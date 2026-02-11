@@ -14,7 +14,6 @@
  * builds the project, links the binary globally, and sets up ~/.tallow/.
  */
 
-import { execSync } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -37,14 +36,6 @@ const TALLOW_HOME = join(homedir(), ".tallow");
 const SETTINGS_PATH = join(TALLOW_HOME, "settings.json");
 const TEMPLATES_DIR = join(PACKAGE_DIR, "templates");
 
-/**
- * True when running from a git clone (dev), false when installed from npm.
- * Checks for both .git (repo) and tsconfig (can compile). Without tsconfig,
- * there's nothing to build even if .git somehow exists.
- */
-const IS_SOURCE_INSTALL =
-	existsSync(join(PACKAGE_DIR, ".git")) && existsSync(join(PACKAGE_DIR, "tsconfig.build.json"));
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ExtensionInfo {
@@ -60,7 +51,6 @@ interface ThemeInfo {
 interface InstallChoices {
 	readonly defaultTheme: string;
 	readonly extensions: readonly string[];
-	readonly installGlobally: boolean;
 	readonly themes: readonly string[];
 }
 
@@ -129,10 +119,6 @@ function ensureDir(dir: string): void {
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
-}
-
-function exec(cmd: string, cwd?: string): string {
-	return execSync(cmd, { cwd: cwd ?? PACKAGE_DIR, encoding: "utf-8", stdio: "pipe" }).trim();
 }
 
 /**
@@ -316,35 +302,9 @@ async function runNonInteractive(): Promise<void> {
 	console.log("🕯️  tallow install (non-interactive)");
 	console.log("");
 
-	if (IS_SOURCE_INSTALL) {
-		console.log("Building...");
-		try {
-			exec("npm run build", PACKAGE_DIR);
-			console.log("✓ Built successfully");
-		} catch (error) {
-			console.error("✗ Build failed:", error instanceof Error ? error.message : String(error));
-			process.exit(1);
-		}
-	}
-
 	const templates = installTemplates();
 	if (templates.copied > 0) {
 		console.log(`✓ Added ${templates.copied} new template files`);
-	}
-
-	if (IS_SOURCE_INSTALL) {
-		console.log("Installing globally...");
-		try {
-			exec("npm link", PACKAGE_DIR);
-			console.log("✓ Installed globally");
-		} catch (error) {
-			console.error(
-				"✗ Global install failed:",
-				error instanceof Error ? error.message : String(error)
-			);
-			console.log(`  Try manually: cd ${PACKAGE_DIR} && npm link`);
-			process.exit(1);
-		}
 	}
 
 	console.log("");
@@ -425,11 +385,9 @@ async function main(): Promise<void> {
 
 async function runUpgrade(existing: ExistingInstall): Promise<void> {
 	p.note(
-		[
-			"• Rebuild from source",
-			"• Reinstall global binary",
-			"• Keep all existing settings untouched",
-		].join("\n"),
+		["• Update template files (agents, commands)", "• Keep all existing settings untouched"].join(
+			"\n"
+		),
 		"Upgrade plan"
 	);
 
@@ -440,36 +398,10 @@ async function runUpgrade(existing: ExistingInstall): Promise<void> {
 
 	if (isCancel(confirm) || !confirm) cancelled();
 
-	const s = p.spinner();
-
-	if (IS_SOURCE_INSTALL) {
-		s.start("Building tallow...");
-		try {
-			exec("npm run build", PACKAGE_DIR);
-			s.stop("Built successfully");
-		} catch (error) {
-			s.stop("Build failed");
-			p.log.error(error instanceof Error ? error.message : String(error));
-			process.exit(1);
-		}
-	}
-
 	// Copy any new agents/commands — preserves user edits
 	const templates = installTemplates();
 	if (templates.copied > 0) {
 		p.log.info(`Added ${templates.copied} new template files`);
-	}
-
-	if (IS_SOURCE_INSTALL) {
-		s.start("Reinstalling globally...");
-		try {
-			exec("npm link", PACKAGE_DIR);
-			s.stop("Installed globally ✓");
-		} catch (error) {
-			s.stop("Global install failed");
-			p.log.error(error instanceof Error ? error.message : String(error));
-			p.log.info(`Try manually: cd ${PACKAGE_DIR} && npm link`);
-		}
 	}
 
 	p.note(
@@ -532,7 +464,6 @@ async function runFullInstall(
 		choices = {
 			defaultTheme: theme,
 			extensions: allExtensions.map((e) => e.name),
-			installGlobally: true,
 			themes: allThemes.map((t) => t.name),
 		};
 	} else {
@@ -597,19 +528,9 @@ async function runFullInstall(
 		choices = {
 			defaultTheme: theme,
 			extensions: selectedExtensions,
-			installGlobally: true,
 			themes: themeList,
 		};
 	}
-
-	// ── Step 2: Global install? ──────────────────────────────────────────────
-
-	const installGlobal = await p.confirm({
-		message: "Install tallow globally? (makes `tallow` available everywhere)",
-		initialValue: true,
-	});
-
-	if (isCancel(installGlobal)) cancelled();
 
 	// ── Summary ──────────────────────────────────────────────────────────────
 
@@ -626,7 +547,6 @@ async function runFullInstall(
 		`Agents:      ${agentCount} → ~/.tallow/agents/`,
 		`Commands:    ${commandCount} → ~/.tallow/commands/`,
 		`Default:     ${choices.defaultTheme}`,
-		`Global:      ${installGlobal ? "yes" : "no"}`,
 		`Config dir:  ${TALLOW_HOME}`,
 	];
 
@@ -645,25 +565,9 @@ async function runFullInstall(
 
 	if (isCancel(confirm) || !confirm) cancelled();
 
-	// ── Step 3: Build (source installs only) ─────────────────────────────────
+	// ── Step 3: Set up ~/.tallow/ ────────────────────────────────────────────
 
 	const s = p.spinner();
-
-	if (IS_SOURCE_INSTALL) {
-		s.start("Building tallow...");
-		try {
-			exec("npm run build", PACKAGE_DIR);
-			s.stop("Built successfully");
-		} catch (error) {
-			s.stop("Build failed");
-			const msg = error instanceof Error ? error.message : String(error);
-			p.log.error(msg);
-			process.exit(1);
-		}
-	}
-
-	// ── Step 4: Set up ~/.tallow/ ────────────────────────────────────────────
-
 	s.start("Setting up ~/.tallow/...");
 
 	ensureDir(TALLOW_HOME);
@@ -695,34 +599,16 @@ async function runFullInstall(
 	writeSettings(settings);
 	s.stop("Config ready at ~/.tallow/");
 
-	// ── Step 5: Global install ───────────────────────────────────────────────
-
-	if (installGlobal && IS_SOURCE_INSTALL) {
-		s.start("Installing globally via npm link...");
-		try {
-			exec("npm link", PACKAGE_DIR);
-			s.stop("Installed globally ✓");
-		} catch (error) {
-			s.stop("Global install failed");
-			const msg = error instanceof Error ? error.message : String(error);
-			p.log.error(msg);
-			p.log.info(`You can try manually: cd ${PACKAGE_DIR} && npm link`);
-		}
-	}
-
 	// ── Done ─────────────────────────────────────────────────────────────────
 
-	const nextSteps = [
-		"Run `tallow` in any project directory to start",
-		"Run `tallow --help` to see all options",
-		`Config lives at ${TALLOW_HOME}/settings.json`,
-	];
-
-	if (!installGlobal) {
-		nextSteps.unshift(`Run from source: node ${join(PACKAGE_DIR, "dist/cli.js")}`);
-	}
-
-	p.note(nextSteps.join("\n"), "Next steps");
+	p.note(
+		[
+			"Run `tallow` in any project directory to start",
+			"Run `tallow --help` to see all options",
+			`Config lives at ${TALLOW_HOME}/settings.json`,
+		].join("\n"),
+		"Next steps"
+	);
 	p.outro("Done! Happy coding 🕯️");
 }
 
