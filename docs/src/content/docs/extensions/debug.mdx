@@ -1,0 +1,85 @@
+---
+title: debug
+description: Structured diagnostic logging — tool timings, lifecycle events, model info, errors.
+---
+
+The **debug** extension emits structured JSONL diagnostics to
+`~/.tallow/debug.log`. Useful for inspecting tool performance,
+extension lifecycle, model changes, subagent activity, and errors.
+
+Zero-cost when disabled — no file I/O, no object allocation.
+
+## Activation
+
+Debug mode activates when **any** of these are true (checked once
+at session start):
+
+| Method | Example |
+|--------|---------|
+| `--debug` CLI flag | `tallow --debug` |
+| `TALLOW_DEBUG` env var | `TALLOW_DEBUG=1 tallow` |
+| Development mode | `NODE_ENV=development` or running via `tsx` |
+
+To stream to stderr instead of a file:
+
+```bash
+TALLOW_DEBUG=stderr tallow
+```
+
+## Log format
+
+Each line in the log is a self-contained JSON object:
+
+```jsonl
+{"ts":"2026-02-11T12:00:00.000Z","cat":"session","evt":"start","data":{"cwd":"/dev/project","sessionId":"abc","model":"anthropic/claude-sonnet-4"}}
+{"ts":"2026-02-11T12:00:01.200Z","cat":"tool","evt":"call","data":{"toolCallId":"tc_1","name":"bash","args":{"command":"ls"}}}
+{"ts":"2026-02-11T12:00:01.850Z","cat":"tool","evt":"result","data":{"toolCallId":"tc_1","name":"bash","durationMs":650,"ok":true,"contentLength":245}}
+```
+
+## Categories
+
+| Category | Events logged |
+|----------|---------------|
+| `session` | start, shutdown (with duration and totals), hooks\_merge |
+| `tool` | call (name, args), result (name, duration ms, success/failure, content length) |
+| `turn` | start/end with turn index and tool result count |
+| `agent` | before\_start (prompt size, estimated tokens), end (message count) |
+| `model` | select (provider, model ID, previous model, source) |
+| `subagent` | start/stop (agent type, task, exit code) |
+| `error` | uncaught\_exception, unhandled\_rejection (with full stack traces) |
+
+String values longer than 500 characters are automatically truncated.
+
+## Commands
+
+Manage debug mode from within a session:
+
+| Command | Description |
+|---------|-------------|
+| `/diag` | Show status (on/off, log path, size, last 5 entries) |
+| `/diag-on` | Enable debug mode mid-session |
+| `/diag-off` | Disable debug mode mid-session |
+| `/diag-clear` | Truncate the log file |
+| `/diag-tail [n]` | Show last N log entries (default: 20) |
+
+## Examples
+
+### Inspect tool performance
+
+```bash
+tallow --debug -p "Refactor the auth module"
+# After the session:
+cat ~/.tallow/debug.log | jq 'select(.cat == "tool" and .evt == "result")' | jq '{name: .data.name, ms: .data.durationMs}'
+```
+
+### Watch live in another terminal
+
+```bash
+tail -f ~/.tallow/debug.log | jq .
+```
+
+### Filter by category
+
+```bash
+cat ~/.tallow/debug.log | jq 'select(.cat == "error")'
+```

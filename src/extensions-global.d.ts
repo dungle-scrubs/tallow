@@ -25,6 +25,17 @@ declare global {
 
 	// tasks extension
 	var __piTasksInterval: ReturnType<typeof setInterval> | undefined;
+
+	// debug extension
+	var __piDebugLogger:
+		| {
+				readonly sessionId: string;
+				readonly logPath: string;
+				log(cat: string, evt: string, data: Record<string, unknown>): void;
+				clear(): void;
+				close(): void;
+		  }
+		| undefined;
 }
 
 export {};
