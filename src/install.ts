@@ -4,11 +4,19 @@
  * Tallow interactive installer.
  *
  * Usage:
- *   npx tallow install        (after global install)
- *   node dist/install.js      (from source)
+ *   npx tallow install             (after global install)
+ *   node dist/install.js           (from source)
  *
  * Flags:
- *   --yes, -y   Non-interactive: rebuild + reinstall, keep all settings.
+ *   --yes, -y                Non-interactive: rebuild + reinstall, keep all settings.
+ *   --default-provider <p>   Set default provider (anthropic, openai, google, etc.)
+ *   --default-model <m>      Set default model ID (e.g., claude-sonnet-4)
+ *   --api-key <key>          Set API key for the default provider
+ *   --theme <name>           Set default theme
+ *   --thinking <level>       Set default thinking level (off, minimal, low, medium, high, xhigh)
+ *
+ * Headless setup for automated systems:
+ *   tallow install -y --default-provider anthropic --api-key sk-xxx
  *
  * Walks the user through selecting which bundled components to install,
  * builds the project, links the binary globally, and sets up ~/.tallow/.
@@ -33,10 +41,19 @@ const __filename_ = fileURLToPath(import.meta.url);
 const __dirname_ = join(__filename_, "..");
 const PACKAGE_DIR = resolve(__dirname_, "..");
 const TALLOW_HOME = join(homedir(), ".tallow");
+const AUTH_PATH = join(TALLOW_HOME, "auth.json");
 const SETTINGS_PATH = join(TALLOW_HOME, "settings.json");
 const TEMPLATES_DIR = join(PACKAGE_DIR, "templates");
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+interface InstallFlags {
+	readonly apiKey?: string;
+	readonly defaultModel?: string;
+	readonly defaultProvider?: string;
+	readonly theme?: string;
+	readonly thinking?: string;
+}
 
 interface ExtensionInfo {
 	readonly description: string;
@@ -115,6 +132,120 @@ function writeSettings(settings: Record<string, unknown>): void {
 	writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
+/**
+ * Parse headless install flags from process.argv.
+ *
+ * @returns Parsed flags for headless configuration
+ */
+function parseInstallFlags(): InstallFlags {
+	const args = process.argv;
+	const flags: Record<string, string | undefined> = {};
+
+	const flagMap: Record<string, keyof InstallFlags> = {
+		"--api-key": "apiKey",
+		"--default-model": "defaultModel",
+		"--default-provider": "defaultProvider",
+		"--theme": "theme",
+		"--thinking": "thinking",
+	};
+
+	for (let i = 0; i < args.length; i++) {
+		const key = flagMap[args[i] ?? ""];
+		if (key && i + 1 < args.length) {
+			flags[key] = args[++i];
+		}
+	}
+
+	return flags as InstallFlags;
+}
+
+/**
+ * Read auth.json credentials.
+ *
+ * @returns Parsed auth data
+ */
+function readAuth(): Record<string, unknown> {
+	if (existsSync(AUTH_PATH)) {
+		try {
+			return JSON.parse(readFileSync(AUTH_PATH, "utf-8")) as Record<string, unknown>;
+		} catch {
+			return {};
+		}
+	}
+	return {};
+}
+
+/**
+ * Write auth.json credentials.
+ *
+ * @param auth - Auth data to persist
+ */
+function writeAuth(auth: Record<string, unknown>): void {
+	writeFileSync(AUTH_PATH, `${JSON.stringify(auth, null, 2)}\n`);
+}
+
+/**
+ * Apply headless install flags to settings and auth.
+ * Only touches fields that have explicit flag values — preserves everything else.
+ *
+ * @param flags - Parsed CLI flags
+ * @returns Summary lines describing what was configured
+ */
+function applyInstallFlags(flags: InstallFlags): readonly string[] {
+	const summary: string[] = [];
+
+	if (
+		!flags.defaultProvider &&
+		!flags.defaultModel &&
+		!flags.apiKey &&
+		!flags.theme &&
+		!flags.thinking
+	) {
+		return summary;
+	}
+
+	ensureDir(TALLOW_HOME);
+	const settings = readSettings();
+
+	if (flags.defaultProvider) {
+		settings.defaultProvider = flags.defaultProvider;
+		summary.push(`Default provider: ${flags.defaultProvider}`);
+	}
+
+	if (flags.defaultModel) {
+		settings.defaultModel = flags.defaultModel;
+		summary.push(`Default model:    ${flags.defaultModel}`);
+	}
+
+	if (flags.theme) {
+		settings.theme = flags.theme;
+		summary.push(`Theme:            ${flags.theme}`);
+	}
+
+	if (flags.thinking) {
+		settings.defaultThinkingLevel = flags.thinking;
+		summary.push(`Thinking level:   ${flags.thinking}`);
+	}
+
+	writeSettings(settings);
+
+	if (flags.apiKey) {
+		const provider = flags.defaultProvider ?? (settings.defaultProvider as string | undefined);
+		if (!provider) {
+			console.error(
+				"--api-key requires --default-provider to be set (or already configured in settings)"
+			);
+			process.exit(1);
+		}
+		const auth = readAuth();
+		auth[provider] = { type: "api_key", key: flags.apiKey };
+		writeAuth(auth);
+		summary.push(`API key:          set for ${provider}`);
+	}
+
+	return summary;
+}
+
 function ensureDir(dir: string): void {
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
@@ -170,7 +301,13 @@ function groupExtensions(extensions: readonly ExtensionInfo[]): readonly Extensi
 		"web-fetch-tool",
 	];
 
-	const agentTools = ["agent-commands-tool", "subagent-tool", "teams-tool", "background-task-tool"];
+	const agentTools = [
+		"agent-commands-tool",
+		"subagent-tool",
+		"teams-tool",
+		"background-task-tool",
+		"session-memory",
+	];
 
 	const devTools = [
 		"lsp",
@@ -291,10 +428,19 @@ function describeExisting(existing: ExistingInstall): string {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function runNonInteractive(): Promise<void> {
+	const flags = parseInstallFlags();
+	const hasFlags = !!(
+		flags.defaultProvider ||
+		flags.defaultModel ||
+		flags.apiKey ||
+		flags.theme ||
+		flags.thinking
+	);
 	const existing = detectExistingInstall();
-	if (!existing) {
+
+	if (!existing && !hasFlags) {
 		console.error(
-			"No existing installation found at ~/.tallow/. Run without --upgrade for first-time setup."
+			"No existing installation found at ~/.tallow/. Run without -y for first-time setup,\nor pass --default-provider and --api-key for headless setup."
 		);
 		process.exit(1);
 	}
@@ -302,13 +448,28 @@ async function runNonInteractive(): Promise<void> {
 	console.log("🕯️  tallow install (non-interactive)");
 	console.log("");
 
+	// Ensure directories exist for first-time headless setup
+	ensureDir(TALLOW_HOME);
+	ensureDir(join(TALLOW_HOME, "sessions"));
+	ensureDir(join(TALLOW_HOME, "extensions"));
+
 	const templates = installTemplates();
 	if (templates.copied > 0) {
 		console.log(`✓ Added ${templates.copied} new template files`);
 	}
 
+	// Apply headless flags (provider, model, api-key, theme, thinking)
+	const configSummary = applyInstallFlags(flags);
+	if (configSummary.length > 0) {
+		console.log("");
+		console.log("Configuration:");
+		for (const line of configSummary) {
+			console.log(`  ✓ ${line}`);
+		}
+	}
+
 	console.log("");
-	console.log("Done! All settings preserved. 🕯️");
+	console.log("Done! 🕯️");
 }
 
 async function main(): Promise<void> {
