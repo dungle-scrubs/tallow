@@ -5,7 +5,7 @@
  * an in-memory task board and can message each other directly — no hub-and-spoke
  * bottleneck. Teammates auto-wake on incoming messages.
  *
- * Main-agent tools: team_create, team_add_tasks, team_spawn, team_send, team_status, team_shutdown
+ * Main-agent tools: team_create, team_add_tasks, team_spawn, team_send, team_status, team_shutdown, team_resume
  * Teammate tools (injected): team_tasks, team_message, team_inbox
  *
  * Pure logic (store, tasks, messages) lives in store.ts for testability.
@@ -39,8 +39,11 @@ import { getIcon } from "../_icons/index.js";
 import {
 	addTaskToBoard,
 	addTeamMessage,
+	archiveTeam,
 	createTeamStore,
+	formatArchivedTeamStatus,
 	formatTeamStatus,
+	getArchivedTeams,
 	getReadyTasks,
 	getTeam,
 	getTeammatesByStatus,
@@ -48,16 +51,21 @@ import {
 	getUnread,
 	isTaskReady,
 	markRead,
+	restoreArchivedTeam,
 	type Team,
 	type TeamTask,
 } from "./store.js";
 
 // Re-export store types and functions so existing imports still work
 export {
+	type ArchivedTeam,
 	addTaskToBoard,
 	addTeamMessage,
+	archiveTeam,
 	createTeamStore,
+	formatArchivedTeamStatus,
 	formatTeamStatus,
+	getArchivedTeams,
 	getReadyTasks,
 	getTeam,
 	getTeammatesByStatus,
@@ -65,6 +73,7 @@ export {
 	getUnread,
 	isTaskReady,
 	markRead,
+	restoreArchivedTeam,
 	type Team,
 	type TeamMessage,
 	type TeamTask,
@@ -630,7 +639,7 @@ export default function (pi: ExtensionAPI) {
 		cwd = ctx.cwd;
 	});
 
-	// Cleanup all teams on shutdown
+	// Archive all teams on session shutdown (preserves tasks for future recovery)
 	pi.on("session_shutdown", async () => {
 		for (const [name, team] of getTeams() as Map<string, Team<Teammate>>) {
 			for (const [, mate] of team.teammates) {
@@ -643,13 +652,14 @@ export default function (pi: ExtensionAPI) {
 				mate.status = "shutdown";
 			}
 			removeTeamView(name);
+			archiveTeam(name);
 		}
-		getTeams().clear();
 	});
 
-	// Kill all team agents on Esc interrupt. Teams are cognitive work
-	// tied to the conversation — when the user interrupts, all agent
-	// work should stop. This mirrors the subagent-tool behavior.
+	// Kill all team agents on Esc interrupt and archive for recovery.
+	// Teams are cognitive work tied to the conversation — when the user
+	// interrupts, agent work stops but tasks are preserved so the model
+	// can resume via team_resume on the next turn.
 	pi.on("agent_end", async () => {
 		for (const [name, team] of getTeams() as Map<string, Team<Teammate>>) {
 			for (const [, mate] of team.teammates) {
@@ -664,6 +674,7 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 			removeTeamView(name);
+			archiveTeam(name);
 		}
 	});
 
@@ -1029,12 +1040,12 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			removeTeamView(params.team);
-			getTeams().delete(params.team);
+			archiveTeam(params.team);
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Team "${params.team}" shutdown. ${count} teammate${count !== 1 ? "s" : ""} terminated, task list deleted.`,
+						text: `Team "${params.team}" shutdown. ${count} teammate${count !== 1 ? "s" : ""} terminated, task list archived. Use team_resume to restore.`,
 					},
 				],
 				details: {},
@@ -1050,6 +1061,114 @@ export default function (pi: ExtensionAPI) {
 		renderResult(result, _opts, theme) {
 			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 			return new Text(theme.fg("warning", text), 0, 0);
+		},
+	});
+
+	// ─── team_resume ────────────────────────────────────────────
+
+	pi.registerTool({
+		name: "team_resume",
+		label: "Team Resume",
+		description:
+			"Restore an archived team and its task board. Lists archived teams when called without a name. " +
+			"The restored team has no teammates — spawn new ones to continue work on remaining tasks.",
+		parameters: Type.Object({
+			team: Type.Optional(
+				Type.String({
+					description: "Archived team name to restore. Omit to list available archives.",
+				})
+			),
+		}),
+		async execute(_toolCallId, params) {
+			// List mode — show all archived teams
+			if (!params.team) {
+				const archives = getArchivedTeams();
+				if (archives.size === 0) {
+					return {
+						content: [{ type: "text", text: "No archived teams available." }],
+						details: {} as Record<string, unknown>,
+					};
+				}
+				const lines = ["# Archived Teams\n"];
+				for (const [, arch] of archives) {
+					lines.push(formatArchivedTeamStatus(arch));
+					lines.push("");
+				}
+				return {
+					content: [{ type: "text", text: lines.join("\n") }],
+					details: { count: archives.size } as Record<string, unknown>,
+				};
+			}
+
+			// Restore mode
+			if (getTeams().has(params.team)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Team "${params.team}" is already active. Use team_status to inspect it.`,
+						},
+					],
+					details: {} as Record<string, unknown>,
+					isError: true,
+				};
+			}
+
+			const restored = restoreArchivedTeam(params.team);
+			if (!restored) {
+				const available = Array.from(getArchivedTeams().keys());
+				const hint =
+					available.length > 0
+						? ` Available: ${available.join(", ")}`
+						: " No archived teams available.";
+				return {
+					content: [{ type: "text", text: `No archived team "${params.team}" found.${hint}` }],
+					details: {} as Record<string, unknown>,
+					isError: true,
+				};
+			}
+
+			const completed = restored.tasks.filter((t) => t.status === "completed").length;
+			const remaining = restored.tasks.length - completed;
+			const failed = restored.tasks.filter((t) => t.status === "failed").length;
+
+			// Reset claimed tasks back to pending (their agents are gone)
+			for (const task of restored.tasks) {
+				if (task.status === "claimed") {
+					task.status = "pending";
+					task.assignee = null;
+				}
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text:
+							`Team "${params.team}" restored. ${restored.tasks.length} tasks: ${completed} completed` +
+							(failed > 0 ? `, ${failed} failed` : "") +
+							`, ${remaining} remaining.\n` +
+							"Spawn teammates with team_spawn to continue work.",
+					},
+				],
+				details: { tasks: restored.tasks.length, completed, remaining, failed } as Record<
+					string,
+					unknown
+				>,
+			};
+		},
+		renderCall(args, theme) {
+			const label = args.team || "(list)";
+			return new Text(
+				theme.fg("toolTitle", theme.bold("team_resume ")) + theme.fg("accent", label),
+				0,
+				0
+			);
+		},
+		renderResult(result, _opts, theme) {
+			const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+			const isErr = "isError" in result && result.isError;
+			return new Text(theme.fg(isErr ? "error" : "success", text), 0, 0);
 		},
 	});
 }
