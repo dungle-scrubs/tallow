@@ -1,0 +1,22 @@
+#!/bin/sh
+
+# Type checking
+echo "🔍 Running type check..."
+npx tsc --noEmit || {
+  echo "❌ Type check failed. Fix errors before committing."
+  exit 1
+}
+
+# Extension type checking
+echo "🔍 Running type check (extensions)..."
+npx tsc --project tsconfig.extensions.json --noEmit || {
+  echo "❌ Extension type check failed. Fix errors before committing."
+  exit 1
+}
+
+# Lint + format on staged files
+echo "🧹 Running lint & format check on staged files..."
+npx lint-staged || {
+  echo "❌ Lint/format check failed. Run 'npm run lint:fix' to auto-fix."
+  exit 1
+}

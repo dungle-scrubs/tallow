@@ -1,0 +1,10 @@
+{
+	"name": "web-fetch-tool",
+	"version": "0.1.0",
+	"description": "Fetch web content with optional Firecrawl fallback for large pages",
+	"category": "tool",
+	"tags": ["web", "fetch", "firecrawl"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

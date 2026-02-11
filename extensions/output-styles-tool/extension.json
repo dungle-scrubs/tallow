@@ -1,0 +1,10 @@
+{
+	"name": "output-styles-tool",
+	"version": "0.1.0",
+	"description": "Switchable agent personality modes via named markdown files",
+	"category": "tool",
+	"tags": ["system-prompt", "personality", "style"],
+	"files": ["index.ts", "utils.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

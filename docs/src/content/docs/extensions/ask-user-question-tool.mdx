@@ -1,0 +1,19 @@
+---
+title: ask-user-question-tool
+description: Interactive prompts with selectable options and freeform input.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+When the agent needs your input, it presents a proper TUI prompt
+not a text dump asking you to type a number. Options are
+navigable with arrow keys, with optional descriptions below each
+label. A "Type something..." option opens an inline editor for
+freeform answers.
+
+Escape in the editor returns to options. Escape from options
+cancels the question entirely.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/ask-user-question/options.png", alt: "Option list with descriptions" },
+]} />

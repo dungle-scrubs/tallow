@@ -1,0 +1,68 @@
+---
+title: mcp-adapter-tool
+description: Drop-in support for standard MCP servers via STDIO transport.
+---
+
+Declare MCP servers in `settings.json` and their tools show up
+alongside tallow's built-in tools. No proxy, no extra config,
+no dependencies. Any standard MCP server that speaks STDIO just
+works.
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_..." }
+    }
+  }
+}
+```
+
+Tools register as `mcp__<server>__<tool>`. The filesystem server
+above would expose `mcp__filesystem__read_file`,
+`mcp__filesystem__write_file`, etc. The LLM sees them like any
+other tool.
+
+## How it works
+
+1. On session start, reads `mcpServers` from settings.json
+2. Spawns each server as a child process (STDIO transport)
+3. Sends the MCP initialize handshake and `tools/list` request
+4. Registers every discovered tool with tallow
+5. Routes tool calls to the right server
+6. Kills all servers on session end
+
+## Crash handling
+
+If a server process dies mid-session, the adapter attempts one
+automatic restart on the next tool call. If the restart fails,
+the server's tools are marked unavailable and a notification is
+shown. No retry loops.
+
+## /mcp command
+
+Run `/mcp` to see all configured servers, their connection state,
+and their tool lists:
+
+```
+filesystem: ● connected (4 tools)
+  mcp__filesystem__read_file
+    Read the complete contents of a file
+  mcp__filesystem__write_file
+    Create or overwrite a file
+  mcp__filesystem__list_directory
+    List directory contents
+  mcp__filesystem__search_files
+    Search for files matching a pattern
+github: ● connected (8 tools)
+  mcp__github__create_issue
+    Create a new issue in a repository
+  ...
+```
+

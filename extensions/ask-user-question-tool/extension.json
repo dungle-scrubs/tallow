@@ -1,0 +1,10 @@
+{
+	"name": "ask-user-question-tool",
+	"version": "0.1.0",
+	"description": "Let the LLM ask the user multiple-choice questions",
+	"category": "tool",
+	"tags": ["interaction", "prompts"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

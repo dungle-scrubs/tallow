@@ -1,0 +1,51 @@
+---
+title: background-task-tool
+description: Run commands in the background without blocking the conversation.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+Fire off long-running commands, builds, test suites, servers,
+without blocking the agent conversation. The `bg_bash` tool
+returns a task ID immediately. Check output with `task_output`
+and status with `task_status` at any time.
+
+A status widget shows running background tasks. The `/bg` command
+lists and manages all active tasks.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/background-tasks/single-task.png", alt: "Single background task with status widget" },
+  { src: "/screenshots/extensions/background-tasks/multiple-tasks.gif", alt: "Multiple background tasks running" },
+]} />
+
+## Relationships with other extensions
+
+### [tasks](/extensions/tasks/)
+
+Background bash tasks appear in the [tasks](/extensions/tasks/)
+widget alongside the task board and running agents. Each
+background task shows the truncated command string and elapsed
+duration, capped at 5 visible entries with overflow.
+
+In the combined widget, background tasks render below agents
+with a spacer line. On wide terminals they share the right
+column; on narrow terminals they stack at the bottom. See
+[tasks, responsive layout](/extensions/tasks/#responsive-layout)
+for the full layout behavior.
+
+### [subagent](/extensions/subagent-tool/)
+
+Background tasks and background subagents are different things.
+Background tasks are raw shell commands (`bg_bash`). Background
+subagents are full agent processes with their own context.
+Both appear in the same widget but in separate sections, agents
+first (with colored names and live activity), background tasks
+below (with command strings and durations).
+
+### [custom-footer](/extensions/custom-footer/)
+
+The footer doesn't show background task counts directly, that
+information lives in the tasks widget. The footer focuses on
+token usage, cost, git state, and subagent counts. This avoids
+duplicating information that's already visible in the widget
+above it.

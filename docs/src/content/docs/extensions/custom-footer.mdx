@@ -1,0 +1,71 @@
+---
+title: custom-footer
+description: Responsive status bar with git, tokens, cost, and model info.
+---
+
+A dense, information-rich status bar at the bottom of the TUI
+showing everything you need at a glance: current working directory,
+git branch with dirty state, token usage (input/output), context
+window utilization, session cost, active subagent count, model
+name, and thinking level.
+
+## Responsive layout
+
+The footer adapts to terminal width:
+
+**Wide terminals (2 lines):**
+```
+~/dev/project                                              main*
+↑1.2k ↓39k R12M W708k $11.444 (sub) 68.4%/200k (auto) model • high
+```
+
+**Narrow terminals (4 lines):**
+```
+~/dev/project
+ main*
+↑1.2k ↓39k R12M W708k $11.444 (sub) 68.4%/200k (auto)
+model • high
+```
+
+The wide layout puts the working directory and git branch on the
+first line (directory left, branch right), then metrics and model
+on the second. The narrow layout stacks everything vertically.
+All values truncate gracefully, long paths are shortened, metrics
+compress, so nothing overflows.
+
+## Relationships with other extensions
+
+### [tasks](/extensions/tasks/) + [subagent](/extensions/subagent-tool/)
+
+When subagents are running, the tasks extension adds a colored
+agent bar to the status area, `@main @alice @bob · 2 teammates`
+positioned above the footer. The footer itself shows `(sub)`
+with the active subagent count. Together they give two levels of
+detail: the footer for a number, the agent bar for names.
+
+### [git-status](/extensions/git-status/)
+
+The footer handles git display directly, branch name, dirty
+indicator (`*`), ahead/behind counts. The git-status extension
+provides the same information. If both are active, the footer's
+own git rendering takes precedence. Git state is cached with a
+5-second TTL to avoid running `git` on every render frame.
+
+### Stacking with the tasks widget
+
+When the tasks widget, agent bar, and footer are all active,
+they stack vertically at the bottom of the terminal:
+
+```
+Tasks (2/5)                          │  2 agents launched
+├─ ◐ Writing tests (@alice)          │  └─ ⠋ @alice · 12s
+└─ ☐ Update docs                     │
+────────────────────────────────────────────────────────────
+@main @alice · 1 teammate
+~/dev/project                                        main*
+↑3.2k ↓89k R12M W1.4M $4.221 (1 sub) 42%/200k  sonnet • high
+```
+
+The widget occupies the most vertical space, the agent bar one
+line, and the footer two or four lines depending on width. All
+three adapt independently to the available width.

@@ -1,0 +1,109 @@
+---
+title: web-fetch-tool
+description: "Fetch web content with optional Firecrawl fallback for large pages"
+---
+
+Fetches web content and returns page text, truncated to 100KB
+by default. Works out of the box with no configuration for
+simple pages.
+
+## How it works
+
+1. **Direct fetch** — makes a standard HTTP request with a
+   browser-like User-Agent. Works for static HTML, APIs, and
+   simple pages.
+2. **Firecrawl fallback** — if `FIRECRAWL_API_KEY` is set,
+   automatically falls back to Firecrawl in two cases:
+   - **Truncated content** — response exceeds the size limit
+   - **JS-dependent pages** — the HTML looks like an empty
+     shell that needs JavaScript to render (SPAs, React/Vue/
+     Angular/Next.js apps)
+
+The JS detection runs automatically on every HTML response
+and checks three signals:
+
+- **Empty SPA roots** — `<div id="root"></div>`,
+  `<div id="app"></div>`, `<div id="__next"></div>`,
+  `<div id="__nuxt"></div>`
+- **Low text-to-markup ratio** — pages over 1KB with less
+  than 200 characters of visible text after stripping tags
+- **Framework bundles with no content** — `_app`, `main`,
+  `bundle`, or `chunk` script references combined with
+  less than 500 characters of visible text
+
+If any of these patterns match and Firecrawl is available, it
+fetches via headless browser automatically — even if the page
+is well under the size limit. Sites like Excalidraw, Miro,
+draw.io, and Vue Playground all trigger this detection.
+
+Without Firecrawl, you get the raw HTML as-is (which for
+JS-dependent pages means an empty shell).
+
+## Why Firecrawl matters
+
+A plain `fetch` sends an HTTP request and gets back whatever
+the server returns. For many modern sites, that's an empty
+shell with a `<script>` tag — the actual content is rendered
+by JavaScript in the browser.
+
+Firecrawl runs a **headless browser** that:
+- Executes JavaScript and waits for dynamic content to load
+- Handles anti-bot protections and CAPTCHAs
+- Navigates through proxies to avoid IP blocking
+- Extracts the **main content** as clean markdown, stripping
+  nav, ads, and boilerplate
+
+This means SPAs (React, Vue, Angular), dashboards behind
+authentication walls, and JS-heavy documentation sites all
+return usable content instead of empty HTML skeletons.
+
+## Setting up Firecrawl
+
+Firecrawl is optional. Without it, `web-fetch` still works —
+you just get raw (possibly truncated) HTML.
+
+### 1. Get an API key
+
+Sign up at [firecrawl.dev](https://www.firecrawl.dev/signin)
+and create an API key. The free tier includes 500 credits
+(pages) per month — enough for typical agent usage.
+
+### 2. Set the environment variable
+
+Add `FIRECRAWL_API_KEY` to your environment so tallow can
+read it at runtime. Where you put it depends on your setup:
+
+**Option A: Shell profile** (simplest)
+
+```bash
+# ~/.zshrc or ~/.bashrc
+export FIRECRAWL_API_KEY="fc-your-key-here"
+```
+
+**Option B: direnv** (per-project)
+
+```bash
+# .envrc in your project root
+export FIRECRAWL_API_KEY="fc-your-key-here"
+```
+
+### 3. Verify
+
+Run tallow and fetch a JavaScript-heavy page. If Firecrawl is
+active, you'll see `source: "firecrawl"` in the tool details
+and the content will be clean markdown instead of raw HTML.
+
+## Parameters
+
+| Parameter  | Type   | Default | Description                                |
+|------------|--------|---------|--------------------------------------------|
+| `url`      | string | —       | URL to fetch                               |
+| `maxBytes` | number | 100000  | Max bytes before truncation/Firecrawl      |
+| `format`   | string | "text"  | Output format hint: "text", "markdown", "html" |
+
+## When to use
+
+- Reading documentation or articles
+- Checking API responses
+- Fetching page content for summarization
+- Any URL where you need the text, not the HTML

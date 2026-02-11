@@ -1,0 +1,14 @@
+---
+title: init
+description: Analyze a codebase and generate an AGENTS.md context file.
+---
+
+Analyzes your codebase and generates an `AGENTS.md` file capturing
+build commands, architecture, project structure, and development
+workflow. Future sessions (and other agents) receive this context
+automatically.
+
+If an `AGENTS.md` already exists, suggests improvements rather
+than overwriting. If only a `CLAUDE.md` exists, migrates it to
+`AGENTS.md`. Skips obvious advice, no "write unit tests"
+or "use meaningful variable names."

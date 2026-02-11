@@ -1,0 +1,10 @@
+{
+	"name": "command-prompt",
+	"version": "0.4.0",
+	"description": "Merges commands/ and prompts/ as one source with colon-separated namespaces and toggleable prompt expansion visibility",
+	"category": "command",
+	"tags": ["prompts", "commands", "namespacing", "packages", "merge", "visibility"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

@@ -1,0 +1,10 @@
+{
+	"name": "mcp-adapter-tool",
+	"version": "0.1.0",
+	"description": "Drop-in support for standard MCP servers via STDIO transport",
+	"category": "tool",
+	"tags": ["mcp", "tools", "integration"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

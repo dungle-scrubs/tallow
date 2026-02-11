@@ -1,0 +1,16 @@
+{
+	"name": "bash-tool-enhanced",
+	"version": "0.1.1",
+	"description": "Enhanced bash tool with tail-truncated live output",
+	"category": "tool",
+	"tags": ["bash", "display", "truncation"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "tool-display",
+			"kind": "requires",
+			"reason": "Shared truncation config and utilities"
+		}
+	],
+	"npmDependencies": {}
+}

@@ -1,0 +1,10 @@
+{
+	"name": "pi-lsp-extension",
+	"version": "1.0.0",
+	"type": "module",
+	"dependencies": {
+		"@sinclair/typebox": "^0.34.0",
+		"vscode-languageserver-protocol": "^3.17.5",
+		"vscode-jsonrpc": "^8.2.0"
+	}
+}

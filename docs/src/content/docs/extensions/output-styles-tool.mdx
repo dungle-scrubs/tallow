@@ -1,0 +1,12 @@
+---
+title: output-styles-tool
+description: Switchable agent personality modes via markdown files.
+---
+
+Drop markdown files with frontmatter into `~/.tallow/output-styles/`
+(global) or `.tallow/output-styles/` (project) to define how the agent
+communicates. Select with `/output-style` or `/output-style <name>`.
+
+Styles can be appended or prepended to the system prompt. Optional
+reminders re-inject the style every N turns to prevent drift in
+long conversations.

@@ -1,0 +1,76 @@
+---
+title: Overview
+description: How tallow's extension system works and what ships built-in.
+---
+
+tallow ships with 31 built-in extensions that handle everything
+from tool output rendering to multi-agent coordination. Extensions
+aren't plugins bolted on — they're the primary way tallow's
+features are implemented.
+
+## What extensions can do
+
+Extensions have full access to tallow's runtime:
+
+- **Register tools** — give the LLM new capabilities
+- **Render TUI widgets** — status bars, task boards, progress indicators
+- **Hook lifecycle events** — intercept tool calls, turn completions, errors
+- **Register commands** — add `/slash` commands for users
+- **Inject context** — modify the system prompt dynamically
+- **Compose with each other** — one extension can enhance another
+
+## Categories
+
+Every extension has a `category` property in its `extension.json`
+manifest. The docs sidebar and the installer group extensions by
+these categories:
+
+> **Note:** Some extensions provide both LLM-callable tools and UI features.
+> For example, the `tasks` extension provides a task board UI *and* a `manage_tasks`
+> tool that lets the AI manage tasks programmatically.
+
+| Category | Count | What's in it |
+|----------|-------|--------------|
+| **Tools** | 15 | bash, edit, read, write, cd, web-fetch, subagent, teams, tasks, plan-mode, agent-commands, ask-user-question, background-task, output-styles, theme-selector, MCP adapter |
+| **UI & Display** | 4 | custom footer, git status, tool display, minimal skill display |
+| **Utilities** | 5 | cheatsheet, context-usage, init, show-system-prompt, read-tool-enhanced |
+| **Commands** | 2 | command-prompt, command-expansion |
+| **Integrations** | 1 | lifecycle hooks |
+| **Language Support** | 1 | LSP |
+| **Context** | 1 | context-files |
+| **Aliases** | 1 | /clear → /new |
+
+## How extensions are loaded
+
+All bundled extensions ship with tallow and are loaded
+automatically — no separate installation step. Just run `tallow`.
+
+Extensions load from multiple sources in this order:
+
+1. **Bundled** — shipped in the tallow package's `extensions/`
+   directory
+2. **User global** — `~/.tallow/extensions/`
+3. **Project local** — `.tallow/extensions/`
+
+If a user extension has the same directory name as a bundled
+extension, the user version overrides the bundled one. tallow
+prints a notice at startup when this happens.
+
+## Disabling extensions
+
+The installer lets you disable extension groups. Under the hood,
+disabled extension names are stored in `settings.json`:
+
+```json
+{
+  "disabledExtensions": ["git-status", "cheatsheet"]
+}
+```
+
+You can also pass `--no-extensions` on the CLI to disable all
+extensions for a session.
+
+## Creating your own
+
+See [Creating Extensions](/development/creating-extensions/) for
+the full guide on building custom extensions.

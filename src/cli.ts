@@ -1,0 +1,188 @@
+#!/usr/bin/env node
+
+/**
+ * Tallow CLI — an opinionated coding agent built on the pi framework.
+ *
+ * Usage:
+ *   tallow                          Interactive mode
+ *   tallow -p "Fix the tests"       Print mode (single-shot)
+ *   tallow --mode rpc               RPC mode (for OpenClaw, etc.)
+ *   tallow --continue               Continue most recent session
+ *   tallow --list                   List available sessions
+ */
+
+// Bootstrap MUST happen before any framework imports resolve config
+import { APP_NAME, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+
+bootstrap();
+
+import {
+	InteractiveMode,
+	runPrintMode,
+	runRpcMode,
+	SessionManager,
+} from "@mariozechner/pi-coding-agent";
+import { Command, Option } from "commander";
+import { createTallowSession, type TallowSessionOptions } from "./sdk.js";
+
+// ─── CLI ─────────────────────────────────────────────────────────────────────
+
+const program = new Command();
+
+program
+	.name(APP_NAME)
+	.description("An opinionated coding agent. Built on pi.")
+	.version(TALLOW_VERSION)
+	.option("-p, --print <prompt>", "Single-shot: run prompt and print result")
+	.option("-c, --continue", "Continue most recent session")
+	.option("-m, --model <model>", "Model to use (provider/id)")
+	.option("--mode <mode>", "Run mode: interactive, rpc, json", "interactive")
+	.option("--thinking <level>", "Thinking level: off, minimal, low, medium, high, xhigh")
+	.option("--no-session", "Don't persist session (in-memory only)")
+	.option("-e, --extension <path...>", "Additional extension paths")
+	.option("--no-extensions", "Disable all extensions (bundled + user)")
+	.option("--list", "List available sessions")
+	.option("--home", "Print Tallow home directory")
+	.addOption(new Option("--init").hideHelp())
+	.addOption(new Option("--init-only").hideHelp())
+	.addOption(new Option("--maintenance").hideHelp())
+	.action(run);
+
+program
+	.command("install")
+	.description("Interactive installer — choose extensions, themes, and set up tallow")
+	.action(async () => {
+		// Dynamically import so the main CLI stays lightweight
+		await import("./install.js");
+	});
+
+program.parse();
+
+// ─── Main ────────────────────────────────────────────────────────────────────
+
+async function run(opts: {
+	print?: string;
+	continue?: boolean;
+	model?: string;
+	mode: string;
+	thinking?: string;
+	session?: boolean;
+	extension?: string[];
+	extensions?: boolean;
+	list?: boolean;
+	home?: boolean;
+	init?: boolean;
+	initOnly?: boolean;
+	maintenance?: boolean;
+}): Promise<void> {
+	// Quick info commands
+	if (opts.home) {
+		console.log(TALLOW_HOME);
+		return;
+	}
+
+	if (opts.list) {
+		const sessionsDir = `${TALLOW_HOME}/sessions`;
+		const sessions = await SessionManager.list(process.cwd(), sessionsDir);
+		if (sessions.length === 0) {
+			console.log("No sessions found.");
+			return;
+		}
+		for (const s of sessions) {
+			const date = s.modified.toLocaleDateString();
+			const msg = s.firstMessage?.slice(0, 60) ?? "(empty)";
+			console.log(`  ${date}  ${s.messageCount} msgs  ${msg}`);
+		}
+		return;
+	}
+
+	// ── Setup trigger (env var consumed by hooks extension on session_start) ─
+
+	if (opts.init || opts.initOnly) {
+		process.env.TALLOW_SETUP_TRIGGER = "init";
+	} else if (opts.maintenance) {
+		process.env.TALLOW_SETUP_TRIGGER = "maintenance";
+	}
+
+	// ── Build session options ────────────────────────────────────────────────
+
+	const sessionOpts: TallowSessionOptions = {
+		additionalExtensions: opts.extension,
+		noBundledExtensions: opts.extensions === false,
+		noBundledSkills: opts.extensions === false,
+	};
+
+	// Session strategy
+	if (opts.session === false) {
+		sessionOpts.session = { type: "memory" };
+	} else if (opts.continue) {
+		sessionOpts.session = { type: "continue" };
+	} else {
+		sessionOpts.session = { type: "new" };
+	}
+
+	// Thinking level
+	if (opts.thinking) {
+		sessionOpts.thinkingLevel = opts.thinking as TallowSessionOptions["thinkingLevel"];
+	}
+
+	// ── Create session ───────────────────────────────────────────────────────
+
+	const tallow = await createTallowSession(sessionOpts);
+
+	// ── init-only: bind extensions (fires session_start → setup hooks), then exit ─
+
+	if (opts.initOnly) {
+		await tallow.session.bindExtensions({});
+		return;
+	}
+
+	// ── Run in the requested mode ────────────────────────────────────────────
+
+	switch (opts.mode) {
+		case "interactive": {
+			if (opts.print) {
+				// Print mode: single-shot
+				await runPrintMode(tallow.session, {
+					mode: "text",
+					initialMessage: opts.print,
+				});
+			} else {
+				// Interactive TUI
+				if (tallow.extensionOverrides.length > 0) {
+					const names = tallow.extensionOverrides.map((o) => o.name).join(", ");
+					console.log(`\x1b[33mℹ User extensions overriding bundled: ${names}\x1b[0m`);
+					console.log(
+						"\x1b[2m  To use bundled versions, rename yours or remove from ~/.tallow/extensions/\x1b[0m"
+					);
+				}
+				const mode = new InteractiveMode(tallow.session, {
+					modelFallbackMessage: tallow.modelFallbackMessage,
+				});
+				await mode.run();
+			}
+			break;
+		}
+
+		case "rpc": {
+			await runRpcMode(tallow.session);
+			break;
+		}
+
+		case "json": {
+			if (!opts.print) {
+				console.error("JSON mode requires -p <prompt>");
+				process.exit(1);
+			}
+			await runPrintMode(tallow.session, {
+				mode: "json",
+				initialMessage: opts.print,
+			});
+			break;
+		}
+
+		default:
+			console.error(`Unknown mode: ${opts.mode}`);
+			process.exit(1);
+	}
+}

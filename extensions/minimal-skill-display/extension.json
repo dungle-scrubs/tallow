@@ -1,0 +1,10 @@
+{
+	"name": "minimal-skill-display",
+	"version": "0.1.0",
+	"description": "Minimal skill display without background box and extra padding",
+	"category": "ui",
+	"tags": ["skills", "display", "minimal"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

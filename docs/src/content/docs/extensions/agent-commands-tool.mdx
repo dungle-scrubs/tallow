@@ -1,0 +1,18 @@
+---
+title: agent-commands-tool
+description: Register agents as slash commands for direct invocation.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+Registers every agent defined in `~/.tallow/agents/` or
+`.tallow/agents/` as a `/agent-name` slash command. Typing
+`/planner implement user authentication` directly spawns the
+planner agent as a subprocess with that task.
+
+No tool call overhead, the agent runs immediately as a child
+process with full access to its configured tools and context.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/agent-commands/agent-command-picker.jpg", alt: "Agent command picker showing available agents after typing /agent" },
+]} />

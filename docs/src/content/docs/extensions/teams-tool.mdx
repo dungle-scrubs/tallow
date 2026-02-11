@@ -1,0 +1,51 @@
+---
+title: teams-tool
+description: "Multi-agent teams with shared task boards and direct inter-agent messaging"
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+Spawn persistent teammate sessions that share an in-memory task
+board and can message each other directly — no hub-and-spoke
+bottleneck through the orchestrator.
+
+## Tools
+
+**Orchestrator tools** (available to you):
+- `team_create` — create a named team
+- `team_add_tasks` — add tasks with optional `blockedBy` dependencies
+- `team_spawn` — spawn a teammate with a role, model, and tool set
+- `team_send` — send a message (fire-and-forget or `wait` for response)
+- `team_status` — view task board, teammate states, recent messages
+- `team_shutdown` — abort all teammates and clean up
+
+**Teammate tools** (injected into each spawned agent):
+- `team_tasks` — list, claim, complete, or fail tasks
+- `team_message` — send messages to other teammates
+- `team_inbox` — check for unread messages
+
+## Auto-dispatch
+
+When a teammate completes a task, the extension automatically
+checks for newly unblocked tasks and idle teammates. If a match
+exists, the idle teammate is woken and assigned the task
+immediately — no orchestrator polling needed.
+
+This means dependency chains like `A → B → C` resolve
+automatically. Teammates claim parallel work, complete it, and
+the blocked downstream task dispatches to whoever goes idle
+first.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/teams/status-working.png", alt: "Team status showing two teammates working on claimed tasks with a blocked task waiting" },
+  { src: "/screenshots/extensions/teams/status-complete.png", alt: "All three tasks completed — task 3 was auto-dispatched after its blockers finished" },
+  { src: "/screenshots/extensions/teams/auto-dispatch.png", alt: "Auto-dispatch summary showing the full chain of events" },
+]} />
+
+## Interrupting with Escape
+
+Pressing Escape kills all team agents (both working and idle).
+Teams are cognitive work tied to the conversation. The
+`agent_end` event aborts streaming sessions and disposes them.
+This mirrors [subagent](/extensions/subagent-tool/) interrupt
+behavior.

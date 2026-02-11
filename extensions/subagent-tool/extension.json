@@ -1,0 +1,16 @@
+{
+	"name": "subagent-tool",
+	"version": "0.1.0",
+	"description": "Delegate tasks to specialized sub-agents with isolated contexts",
+	"category": "tool",
+	"tags": ["agents", "delegation", "parallel"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "tasks",
+			"kind": "enhances",
+			"reason": "Tasks widget can show running/background subagent status"
+		}
+	],
+	"npmDependencies": {}
+}

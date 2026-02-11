@@ -1,0 +1,74 @@
+/**
+ * Enhanced write tool — shows full written content with summary footer.
+ */
+import { createWriteTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
+import { renderLines } from "../tool-display/index.js";
+
+const PREVIEW_MARKER = "__write_preview__";
+
+interface WritePreviewDetails {
+	_content?: string;
+	_summary?: string;
+	__write_preview__?: boolean;
+}
+
+export default function writePreview(pi: ExtensionAPI): void {
+	const baseWriteTool = createWriteTool(process.cwd());
+
+	pi.registerTool({
+		name: "write",
+		label: baseWriteTool.label,
+		description: baseWriteTool.description,
+		parameters: baseWriteTool.parameters,
+
+		renderCall(args, theme) {
+			const path = args.path ?? "file";
+			const filename = path.split("/").pop() ?? path;
+			return new Text(
+				theme.fg("toolTitle", theme.bold("write ")) + theme.fg("muted", filename),
+				0,
+				0
+			);
+		},
+
+		async execute(toolCallId, params, signal, onUpdate, _ctx) {
+			const path = params.path ?? "file";
+			const content = params.content ?? "";
+			const filename = path.split("/").pop() ?? path;
+			const lines = content.split("\n").length;
+			const sizeKb = (content.length / 1024).toFixed(1);
+			const summary = `${filename} (${lines} lines, ${sizeKb}KB)`;
+
+			const result = await baseWriteTool.execute(toolCallId, params, signal, onUpdate);
+			return {
+				content: result.content,
+				details: {
+					[PREVIEW_MARKER]: true,
+					_content: content,
+					_summary: summary,
+				},
+			};
+		},
+
+		renderResult(result, { isPartial }, theme) {
+			const details = result.details as WritePreviewDetails | undefined;
+
+			if (isPartial) {
+				return renderLines([theme.fg("muted", "...")]);
+			}
+
+			if (!details?.[PREVIEW_MARKER]) {
+				const textContent = result.content.find((c: { type: string }) => c.type === "text") as
+					| { text: string }
+					| undefined;
+				return renderLines((textContent?.text ?? "").split("\n"));
+			}
+
+			const footer = theme.fg("muted", `✓ ${details._summary ?? "file"}`);
+			const body = details._content ?? "";
+			const contentLines = body.split("\n").map((line) => theme.fg("dim", line));
+			return renderLines([...contentLines, "", footer]);
+		},
+	});
+}

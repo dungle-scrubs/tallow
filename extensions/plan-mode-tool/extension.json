@@ -1,0 +1,10 @@
+{
+	"name": "plan-mode-tool",
+	"version": "0.1.0",
+	"description": "Plan mode — structured planning before execution",
+	"category": "tool",
+	"tags": ["planning", "workflow"],
+	"files": ["index.ts", "utils.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

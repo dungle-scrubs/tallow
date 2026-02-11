@@ -1,0 +1,139 @@
+---
+title: tasks
+description: Task board extension with dependencies, comments, and team coordination.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+The **tasks extension** provides a complete task management system
+with two components:
+
+## Task Board Feature
+
+A full task board built into the TUI. Tasks have three states:
+pending, in-progress, and completed, with bidirectional dependency
+tracking (`blocks`/`blockedBy`). Blocked tasks automatically
+become ready when their dependencies complete.
+
+Tasks persist across sessions via the filesystem. Comments
+provide handoff context between sessions or agents. Team-based
+sharing lets multiple agents coordinate through a shared task
+board with file-system watching for real-time updates.
+
+**Toggle visibility:** `ctrl+shift+t`  
+**Manual management:** `/tasks` command
+
+## `manage_tasks` Tool
+
+A separate LLM-callable tool that enables the AI to create,
+update, complete, and organize tasks programmatically. This tool
+is what allows the assistant to break down complex requests
+into structured task lists and track progress automatically.
+
+The tool and the UI feature work together — tasks created by
+the AI via `manage_tasks` appear in the task board, and manual
+task operations update what the AI can see.
+
+Task listings now show both **list index** and stable **task id**
+(`1. Subject (id:7)`) so completion calls can target the right item
+after reordering/deletions. Completion handling is also stricter:
+invalid indices are reported, blocked tasks are skipped with reasons,
+and only explicit completion markers auto-complete tasks.
+
+## Responsive layout
+
+The task widget adapts to terminal width:
+
+- **Wide terminals (120+ columns)**, side-by-side layout. Tasks
+  on the left, running agents and background tasks on the right,
+  separated by a vertical rule. The right column is bottom-aligned
+  so agents appear next to the most recent tasks.
+- **Narrow terminals (under 120 columns)**, stacked layout. Tasks
+  first, then agents, then background tasks, each separated by
+  a spacer line. All content truncates to fit the available width.
+
+Both layouts cap visible tasks at 10 with a "... and N more"
+overflow indicator. Task titles, agent task previews, and
+background command strings all truncate independently based on
+available column width.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/tasks/board.png", alt: "Task board with pending, active, and completed tasks" },
+]} />
+
+## Relationships with other extensions
+
+The tasks widget is the **central dashboard**, it doesn't just
+show tasks, it unifies the display of several independent
+features into one responsive view.
+
+### [subagent](/extensions/subagent-tool/)
+
+When subagents are running (foreground or background), the tasks
+widget shows them alongside the task list. Each agent gets a
+colored `@name` with a spinner, its assigned task preview, and
+a live activity line showing what tool the agent is currently
+executing. In-progress tasks display `(@agent-name)` attribution
+when an agent claims ownership.
+
+In the status bar, a separate agent bar appears:
+`@main @alice @bob · 2 teammates`, with each name colored
+to match the agent's identity in the task widget.
+
+### [background-tasks](/extensions/background-task-tool/)
+
+Running background bash commands appear in the same widget,
+below the agent section. Each shows the truncated command string
+and elapsed duration. The widget caps at 5 visible background
+tasks with an overflow indicator.
+
+### [custom-footer](/extensions/custom-footer/)
+
+The footer's `(sub)` indicator shows the active subagent count.
+Combined with the agent bar from the tasks extension, you get
+two layers of agent visibility: the footer for a glance count,
+the widget for full detail.
+
+### Combined display
+
+When all three features are active simultaneously, tasks with
+dependencies, multiple agents with live activity, and background
+commands, the widget composes them into a unified view:
+
+**Wide (120+ cols):**
+```
+Tasks (2/5)                          │  3 agents launched
+├─ ◐ Writing unit tests (@alice)     │  ├─ ⠋ @alice (Foreground) · 12s
+├─ ◐ Refactoring auth (@bob)         │  │    Writing tests for auth module
+├─ ☐ Update documentation            │  ├─ ⠋ @bob (Background) · 8s
+│  └─ blocked by @alice, @bob        │  │    Refactoring auth middleware
+└─ ✓ Explore codebase                │  └─ ⠋ @carol (Background) · 3s
+                                     │       Running type checker
+                                     │
+                                     │  Background Tasks (1)
+                                     │  └─ ● npm run test:watch (45s)
+```
+
+**Narrow (under 120 cols):**
+```
+Tasks (2/5)
+├─ ◐ Writing unit tests (@alice)
+├─ ◐ Refactoring auth (@bob)
+├─ ☐ Update documentation
+│  └─ blocked by @alice, @bob
+└─ ✓ Explore codebase
+
+3 agents launched
+├─ ⠋ @alice (Foreground) · 12s
+│    Writing tests for auth module
+├─ ⠋ @bob (Background) · 8s
+│    Refactoring auth middleware
+└─ ⠋ @carol (Background) · 3s
+     Running type checker
+
+Background Tasks (1)
+└─ ● npm run test:watch (45s)
+```
+
+The layout decision is automatic, no configuration needed.
+Everything adapts to whatever terminal width you have.

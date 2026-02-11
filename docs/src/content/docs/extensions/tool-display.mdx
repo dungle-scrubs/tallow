@@ -1,0 +1,13 @@
+---
+title: tool-display
+description: Configure visible output lines per tool during and after execution.
+---
+
+Shared configuration that controls how many lines each tool shows
+during execution and after completion. Truncation position (head
+or tail) determines whether the first or last N lines are visible.
+Tools can opt out of truncation entirely.
+
+This is a library extension, other tool extensions (bash-live,
+read-summary, etc.) import its configuration to ensure consistent
+display behavior across all tools.

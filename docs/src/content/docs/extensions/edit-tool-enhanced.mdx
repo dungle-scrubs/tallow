@@ -1,0 +1,18 @@
+---
+title: edit-tool-enhanced
+description: Enhanced edit tool showing full colored diff preview.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+Every file edit the agent makes renders as a full colored diff,
+insertions in green, deletions in red, context lines for
+orientation. You see exactly what changed before and after,
+not just "edit applied."
+
+The diff stays visible after execution and persists with a
+summary line showing the file path and confirmation.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/edit-live/diff-preview.png", alt: "Colored diff showing insertions and deletions" },
+]} />

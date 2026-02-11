@@ -1,0 +1,9 @@
+---
+title: cd-tool
+description: Change tallow's working directory via command or tool.
+---
+
+Provides directory navigation as both a `/cd <path>` slash command
+for users and a `cd` tool for the LLM. Paths are validated before
+changing, non-existent or non-directory paths return clear errors.
+Supports `~` expansion to home directory.

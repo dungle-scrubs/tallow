@@ -1,0 +1,10 @@
+{
+	"name": "health",
+	"version": "0.1.0",
+	"description": "Session diagnostics — /health to view session, model, context, tools, and environment info",
+	"category": "command",
+	"tags": ["diagnostics", "health", "status", "doctor"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

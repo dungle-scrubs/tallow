@@ -1,0 +1,12 @@
+---
+title: command-expansion
+description: Expand nested commands and skills used as arguments to other commands.
+---
+
+When a command or skill is used as an argument to another command,
+this extension expands it to its content before passing it through.
+`/outer-command /skill:inner-skill args` expands the inner skill
+first, then feeds the result to the outer command.
+
+Supports recursive expansion (nested within nested) and works with
+skills, prompt templates, and other registered commands.

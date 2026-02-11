@@ -1,0 +1,16 @@
+{
+	"name": "agent-commands-tool",
+	"version": "0.1.0",
+	"description": "Commands for managing pi agents — list, view, create",
+	"category": "tool",
+	"tags": ["agents", "commands"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "subagent-tool",
+			"kind": "requires",
+			"reason": "Agents are spawned via the subagent system"
+		}
+	],
+	"npmDependencies": {}
+}

@@ -1,0 +1,10 @@
+{
+	"name": "show-system-prompt",
+	"version": "0.1.0",
+	"description": "Show the current system prompt via /system-prompt command",
+	"category": "utility",
+	"tags": ["debug", "system-prompt"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

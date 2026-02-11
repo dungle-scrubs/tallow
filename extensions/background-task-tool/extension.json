@@ -1,0 +1,16 @@
+{
+	"name": "background-task-tool",
+	"version": "0.1.0",
+	"description": "Run bash commands in the background with bg_bash, task_output, task_status tools",
+	"category": "tool",
+	"tags": ["background", "async", "bash"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "tasks",
+			"kind": "enhances",
+			"reason": "Tasks widget can show background task status"
+		}
+	],
+	"npmDependencies": {}
+}

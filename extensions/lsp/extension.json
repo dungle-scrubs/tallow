@@ -1,0 +1,13 @@
+{
+	"name": "lsp",
+	"version": "0.1.0",
+	"description": "Language Server Protocol support — jump to definition, references, hover, symbols",
+	"category": "language-support",
+	"tags": ["lsp", "code-intelligence"],
+	"files": ["index.ts", "types.d.ts"],
+	"relationships": [],
+	"npmDependencies": {
+		"vscode-languageserver-protocol": "^3.17.5",
+		"vscode-jsonrpc": "^8.2.0"
+	}
+}

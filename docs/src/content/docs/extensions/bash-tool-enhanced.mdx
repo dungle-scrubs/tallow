@@ -1,0 +1,17 @@
+---
+title: bash-tool-enhanced
+description: Enhanced bash with live streaming output and smart truncation.
+---
+
+Every command the agent runs streams its output in real time, but
+capped to the last 7 lines. Long builds, test suites, and installs
+stay readable instead of flooding your screen. A truncation indicator
+shows how many lines are hidden.
+
+After execution, the output collapses to a single summary line
+(exit code, line count, size). Press `ctrl+o` to expand the full
+output at any time.
+
+When command output already contains ANSI colors (for example,
+`git diff --color`), bash-live preserves those lines instead of
+re-wrapping them, preventing style-reset leakage across rows.

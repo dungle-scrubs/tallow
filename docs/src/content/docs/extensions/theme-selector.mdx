@@ -1,0 +1,48 @@
+---
+title: theme-selector
+description: Live theme switching with instant preview.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+Switch between 34 built-in **dark-only** themes via the `/theme`
+command. As you navigate the list, the entire TUI updates in real
+time — colors shift before you commit.
+
+Includes Apprentice, Ayu Mirage, Bluloco Dark, Catppuccin (Frappe,
+Macchiato, Mocha), Dracula, Everforest Dark, Flexoki Dark, GitHub
+Dark, Gruvbox Dark, Horizon, Iceberg, Kanagawa Wave, Material
+Ocean, Mellow, Modus Vivendi, Monokai Pro, Moonlight, Night Owl,
+Nord, One Dark, Oxocarbon Dark, Palenight, Poimandres, Rosé Pine,
+Solarized Dark, Spaceduck, Synthwave 84, Tokyo Night, Trash Panda,
+Vesper, Vitesse Dark, and Zenburn Dark.
+
+Every color token — accent, borders, backgrounds, tool status
+indicators, thinking text, message backgrounds — is theme-driven.
+Create your own theme as a single JSON file.
+
+For rendering stability, `/theme` now applies colors through pi's
+UI API only (no direct OSC terminal background writes), preventing
+screen corruption during overlay preview.
+
+## switch\_theme tool
+
+The agent also has a `switch_theme` tool it can call directly.
+Instead of opening the picker, you describe what you want in
+natural language and the agent picks a matching theme:
+
+- *"give me a warm retro theme"*
+- *"something cool and minimal"*
+- *"switch to a neon theme"*
+- *"random theme"*
+
+The tool filters the 34 themes by mood tags — `cool`, `warm`,
+`earthy`, `neon`, `pastel`, `retro`, `vibrant`, `muted`,
+`minimal`, `high-contrast`, `low-contrast` — and applies a
+matching one. You can also request a specific theme by name
+(`"switch to dracula"`) or ask for a random pick with optional
+tag filters.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/theme/switch-theme.gif", alt: "Switching themes with the switch_theme tool" },
+]} />
