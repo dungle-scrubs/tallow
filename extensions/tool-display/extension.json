@@ -1,0 +1,31 @@
+{
+	"name": "tool-display",
+	"version": "0.1.0",
+	"description": "Shared configuration for tool output truncation and display",
+	"category": "ui",
+	"tags": ["config", "display", "truncation"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "read-tool-enhanced",
+			"kind": "supports",
+			"reason": "Provides truncation config for read tool display"
+		},
+		{
+			"name": "write-tool-enhanced",
+			"kind": "supports",
+			"reason": "Provides truncation config for write tool display"
+		},
+		{
+			"name": "bash-tool-enhanced",
+			"kind": "supports",
+			"reason": "Provides truncation config for bash tool display"
+		},
+		{
+			"name": "edit-tool-enhanced",
+			"kind": "supports",
+			"reason": "Provides truncation config for edit tool display"
+		}
+	],
+	"npmDependencies": {}
+}

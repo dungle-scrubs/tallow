@@ -1,0 +1,17 @@
+{
+	"name": "tasks",
+	"version": "0.1.1",
+	"description": "Task management with status widget — tracks tasks, background jobs, and subagents",
+	"category": "tool",
+	"tags": ["tasks", "widget", "status"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "background-task-tool",
+			"kind": "enhances",
+			"reason": "Shows background task status in widget"
+		},
+		{ "name": "subagent-tool", "kind": "enhances", "reason": "Shows subagent status in widget" }
+	],
+	"npmDependencies": {}
+}

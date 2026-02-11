@@ -1,0 +1,10 @@
+{
+	"name": "context-files",
+	"version": "0.1.0",
+	"description": "Load both CLAUDE.md and AGENTS.md files from parent dirs, cwd, and subdirectories. Supplements pi's native context loading which picks only one when both exist.",
+	"category": "context",
+	"tags": ["context", "claude", "agents", "instructions"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

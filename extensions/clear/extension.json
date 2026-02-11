@@ -1,0 +1,10 @@
+{
+	"name": "clear",
+	"version": "0.1.0",
+	"description": "Alias /clear for /new (start a fresh session)",
+	"category": "alias",
+	"tags": ["session", "alias"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

@@ -1,0 +1,200 @@
+---
+title: hooks
+description: Lifecycle hooks for automating and gating agent behavior.
+---
+
+Claude Code-style hooks that intercept any point in the agent
+lifecycle. Three hook types:
+
+- **Command**: run a shell command. Event data passed via
+  `PI_HOOK_EVENT` env var. Exit 0 = allow, exit 2 = block
+  (stderr becomes the reason).
+- **Prompt**: single LLM call for evaluation (not yet implemented).
+- **Agent**: spawn a subagent with tool access and a prompt
+  template. Use `$ARGUMENTS` for event data injection.
+
+Hooks can be sync (blocking, can return accept/reject decisions)
+or async (fire-and-forget background tasks). Matchers filter which
+tools or events trigger each hook using regex patterns.
+
+Configure in `hooks.json` at the project root or in settings.
+Only `tool_call` and `input` events support blocking. All other
+events are observe-only.
+
+## All pi events
+
+Every event you can hook into:
+
+### Tool lifecycle
+
+| Event | Description | Matcher field | Can block? |
+|-------|-------------|---------------|------------|
+| `tool_call` | Before a tool executes | `toolName` | Yes |
+| `tool_result` | After a tool returns | `toolName` | No |
+| `user_bash` | When bash runs via the built-in tool | | No |
+
+### Agent lifecycle
+
+| Event | Description | Matcher field | Can block? |
+|-------|-------------|---------------|------------|
+| `before_agent_start` | Before the agent starts, can inject context | | No |
+| `agent_start` | When the agent starts processing | | No |
+| `agent_end` | When the agent finishes processing | | No |
+| `turn_start` | At the start of each agent turn | | No |
+| `turn_end` | At the end of each agent turn | | No |
+| `input` | When the user submits input | | Yes |
+
+### Session lifecycle
+
+| Event | Description | Matcher field | Can block? |
+|-------|-------------|---------------|------------|
+| `session_start` | When a session starts or resumes | | No |
+| `session_shutdown` | When a session is shutting down | | No |
+| `session_compact` | After context is compacted | | No |
+| `session_before_compact` | Before context compaction, can preserve data | | No |
+| `session_fork` | After a session fork | | No |
+| `session_before_fork` | Before a session fork | | No |
+| `session_switch` | After switching sessions | | No |
+| `session_before_switch` | Before switching sessions | | No |
+| `session_tree` | After session tree operations | | No |
+| `session_before_tree` | Before session tree operations | | No |
+
+### Other
+
+| Event | Description | Matcher field | Can block? |
+|-------|-------------|---------------|------------|
+| `context` | Context filtering, can modify messages sent to the model | | No |
+| `model_select` | When the model changes (set, cycle, or restore) | | No |
+
+## Multi-source merge
+
+Hooks are loaded from all sources and merged additively at
+session start. Matchers are concatenated per event, nothing is
+replaced. Every source participates:
+
+1. `hooks.json` from local paths in `settings.json` `packages` (lowest priority)
+2. `~/.tallow/hooks.json` (global standalone)
+3. `~/.tallow/settings.json` → `hooks` key (global settings)
+4. `.tallow/hooks.json` (project standalone)
+5. `.tallow/settings.json` → `hooks` key (project settings)
+6. `~/.tallow/extensions/*/hooks.json` (global extension hooks)
+7. `.tallow/extensions/*/hooks.json` (project extension hooks)
+8. Runtime: `hooks:merge` event bus (other extensions)
+
+This means any extension or package can ship a `hooks.json`
+alongside its code and it automatically participates in the
+hook system. A hook from a package, a global extension, and
+your project's `hooks.json` all fire on the same event if
+their matchers match.
+
+## Included hook
+
+tallow ships one basic starter hook: a `tool_call` command hook
+that matches `bash` invocations. It's intentionally minimal, just
+enough to demonstrate the pattern.
+
+```json
+{
+  "hooks": {
+    "tool_call": [
+      {
+        "matcher": "bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.tallow/extensions/hooks/tool-call/tool-call.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Adding your own hooks
+
+The pattern is straightforward. Here are a few examples to start
+from:
+
+### Auto-review after writes
+
+Spawn a reviewer agent asynchronously after every `write` or
+`edit`. The agent checks the change and queues its result for
+the next turn.
+
+```json
+{
+  "tool_result": [
+    {
+      "matcher": "write|edit",
+      "hooks": [
+        {
+          "type": "agent",
+          "agent": "reviewer",
+          "prompt": "Review this file change for issues:\n\n$ARGUMENTS",
+          "timeout": 60,
+          "async": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Block destructive bash commands
+
+A sync command hook that inspects the bash input before execution.
+The shell script exits 2 to block, with the reason on stderr.
+
+```json
+{
+  "tool_call": [
+    {
+      "matcher": "bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "~/.tallow/hooks/check-destructive.sh",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
+```bash
+#!/bin/bash
+# check-destructive.sh
+# PI_HOOK_EVENT contains JSON with the tool call details
+INPUT=$(echo "$PI_HOOK_EVENT" | jq -r '.input.command // empty')
+if echo "$INPUT" | grep -qE 'rm\s+-rf\s+/'; then
+  echo "Blocked: refusing to rm -rf a root path" >&2
+  exit 2
+fi
+exit 0
+```
+
+### Completion check on agent end
+
+After the agent finishes, spawn a reviewer to verify all tasks
+were completed.
+
+```json
+{
+  "agent_end": [
+    {
+      "hooks": [
+        {
+          "type": "agent",
+          "agent": "reviewer",
+          "prompt": "Check if all tasks were completed. Return { \"ok\": true } or { \"ok\": false, \"reason\": \"...\" }.\n\n$ARGUMENTS",
+          "async": true
+        }
+      ]
+    }
+  ]
+}
+```
+

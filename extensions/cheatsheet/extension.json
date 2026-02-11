@@ -1,0 +1,10 @@
+{
+	"name": "cheatsheet",
+	"version": "0.1.0",
+	"description": "Quick reference cheatsheet for pi commands and shortcuts",
+	"category": "utility",
+	"tags": ["help", "reference"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

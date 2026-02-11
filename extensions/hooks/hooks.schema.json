@@ -1,0 +1,189 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "Pi Hooks Configuration",
+	"description": "Configuration for Pi agent hooks — shell commands, LLM prompts, or subagents triggered by lifecycle events.",
+	"type": "object",
+	"properties": {
+		"$schema": {
+			"type": "string"
+		},
+		"hooks": {
+			"type": "object",
+			"description": "Hook definitions keyed by Pi event name.",
+			"properties": {
+				"tool_call": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before a tool executes. Matcher filters on toolName. Can block."
+				},
+				"tool_result": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "After a tool returns. Matcher filters on toolName."
+				},
+				"input": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When user submits input. Can block."
+				},
+				"turn_start": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "At the start of each agent turn."
+				},
+				"turn_end": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "At the end of each agent turn."
+				},
+				"agent_start": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When the agent starts processing."
+				},
+				"agent_end": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When the agent finishes processing."
+				},
+				"before_agent_start": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before the agent starts — can inject context."
+				},
+				"setup": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before session starts. Matcher filters on trigger (init, maintenance). Triggered by --init, --init-only, or --maintenance CLI flags."
+				},
+				"session_start": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a session starts or resumes."
+				},
+				"session_shutdown": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a session is shutting down."
+				},
+				"session_compact": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "After context is compacted."
+				},
+				"session_before_compact": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before context compaction — can preserve data."
+				},
+				"session_fork": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "After a session fork."
+				},
+				"session_before_fork": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before a session fork."
+				},
+				"session_switch": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "After switching sessions."
+				},
+				"session_before_switch": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before switching sessions."
+				},
+				"session_tree": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "After session tree operations."
+				},
+				"session_before_tree": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Before session tree operations."
+				},
+				"context": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Context filtering — can modify messages sent to the model."
+				},
+				"model_select": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When the model changes (set, cycle, or restore)."
+				},
+				"user_bash": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a bash command is run via the built-in bash tool."
+				}
+			},
+			"additionalProperties": {
+				"$ref": "#/$defs/eventHooks"
+			}
+		}
+	},
+	"required": ["hooks"],
+	"$defs": {
+		"eventHooks": {
+			"type": "array",
+			"description": "Array of matchers with their associated hooks.",
+			"items": {
+				"$ref": "#/$defs/hookMatcher"
+			}
+		},
+		"hookMatcher": {
+			"type": "object",
+			"description": "Matches events by regex and runs associated hooks.",
+			"properties": {
+				"matcher": {
+					"type": "string",
+					"description": "Regex pattern to filter events. Empty or '*' matches all. For tool_call/tool_result, matches toolName."
+				},
+				"hooks": {
+					"type": "array",
+					"description": "Hooks to execute when matcher matches.",
+					"items": {
+						"$ref": "#/$defs/hookHandler"
+					},
+					"minItems": 1
+				}
+			},
+			"required": ["hooks"]
+		},
+		"hookHandler": {
+			"type": "object",
+			"description": "A single hook action — shell command, LLM prompt, or subagent.",
+			"properties": {
+				"type": {
+					"type": "string",
+					"enum": ["command", "prompt", "agent"],
+					"description": "command: shell script. prompt: single LLM call. agent: spawn subagent with tools."
+				},
+				"command": {
+					"type": "string",
+					"description": "Shell command to execute. Event data passed via PI_HOOK_EVENT env var. Exit 0=allow, 2=block (stderr=reason)."
+				},
+				"agent": {
+					"type": "string",
+					"description": "Agent name from ~/.tallow/agents/ directory."
+				},
+				"prompt": {
+					"type": "string",
+					"description": "Prompt template for agent/prompt hooks. Use $ARGUMENTS for event data."
+				},
+				"model": {
+					"type": "string",
+					"description": "Model override for prompt/agent hooks."
+				},
+				"timeout": {
+					"type": "number",
+					"description": "Timeout in seconds. Defaults: 600 (command), 30 (prompt), 60 (agent).",
+					"minimum": 1
+				},
+				"async": {
+					"type": "boolean",
+					"description": "Run in background without blocking. Only for command/agent types.",
+					"default": false
+				},
+				"statusMessage": {
+					"type": "string",
+					"description": "Custom spinner message while hook executes."
+				}
+			},
+			"required": ["type"],
+			"allOf": [
+				{
+					"if": { "properties": { "type": { "const": "command" } } },
+					"then": { "required": ["command"] }
+				},
+				{
+					"if": { "properties": { "type": { "const": "agent" } } },
+					"then": { "required": ["agent"] }
+				}
+			]
+		}
+	}
+}

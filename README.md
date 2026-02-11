@@ -1,0 +1,203 @@
+<p align="center">
+  <img src="assets/logo.jpg" width="200" alt="Tallow logo" />
+</p>
+
+<h1 align="center">Tallow</h1>
+
+<p align="center">
+  An opinionated coding agent. Built on <a href="https://github.com/nicobrinkkemper/pi-coding-agent">pi</a>.
+</p>
+
+<p align="center">
+  <a href="https://tallow.dungle-scrubs.com">Docs</a> · <a href="https://github.com/dungle-scrubs/tallow">GitHub</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml"><img src="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+</p>
+
+---
+
+30+ extensions, 34 themes, 8 slash commands, and 8 specialized agents.
+Install only what you need — the interactive installer lets you pick.
+
+## Features
+
+- **30+ bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
+- **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
+- **8 slash commands** — `/implement`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
+- **8 specialized agents** — architect, debug, planner, refactor, reviewer, scout, worker, tallow-expert
+- **Multi-agent teams** — coordinate multiple agents with task boards and messaging
+- **SDK** — embed Tallow in your own scripts and orchestrators
+- **User-owned config** — agents and commands are installed to `~/.tallow/` where you can edit, remove, or add your own
+
+Read the full [documentation](https://tallow.dungle-scrubs.com).
+
+## Requirements
+
+- Node.js ≥ 22
+- An API key for at least one supported LLM provider (Anthropic, OpenAI, Google, etc.)
+
+## Installation
+
+### From npm
+
+```bash
+npm install -g tallow
+tallow install
+```
+
+### From source
+
+```bash
+git clone https://github.com/dungle-scrubs/tallow.git
+cd tallow
+npm install
+npm run build
+node dist/install.js
+```
+
+The installer walks you through selecting extensions, themes, and agents,
+then links the `tallow` binary globally.
+
+## Usage
+
+```bash
+# Interactive mode
+tallow
+
+# Single-shot prompt
+tallow -p "Fix the failing tests"
+
+# Continue most recent session
+tallow --continue
+
+# Use a specific model
+tallow -m anthropic/claude-sonnet-4-20250514
+
+# Set thinking level
+tallow --thinking high
+
+# Run without persisting session
+tallow --no-session
+
+# Load additional extensions
+tallow -e ./my-extension
+
+# List saved sessions
+tallow --list
+```
+
+### Slash commands
+
+Inside an interactive session, type `/` to see available commands:
+
+| Command | Description |
+|---------|-------------|
+| `/implement` | Implement a feature from a description |
+| `/implement-and-review` | Implement then self-review |
+| `/review` | Review recent changes |
+| `/fix` | Fix a bug from a description |
+| `/test` | Write or fix tests |
+| `/scout-and-plan` | Explore the codebase and create a plan |
+| `/scaffold` | Scaffold a new project |
+| `/question` | Ask a question about the codebase |
+
+## SDK
+
+Use Tallow programmatically in your own tools:
+
+```typescript
+import { createTallowSession } from "tallow";
+
+const { session } = await createTallowSession({
+  model: "anthropic/claude-sonnet-4-20250514",
+});
+
+session.subscribe((event) => {
+  if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+    process.stdout.write(event.assistantMessageEvent.delta);
+  }
+});
+
+await session.prompt("What files are in this directory?");
+session.dispose();
+```
+
+### SDK options
+
+```typescript
+const tallow = await createTallowSession({
+  cwd: "/path/to/project",
+  model: "anthropic/claude-sonnet-4-20250514",
+  thinkingLevel: "high",
+  session: { type: "memory" },        // Don't persist
+  noBundledExtensions: true,           // Start clean
+  additionalExtensions: ["./my-ext"],  // Add your own
+  systemPrompt: "You are a test bot.", // Override system prompt
+});
+```
+
+## Configuration
+
+Tallow stores its configuration in `~/.tallow/`:
+
+| Path | Purpose |
+|------|---------|
+| `~/.tallow/settings.json` | Global settings |
+| `~/.tallow/auth.json` | API key storage |
+| `~/.tallow/models.json` | Model configuration |
+| `~/.tallow/keybindings.json` | Keybinding overrides |
+| `~/.tallow/agents/` | Agent profiles (installed from templates, yours to edit) |
+| `~/.tallow/commands/` | Slash commands (installed from templates, yours to edit) |
+| `~/.tallow/extensions/` | User extensions (override bundled ones by name) |
+| `~/.tallow/sessions/` | Persisted conversation sessions |
+
+Project-level configuration lives in `.tallow/` within your project directory.
+
+## Themes
+
+Switch themes inside an interactive session with the theme selector (`ctrl+t`),
+or set one in `~/.tallow/settings.json`:
+
+```json
+{
+  "theme": "tokyo-night"
+}
+```
+
+## Writing extensions
+
+Extensions are TypeScript files that receive the pi `ExtensionAPI`:
+
+```typescript
+import type { ExtensionAPI } from "tallow";
+
+export default function myExtension(api: ExtensionAPI): void {
+  api.registerCommand({
+    name: "greet",
+    description: "Say hello",
+    execute: async (ctx) => {
+      ctx.ui.notify("Hello from my extension!", "info");
+    },
+  });
+}
+```
+
+Place your extension in `~/.tallow/extensions/my-extension/index.ts`.
+If it shares a name with a bundled extension, yours takes precedence.
+
+## Known limitations
+
+- Requires Node.js 22+ (uses modern ESM features)
+- Session persistence is local — no cloud sync
+- The `web-fetch` extension works best with a [Firecrawl](https://firecrawl.dev) API key for JS-heavy pages
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+## License
+
+[MIT](LICENSE) © Kevin Frilot

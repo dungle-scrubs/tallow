@@ -1,0 +1,48 @@
+---
+title: health
+description: Session diagnostics — model, context, tools, and environment at a glance.
+---
+
+Run `/health` (or `/doctor`) to print a diagnostic overview of
+the current session. The output renders inline as a tree-style
+layout covering seven sections:
+
+| Section | What it shows |
+|---------|---------------|
+| **Session** | ID, file, name, CWD, branch/entry counts |
+| **Model** | Provider, ID, context window, max output, reasoning, thinking level, input modalities |
+| **Context** | Token usage with percentage, OK / Warning / Critical status |
+| **Tools** | Active vs total count, active tool names |
+| **Commands** | Registered count with per-source breakdown |
+| **Extensions** | Active theme name |
+| **Environment** | Tallow version, framework version, Node version, platform, home and package directories |
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/health` | Show session diagnostics |
+| `/doctor` | Alias for `/health` |
+
+## Screenshot
+
+![Session health diagnostics showing session, model, context, tools, commands, extensions, and environment sections](/screenshots/extensions/health/diagnostics.jpg)
+
+## Responsive layout
+
+The output adapts to terminal width:
+
+- **< 80 columns** — single column, sections stacked vertically
+- **80–159 columns** — two columns side-by-side
+- **≥ 160 columns** — three columns
+
+Long values (e.g. tool lists) are truncated with `…` to prevent
+overflow.
+
+## Context status
+
+| Status | Condition |
+|--------|-----------|
+| OK | ≤ 50% context used |
+| Warning | 51–80% |
+| Critical | > 80% |

@@ -1,0 +1,21 @@
+---
+title: plan-mode-tool
+description: Read-only exploration mode for safe code analysis and planning.
+---
+
+Toggle with `/plan` or `ctrl+alt+p` to enter a restricted mode
+where only read-only tools are available. The agent can explore
+the codebase, analyze architecture, and formulate a plan, but
+cannot modify any files or run destructive commands.
+
+Plan mode extracts numbered steps from "Plan:" sections in the
+agent's response. During execution (after exiting plan mode),
+a progress tracking widget shows which steps are complete.
+`[DONE:n]` markers in the conversation advance the progress.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/plan-mode` | Toggle plan mode on/off |
+| `/todos` | Show current plan todo list |

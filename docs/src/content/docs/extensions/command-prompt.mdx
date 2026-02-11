@@ -1,0 +1,32 @@
+---
+title: command-prompt
+description: Register prompts in subdirectories as /dir:name commands.
+---
+
+Scans `prompts/` and `commands/` subdirectories and registers them as
+`/dir:name` commands. A file at `prompts/command/new.md` becomes
+`/command:new`. Files starting with `_` are skipped (templates/internal files).
+
+## Prompt expansion visibility
+
+When you run a nested prompt command (for example `/plan`), the extension now
+separates what is sent to the model from what is shown in chat:
+
+- **Compact mode (default):** chat shows a short summary + preview line
+- **Verbose mode:** chat shows the full expanded prompt body
+
+The model still receives the full expanded prompt content in both modes.
+
+### Controls
+
+| Input | Action |
+|-------|--------|
+| `/prompt` | Toggle compact/verbose |
+| `/prompt compact` | Switch to compact |
+| `/prompt verbose` | Switch to verbose |
+| `/prompt status` | Show current mode |
+| <kbd>Ctrl+Alt+O</kbd> | Toggle shortcut |
+
+Frontmatter in prompt markdown still controls description and argument hints,
+and `$ARGUMENTS`, `$@`, `$1`, `$2`, and `${@:N}` substitutions continue to work.
+

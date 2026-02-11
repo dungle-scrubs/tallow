@@ -1,0 +1,191 @@
+---
+title: tallow
+description: The extensible coding agent for your terminal.
+template: splash
+hero:
+  image:
+    file: ../../../../assets/logo.jpg
+    alt: tallow logo
+  tagline: An extensible coding agent for your terminal. 30+ extensions, 34 themes, 8 agents — install only what you need.
+  actions:
+    - text: Get Started
+      link: /getting-started/installation/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/dungle-scrubs/tallow
+      icon: external
+      variant: minimal
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<div class="stats-row">
+  <div class="stat">
+    <span class="stat-value">31</span>
+    <span class="stat-label">Extensions</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">34</span>
+    <span class="stat-label">Themes</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">7</span>
+    <span class="stat-label">Agents</span>
+  </div>
+  <div class="stat">
+    <span class="stat-value">∞</span>
+    <span class="stat-label">Models</span>
+  </div>
+</div>
+
+---
+
+<div class="feature-section">
+
+## What makes tallow different
+
+<div class="feature-grid">
+
+<div class="feature-item">
+
+### Multi-model routing
+
+Run Claude, GPT-4, Gemini, or any OpenAI-compatible model from the same interface. Switch mid-conversation, assign different models to different agents, or compare outputs side-by-side.
+
+</div>
+
+<div class="feature-item">
+
+### Real extension system
+
+Not plugins bolted on — a proper extension architecture. Tools, TUI widgets, lifecycle hooks, event bus, custom commands. Extensions can render rich terminal UI, intercept tool calls, and compose with each other. All 31 built-in features are extensions.
+
+</div>
+
+<div class="feature-item">
+
+### Multi-agent teams
+
+Spawn parallel agents with isolated contexts. Assign different models, roles, and tasks to each teammate. Coordinate via a shared task board with dependency tracking and inter-agent messaging. 7 built-in agent profiles: architect, debug, planner, refactor, reviewer, scout, worker.
+
+</div>
+
+<div class="feature-item">
+
+### Themeable everything
+
+34 built-in themes from Tokyo Night to Synthwave 84. Every color in the TUI — borders, backgrounds, accents, tool status indicators — is token-driven and overridable.
+
+</div>
+
+<div class="feature-item">
+
+### Packages & Claude Code compatibility
+
+A package system for distributing commands, agents, skills, and hooks. Compatible with Claude Code plugins out of the box — hooks, MCP servers, slash commands, agents, and CLAUDE.md context files all work. Commands and prompts are interchangeable — put a markdown file in either directory and it becomes a `/slash` command.
+
+</div>
+
+<div class="feature-item">
+
+### Lifecycle hooks
+
+Intercept any point in the agent lifecycle — before/after tool execution, on turn completion, on errors. Run shell commands, validate outputs, enforce policies, or trigger notifications. Claude Code hook format supported.
+
+</div>
+
+</div>
+</div>
+
+---
+
+<div class="feature-section">
+
+## Built-in extensions
+
+<div class="extension-list">
+  <span class="extension-tag">subagent</span>
+  <span class="extension-tag">teams</span>
+  <span class="extension-tag">tasks</span>
+  <span class="extension-tag">lsp</span>
+  <span class="extension-tag">hooks</span>
+  <span class="extension-tag">plan-mode</span>
+  <span class="extension-tag">git-status</span>
+  <span class="extension-tag">theme-selector</span>
+  <span class="extension-tag">command-prompt</span>
+  <span class="extension-tag">command-expansion</span>
+  <span class="extension-tag">ask-user-question</span>
+  <span class="extension-tag">background-tasks</span>
+  <span class="extension-tag">context-files</span>
+  <span class="extension-tag">context-usage</span>
+  <span class="extension-tag">agent-commands</span>
+  <span class="extension-tag">read-enhanced</span>
+  <span class="extension-tag">write-enhanced</span>
+  <span class="extension-tag">edit-enhanced</span>
+  <span class="extension-tag">bash-enhanced</span>
+  <span class="extension-tag">output-styles</span>
+  <span class="extension-tag">mcp-adapter</span>
+  <span class="extension-tag">cheatsheet</span>
+  <span class="extension-tag">custom-footer</span>
+  <span class="extension-tag">tool-display</span>
+  <span class="extension-tag">web-fetch</span>
+  <span class="extension-tag">cd</span>
+  <span class="extension-tag">init</span>
+  <span class="extension-tag">show-system-prompt</span>
+
+  <span class="extension-tag">clear</span>
+</div>
+
+</div>
+
+---
+
+<div class="feature-section">
+
+## Themes
+
+<div class="theme-strip">
+  <div class="theme-swatch" style="background: #1a1b26"><span class="theme-swatch-label">Tokyo Night</span></div>
+  <div class="theme-swatch" style="background: #191724"><span class="theme-swatch-label">Rosé Pine</span></div>
+  <div class="theme-swatch" style="background: #282a36"><span class="theme-swatch-label">Dracula</span></div>
+  <div class="theme-swatch" style="background: #1e1e2e"><span class="theme-swatch-label">Catppuccin</span></div>
+  <div class="theme-swatch" style="background: #2e3440"><span class="theme-swatch-label">Nord</span></div>
+  <div class="theme-swatch" style="background: #282828"><span class="theme-swatch-label">Gruvbox</span></div>
+  <div class="theme-swatch" style="background: #0d1117"><span class="theme-swatch-label">GitHub Dark</span></div>
+  <div class="theme-swatch" style="background: #002b36"><span class="theme-swatch-label">Solarized</span></div>
+  <div class="theme-swatch" style="background: #282c34"><span class="theme-swatch-label">One Dark</span></div>
+  <div class="theme-swatch" style="background: #1e1e1e"><span class="theme-swatch-label">Trash Panda</span></div>
+  <div class="theme-swatch" style="background: #1b1e28"><span class="theme-swatch-label">Material Ocean</span></div>
+  <div class="theme-swatch" style="background: #2b2d3a"><span class="theme-swatch-label">Moonlight</span></div>
+  <div class="theme-swatch" style="background: #1c1e26"><span class="theme-swatch-label">Horizon</span></div>
+  <div class="theme-swatch" style="background: #2a2139"><span class="theme-swatch-label">Synthwave 84</span></div>
+</div>
+
+Every color token — accent, borders, tool status, thinking indicators, message backgrounds — is fully configurable. Create your own theme as a single JSON file.
+
+</div>
+
+---
+
+<div class="quick-start">
+
+## Quick start
+
+```bash
+git clone https://github.com/dungle-scrubs/tallow.git
+cd tallow && npm install && npm run build
+node dist/install.js
+tallow
+```
+
+</div>
+
+---
+
+<div class="feature-section">
+
+## Other projects
+
+Coming soon.
+
+</div>

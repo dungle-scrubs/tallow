@@ -1,0 +1,164 @@
+---
+/**
+ * Image gallery with lightbox popup.
+ * Renders a grid of thumbnails. Click to open full-size overlay
+ * with prev/next navigation and keyboard support.
+ *
+ * @param images - Array of { src, alt } objects
+ *
+ * When an image src doesn't exist yet, renders a numbered
+ * placeholder slot so the layout is visible before screenshots
+ * are captured.
+ */
+
+interface Props {
+	images: { src: string; alt: string }[];
+}
+
+const { images } = Astro.props;
+const galleryId = `gallery-${Math.random().toString(36).slice(2, 8)}`;
+---
+
+<div class="gallery-grid not-content" data-gallery={galleryId}>
+  {images.map((img, i) => (
+    <button
+      class="gallery-thumb"
+      data-index={i}
+      data-src={img.src}
+      data-alt={img.alt}
+      aria-label={`View: ${img.alt}`}
+    >
+      <img
+        src={img.src}
+        alt={img.alt}
+        loading="lazy"
+        decoding="async"
+        onerror={`this.parentElement.classList.add('gallery-placeholder')`}
+      />
+      <span class="gallery-placeholder-label" aria-hidden="true">{i + 1}</span>
+      <span class="gallery-thumb-caption">{img.alt}</span>
+    </button>
+  ))}
+</div>
+
+<script>
+  /**
+   * Lightbox controller. One instance per page - attaches to all
+   * [data-gallery] grids. Handles click, keyboard nav, and
+   * click-outside-to-close.
+   */
+  class Lightbox {
+    private overlay: HTMLDivElement;
+    private imgEl: HTMLImageElement;
+    private captionEl: HTMLDivElement;
+    private counterEl: HTMLDivElement;
+    private images: { src: string; alt: string }[] = [];
+    private currentIndex = 0;
+
+    constructor() {
+      this.overlay = document.createElement('div');
+      this.overlay.className = 'lightbox-overlay';
+      this.overlay.setAttribute('role', 'dialog');
+      this.overlay.setAttribute('aria-modal', 'true');
+      this.overlay.setAttribute('aria-label', 'Image viewer');
+      this.overlay.innerHTML = `
+        <button class="lightbox-close" aria-label="Close">&times;</button>
+        <button class="lightbox-prev" aria-label="Previous image">&#8249;</button>
+        <button class="lightbox-next" aria-label="Next image">&#8250;</button>
+        <div class="lightbox-content">
+          <img class="lightbox-img" src="" alt="" />
+          <div class="lightbox-caption"></div>
+          <div class="lightbox-counter"></div>
+        </div>
+      `;
+      document.body.appendChild(this.overlay);
+
+      this.imgEl = this.overlay.querySelector('.lightbox-img')!;
+      this.captionEl = this.overlay.querySelector('.lightbox-caption')!;
+      this.counterEl = this.overlay.querySelector('.lightbox-counter')!;
+
+      this.overlay.querySelector('.lightbox-close')!
+        .addEventListener('click', () => this.close());
+      this.overlay.querySelector('.lightbox-prev')!
+        .addEventListener('click', (e) => { e.stopPropagation(); this.prev(); });
+      this.overlay.querySelector('.lightbox-next')!
+        .addEventListener('click', (e) => { e.stopPropagation(); this.next(); });
+      this.overlay.addEventListener('click', (e) => {
+        if (e.target === this.overlay) this.close();
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (!this.overlay.classList.contains('lightbox-open')) return;
+        if (e.key === 'Escape') this.close();
+        if (e.key === 'ArrowLeft') this.prev();
+        if (e.key === 'ArrowRight') this.next();
+      });
+
+      this.attachGalleries();
+    }
+
+    /** Scan all [data-gallery] grids and bind click handlers. */
+    private attachGalleries() {
+      document.querySelectorAll<HTMLDivElement>('[data-gallery]').forEach((grid) => {
+        grid.addEventListener('click', (e) => {
+          const thumb = (e.target as HTMLElement).closest<HTMLButtonElement>('.gallery-thumb');
+          if (!thumb || thumb.classList.contains('gallery-placeholder')) return;
+
+          const buttons = Array.from(grid.querySelectorAll<HTMLButtonElement>('.gallery-thumb'));
+          this.images = buttons
+            .filter((b) => !b.classList.contains('gallery-placeholder'))
+            .map((b) => ({
+              src: b.dataset.src || '',
+              alt: b.dataset.alt || '',
+            }));
+
+          const clickedSrc = thumb.dataset.src || '';
+          this.currentIndex = this.images.findIndex((img) => img.src === clickedSrc);
+          if (this.currentIndex === -1) this.currentIndex = 0;
+
+          this.open();
+        });
+      });
+    }
+
+    private open() {
+      this.show(this.currentIndex);
+      this.overlay.classList.add('lightbox-open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    private close() {
+      this.overlay.classList.remove('lightbox-open');
+      document.body.style.overflow = '';
+    }
+
+    private prev() {
+      this.currentIndex = (this.currentIndex - 1 + this.images.length) % this.images.length;
+      this.show(this.currentIndex);
+    }
+
+    private next() {
+      this.currentIndex = (this.currentIndex + 1) % this.images.length;
+      this.show(this.currentIndex);
+    }
+
+    private show(index: number) {
+      const img = this.images[index];
+      if (!img) return;
+      this.imgEl.src = img.src;
+      this.imgEl.alt = img.alt;
+      this.captionEl.textContent = img.alt;
+      this.counterEl.textContent = `${index + 1} / ${this.images.length}`;
+
+      const prevBtn = this.overlay.querySelector<HTMLButtonElement>('.lightbox-prev')!;
+      const nextBtn = this.overlay.querySelector<HTMLButtonElement>('.lightbox-next')!;
+      prevBtn.style.display = this.images.length > 1 ? '' : 'none';
+      nextBtn.style.display = this.images.length > 1 ? '' : 'none';
+    }
+  }
+
+  /* Instantiate once per page load (Astro view transitions safe) */
+  if (!document.querySelector('.lightbox-overlay')) {
+    new Lightbox();
+  }
+</script>

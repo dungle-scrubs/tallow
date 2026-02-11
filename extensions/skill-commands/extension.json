@@ -1,0 +1,10 @@
+{
+	"name": "skill-commands",
+	"version": "0.1.0",
+	"description": "Manage and invoke tallow skills",
+	"category": "command",
+	"tags": ["skills", "commands"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

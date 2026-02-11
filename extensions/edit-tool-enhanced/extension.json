@@ -1,0 +1,10 @@
+{
+	"name": "edit-tool-enhanced",
+	"version": "0.1.0",
+	"description": "Enhanced edit tool with full diff display and summary footer",
+	"category": "tool",
+	"tags": ["edit", "diff", "display"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

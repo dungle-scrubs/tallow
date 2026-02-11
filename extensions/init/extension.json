@@ -1,0 +1,10 @@
+{
+	"name": "init",
+	"version": "0.1.0",
+	"description": "Initialize AGENTS.md for a project via /init command, with CLAUDE.md migration support",
+	"category": "utility",
+	"tags": ["init", "setup"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

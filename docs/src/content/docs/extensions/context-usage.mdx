@@ -1,0 +1,31 @@
+---
+title: context-usage
+description: Visualize context window usage with a waffle chart breakdown.
+---
+
+The **context-usage** extension adds a `/context` command that
+visualizes how your context window is being used with a waffle
+chart and per-category token breakdown.
+
+## Usage
+
+```
+/context
+```
+
+## Categories shown
+
+| Category | What it measures |
+|----------|-----------------|
+| System prompt | Base instructions |
+| System tools | Tool definitions |
+| Context files | AGENTS.md, CLAUDE.md |
+| Skills | Available skill metadata in prompt |
+| Messages | Conversation history |
+| Free space | Remaining capacity |
+| Autocompact buffer | Reserved for compaction (when enabled) |
+
+The waffle chart gives an at-a-glance view of how much context
+budget each category consumes, helping you identify when the
+conversation is getting large or when context files are taking
+too much space.

@@ -1,0 +1,174 @@
+/**
+ * Shared configuration for tool output display.
+ *
+ * Controls how many lines each tool shows during execution and
+ * after completion. Truncation position (head/tail) determines
+ * whether the first or last N lines are visible.
+ *
+ * Tools with truncate: false always show full output.
+ *
+ * This is a shared library — the default export is a noop extension.
+ * Other extensions import the named exports.
+ */
+import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import { truncateToWidth } from "@mariozechner/pi-tui";
+
+/**
+ * Minimal TUI component interface for explicit line-order control.
+ *
+ * Tool renderResult functions return this instead of Text so that
+ * each output line is independently styled and ordered — the summary
+ * footer is always the last element in the returned string[].
+ */
+export interface RenderComponent {
+	render(width: number): string[];
+	invalidate(): void;
+}
+
+/**
+ * Replace tab characters with spaces for consistent terminal rendering.
+ *
+ * Terminals do not fill tab-stop gaps with the current ANSI background
+ * color, so tabs appear as dark rectangular blocks over styled backgrounds.
+ * Three spaces matches pi-tui's `visibleWidth()` tab assumption.
+ *
+ * @param text - String that may contain tab characters
+ * @returns String with tabs replaced by three spaces
+ */
+export function sanitizeTabs(text: string): string {
+	return text.replace(/\t/g, "   ");
+}
+
+/**
+ * Build a render component from pre-styled lines.
+ * Each line is truncated to the available width at render time.
+ * Tabs are replaced with spaces to prevent background rendering artifacts.
+ * @param lines - Individually-styled lines in display order (footer last)
+ */
+export function renderLines(lines: string[]): RenderComponent {
+	return {
+		render(width: number): string[] {
+			return lines.map((line) => truncateToWidth(sanitizeTabs(line), width, "…"));
+		},
+		invalidate() {},
+	};
+}
+
+/** Per-tool display configuration */
+export interface ToolDisplayConfig {
+	/** Maximum visible lines (default: 7) */
+	maxLines: number;
+	/** Maximum characters per visible line before truncation (default: 500) */
+	maxLineWidth: number;
+	/** Which end to keep: "head" (first N) or "tail" (last N) */
+	position: "head" | "tail";
+	/** If false, show full output without truncation */
+	truncate: boolean;
+}
+
+/** Default config applied to any tool not explicitly listed */
+const DEFAULT_CONFIG: ToolDisplayConfig = {
+	maxLines: 7,
+	maxLineWidth: 500,
+	position: "head",
+	truncate: true,
+};
+
+/** Per-tool overrides */
+const TOOL_CONFIGS: Record<string, Partial<ToolDisplayConfig>> = {
+	read: { maxLines: 7, position: "head" },
+	bash: { maxLines: 7, position: "tail" },
+	write: { truncate: false },
+	edit: { truncate: false },
+	grep: { maxLines: 7, position: "head" },
+	find: { maxLines: 7, position: "head" },
+	ls: { maxLines: 7, position: "head" },
+	execute_tool: { maxLines: 7, position: "head" },
+	discover_tools: { maxLines: 7, position: "head" },
+	get_app_context: { maxLines: 7, position: "head" },
+	list_apps: { maxLines: 7, position: "head" },
+	execute_code: { maxLines: 7, position: "tail" },
+};
+
+/**
+ * Get the display config for a given tool.
+ * @param toolName - Name of the tool
+ * @returns Merged config with defaults
+ */
+export function getToolDisplayConfig(toolName: string): ToolDisplayConfig {
+	const overrides = TOOL_CONFIGS[toolName] ?? {};
+	return { ...DEFAULT_CONFIG, ...overrides };
+}
+
+/**
+ * Truncate text for display, keeping head or tail lines.
+ * @param text - Full text content
+ * @param config - Display configuration
+ * @returns Object with visible text, whether truncated, and line counts
+ */
+export function truncateForDisplay(
+	text: string,
+	config: ToolDisplayConfig
+): {
+	visible: string;
+	truncated: boolean;
+	totalLines: number;
+	hiddenLines: number;
+} {
+	if (!config.truncate) {
+		return { visible: text, truncated: false, totalLines: text.split("\n").length, hiddenLines: 0 };
+	}
+
+	const lines = text.split("\n");
+	const totalLines = lines.length;
+
+	// Cap individual line widths to prevent absurdly long lines
+	// (e.g. source maps, minified code) from flooding the display
+	const capLine = (line: string): string => {
+		if (config.maxLineWidth > 0 && line.length > config.maxLineWidth) {
+			return `${line.slice(0, config.maxLineWidth)}…`;
+		}
+		return line;
+	};
+
+	if (totalLines <= config.maxLines) {
+		const capped = lines.map(capLine);
+		const wasCapped = capped.some((l, i) => l !== lines[i]);
+		return { visible: capped.join("\n"), truncated: wasCapped, totalLines, hiddenLines: 0 };
+	}
+
+	const hiddenLines = totalLines - config.maxLines;
+
+	if (config.position === "tail") {
+		const kept = lines.slice(-config.maxLines).map(capLine);
+		return { visible: kept.join("\n"), truncated: true, totalLines, hiddenLines };
+	}
+
+	// head
+	const kept = lines.slice(0, config.maxLines).map(capLine);
+	return { visible: kept.join("\n"), truncated: true, totalLines, hiddenLines };
+}
+
+/**
+ * Format the truncation indicator line.
+ * @param config - Display configuration
+ * @param totalLines - Total number of lines
+ * @param hiddenLines - Number of hidden lines
+ * @param theme - Theme for styling
+ * @returns Formatted indicator string
+ */
+export function formatTruncationIndicator(
+	config: ToolDisplayConfig,
+	totalLines: number,
+	hiddenLines: number,
+	theme: Theme
+): string {
+	const direction = config.position === "tail" ? "above" : "more";
+	return theme.fg(
+		"dim",
+		`... (${hiddenLines} ${direction} lines, ${totalLines} total, ctrl+o to expand)`
+	);
+}
+
+/** Noop — this extension is a shared library, not an active extension */
+export default function (_pi: ExtensionAPI) {}

@@ -1,0 +1,16 @@
+{
+	"name": "read-tool-enhanced",
+	"version": "0.2.0",
+	"description": "Enhanced read tool with live truncated preview and compact summary",
+	"category": "utility",
+	"tags": ["context", "optimization", "display"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "tool-display",
+			"kind": "requires",
+			"reason": "Shared truncation config and utilities"
+		}
+	],
+	"npmDependencies": {}
+}

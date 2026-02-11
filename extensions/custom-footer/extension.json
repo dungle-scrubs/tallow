@@ -1,0 +1,10 @@
+{
+	"name": "custom-footer",
+	"version": "0.1.0",
+	"description": "Responsive footer with git info, token counts, cost, model display, and thinking level",
+	"category": "ui",
+	"tags": ["footer", "status"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

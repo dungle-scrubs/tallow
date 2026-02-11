@@ -1,0 +1,206 @@
+---
+title: Roadmap
+description: What's next for tallow, planned features and direction.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Where tallow is headed. These are concrete features in design, not
+vague aspirations. Each one has a detailed design document in
+the repository.
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
+    <h3>Teams Live Dashboard Widget</h3>
+    <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
+    <span class="roadmap-badge" data-status="planned">Planned</span>
+  </div>
+  <div class="roadmap-description">
+
+The [teams extension](/extensions/teams-tool/) spawns persistent teammate
+sessions with a shared task board and inter-agent messaging, but
+has no live widget. You see tool output scroll by without an
+at-a-glance view of which teammates are working, which tasks are
+claimed or blocked, or what messages are flowing between agents.
+
+The fix: a persistent `setWidget` dashboard that auto-updates as
+team state changes. Task board with status icons, teammate list
+with colored names and working/idle indicators, and a live message
+feed, all in one responsive panel using the same visual language
+as the [tasks](/extensions/tasks/) and [subagent](/extensions/subagent-tool/)
+extensions.
+
+Wide terminals show tasks and teammates side-by-side. Narrow
+terminals stack vertically. The widget appears on `team_create`
+and disappears on `team_shutdown`.
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>Extension:</strong> teams</span>
+    <span class="roadmap-meta-item"><strong>API:</strong> ctx.ui.setWidget()</span>
+    <span class="roadmap-meta-item"><strong>Depends on:</strong> pi-tui, Theme API</span>
+  </div>
+</div>
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
+    <h3>Parallel Plan Execution via Git Worktrees</h3>
+    <span class="roadmap-badge" data-complexity="high">High complexity</span>
+    <span class="roadmap-badge" data-status="draft">Draft</span>
+  </div>
+  <div class="roadmap-description">
+
+One plan, N worktrees, N models. Give tallow a task, pick three
+models, and it spins up isolated git worktrees, one per
+model, all running the same plan in parallel. When they
+finish, compare approaches side-by-side: diffs, test results,
+token costs, wall-clock time.
+
+This is real model evaluation on your actual codebase. Not
+synthetic benchmarks, your code, your constraints, your
+judgment on what "better" means.
+
+The system uses two extensions: **worktree-arena** for
+orchestration (worktree lifecycle, agent spawning, cleanup)
+and an optional **terminal pane provider** (WezTerm, tmux,
+Zellij) for visual multi-pane display. Without a display
+extension, agents run in the background with log files.
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>Invocation:</strong> tallow plan exec --models claude,gpt-4o,gemini</span>
+    <span class="roadmap-meta-item"><strong>Config:</strong> .tallow/plans/*.yaml</span>
+    <span class="roadmap-meta-item"><strong>Setup:</strong> .tallow/worktree.yaml</span>
+  </div>
+</div>
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
+    <h3>Unified Plugin System (Claude Code + pi compatible)</h3>
+    <span class="roadmap-badge" data-complexity="high">High complexity</span>
+    <span class="roadmap-badge" data-status="in-progress">Nearly complete</span>
+  </div>
+  <div class="roadmap-description">
+
+One plugin system that understands both ecosystems. tallow
+reads from `.claude/` (Claude Code convention) and `.tallow/`
+(pi convention) at every level: project-local, user-global,
+and system. Both directory trees are scanned, merged at
+runtime, and project-local always wins.
+
+Claude Code users bring their existing setup. pi users get
+the additional structure pi expects: extensions, prompts,
+skills, agents. No migration, no duplication. Drop a command
+in `.claude/commands/` or `.tallow/commands/` and it works.
+
+**Claude Code compatibility** maps CC config locations
+(`~/.claude/.claude.json`, `.claude/commands/`, `CLAUDE.md`)
+into tallow's runtime. CC lifecycle hooks (`PreToolUse`,
+`PostToolUse`, `Stop`) map to tallow events. MCP servers
+declared in CC config register through the mcp-adapter.
+Slash commands merge into tallow's command system.
+
+**pi-native paths** add what CC doesn't have: extensions,
+typed prompts with subcommands, skills, and agents at the
+project level.
+
+**Scopes:**
+
+<ul class="roadmap-checklist">
+  <li data-done><strong>Commands.</strong> .tallow/commands/ project-local and ~/.tallow/commands/ global, via commands-folder extension. Also scans commands/ in local paths listed in settings.json packages.</li>
+  <li data-done><strong>Prompts.</strong> .tallow/prompts/ and ~/.tallow/prompts/ natively discovered by pi. Registered as /name slash commands.</li>
+  <li data-done><strong>CC Hooks.</strong> hooks.json from packages, extensions, and project/global paths all merged additively. Extension-level hooks.json scanning in ~/.tallow/extensions/*/hooks.json and .tallow/extensions/*/hooks.json. Runtime hooks via hooks:merge event bus.</li>
+  <li data-done><strong>CC Context.</strong> CLAUDE.md and AGENTS.md loaded natively by pi from cwd, ancestor directories, and ~/.tallow/. Injected into system prompt automatically. The <a href="/extensions/context-files/">context-files</a> extension supplements this by loading both files when they coexist (pi picks only one) and scanning subdirectories.</li>
+  <li data-done><strong>Settings.</strong> .tallow/settings.json deep-merges with ~/.tallow/settings.json via SettingsManager. Project overrides user defaults.</li>
+  <li data-done><strong>Hooks.</strong> .tallow/hooks.json and .tallow/settings.json (hooks key) merge with global hooks. Supports standalone files, settings-embedded hooks, and extension-level hooks.json scanning.</li>
+  <li data-done><strong>Skills.</strong> .tallow/skills/ discovered natively by pi at project level, layered on top of ~/.tallow/skills/.</li>
+  <li data-done><strong>Agents.</strong> .tallow/agents/ discovered at project level by agent-commands and subagent extensions, layered on top of ~/.tallow/agents/.</li>
+  <li data-done><strong>Extensions.</strong> .tallow/extensions/ discovered natively by pi at project level, alongside ~/.tallow/extensions/.</li>
+</ul>
+
+**Remaining:** `.claude/commands/` directory scanning (currently only `.tallow/commands/`), `.claude.json` settings passthrough.
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>CC paths:</strong> .claude/&#42;, CLAUDE.md, .claude.json</span>
+    <span class="roadmap-meta-item"><strong>pi paths:</strong> .tallow/&#42;, AGENTS.md</span>
+    <span class="roadmap-meta-item"><strong>Done:</strong> commands, prompts, CC hooks, context files, settings, hooks, skills, agents, extensions</span>
+  </div>
+</div>
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
+    <h3>Prompt Stash (Ctrl+S)</h3>
+    <span class="roadmap-badge" data-complexity="low">Low complexity</span>
+    <span class="roadmap-badge" data-status="planned">Planned</span>
+  </div>
+  <div class="roadmap-description">
+
+`Ctrl+S` stashes the current input, `Ctrl+U` restores it. Stack
+semantics with last-in-first-out. In-memory only. Not yet implemented.
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>Extension:</strong> stash-prompt (planned)</span>
+    <span class="roadmap-meta-item"><strong>Keybinding:</strong> Ctrl+S / Ctrl+U</span>
+  </div>
+</div>
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
+    <h3>Modular Project Rules (.tallow/rules/)</h3>
+    <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
+    <span class="roadmap-badge" data-status="planned">Planned</span>
+  </div>
+  <div class="roadmap-description">
+
+Today you either cram everything into one `AGENTS.md` or use
+skills (which are on-demand, not auto-loaded). There's no way
+to say "when working in `src/api/`, follow these API conventions"
+without a monolithic context file. Claude Code solved this with
+`.claude/rules/`, modular markdown files with optional path
+scoping via YAML frontmatter.
+
+The `rules` extension brings the same pattern to pi. It scans
+three directories in priority order: `~/.tallow/rules/` (user
+global), `.tallow/rules/` (project), and `.claude/rules/` (CC
+compatibility). All `.md` files are discovered recursively,
+including through subdirectories and symlinks.
+
+**Unconditional rules** (no frontmatter) load at session start,
+same as `AGENTS.md`. **Path-scoped rules** use a `paths:` YAML
+frontmatter field with glob patterns, they only inject when the
+agent reads or edits a matching file. This keeps context lean:
+API conventions don't pollute frontend work and vice versa.
+
+```markdown
+---
+paths:
+  - "src/api/&#42;&#42;/&#42;.ts"
+  - "src/middleware/&#42;&#42;/&#42;.ts"
+---
+# API Rules
+- Validate input with Zod
+- Use standard error envelope
+- Include OpenAPI JSDoc on every handler
+```
+
+Commands: `/rules` lists all loaded rules with scope and path
+filters, `/rules:add` creates a new rule file, `/rules:edit`
+opens one in the system editor.
+
+**Resolved:** The `before_agent_start` event allows extensions to
+append to the system prompt at runtime, demonstrated by the
+[context-files](/extensions/context-files/) extension. The rules
+extension can use the same pattern to inject path-scoped rules
+without compiling to intermediate files.
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>Extension:</strong> rules</span>
+    <span class="roadmap-meta-item"><strong>Scopes:</strong> ~/.tallow/rules/, .tallow/rules/, .claude/rules/</span>
+    <span class="roadmap-meta-item"><strong>Depends on:</strong> Context injection API (or compiled fallback)</span>
+  </div>
+</div>
+
+

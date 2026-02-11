@@ -1,0 +1,10 @@
+{
+	"name": "teams-tool",
+	"version": "0.1.0",
+	"description": "Multi-agent teams with shared task boards and direct inter-agent messaging",
+	"category": "tool",
+	"tags": ["agents", "teams", "coordination", "multi-agent"],
+	"files": ["index.ts", "store.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

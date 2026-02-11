@@ -1,0 +1,65 @@
+{
+	"$schema": "hooks.schema.json",
+	"hooks": {
+		"setup": [
+			{
+				"matcher": "init",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "npm install && npm run build",
+						"timeout": 120
+					}
+				]
+			},
+			{
+				"matcher": "maintenance",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "npm update && npm audit fix",
+						"timeout": 120
+					}
+				]
+			}
+		],
+		"tool_call": [
+			{
+				"matcher": "bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "~/.tallow/extensions/hooks/tool-call/tool-call.sh",
+						"timeout": 5
+					}
+				]
+			}
+		],
+		"tool_result": [
+			{
+				"matcher": "write|edit",
+				"hooks": [
+					{
+						"type": "agent",
+						"agent": "reviewer",
+						"prompt": "Review the following file change for code quality issues. Return JSON: { \"ok\": true } if acceptable, or { \"ok\": false, \"reason\": \"...\" } if issues found.\n\n$ARGUMENTS",
+						"timeout": 60,
+						"async": true
+					}
+				]
+			}
+		],
+		"agent_end": [
+			{
+				"hooks": [
+					{
+						"type": "agent",
+						"agent": "reviewer",
+						"prompt": "The agent has finished. Check if all tasks were completed. Return { \"ok\": true } if complete, or { \"ok\": false, \"reason\": \"...\" } with remaining work.\n\n$ARGUMENTS",
+						"async": true
+					}
+				]
+			}
+		]
+	}
+}

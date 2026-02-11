@@ -1,0 +1,10 @@
+{
+	"name": "git-status",
+	"version": "0.1.0",
+	"description": "Show git branch, dirty state, ahead/behind, and PR status in the status bar",
+	"category": "ui",
+	"tags": ["git", "status-bar"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

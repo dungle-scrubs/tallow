@@ -1,0 +1,57 @@
+---
+title: context-files
+description: Load both CLAUDE.md and AGENTS.md files, including from subdirectories.
+---
+
+Supplements pi's native context file loading so that **both**
+`CLAUDE.md` and `AGENTS.md` are loaded when they coexist in
+the same directory, and context files in **subdirectories** are
+picked up too.
+
+## The problem
+
+Pi loads `AGENTS.md` **or** `CLAUDE.md` per directory, preferring
+`AGENTS.md`. If both exist, `CLAUDE.md` is silently ignored.
+Pi also only walks **up** from `cwd`, it never scans subdirectories.
+
+This is a problem when:
+
+- Your team maintains both files (e.g. `AGENTS.md` for all agents,
+  `CLAUDE.md` for Claude-specific guidance)
+- Subdirectories have their own context files (monorepo packages,
+  service directories)
+
+## What it adds
+
+| Source | Pi loads | Extension adds |
+|--------|----------|----------------|
+| `~/.tallow/` | `AGENTS.md` | `CLAUDE.md` (if both exist) |
+| Ancestor dirs → cwd | One file per dir | The other file that was skipped |
+| Subdirectories | Nothing | Both `CLAUDE.md` and `AGENTS.md` |
+
+## Priority order
+
+Files are appended to the system prompt from most general to
+most specific:
+
+1. **Global**, `~/.tallow/CLAUDE.md`
+2. **Ancestors**, farthest directory first, walking toward cwd
+3. **Current directory**, the skipped file in cwd
+4. **Subdirectories**, sorted by depth, then alphabetically
+
+## Skipped directories
+
+The extension skips common non-source directories when scanning
+subdirectories:
+
+`node_modules`, `.git`, `dist`, `build`, `.next`, `__pycache__`,
+`.venv`, `venv`, `vendor`, `.tox`, `.mypy_cache`, `.pytest_cache`,
+`coverage`, `.turbo`, `.cache`, `.output`, and all dot-directories.
+
+## Startup notification
+
+On load, a notification shows which extra files were found:
+
+```
+context-files: +1 context file: ~/dev/myproject/CLAUDE.md
+```

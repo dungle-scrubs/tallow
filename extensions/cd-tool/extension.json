@@ -1,0 +1,10 @@
+{
+	"name": "cd-tool",
+	"version": "0.1.0",
+	"description": "Change pi's working directory via /cd command and cd tool",
+	"category": "tool",
+	"tags": ["navigation", "filesystem"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

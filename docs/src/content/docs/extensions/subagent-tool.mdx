@@ -1,0 +1,105 @@
+---
+title: subagent-tool
+description: Spawn parallel agents with isolated contexts and model routing.
+---
+
+import Gallery from '../../../components/Gallery.astro';
+
+Delegate tasks to specialized agents, each running as a separate
+tallow process with its own context window. Three execution modes:
+
+- **Single**, one agent, one task, wait for result
+- **Parallel**, multiple independent tasks running concurrently
+- **Chain**, sequential steps where each receives the previous
+  output via `{previous}` placeholder
+
+Each subagent can use a different model, have a different role
+description, and work in a different directory. JSON mode captures
+structured output for the parent agent to process.
+
+### Foreground
+
+Multiple agents run in parallel but the conversation blocks
+until all finish. Results appear inline.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/subagent/parallel-running.png", alt: "Four parallel agents running on different models" },
+  { src: "/screenshots/extensions/subagent/parallel-complete.png", alt: "Parallel agents complete with results summary" },
+]} />
+
+### Background
+
+Agents run independently while the conversation continues.
+Check progress with `subagent_status`. These are background
+**agents**, not to be confused with
+[background tasks](/extensions/background-task-tool/) which are
+raw shell commands. Background agents are full tallow processes
+with their own context, tools, and model access. Both appear
+in the widget but in separate sections.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/subagent/background-agents.png", alt: "Five background agents running alongside a background task" },
+]} />
+
+## Foreground vs background agents
+
+Subagents run in two modes:
+
+- **Foreground**, the parent agent blocks waiting for the result.
+  Used in single mode and chain mode where the output feeds back
+  into the next step.
+- **Background**, the agent runs independently. Used when the
+  parent says `background: true`. The agent works while the
+  conversation continues.
+
+Both types appear in the [tasks](/extensions/tasks/) widget with
+colored `@name` identifiers, live activity status, and elapsed
+time. Background agents persist until their task completes or
+the session ends.
+
+## Interrupting with Escape
+
+When you press Escape, background **agents** are killed but
+background **tasks** are not. Agents are delegated cognitive
+work tied to the conversation — if you interrupt, you want all
+agent work to stop. Background tasks (dev servers, builds, test
+watchers) are infrastructure that should keep running.
+
+<Gallery images={[
+  { src: "/screenshots/extensions/subagent/full-dashboard.png", alt: "Tasks, foreground agents, background agents, and background tasks running together" },
+]} />
+
+## Relationships with other extensions
+
+### [tasks](/extensions/tasks/)
+
+Subagents and the task board are deeply integrated. When a
+subagent claims a task (via `manage_tasks` with `owner`), the
+task widget shows `(@agent-name)` attribution in the agent's
+color. The in-progress spinner animates only while the owning
+agent is actively running, if the agent finishes but the task
+isn't marked complete, the spinner switches to a static `●`
+indicator.
+
+In-progress tasks show their `activeForm` text (e.g.,
+"Writing tests") instead of the subject, giving live visibility
+into what each agent is doing.
+
+On wide terminals, running agents appear in a right column
+alongside the task list. On narrow terminals, they stack below.
+See [tasks, responsive layout](/extensions/tasks/#responsive-layout)
+for the full breakdown.
+
+### [background-tasks](/extensions/background-task-tool/)
+
+Subagents and background bash tasks share display space in the
+[tasks](/extensions/tasks/) widget. When both are active, agents
+render above background tasks with a spacer between. Each gets
+independent truncation based on the available width.
+
+### [custom-footer](/extensions/custom-footer/)
+
+The footer shows a `(sub)` count when subagents are running. The
+tasks extension adds a separate agent bar to the status area:
+`@main @alice @bob · 2 teammates` with colored names matching
+the widget display.

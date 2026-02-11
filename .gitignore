@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+*.tsbuildinfo
+
+# Symlinked pi-coding-agent theme dir (created by postinstall)
+src/modes/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+
+# Agent context (user-local)
+.tallow/
+.claude/
+.pi/
+CLAUDE.md
+AGENTS.md
+
+# Docs site
+docs/node_modules/
+docs/dist/

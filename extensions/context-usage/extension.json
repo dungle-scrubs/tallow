@@ -1,0 +1,9 @@
+{
+	"name": "context-usage",
+	"version": "0.1.0",
+	"description": "Visualize context window usage with a waffle chart breakdown",
+	"category": "utility",
+	"tags": ["context", "tokens", "usage", "debug"],
+	"files": ["index.ts"],
+	"relationships": []
+}
