@@ -2,8 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
 	addTaskToBoard,
 	addTeamMessage,
+	archiveTeam,
 	createTeamStore,
+	formatArchivedTeamStatus,
 	formatTeamStatus,
+	getArchivedTeams,
 	getReadyTasks,
 	getTeam,
 	getTeammatesByStatus,
@@ -11,16 +14,24 @@ import {
 	getUnread,
 	isTaskReady,
 	markRead,
+	restoreArchivedTeam,
 	type Team,
 	type TeammateRecord,
 } from "../store";
 
 // ── Helpers ──────────────────────────────────────────────────
 
-/** Create a fresh team, clearing the global store first. */
+/** Create a fresh team, clearing both active and archived stores. */
 function freshTeam(name = "test-team"): Team {
 	getTeams().clear();
+	getArchivedTeams().clear();
 	return createTeamStore(name);
+}
+
+/** Assert a value is defined and return it narrowed. */
+function defined<T>(value: T | undefined | null, msg = "expected defined"): T {
+	if (value == null) throw new Error(msg);
+	return value;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -505,5 +516,180 @@ describe("getTeammatesByStatus", () => {
 		addMate(team, "alice", "idle");
 		addMate(team, "bob", "idle");
 		expect(getTeammatesByStatus(team, "idle").length).toBe(2);
+	});
+});
+
+// ════════════════════════════════════════════════════════════════
+// Archive / restore
+// ════════════════════════════════════════════════════════════════
+
+describe("archiveTeam", () => {
+	afterEach(() => {
+		getTeams().clear();
+		getArchivedTeams().clear();
+	});
+
+	it("moves team from active to archived store", () => {
+		const team = freshTeam("alpha");
+		addTaskToBoard(team, "task1", "desc", []);
+
+		const archived = defined(archiveTeam("alpha"));
+		expect(archived.name).toBe("alpha");
+		expect(archived.tasks.length).toBe(1);
+		expect(archived.archivedAt).toBeGreaterThan(0);
+		expect(getTeam("alpha")).toBeUndefined();
+		expect(getArchivedTeams().has("alpha")).toBe(true);
+	});
+
+	it("returns undefined for non-existent team", () => {
+		expect(archiveTeam("nope")).toBeUndefined();
+	});
+
+	it("preserves task state including results and assignees", () => {
+		const team = freshTeam("beta");
+		const t1 = addTaskToBoard(team, "done", "", []);
+		t1.status = "completed";
+		t1.assignee = "alice";
+		t1.result = "finished successfully";
+		const t2 = addTaskToBoard(team, "in-flight", "", []);
+		t2.status = "claimed";
+		t2.assignee = "bob";
+
+		const archived = defined(archiveTeam("beta"));
+		expect(archived.tasks[0].status).toBe("completed");
+		expect(archived.tasks[0].assignee).toBe("alice");
+		expect(archived.tasks[0].result).toBe("finished successfully");
+		expect(archived.tasks[1].status).toBe("claimed");
+	});
+
+	it("preserves messages", () => {
+		const team = freshTeam("gamma");
+		addTeamMessage(team, "alice", "bob", "hello");
+		addTeamMessage(team, "bob", "alice", "hi back");
+
+		const archived = defined(archiveTeam("gamma"));
+		expect(archived.messages.length).toBe(2);
+		expect(archived.messages[0].content).toBe("hello");
+	});
+
+	it("preserves taskCounter for ID continuity", () => {
+		const team = freshTeam("delta");
+		addTaskToBoard(team, "t1", "", []);
+		addTaskToBoard(team, "t2", "", []);
+
+		const archived = defined(archiveTeam("delta"));
+		expect(archived.taskCounter).toBe(2);
+	});
+
+	it("overwrites previous archive with same name", () => {
+		const team1 = freshTeam("reuse");
+		addTaskToBoard(team1, "first-gen", "", []);
+		archiveTeam("reuse");
+
+		const team2 = createTeamStore("reuse");
+		addTaskToBoard(team2, "second-gen", "", []);
+		archiveTeam("reuse");
+
+		const archived = defined(getArchivedTeams().get("reuse"));
+		expect(archived.tasks.length).toBe(1);
+		expect(archived.tasks[0].title).toBe("second-gen");
+	});
+});
+
+describe("restoreArchivedTeam", () => {
+	afterEach(() => {
+		getTeams().clear();
+		getArchivedTeams().clear();
+	});
+
+	it("moves team from archived to active store", () => {
+		const team = freshTeam("alpha");
+		addTaskToBoard(team, "task1", "desc", []);
+		addTaskToBoard(team, "task2", "desc2", []);
+		archiveTeam("alpha");
+
+		const restored = defined(restoreArchivedTeam("alpha"));
+		expect(restored.name).toBe("alpha");
+		expect(restored.tasks.length).toBe(2);
+		expect(restored.teammates.size).toBe(0);
+		expect(getTeam("alpha")).toBe(restored);
+		expect(getArchivedTeams().has("alpha")).toBe(false);
+	});
+
+	it("returns undefined for non-existent archive", () => {
+		expect(restoreArchivedTeam("nope")).toBeUndefined();
+	});
+
+	it("preserves completed task results", () => {
+		const team = freshTeam("beta");
+		const t = addTaskToBoard(team, "done", "", []);
+		t.status = "completed";
+		t.result = "great work";
+		archiveTeam("beta");
+
+		const restored = defined(restoreArchivedTeam("beta"));
+		expect(restored.tasks[0].result).toBe("great work");
+		expect(restored.tasks[0].status).toBe("completed");
+	});
+
+	it("restores taskCounter so new tasks get correct IDs", () => {
+		const team = freshTeam("gamma");
+		addTaskToBoard(team, "t1", "", []);
+		addTaskToBoard(team, "t2", "", []);
+		archiveTeam("gamma");
+
+		const restored = defined(restoreArchivedTeam("gamma"));
+		const t3 = addTaskToBoard(restored, "t3", "", []);
+		expect(t3.id).toBe("3");
+	});
+
+	it("creates fresh teammate map (no stale sessions)", () => {
+		const team = freshTeam("delta");
+		team.teammates.set("alice", {
+			name: "alice",
+			role: "test",
+			model: "test",
+			status: "working",
+		});
+		archiveTeam("delta");
+
+		const restored = defined(restoreArchivedTeam("delta"));
+		expect(restored.teammates.size).toBe(0);
+	});
+});
+
+describe("formatArchivedTeamStatus", () => {
+	afterEach(() => {
+		getTeams().clear();
+		getArchivedTeams().clear();
+	});
+
+	it("shows task summary with counts", () => {
+		const team = freshTeam("alpha");
+		const t1 = addTaskToBoard(team, "Done", "", []);
+		t1.status = "completed";
+		addTaskToBoard(team, "Pending", "", []);
+		const archived = defined(archiveTeam("alpha"));
+
+		const out = formatArchivedTeamStatus(archived);
+		expect(out).toContain("**alpha**");
+		expect(out).toContain("archived");
+		expect(out).toContain("2 tasks");
+		expect(out).toContain("1 done");
+		expect(out).toContain("1 pending");
+	});
+
+	it("shows per-task status with icons", () => {
+		const team = freshTeam("beta");
+		const t1 = addTaskToBoard(team, "Completed", "", []);
+		t1.status = "completed";
+		t1.result = "result text";
+		addTaskToBoard(team, "Still Pending", "", []);
+		const archived = defined(archiveTeam("beta"));
+
+		const out = formatArchivedTeamStatus(archived);
+		expect(out).toContain("✓ #1 Completed [completed]");
+		expect(out).toContain("result text");
+		expect(out).toContain("Still Pending [pending]");
 	});
 });

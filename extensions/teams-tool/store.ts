@@ -49,11 +49,21 @@ export interface Team<T extends TeammateRecord = TeammateRecord> {
 	taskCounter: number;
 }
 
+/** Snapshot of a team at the time it was archived (no live sessions). */
+export interface ArchivedTeam {
+	name: string;
+	tasks: TeamTask[];
+	messages: TeamMessage[];
+	taskCounter: number;
+	archivedAt: number;
+}
+
 // ════════════════════════════════════════════════════════════════
 // Store (plain Map — single-threaded, no races)
 // ════════════════════════════════════════════════════════════════
 
 const teams = new Map<string, Team>();
+const archivedTeams = new Map<string, ArchivedTeam>();
 
 /** @returns The team, or undefined if not found */
 export function getTeam(name: string): Team | undefined {
@@ -63,6 +73,11 @@ export function getTeam(name: string): Team | undefined {
 /** @returns The global teams map */
 export function getTeams(): Map<string, Team> {
 	return teams;
+}
+
+/** @returns The global archived teams map */
+export function getArchivedTeams(): Map<string, ArchivedTeam> {
+	return archivedTeams;
 }
 
 /**
@@ -80,6 +95,88 @@ export function createTeamStore(name: string): Team {
 	};
 	teams.set(name, team);
 	return team;
+}
+
+/**
+ * Archive a team — snapshot its tasks/messages, remove from active store.
+ * Overwrites any previous archive with the same name.
+ * @param name - Team name to archive
+ * @returns The archived snapshot, or undefined if team not found
+ */
+export function archiveTeam(name: string): ArchivedTeam | undefined {
+	const team = teams.get(name);
+	if (!team) return undefined;
+
+	const archived: ArchivedTeam = {
+		name: team.name,
+		tasks: [...team.tasks],
+		messages: [...team.messages],
+		taskCounter: team.taskCounter,
+		archivedAt: Date.now(),
+	};
+	archivedTeams.set(name, archived);
+	teams.delete(name);
+	return archived;
+}
+
+/**
+ * Restore an archived team into the active store.
+ * Creates a fresh Team with the archived tasks/messages but no teammates.
+ * @param name - Archived team name to restore
+ * @returns The restored team, or undefined if no archive found
+ */
+export function restoreArchivedTeam(name: string): Team | undefined {
+	const archived = archivedTeams.get(name);
+	if (!archived) return undefined;
+
+	const team: Team = {
+		name: archived.name,
+		tasks: [...archived.tasks],
+		teammates: new Map(),
+		messages: [...archived.messages],
+		taskCounter: archived.taskCounter,
+	};
+	teams.set(name, team);
+	archivedTeams.delete(name);
+	return team;
+}
+
+/**
+ * Format an archived team's status as a readable text block.
+ * @param archived - Archived team to format
+ * @returns Formatted status string
+ */
+export function formatArchivedTeamStatus(archived: ArchivedTeam): string {
+	const completed = archived.tasks.filter((t) => t.status === "completed").length;
+	const failed = archived.tasks.filter((t) => t.status === "failed").length;
+	const pending = archived.tasks.filter((t) => t.status === "pending").length;
+	const claimed = archived.tasks.filter((t) => t.status === "claimed").length;
+	const ago = Math.round((Date.now() - archived.archivedAt) / 1000);
+	const agoStr = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
+
+	const lines: string[] = [`**${archived.name}** (archived ${agoStr})`];
+	lines.push(
+		`  ${archived.tasks.length} tasks: ${completed} done, ${failed} failed, ${claimed} in-flight, ${pending} pending`
+	);
+
+	for (const t of archived.tasks) {
+		const icon =
+			t.status === "completed"
+				? getIcon("success")
+				: t.status === "failed"
+					? getIcon("error")
+					: t.status === "claimed"
+						? getIcon("waiting")
+						: getIcon("pending");
+		const assignee = t.assignee ? ` → ${t.assignee}` : "";
+		lines.push(`  ${icon} #${t.id} ${t.title} [${t.status}]${assignee}`);
+		if (t.result) {
+			const preview = t.result.length > 120 ? `${t.result.slice(0, 120)}...` : t.result;
+			lines.push(`    └─ ${preview}`);
+		}
+	}
+
+	return lines.join("\n");
 }
 
 // ════════════════════════════════════════════════════════════════
