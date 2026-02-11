@@ -75,6 +75,7 @@ export default defineConfig({
 					items: [
 						{ label: "Introduction", slug: "getting-started/introduction" },
 						{ label: "Installation", slug: "getting-started/installation" },
+						{ label: "Icons", slug: "getting-started/icons" },
 						{ label: "Packages", slug: "getting-started/packages" },
 					],
 				},
