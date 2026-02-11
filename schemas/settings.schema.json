@@ -1,0 +1,357 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"title": "Tallow Settings",
+	"description": "Configuration for tallow — an opinionated coding agent built on pi.",
+	"type": "object",
+	"properties": {
+		"$schema": {
+			"type": "string",
+			"description": "JSON Schema reference for IDE autocompletion."
+		},
+		"lastChangelogVersion": {
+			"type": "string",
+			"description": "Last changelog version shown to the user."
+		},
+		"defaultProvider": {
+			"type": "string",
+			"description": "Default LLM provider (e.g., 'anthropic', 'openai', 'google')."
+		},
+		"defaultModel": {
+			"type": "string",
+			"description": "Default model ID (e.g., 'claude-sonnet-4', 'gpt-4o')."
+		},
+		"defaultThinkingLevel": {
+			"type": "string",
+			"enum": ["off", "minimal", "low", "medium", "high", "xhigh"],
+			"description": "Default thinking level for the agent."
+		},
+		"steeringMode": {
+			"type": "string",
+			"enum": ["all", "one-at-a-time"],
+			"description": "How steering messages are delivered."
+		},
+		"followUpMode": {
+			"type": "string",
+			"enum": ["all", "one-at-a-time"],
+			"description": "How follow-up messages are delivered."
+		},
+		"theme": {
+			"type": "string",
+			"description": "Active color theme name."
+		},
+		"compaction": {
+			"type": "object",
+			"description": "Context compaction settings.",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable automatic context compaction.",
+					"default": true
+				},
+				"reserveTokens": {
+					"type": "number",
+					"description": "Tokens to reserve for new content after compaction.",
+					"minimum": 0
+				},
+				"keepRecentTokens": {
+					"type": "number",
+					"description": "Tokens of recent context to preserve during compaction.",
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
+		"branchSummary": {
+			"type": "object",
+			"description": "Branch summary settings.",
+			"properties": {
+				"reserveTokens": {
+					"type": "number",
+					"description": "Tokens to reserve for branch summaries.",
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
+		"retry": {
+			"type": "object",
+			"description": "Retry settings for failed API calls.",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable automatic retries.",
+					"default": true
+				},
+				"maxRetries": {
+					"type": "number",
+					"description": "Maximum number of retries.",
+					"minimum": 0
+				},
+				"baseDelayMs": {
+					"type": "number",
+					"description": "Base delay between retries in milliseconds.",
+					"minimum": 0
+				},
+				"maxDelayMs": {
+					"type": "number",
+					"description": "Maximum delay between retries in milliseconds.",
+					"minimum": 0
+				}
+			},
+			"additionalProperties": false
+		},
+		"hideThinkingBlock": {
+			"type": "boolean",
+			"description": "Hide the thinking block in the TUI."
+		},
+		"shellPath": {
+			"type": "string",
+			"description": "Path to the shell executable for bash tool."
+		},
+		"quietStartup": {
+			"type": "boolean",
+			"description": "Suppress startup messages."
+		},
+		"shellCommandPrefix": {
+			"type": "string",
+			"description": "Prefix prepended to all shell commands."
+		},
+		"collapseChangelog": {
+			"type": "boolean",
+			"description": "Collapse changelog display on startup."
+		},
+		"packages": {
+			"type": "array",
+			"description": "External packages to load (npm or git sources).",
+			"items": {
+				"oneOf": [
+					{
+						"type": "string",
+						"description": "Package source string — loads all resources."
+					},
+					{
+						"type": "object",
+						"description": "Package source with resource filters.",
+						"properties": {
+							"source": {
+								"type": "string",
+								"description": "Package source identifier."
+							},
+							"extensions": {
+								"type": "array",
+								"items": { "type": "string" },
+								"description": "Extension names to load from the package."
+							},
+							"skills": {
+								"type": "array",
+								"items": { "type": "string" },
+								"description": "Skill names to load."
+							},
+							"prompts": {
+								"type": "array",
+								"items": { "type": "string" },
+								"description": "Prompt template names to load."
+							},
+							"themes": {
+								"type": "array",
+								"items": { "type": "string" },
+								"description": "Theme names to load."
+							}
+						},
+						"required": ["source"],
+						"additionalProperties": false
+					}
+				]
+			}
+		},
+		"extensions": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Additional extension paths to load."
+		},
+		"skills": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Additional skill paths to load."
+		},
+		"prompts": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Additional prompt template paths to load."
+		},
+		"themes": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Additional theme paths to load."
+		},
+		"enableSkillCommands": {
+			"type": "boolean",
+			"description": "Enable /skill: slash commands."
+		},
+		"terminal": {
+			"type": "object",
+			"description": "Terminal display settings.",
+			"properties": {
+				"showImages": {
+					"type": "boolean",
+					"description": "Display images in the terminal."
+				},
+				"clearOnShrink": {
+					"type": "boolean",
+					"description": "Clear terminal when window shrinks."
+				}
+			},
+			"additionalProperties": false
+		},
+		"images": {
+			"type": "object",
+			"description": "Image handling settings.",
+			"properties": {
+				"autoResize": {
+					"type": "boolean",
+					"description": "Automatically resize images."
+				},
+				"blockImages": {
+					"type": "boolean",
+					"description": "Block all image rendering."
+				}
+			},
+			"additionalProperties": false
+		},
+		"enabledModels": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Model name patterns to enable (filters the model list)."
+		},
+		"doubleEscapeAction": {
+			"type": "string",
+			"enum": ["fork", "tree", "none"],
+			"description": "Action triggered by double-pressing Escape."
+		},
+		"thinkingBudgets": {
+			"type": "object",
+			"description": "Token budgets for each thinking level.",
+			"properties": {
+				"minimal": { "type": "number", "minimum": 0 },
+				"low": { "type": "number", "minimum": 0 },
+				"medium": { "type": "number", "minimum": 0 },
+				"high": { "type": "number", "minimum": 0 }
+			},
+			"additionalProperties": false
+		},
+		"editorPaddingX": {
+			"type": "number",
+			"description": "Horizontal padding in the editor area.",
+			"minimum": 0
+		},
+		"autocompleteMaxVisible": {
+			"type": "number",
+			"description": "Maximum visible items in autocomplete dropdown.",
+			"minimum": 1
+		},
+		"showHardwareCursor": {
+			"type": "boolean",
+			"description": "Show the hardware terminal cursor."
+		},
+		"markdown": {
+			"type": "object",
+			"description": "Markdown rendering settings.",
+			"properties": {
+				"codeBlockIndent": {
+					"type": "string",
+					"description": "Indentation string for code blocks."
+				}
+			},
+			"additionalProperties": false
+		},
+		"disabledExtensions": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Extension names to disable."
+		},
+		"icons": {
+			"type": "object",
+			"description": "Override default TUI icon glyphs. Keys are icon roles, values are replacement glyphs (strings) or glyph arrays (for spinners).",
+			"properties": {
+				"success": {
+					"type": "string",
+					"description": "Successful operation (default: '✓').",
+					"default": "✓"
+				},
+				"error": {
+					"type": "string",
+					"description": "Failed operation (default: '✗').",
+					"default": "✗"
+				},
+				"pending": {
+					"type": "string",
+					"description": "Pending/not-started task (default: '☐').",
+					"default": "☐"
+				},
+				"in_progress": {
+					"type": "string",
+					"description": "In-progress/active task (default: '●').",
+					"default": "●"
+				},
+				"idle": {
+					"type": "string",
+					"description": "Idle/inactive status (default: '○').",
+					"default": "○"
+				},
+				"waiting": {
+					"type": "string",
+					"description": "Waiting/queued status (default: '⏳').",
+					"default": "⏳"
+				},
+				"active": {
+					"type": "string",
+					"description": "Active/running status (default: '⚡').",
+					"default": "⚡"
+				},
+				"blocked": {
+					"type": "string",
+					"description": "Blocked task (default: '◇').",
+					"default": "◇"
+				},
+				"unavailable": {
+					"type": "string",
+					"description": "Unavailable resource (default: '⊘').",
+					"default": "⊘"
+				},
+				"spinner": {
+					"type": "array",
+					"items": { "type": "string" },
+					"description": "Spinner animation frames (default: ['◐','◓','◑','◒']).",
+					"default": ["◐", "◓", "◑", "◒"],
+					"minItems": 1
+				},
+				"plan_mode": {
+					"type": "string",
+					"description": "Plan mode indicator (default: '⏸').",
+					"default": "⏸"
+				},
+				"task_list": {
+					"type": "string",
+					"description": "Task list indicator (default: '📋').",
+					"default": "📋"
+				},
+				"comment": {
+					"type": "string",
+					"description": "Comment indicator (default: '💬').",
+					"default": "💬"
+				}
+			},
+			"additionalProperties": {
+				"oneOf": [
+					{ "type": "string" },
+					{
+						"type": "array",
+						"items": { "type": "string" },
+						"minItems": 1
+					}
+				]
+			}
+		}
+	},
+	"additionalProperties": true
+}

@@ -128,8 +128,16 @@ function readSettings(): Record<string, unknown> {
 	return {};
 }
 
+/**
+ * Write settings.json with $schema reference for IDE autocompletion.
+ * The schema path points to the bundled settings.schema.json in the package.
+ *
+ * @param settings - Settings object to persist
+ */
 function writeSettings(settings: Record<string, unknown>): void {
-	writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
+	const schemaPath = `file://${join(PACKAGE_DIR, "schemas", "settings.schema.json")}`;
+	const withSchema = { $schema: schemaPath, ...settings };
+	writeFileSync(SETTINGS_PATH, `${JSON.stringify(withSchema, null, 2)}\n`);
 }
 
 /**
