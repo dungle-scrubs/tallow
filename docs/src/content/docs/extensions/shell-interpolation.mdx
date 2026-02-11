@@ -1,0 +1,64 @@
+---
+title: shell-interpolation
+description: Expand !`command` patterns by executing shell commands and inlining stdout.
+---
+
+Expands `` !`command` `` patterns in your input by running the shell
+command and replacing the pattern with its stdout. Compatible with
+Claude Code's backtick interpolation syntax.
+
+## Usage
+
+Type shell commands inline using `` !`command` `` syntax:
+
+```
+Review !`git diff --stat`
+```
+
+The command runs before your prompt reaches the agent, so the agent
+sees the actual diff output.
+
+### Multiple commands
+
+```
+Branch: !`git branch --show-current`, last commit: !`git log --oneline -1`
+```
+
+All patterns are expanded in a single pass.
+
+### Error handling
+
+If a command fails (non-zero exit, timeout, or signal), the pattern
+is replaced with an error marker instead of throwing:
+
+```
+[error: command failed: nonexistent-command]
+```
+
+## Limits
+
+| Setting | Value |
+|---------|-------|
+| Timeout | 5 seconds |
+| Max output | 1 MB |
+
+Commands run in the project root (`process.cwd()`).
+
+## Security
+
+Output from commands is **not re-scanned** for additional
+`` !`...` `` patterns. This prevents injection attacks where
+command output contains shell interpolation syntax.
+
+## Programmatic use
+
+Other extensions can import the transform directly:
+
+```ts
+import { expandShellCommands } from "../shell-interpolation/index.js";
+
+const expanded = expandShellCommands(text, cwd);
+```
+
+The `subagent-tool` extension uses this to expand patterns in
+task prompts before spawning subagents.

@@ -1,0 +1,10 @@
+{
+	"name": "shell-interpolation",
+	"version": "0.1.0",
+	"description": "Expands !`command` patterns by executing shell commands and inlining stdout",
+	"category": "command",
+	"tags": ["shell", "interpolation", "commands", "cc-compat"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
