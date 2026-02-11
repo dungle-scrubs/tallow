@@ -29,6 +29,8 @@ import {
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import { expandFileReferences } from "../file-reference/index.js";
+import { expandShellCommands } from "../shell-interpolation/index.js";
 
 // === Agent Discovery (inlined from agents.ts) ===
 
@@ -665,7 +667,8 @@ function spawnBackgroundSubagent(
 		args.push("--append-system-prompt", tmpPromptPath);
 	}
 
-	args.push(`Task: ${task}`);
+	const expandedTask = expandFileReferences(expandShellCommands(task, effectiveCwd), effectiveCwd);
+	args.push(`Task: ${expandedTask}`);
 
 	const childEnv: Record<string, string> = { ...process.env, PI_IS_SUBAGENT: "1" } as Record<
 		string,
@@ -948,7 +951,11 @@ async function runSingleAgent(
 			args.push("--append-system-prompt", tmpPromptPath);
 		}
 
-		args.push(`Task: ${task}`);
+		const expandedTask = expandFileReferences(
+			expandShellCommands(task, effectiveCwd),
+			effectiveCwd
+		);
+		args.push(`Task: ${expandedTask}`);
 		let wasAborted = false;
 
 		const fgChildEnv: Record<string, string> = {
