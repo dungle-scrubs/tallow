@@ -22,6 +22,7 @@
 	"files": [
 		"dist",
 		"extensions",
+		"schemas",
 		"skills",
 		"templates",
 		"themes"

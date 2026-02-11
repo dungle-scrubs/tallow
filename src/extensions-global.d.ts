@@ -20,6 +20,9 @@ declare global {
 	// git-status extension
 	var __piGitStatusInterval: ReturnType<typeof setInterval> | null | undefined;
 
+	// session-memory extension
+	var __piSessionIndexer: unknown | undefined;
+
 	// tasks extension
 	var __piTasksInterval: ReturnType<typeof setInterval> | undefined;
 }

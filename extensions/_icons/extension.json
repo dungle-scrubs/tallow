@@ -1,0 +1,8 @@
+{
+	"name": "_icons",
+	"version": "0.1.0",
+	"description": "Icon registry — user-configurable TUI glyphs with sensible defaults",
+	"category": "core",
+	"tags": ["icons", "accessibility", "theming"],
+	"files": ["index.ts"]
+}
