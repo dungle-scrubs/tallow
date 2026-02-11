@@ -1,0 +1,21 @@
+{
+	"name": "debug",
+	"version": "0.1.0",
+	"description": "Structured diagnostic logging — tool timings, extension lifecycle, model info, errors",
+	"category": "utility",
+	"tags": ["debug", "diagnostics", "logging"],
+	"files": ["index.ts", "logger.ts"],
+	"relationships": [
+		{
+			"name": "hooks",
+			"kind": "enhances",
+			"reason": "Logs hooks:merge events for diagnostic visibility"
+		},
+		{
+			"name": "subagent-tool",
+			"kind": "enhances",
+			"reason": "Logs subagent start/stop events"
+		}
+	],
+	"npmDependencies": {}
+}
