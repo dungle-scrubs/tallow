@@ -19,6 +19,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ContextUsage, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_COMPACTION_SETTINGS } from "@mariozechner/pi-coding-agent";
+import { getIcon } from "../_icons/index.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -79,60 +80,60 @@ function createCategories(includeAutocompact: boolean): Category[] {
 	const cats: Category[] = [
 		{
 			name: "System prompt",
-			icon: "●",
+			icon: getIcon("in_progress"),
 			color: "\x1b[38;2;139;213;202m",
-			filledChar: "●",
-			emptyChar: "○",
+			filledChar: getIcon("in_progress"),
+			emptyChar: getIcon("idle"),
 			tokens: 0,
 		},
 		{
 			name: "System tools",
-			icon: "●",
+			icon: getIcon("in_progress"),
 			color: "\x1b[38;2;166;209;137m",
-			filledChar: "●",
-			emptyChar: "○",
+			filledChar: getIcon("in_progress"),
+			emptyChar: getIcon("idle"),
 			tokens: 0,
 		},
 		{
 			name: "Context files",
-			icon: "●",
+			icon: getIcon("in_progress"),
 			color: "\x1b[38;2;229;200;144m",
-			filledChar: "●",
-			emptyChar: "○",
+			filledChar: getIcon("in_progress"),
+			emptyChar: getIcon("idle"),
 			tokens: 0,
 		},
 		{
 			name: "Skills",
-			icon: "●",
+			icon: getIcon("in_progress"),
 			color: "\x1b[38;2;244;184;228m",
-			filledChar: "●",
-			emptyChar: "○",
+			filledChar: getIcon("in_progress"),
+			emptyChar: getIcon("idle"),
 			tokens: 0,
 		},
 		{
 			name: "Messages",
-			icon: "●",
+			icon: getIcon("in_progress"),
 			color: "\x1b[38;2;198;160;246m",
-			filledChar: "●",
-			emptyChar: "○",
+			filledChar: getIcon("in_progress"),
+			emptyChar: getIcon("idle"),
 			tokens: 0,
 		},
 		{
 			name: "Free space",
-			icon: "○",
+			icon: getIcon("idle"),
 			color: "\x1b[38;2;100;100;100m",
-			filledChar: "○",
-			emptyChar: "○",
+			filledChar: getIcon("idle"),
+			emptyChar: getIcon("idle"),
 			tokens: 0,
 		},
 	];
 	if (includeAutocompact) {
 		cats.push({
 			name: "Autocompact buffer",
-			icon: "⊘",
+			icon: getIcon("unavailable"),
 			color: "\x1b[38;2;70;70;70m",
-			filledChar: "⊘",
-			emptyChar: "⊘",
+			filledChar: getIcon("unavailable"),
+			emptyChar: getIcon("unavailable"),
 			tokens: 0,
 		});
 	}
@@ -265,7 +266,7 @@ function renderWaffleChart(categories: readonly Category[], contextWindow: numbe
 
 	// Fill remaining with empty
 	while (cells.length < totalCells) {
-		cells.push({ color: "\x1b[38;2;100;100;100m", char: "○" });
+		cells.push({ color: "\x1b[38;2;100;100;100m", char: getIcon("idle") });
 	}
 
 	// Render grid rows

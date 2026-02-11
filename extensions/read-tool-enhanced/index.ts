@@ -16,9 +16,52 @@
  *           ✓ index.ts (150 lines, 4.2KB)
  * Skill:    📚 skill: git (collapsed by default)
  */
-import { createReadTool, type ExtensionAPI, keyHint } from "@mariozechner/pi-coding-agent";
+import {
+	createReadTool,
+	type ExtensionAPI,
+	keyHint,
+	loadSkills,
+} from "@mariozechner/pi-coding-agent";
 import { Text, visibleWidth } from "@mariozechner/pi-tui";
+import { getIcon } from "../_icons/index.js";
 import { getToolDisplayConfig, renderLines, truncateForDisplay } from "../tool-display/index.js";
+
+/** Skill name → correct absolute file path cache. Populated lazily on first miss. */
+let skillPathMap: Map<string, string> | null = null;
+
+/**
+ * Build a map of skill name → filePath from loaded skills.
+ * Cached after first call; cleared on session start.
+ * @returns Map from skill name to absolute SKILL.md path
+ */
+function getSkillPathMap(): Map<string, string> {
+	if (!skillPathMap) {
+		skillPathMap = new Map();
+		try {
+			const { skills } = loadSkills();
+			for (const s of skills) {
+				skillPathMap.set(s.name, s.filePath);
+			}
+		} catch {
+			// Best-effort — if loading fails, map stays empty
+		}
+	}
+	return skillPathMap;
+}
+
+/**
+ * Resolve the correct skill path when the LLM guesses wrong.
+ * Extracts the skill name from a failed path and looks up the real location.
+ * @param failedPath - The path that produced ENOENT
+ * @returns Correct absolute path if found, or null
+ */
+function resolveSkillFallback(failedPath: string): string | null {
+	const name = getSkillName(failedPath);
+	if (name === "unknown") return null;
+	const correctPath = getSkillPathMap().get(name);
+	if (correctPath && correctPath !== failedPath) return correctPath;
+	return null;
+}
 
 const SUMMARY_MARKER = "__summarized_read__";
 const MIN_SIZE_TO_SUMMARIZE = 500; // bytes
@@ -95,10 +138,36 @@ export default function readSummary(pi: ExtensionAPI): void {
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
-			const path = params.path ?? "file";
-			const filename = path.split("/").pop() ?? path;
+			let path = params.path ?? "file";
+			let filename = path.split("/").pop() ?? path;
 
-			const result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
+			let result: Awaited<ReturnType<typeof baseReadTool.execute>>;
+			try {
+				result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
+			} catch (err: unknown) {
+				// Auto-correct wrong skill paths: if ENOENT on a skill-looking path,
+				// look up the correct path from loaded skills and retry transparently.
+				const isEnoent =
+					err instanceof Error &&
+					(err.message.includes("ENOENT") || (err as NodeJS.ErrnoException).code === "ENOENT");
+				if (isEnoent && isSkillPath(path)) {
+					const correctPath = resolveSkillFallback(path);
+					if (correctPath) {
+						path = correctPath;
+						filename = path.split("/").pop() ?? path;
+						result = await baseReadTool.execute(
+							toolCallId,
+							{ ...params, path: correctPath },
+							signal,
+							onUpdate
+						);
+					} else {
+						throw err;
+					}
+				} else {
+					throw err;
+				}
+			}
 
 			const textContent = result.content.find((c) => c.type === "text");
 			if (!textContent || textContent.type !== "text") return result;
@@ -183,7 +252,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 			}
 
 			const summary = textContent?.text ?? "file";
-			const footer = theme.fg("muted", `✓ ${summary}`);
+			const footer = theme.fg("muted", `${getIcon("success")} ${summary}`);
 
 			// Expanded: full content, then summary footer at bottom
 			if (expanded && details?._fullText) {
@@ -194,6 +263,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 			// Collapsed: summary footer only
 			return renderLines([footer]);
 		},
+	});
+
+	// Invalidate skill path cache on session start (skills may have changed)
+	pi.on("session_start", async () => {
+		skillPathMap = null;
 	});
 
 	// Restore full content for LLM context

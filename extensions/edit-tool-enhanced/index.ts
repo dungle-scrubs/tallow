@@ -10,6 +10,7 @@ import {
 	renderDiff,
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { getIcon } from "../_icons/index.js";
 import { renderLines } from "../tool-display/index.js";
 
 const EDIT_MARKER = "__edit_live__";
@@ -80,7 +81,7 @@ export default function editLive(pi: ExtensionAPI): void {
 			}
 
 			const finalFilename = details._filename ?? "file";
-			const footer = theme.fg("muted", `✓ ${finalFilename} (edit applied)`);
+			const footer = theme.fg("muted", `${getIcon("success")} ${finalFilename} (edit applied)`);
 
 			if (details._diff) {
 				const diffLines = renderDiff(details._diff).split("\n");

@@ -28,6 +28,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getIcon, getSpinner } from "../_icons/index.js";
 
 // === Agent Discovery (inlined from agents.ts) ===
 
@@ -221,7 +222,7 @@ function coerceArray<T>(value: T[] | string | undefined | null): T[] | undefined
 }
 
 // Spinner frames
-const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+const SPINNER_FRAMES = getSpinner();
 
 /** Tracks a foreground subagent currently executing inline. */
 interface RunningSubagent {
@@ -1775,12 +1776,12 @@ WHEN NOT TO USE SUBAGENTS:
 				const spinnerChar =
 					details.spinnerFrame !== undefined
 						? SPINNER_FRAMES[details.spinnerFrame % SPINNER_FRAMES.length]
-						: "◐";
+						: getSpinner()[0];
 				const icon = isRunning
 					? theme.fg("warning", spinnerChar) // Animated spinner while running
 					: isError
-						? theme.fg("error", "✗")
-						: theme.fg("success", "✓");
+						? theme.fg("error", getIcon("error"))
+						: theme.fg("success", getIcon("success"));
 				const displayItems = getDisplayItems(r.messages);
 				const finalOutput = getFinalOutput(r.messages);
 
@@ -1866,8 +1867,8 @@ WHEN NOT TO USE SUBAGENTS:
 				const successCount = details.results.filter((r) => r.exitCode === 0).length;
 				const icon =
 					successCount === details.results.length
-						? theme.fg("success", "✓")
-						: theme.fg("error", "✗");
+						? theme.fg("success", getIcon("success"))
+						: theme.fg("error", getIcon("error"));
 
 				if (expanded) {
 					const container = new Container();
@@ -1883,7 +1884,10 @@ WHEN NOT TO USE SUBAGENTS:
 					);
 
 					for (const r of details.results) {
-						const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+						const rIcon =
+							r.exitCode === 0
+								? theme.fg("success", getIcon("success"))
+								: theme.fg("error", getIcon("error"));
 						const displayItems = getDisplayItems(r.messages);
 						const finalOutput = getFinalOutput(r.messages);
 
@@ -1938,7 +1942,10 @@ WHEN NOT TO USE SUBAGENTS:
 					theme.fg("toolTitle", theme.bold("chain ")) +
 					theme.fg("accent", `${successCount}/${details.results.length} steps`);
 				for (const r of details.results) {
-					const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+					const rIcon =
+						r.exitCode === 0
+							? theme.fg("success", getIcon("success"))
+							: theme.fg("error", getIcon("error"));
 					const displayItems = getDisplayItems(r.messages);
 					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}`;
 					if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
@@ -1959,12 +1966,12 @@ WHEN NOT TO USE SUBAGENTS:
 				const spinnerChar =
 					details.spinnerFrame !== undefined
 						? SPINNER_FRAMES[details.spinnerFrame % SPINNER_FRAMES.length]
-						: "◐";
+						: getSpinner()[0];
 				const icon = isRunning
 					? theme.fg("warning", spinnerChar)
 					: failCount > 0
-						? theme.fg("warning", "◐")
-						: theme.fg("success", "✓");
+						? theme.fg("warning", getSpinner()[0])
+						: theme.fg("success", getIcon("success"));
 				const status = isRunning
 					? `${successCount + failCount}/${details.results.length} done, ${running} running`
 					: `${details.results.length} agents complete`;
@@ -1980,7 +1987,10 @@ WHEN NOT TO USE SUBAGENTS:
 					);
 
 					for (const r of details.results) {
-						const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+						const rIcon =
+							r.exitCode === 0
+								? theme.fg("success", getIcon("success"))
+								: theme.fg("error", getIcon("error"));
 						const displayItems = getDisplayItems(r.messages);
 						const finalOutput = getFinalOutput(r.messages);
 
@@ -2036,8 +2046,8 @@ WHEN NOT TO USE SUBAGENTS:
 							r.exitCode === -1
 								? theme.fg("warning", spinnerChar)
 								: r.exitCode === 0
-									? theme.fg("success", "✓")
-									: theme.fg("error", "✗");
+									? theme.fg("success", getIcon("success"))
+									: theme.fg("error", getIcon("error"));
 						const taskPreview = r.task.length > 40 ? `${r.task.slice(0, 37)}...` : r.task;
 						const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
 						const contChar = isLast ? "   " : `${theme.fg("muted", "│")}  `;
@@ -2054,7 +2064,10 @@ WHEN NOT TO USE SUBAGENTS:
 					const isLast = i === details.results.length - 1;
 					const treeChar = isLast ? "└─" : "├─";
 					const contChar = isLast ? "   " : `${theme.fg("muted", "│")}  `;
-					const rIcon = r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+					const rIcon =
+						r.exitCode === 0
+							? theme.fg("success", getIcon("success"))
+							: theme.fg("error", getIcon("error"));
 					const displayItems = getDisplayItems(r.messages);
 					const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
 					text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}${modelTag}`;
@@ -2120,7 +2133,12 @@ WHEN NOT TO USE SUBAGENTS:
 
 			const lines = all.map((bg) => {
 				const duration = formatDuration(Date.now() - bg.startTime);
-				const statusIcon = bg.status === "running" ? "●" : bg.status === "completed" ? "✓" : "✗";
+				const statusIcon =
+					bg.status === "running"
+						? getIcon("in_progress")
+						: bg.status === "completed"
+							? getIcon("success")
+							: getIcon("error");
 				const preview = bg.task.length > 40 ? `${bg.task.slice(0, 37)}...` : bg.task;
 				return `${statusIcon} **${bg.id}** (${bg.agent}) - ${bg.status} (${duration})\n   ${preview}`;
 			});

@@ -36,6 +36,7 @@ import {
 	type WorkspaceSymbol,
 	WorkspaceSymbolRequest,
 } from "vscode-languageserver-protocol";
+import { getIcon } from "../_icons/index.js";
 
 /** Language server binary configuration and project detection markers. */
 interface ServerConfig {
@@ -912,9 +913,9 @@ WHEN TO USE:
 					});
 
 					if (available) {
-						lines.push(`${lang}: ✓ ${config.command}`);
+						lines.push(`${lang}: ${getIcon("success")} ${config.command}`);
 					} else {
-						lines.push(`${lang}: ✗ not installed`);
+						lines.push(`${lang}: ${getIcon("error")} not installed`);
 						if (lang === "python") {
 							lines.push("  Install: uvx ty (recommended) or npm i -g pyright");
 						} else if (lang === "rust") {

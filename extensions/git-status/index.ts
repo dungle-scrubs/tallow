@@ -10,6 +10,7 @@
 
 import { execSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { getIcon } from "../_icons/index.js";
 
 // Catppuccin Macchiato colors
 const C_TEAL = "\x1b[38;2;139;213;202m"; // teal #8bd5ca
@@ -157,10 +158,10 @@ function formatStatus(state: GitState): string {
 				prDisplay = `${C_GRAY}PR#${state.prNumber}(draft)${C_RESET}`;
 				break;
 			case "merged":
-				prDisplay = `${C_MAUVE}PR#${state.prNumber}✓${C_RESET}`;
+				prDisplay = `${C_MAUVE}PR#${state.prNumber}${getIcon("success")}${C_RESET}`;
 				break;
 			case "closed":
-				prDisplay = `${C_RED}PR#${state.prNumber}✗${C_RESET}`;
+				prDisplay = `${C_RED}PR#${state.prNumber}${getIcon("error")}${C_RESET}`;
 				break;
 			default:
 				prDisplay = "";

@@ -3,6 +3,7 @@
  */
 import { createWriteTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { getIcon } from "../_icons/index.js";
 import { renderLines } from "../tool-display/index.js";
 
 const PREVIEW_MARKER = "__write_preview__";
@@ -65,7 +66,7 @@ export default function writePreview(pi: ExtensionAPI): void {
 				return renderLines((textContent?.text ?? "").split("\n"));
 			}
 
-			const footer = theme.fg("muted", `✓ ${details._summary ?? "file"}`);
+			const footer = theme.fg("muted", `${getIcon("success")} ${details._summary ?? "file"}`);
 			const body = details._content ?? "";
 			const contentLines = body.split("\n").map((line) => theme.fg("dim", line));
 			return renderLines([...contentLines, "", footer]);

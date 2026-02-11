@@ -37,6 +37,7 @@ import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Key, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getIcon, getSpinner } from "../_icons/index.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -735,7 +736,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 	let lastWidgetContent = "";
 
 	// Spinner frames for animation
-	const SPINNER_FRAMES = ["◐", "◓", "◑", "◒"];
+	const SPINNER_FRAMES = getSpinner();
 	let spinnerFrame = 0;
 
 	/**
@@ -773,7 +774,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 
 			switch (task.status) {
 				case "completed":
-					icon = ctx.ui.theme.fg("success", "✓");
+					icon = ctx.ui.theme.fg("success", getIcon("success"));
 					textStyle = (s) => ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(s));
 					break;
 				case "in_progress":
@@ -781,12 +782,12 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 					if (hasActiveAgent) {
 						icon = ctx.ui.theme.fg("warning", SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length]);
 					} else {
-						icon = ctx.ui.theme.fg("warning", "●");
+						icon = ctx.ui.theme.fg("warning", getIcon("in_progress"));
 					}
 					textStyle = (s) => ctx.ui.theme.fg("accent", s);
 					break;
 				default:
-					icon = "☐";
+					icon = getIcon("pending");
 					textStyle = (s) => s;
 			}
 
@@ -937,7 +938,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 			const flatCmd = task.command.replace(/\n/g, " ↵ ");
 			const cmd = flatCmd.length > maxCmdLen ? `${flatCmd.slice(0, maxCmdLen - 3)}...` : flatCmd;
 			lines.push(
-				`${ctx.ui.theme.fg("muted", treeChar)} ${ctx.ui.theme.fg("accent", "●")} ${cmd} ${ctx.ui.theme.fg("muted", `(${duration})`)}`
+				`${ctx.ui.theme.fg("muted", treeChar)} ${ctx.ui.theme.fg("accent", getIcon("in_progress"))} ${cmd} ${ctx.ui.theme.fg("muted", `(${duration})`)}`
 			);
 		}
 
@@ -977,7 +978,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 			if (allDone) {
 				lines.push(
 					ctx.ui.theme.fg("success", `Team: ${team.name}`) +
-						ctx.ui.theme.fg("success", ` ✓ ${total}/${total} complete`)
+						ctx.ui.theme.fg("success", ` ${getIcon("success")} ${total}/${total} complete`)
 				);
 			} else {
 				lines.push(
@@ -998,7 +999,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 					mate.status === "working"
 						? `\x1b[38;5;${colorCode}m${spinner}\x1b[0m`
 						: mate.status === "idle"
-							? ctx.ui.theme.fg("muted", "◇")
+							? ctx.ui.theme.fg("muted", getIcon("blocked"))
 							: ctx.ui.theme.fg("muted", "⏹");
 
 				const taskSuffix = mate.currentTask
@@ -1544,10 +1545,15 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 						const list = state.tasks
 							.map((t) => {
 								const icon =
-									t.status === "completed" ? "✓" : t.status === "in_progress" ? "▣" : "☐";
+									t.status === "completed"
+										? getIcon("success")
+										: t.status === "in_progress"
+											? getIcon("in_progress")
+											: getIcon("pending");
 								const blocked =
 									t.blockedBy.length > 0 ? ` (blocked by: ${t.blockedBy.join(", ")})` : "";
-								const comments = t.comments.length > 0 ? ` 💬${t.comments.length}` : "";
+								const comments =
+									t.comments.length > 0 ? ` ${getIcon("comment")}${t.comments.length}` : "";
 								return `${t.id}. ${icon} ${t.subject}${blocked}${comments}`;
 							})
 							.join("\n");
@@ -2360,7 +2366,8 @@ EXAMPLES:
 				const status = t.status === "in_progress" ? " [IN PROGRESS]" : "";
 				const blocked = t.blockedBy.length > 0 ? ` [blocked by: ${t.blockedBy.join(", ")}]` : "";
 				const desc = t.description ? `\n   ${t.description}` : "";
-				const lastComment = t.comments.length > 0 ? `\n   💬 ${t.comments.at(-1)?.content}` : "";
+				const lastComment =
+					t.comments.length > 0 ? `\n   ${getIcon("comment")} ${t.comments.at(-1)?.content}` : "";
 				return `${idx + 1}. ${t.subject} (id:${t.id})${status}${blocked}${desc}${lastComment}`;
 			})
 			.join("\n");

@@ -35,6 +35,7 @@ import {
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
+import { getIcon } from "../_icons/index.js";
 import {
 	addTaskToBoard,
 	addTeamMessage,
@@ -261,7 +262,7 @@ export function createTeammateTools(
 							? ` [blocked by: ${t.blockedBy.join(", ")}]`
 							: "";
 					const assignee = t.assignee ? ` → ${t.assignee}` : "";
-					const readyTag = ready ? " ✓READY" : "";
+					const readyTag = ready ? ` ${getIcon("success")}READY` : "";
 					return `#${t.id} [${t.status}] ${t.title}${assignee}${blocked}${readyTag}\n  ${t.description || "(no description)"}`;
 				});
 				return { content: [{ type: "text" as const, text: lines.join("\n") }], details: {} };
