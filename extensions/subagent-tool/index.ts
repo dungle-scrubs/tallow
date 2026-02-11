@@ -1800,7 +1800,7 @@ WHEN NOT TO USE SUBAGENTS:
 									.filter((l) => l.trim())
 									.slice(0, 3)
 									.join("\n");
-						text += `${theme.fg("toolOutput", preview)}\n`;
+						text += `${theme.fg("dim", preview)}\n`;
 					} else {
 						text += `${theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
 					}
