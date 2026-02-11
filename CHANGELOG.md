@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **User-configurable icons** — override TUI glyphs via `icons` in settings.json
+  - 13 icon keys: success, error, pending, in\_progress, idle, waiting, active,
+    blocked, unavailable, spinner, plan\_mode, task\_list, comment
+  - Icon registry extension (`_icons`) with `getIcon()` and `getSpinner()` helpers
+  - Migrated all 17 extensions from hardcoded literals to registry lookups
+  - JSON Schema for settings.json with `$schema` for IDE autocompletion
+  - Installer injects `$schema` reference on `tallow install`
+
 ## [0.1.0] - 2025-02-11
 
 ### Added

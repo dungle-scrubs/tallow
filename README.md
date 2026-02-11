@@ -104,6 +104,16 @@ tallow -e ./my-extension
 tallow --list
 ```
 
+### Shell commands
+
+Run terminal commands directly from the prompt by prefixing with `!`:
+
+```bash
+! ls -la
+! git status
+! npm test
+```
+
 ### Slash commands
 
 Inside an interactive session, type `/` to see available commands:
@@ -170,6 +180,23 @@ Tallow stores its configuration in `~/.tallow/`:
 | `~/.tallow/sessions/` | Persisted conversation sessions |
 
 Project-level configuration lives in `.tallow/` within your project directory.
+
+## Icons
+
+Override any TUI glyph in `~/.tallow/settings.json`:
+
+```json
+{
+  "icons": {
+    "success": "✔",
+    "error": "✘",
+    "spinner": ["⠋", "⠙", "⠹", "⠸"]
+  }
+}
+```
+
+Only keys you set are overridden — everything else keeps its default.
+See the [icon reference](https://tallow.dungle-scrubs.com/getting-started/icons/) for all available keys.
 
 ## Themes
 
