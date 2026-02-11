@@ -45,6 +45,12 @@ Read the full [documentation](https://tallow.dungle-scrubs.com).
 
 ```bash
 npm install -g tallow
+tallow install
+```
+
+Or without global install:
+
+```bash
 npx tallow install
 ```
 
