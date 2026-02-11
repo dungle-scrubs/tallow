@@ -48,10 +48,19 @@ npm install -g tallow
 tallow install
 ```
 
+Or with pnpm / bun:
+
+```bash
+pnpm add -g tallow && tallow install
+bun install -g tallow && tallow install
+```
+
 Or without global install:
 
 ```bash
 npx tallow install
+pnpm dlx tallow install
+bunx tallow install
 ```
 
 ### From source
