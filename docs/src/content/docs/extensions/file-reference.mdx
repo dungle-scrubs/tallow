@@ -1,0 +1,76 @@
+---
+title: file-reference
+description: Expand @path/to/file patterns by reading files and inlining their contents.
+---
+
+Expands `@path/to/file` patterns in your input by reading the
+referenced file and inlining its contents in a fenced code block.
+Compatible with Claude Code's `@file` syntax.
+
+## Usage
+
+Reference files inline using `@path` syntax:
+
+```
+Review @src/auth/login.ts
+```
+
+The file is read and inlined before your prompt reaches the agent:
+
+````
+`src/auth/login.ts`:
+```ts
+// file contents appear here
+```
+````
+
+### Multiple files
+
+```
+Compare @src/old.ts and @src/new.ts
+```
+
+### Path resolution
+
+Paths resolve relative to the project root. These all work:
+
+- `@src/auth/login.ts` — nested path
+- `@README.md` — top-level file
+- `@package.json` — config files
+- `@.env` — dotfiles
+
+## What's skipped
+
+| Input | Behavior |
+|-------|----------|
+| `user@example.com` | Not matched (preceded by word char) |
+| `@nonexistent.ts` | Left as literal text |
+| `@some-directory` | Left as literal text |
+| `@ref` inside fenced code blocks | Skipped |
+
+## Limits
+
+| Setting | Value |
+|---------|-------|
+| Max file size | 100 KB (truncated with note) |
+| Binary files | Replaced with `[binary file: path]` |
+
+## Language hints
+
+File extensions are mapped to fenced code block language hints
+(`.ts` → `ts`, `.py` → `python`, `.yaml` → `yaml`, etc.).
+Unknown extensions use the extension itself as the hint.
+
+## Programmatic use
+
+Other extensions can import the transform directly:
+
+```ts
+import { expandFileReferences } from "../file-reference/index.js";
+
+const expanded = expandFileReferences(text, cwd);
+```
+
+The `subagent-tool` extension uses this alongside
+`shell-interpolation` to expand patterns in task prompts
+before spawning subagents.
