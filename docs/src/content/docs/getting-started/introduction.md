@@ -3,6 +3,13 @@ title: Introduction
 description: Why tallow exists and what it does.
 ---
 
+## What is tallow?
+
+tallow is an opinionated coding agent built on pi. It bundles
+36 extensions, 8 agent profiles, 34 themes, and a skill system
+into a single install. No manual extension management —
+everything ships together, ready to use.
+
 ## What is [pi](https://github.com/badlogic/pi-mono)?
 
 pi is the terminal-native coding agent framework. It runs in
@@ -10,16 +17,9 @@ your terminal, connects to any LLM provider, and gives you full
 control over how the agent behaves through extensions, themes,
 hooks, skills, and commands.
 
-## What is tallow?
-
-tallow is an opinionated coding agent built on pi. It bundles
-31 extensions, 7 agent profiles, 34 themes, and a skill system
-into a single install. No manual extension management —
-everything ships together, ready to use.
-
 ## What ships out of the box
 
-### Extensions (31)
+### Extensions (36)
 
 Every feature is an extension. They're organized by category:
 
@@ -40,7 +40,7 @@ and the installer's grouping. See
 [Creating Extensions](/development/creating-extensions/) for
 the full manifest spec.
 
-### Agents (7)
+### Agents (8)
 
 Built-in agent profiles, each with a specialized role and
 system prompt. Invoke any agent as a `/slash` command:
@@ -81,7 +81,7 @@ Skills have frontmatter metadata including `name`,
 
 ## What makes it different
 
-- **Batteries included** — 31 extensions loaded automatically.
+- **Batteries included** — 36 extensions loaded automatically.
   No separate install step.
 - **Extensible from the ground up** — features are extensions,
   not hard-coded. Don't like how bash output renders? Replace
