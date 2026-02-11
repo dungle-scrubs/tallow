@@ -51,6 +51,7 @@ program
 program
 	.command("install")
 	.description("Interactive installer — choose extensions, themes, and set up tallow")
+	.option("-y, --yes", "Non-interactive: keep all settings, update templates")
 	.action(async () => {
 		// Dynamically import so the main CLI stays lightweight
 		await import("./install.js");
