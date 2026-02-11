@@ -19,16 +19,16 @@
 
 ---
 
-30+ extensions, 34 themes, 8 slash commands, and 8 specialized agents.
+36 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
 ## Features
 
-- **30+ bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
+- **36 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
 - **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
-- **8 slash commands** — `/implement`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
+- **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
 - **8 specialized agents** — architect, debug, planner, refactor, reviewer, scout, worker, tallow-expert
-- **Multi-agent teams** — coordinate multiple agents with task boards and messaging
+- **Multi-agent teams** — coordinate multiple agents with task boards, messaging, and archive/resume
 - **SDK** — embed Tallow in your own scripts and orchestrators
 - **User-owned config** — agents and commands are installed to `~/.tallow/` where you can edit, remove, or add your own
 
@@ -104,15 +104,18 @@ tallow -e ./my-extension
 tallow --list
 ```
 
-### Shell commands
+### Shell interpolation
 
-Run terminal commands directly from the prompt by prefixing with `!`:
+Expand shell commands inline with `` !`command` `` syntax:
 
-```bash
-! ls -la
-! git status
-! npm test
 ```
+!`ls -la`
+!`git status`
+!`git branch --show-current`
+```
+
+The command runs and its stdout replaces the pattern before reaching the
+agent. 5-second timeout, 1 MB max output, non-recursive.
 
 ### Slash commands
 
@@ -200,7 +203,7 @@ See the [icon reference](https://tallow.dungle-scrubs.com/getting-started/icons/
 
 ## Themes
 
-Switch themes inside an interactive session with the theme selector (`ctrl+t`),
+Switch themes inside an interactive session with the `/theme` command,
 or set one in `~/.tallow/settings.json`:
 
 ```json

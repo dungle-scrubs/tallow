@@ -17,7 +17,8 @@ bottleneck through the orchestrator.
 - `team_spawn` — spawn a teammate with a role, model, and tool set
 - `team_send` — send a message (fire-and-forget or `wait` for response)
 - `team_status` — view task board, teammate states, recent messages
-- `team_shutdown` — abort all teammates and clean up
+- `team_shutdown` — abort all teammates and archive the team
+- `team_resume` — restore an archived team (omit name to list archives)
 
 **Teammate tools** (injected into each spawned agent):
 - `team_tasks` — list, claim, complete, or fail tasks
@@ -42,10 +43,24 @@ first.
   { src: "/screenshots/extensions/teams/auto-dispatch.png", alt: "Auto-dispatch summary showing the full chain of events" },
 ]} />
 
+## Archive and Resume
+
+Shutting down a team — whether via `team_shutdown`, pressing
+Escape, or session end — **archives** the team instead of
+deleting it. The task board, results, and messages are
+preserved.
+
+Call `team_resume` to restore an archived team. The restored
+team has no teammates (their sessions are gone), so spawn
+fresh ones to pick up where you left off. Any tasks that were
+claimed when the team was archived are reset to pending.
+
+Call `team_resume` with no arguments to list all available
+archives with task summaries.
+
 ## Interrupting with Escape
 
-Pressing Escape kills all team agents (both working and idle).
-Teams are cognitive work tied to the conversation. The
-`agent_end` event aborts streaming sessions and disposes them.
-This mirrors [subagent](/extensions/subagent-tool/) interrupt
-behavior.
+Pressing Escape kills all team agents (both working and idle)
+and archives the team. Task state is preserved — use
+`team_resume` to restore and continue work. This mirrors
+[subagent](/extensions/subagent-tool/) interrupt behavior.

@@ -1,0 +1,71 @@
+---
+title: session-memory
+description: Search and recall context from previous sessions using FTS5 full-text search and LLM curation.
+---
+
+The **session-memory** extension provides cross-session recall.
+It searches previous conversation history using SQLite FTS5
+full-text search, then filters results through a curator LLM
+to return only relevant excerpts.
+
+The main agent never sees raw search results — only
+curator-filtered content.
+
+## `session_recall` tool
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `query` | yes | Keywords to match (FTS search) |
+| `looking_for` | yes | What content to extract — be specific (e.g., "an ASCII mockup of a UI design", "a decision about which database to use") |
+| `project` | no | Filter by project name |
+| `date_from` | no | Only sessions after this date (ISO) |
+| `date_to` | no | Only sessions before this date (ISO) |
+
+The `looking_for` parameter is critical — it tells the curator
+what to extract from matches. Vague descriptions return vague
+results. Specific descriptions like "code for the auth flow"
+or "a list of API endpoints" get precise content.
+
+## How it works
+
+1. **Index** — on first call, builds an incremental FTS5 index
+   over all session JSONL files. Subsequent calls only index
+   new or modified sessions.
+2. **Search** — runs an FTS5 query across the index, returning
+   up to 15 results with surrounding context turns.
+3. **Curate** — passes results through a curator LLM (prefers
+   Haiku for speed/cost) with the caller's `looking_for`
+   description. The curator extracts matching content and
+   discards noise.
+4. **Return** — the main agent receives only the curated
+   excerpts.
+
+## Cross-project search
+
+The extension discovers sessions across all tallow
+installations:
+
+- Current project's tallow home (`TALLOW_CODING_AGENT_DIR`)
+- Default tallow home (`~/.tallow`)
+- All per-project tallow homes listed in
+  `~/.config/tallow-work-dirs`
+
+Use the `project` parameter to filter results to a specific
+project.
+
+## Database
+
+- **Location**: `<tallow-home>/sessions/index.db`
+- **Engine**: SQLite with FTS5 (via `better-sqlite3`)
+- **Indexing**: Incremental — only new/modified sessions are
+  processed on each call
+- **Current session**: Excluded from search results to avoid
+  self-referencing
+
+## Curator fallback
+
+If no curator model is available (no API key configured for
+Haiku or any fallback model), the tool returns a message
+indicating curator unavailability rather than dumping raw
+results. This prevents noisy, unfiltered content from reaching
+the main agent.

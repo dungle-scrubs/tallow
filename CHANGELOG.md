@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Logs tool timings, turn boundaries, model changes, subagent events, errors
   - `/diag` command for status, toggling, tailing, and clearing the log
   - Zero-cost when disabled — no file I/O or object allocation
+- **Team archive and resume** — `team_shutdown`, Escape, and session end now archive
+  teams instead of deleting them. New `team_resume` tool restores archived teams
+  with their full task board, results, and messages. Claimed tasks reset to pending
+  on restore.
+- **CLI flags** — `--provider` and `--api-key` for headless startup without
+  interactive prompts. Install command gains `--default-provider`, `--default-model`,
+  `--api-key`, `--theme`, and `--thinking` flags.
 - **User-configurable icons** — override TUI glyphs via `icons` in settings.json
   - 13 icon keys: success, error, pending, in\_progress, idle, waiting, active,
     blocked, unavailable, spinner, plan\_mode, task\_list, comment
@@ -31,6 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Migrated all 17 extensions from hardcoded literals to registry lookups
   - JSON Schema for settings.json with `$schema` for IDE autocompletion
   - Installer injects `$schema` reference on `tallow install`
+
+### Changed
+
+- **Subagent UI** — animated progress indicators for chain mode (spinner while
+  running, checkmark/X on completion). Agent prose uses subdued color to recede
+  behind structural elements.
+
+### Fixed
+
+- **Plan mode** — extension tools now preserved across mode transitions instead
+  of being dropped when toggling plan mode on/off.
 
 ## [0.1.0] - 2025-02-11
 
