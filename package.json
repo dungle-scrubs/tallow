@@ -1,6 +1,6 @@
 {
 	"name": "tallow",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "An opinionated coding agent. Built on pi.",
 	"piConfig": {
 		"name": "tallow",
@@ -37,8 +37,8 @@
 		"format": "biome format --write .",
 		"test": "bun test",
 		"format:check": "biome format .",
-		"postinstall": "mkdir -p src/modes/interactive && ln -sfn ../../../node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/theme src/modes/interactive/theme",
-		"prepare": "husky"
+		"postinstall": "test -d .git && mkdir -p src/modes/interactive && ln -sfn ../../../node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/theme src/modes/interactive/theme || true",
+		"prepare": "test -d .git && husky || true"
 	},
 	"lint-staged": {
 		"*.{ts,tsx,js,jsx,json,jsonc,css}": [

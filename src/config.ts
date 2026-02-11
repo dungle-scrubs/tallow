@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,13 +6,49 @@ import { fileURLToPath } from "node:url";
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export const APP_NAME = "tallow";
-export const TALLOW_VERSION = "0.1.0";
+export const TALLOW_VERSION = "0.1.1";
 export const CONFIG_DIR = ".tallow";
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
-/** ~/.tallow — all user config, sessions, auth, extensions */
-export const TALLOW_HOME = join(homedir(), CONFIG_DIR);
+/** ~/.tallow (or override from ~/.config/tallow-work-dirs) — all user config, sessions, auth, extensions */
+export const TALLOW_HOME = resolveTallowHome();
+
+/**
+ * Resolve TALLOW_HOME from ~/.config/tallow-work-dirs.
+ *
+ * File format (one mapping per line, comments start with #):
+ *   /path/to/project:/path/to/config-dir
+ *
+ * When cwd is inside a mapped directory, that config dir is used.
+ * Falls back to ~/.tallow if no match or the file doesn't exist.
+ *
+ * @returns Resolved tallow home directory path
+ */
+function resolveTallowHome(): string {
+	const defaultHome = join(homedir(), CONFIG_DIR);
+	const workDirsPath = join(homedir(), ".config", "tallow-work-dirs");
+	const cwd = process.cwd();
+
+	try {
+		const content = readFileSync(workDirsPath, "utf-8");
+		for (const line of content.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith("#")) continue;
+			const colonIdx = trimmed.indexOf(":");
+			if (colonIdx === -1) continue;
+			const dir = trimmed.slice(0, colonIdx);
+			const configDir = trimmed.slice(colonIdx + 1);
+			if (dir && configDir && (cwd === dir || cwd.startsWith(`${dir}/`))) {
+				return configDir;
+			}
+		}
+	} catch {
+		// File doesn't exist or isn't readable — use default
+	}
+
+	return defaultHome;
+}
 
 /** Where bundled resources live (the package root) */
 const __filename_ = fileURLToPath(import.meta.url);
