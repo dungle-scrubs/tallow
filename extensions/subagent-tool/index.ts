@@ -532,6 +532,7 @@ interface SubagentDetails {
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 	spinnerFrame?: number; // For animated spinner during execution
+	chainSteps?: { agent: string; task: string }[]; // All chain steps for progress display
 }
 
 /**
@@ -1307,12 +1308,13 @@ WHEN NOT TO USE SUBAGENTS:
 			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
 
 			const makeDetails =
-				(mode: "single" | "parallel" | "chain") =>
+				(mode: "single" | "parallel" | "chain", chainSteps?: { agent: string; task: string }[]) =>
 				(results: SingleResult[]): SubagentDetails => ({
 					mode,
 					agentScope,
 					projectAgentsDir: discovery.projectAgentsDir,
 					results,
+					chainSteps,
 				});
 
 			if (modeCount !== 1) {
@@ -1360,74 +1362,114 @@ WHEN NOT TO USE SUBAGENTS:
 			if (chain && chain.length > 0) {
 				const results: SingleResult[] = [];
 				let previousOutput = "";
+				const chainSteps = chain.map((s) => ({ agent: s.agent, task: s.task }));
+				const mkChainDetails = makeDetails("chain", chainSteps);
 
-				for (let i = 0; i < chain.length; i++) {
-					const step = chain[i];
-					ctx.ui.setWorkingMessage(`Running chain step ${i + 1}/${chain.length}: ${step.agent}`);
-					const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
+				// Spinner animation for chain progress (same pattern as parallel mode)
+				let chainSpinnerFrame = 0;
+				let latestPartialResult: SingleResult | undefined;
+				let spinnerInterval: NodeJS.Timeout | null = null;
 
-					// Create update callback that includes all previous results
-					const chainUpdate: OnUpdateCallback | undefined = onUpdate
-						? (partial) => {
-								// Combine completed results with current streaming result
-								const currentResult = partial.details?.results[0];
-								if (currentResult) {
-									const allResults = [...results, currentResult];
-									onUpdate({
-										content: partial.content,
-										details: makeDetails("chain")(allResults),
-									});
-								}
-							}
-						: undefined;
-
-					const result = await runSingleAgent(
-						ctx.cwd,
-						agents,
-						step.agent,
-						taskWithContext,
-						step.cwd,
-						i + 1,
-						signal,
-						chainUpdate,
-						makeDetails("chain"),
-						pi.events,
-						undefined,
-						step.model
-					);
-					results.push(result);
-
-					const isError =
-						result.exitCode !== 0 ||
-						result.stopReason === "error" ||
-						result.stopReason === "aborted";
-					if (isError) {
-						ctx.ui.setWorkingMessage();
-						const errorMsg =
-							result.errorMessage ||
-							result.stderr ||
-							getFinalOutput(result.messages) ||
-							"(no output)";
-						return {
+				const emitChainUpdate = () => {
+					if (onUpdate) {
+						const allResults = latestPartialResult
+							? [...results, latestPartialResult]
+							: [...results];
+						const details = mkChainDetails(allResults);
+						details.spinnerFrame = chainSpinnerFrame;
+						onUpdate({
 							content: [
 								{
 									type: "text",
-									text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}`,
+									text: getFinalOutput(latestPartialResult?.messages ?? []) || "(running...)",
 								},
 							],
-							details: makeDetails("chain")(results),
-							isError: true,
-						};
+							details,
+						});
 					}
-					previousOutput = getFinalOutput(result.messages);
-				}
-				ctx.ui.setWorkingMessage();
-				return {
-					content: [
-						{ type: "text", text: getFinalOutput(results.at(-1)?.messages ?? []) || "(no output)" },
-					],
-					details: makeDetails("chain")(results),
 				};
+
+				if (onUpdate) {
+					spinnerInterval = setInterval(() => {
+						chainSpinnerFrame = (chainSpinnerFrame + 1) % SPINNER_FRAMES.length;
+						emitChainUpdate();
+					}, 100);
+				}
+
+				try {
+					for (let i = 0; i < chain.length; i++) {
+						const step = chain[i];
+						ctx.ui.setWorkingMessage(`Running chain step ${i + 1}/${chain.length}: ${step.agent}`);
+						const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
+						latestPartialResult = undefined;
+
+						// Create update callback that includes all previous results
+						const chainUpdate: OnUpdateCallback | undefined = onUpdate
+							? (partial) => {
+									const currentResult = partial.details?.results[0];
+									if (currentResult) {
+										latestPartialResult = currentResult;
+										emitChainUpdate();
+									}
+								}
+							: undefined;
+
+						const result = await runSingleAgent(
+							ctx.cwd,
+							agents,
+							step.agent,
+							taskWithContext,
+							step.cwd,
+							i + 1,
+							signal,
+							chainUpdate,
+							mkChainDetails,
+							pi.events,
+							undefined,
+							step.model
+						);
+						results.push(result);
+						latestPartialResult = undefined;
+
+						const isError =
+							result.exitCode !== 0 ||
+							result.stopReason === "error" ||
+							result.stopReason === "aborted";
+						if (isError) {
+							if (spinnerInterval) clearInterval(spinnerInterval);
+							ctx.ui.setWorkingMessage();
+							const errorMsg =
+								result.errorMessage ||
+								result.stderr ||
+								getFinalOutput(result.messages) ||
+								"(no output)";
+							return {
+								content: [
+									{
+										type: "text",
+										text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}`,
+									},
+								],
+								details: mkChainDetails(results),
+								isError: true,
+							};
+						}
+						previousOutput = getFinalOutput(result.messages);
+					}
+					if (spinnerInterval) clearInterval(spinnerInterval);
+					ctx.ui.setWorkingMessage();
+					return {
+						content: [
+							{
+								type: "text",
+								text: getFinalOutput(results.at(-1)?.messages ?? []) || "(no output)",
+							},
+						],
+						details: mkChainDetails(results),
+					};
+				} finally {
+					if (spinnerInterval) clearInterval(spinnerInterval);
+				}
 			}
 
 			if (tasks && tasks.length > 0) {
@@ -1864,11 +1906,33 @@ WHEN NOT TO USE SUBAGENTS:
 			};
 
 			if (details.mode === "chain") {
+				const totalSteps = details.chainSteps?.length ?? details.results.length;
+				const isRunning = details.results.some((r) => r.exitCode === -1);
 				const successCount = details.results.filter((r) => r.exitCode === 0).length;
-				const icon =
-					successCount === details.results.length
-						? theme.fg("success", getIcon("success"))
-						: theme.fg("error", getIcon("error"));
+				const failCount = details.results.filter((r) => r.exitCode > 0).length;
+				const spinnerChar =
+					details.spinnerFrame !== undefined
+						? SPINNER_FRAMES[details.spinnerFrame % SPINNER_FRAMES.length]
+						: getSpinner()[0];
+
+				const icon = isRunning
+					? theme.fg("warning", spinnerChar)
+					: failCount > 0
+						? theme.fg("error", getIcon("error"))
+						: theme.fg("success", getIcon("success"));
+
+				/**
+				 * Get the status icon for a chain step by index (1-based).
+				 * @param stepNum - 1-based step number
+				 * @returns Formatted icon string: spinner if running, ✓ if done, × if failed, empty if upcoming
+				 */
+				const getStepIcon = (stepNum: number): string => {
+					const r = details.results.find((res) => res.step === stepNum);
+					if (!r) return "";
+					if (r.exitCode === -1) return ` ${theme.fg("warning", spinnerChar)}`;
+					if (r.exitCode === 0) return ` ${theme.fg("success", getIcon("success"))}`;
+					return ` ${theme.fg("error", getIcon("error"))}`;
+				};
 
 				if (expanded) {
 					const container = new Container();
@@ -1877,54 +1941,56 @@ WHEN NOT TO USE SUBAGENTS:
 							icon +
 								" " +
 								theme.fg("toolTitle", theme.bold("chain ")) +
-								theme.fg("accent", `${successCount}/${details.results.length} steps`),
+								theme.fg("accent", `${successCount}/${totalSteps} steps`),
 							0,
 							0
 						)
 					);
 
-					for (const r of details.results) {
-						const rIcon =
-							r.exitCode === 0
-								? theme.fg("success", getIcon("success"))
-								: theme.fg("error", getIcon("error"));
-						const displayItems = getDisplayItems(r.messages);
-						const finalOutput = getFinalOutput(r.messages);
+					for (let si = 0; si < totalSteps; si++) {
+						const stepNum = si + 1;
+						const r = details.results.find((res) => res.step === stepNum);
+						const stepAgent = r?.agent ?? details.chainSteps?.[si]?.agent ?? `step ${stepNum}`;
+						const rIcon = getStepIcon(stepNum);
 
 						container.addChild(new Spacer(1));
 						container.addChild(
 							new Text(
-								`${theme.fg("muted", `─── Step ${r.step}: `) + theme.fg("accent", r.agent)} ${rIcon}`,
+								theme.fg("muted", `─── Step ${stepNum}: `) + theme.fg("accent", stepAgent) + rIcon,
 								0,
 								0
 							)
 						);
-						container.addChild(
-							new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0)
-						);
 
-						// Show tool calls
-						for (const item of displayItems) {
-							if (item.type === "toolCall") {
-								container.addChild(
-									new Text(
-										theme.fg("muted", "→ ") +
-											formatToolCall(item.name, item.args, theme.fg.bind(theme)),
-										0,
-										0
-									)
-								);
+						if (r) {
+							const displayItems = getDisplayItems(r.messages);
+							const finalOutput = getFinalOutput(r.messages);
+
+							container.addChild(
+								new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0)
+							);
+
+							for (const item of displayItems) {
+								if (item.type === "toolCall") {
+									container.addChild(
+										new Text(
+											theme.fg("muted", "→ ") +
+												formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+											0,
+											0
+										)
+									);
+								}
 							}
-						}
 
-						// Show final output as markdown
-						if (finalOutput) {
-							container.addChild(new Spacer(1));
-							container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-						}
+							if (finalOutput) {
+								container.addChild(new Spacer(1));
+								container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+							}
 
-						const stepUsage = formatUsageStats(r.usage, r.model);
-						if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
+							const stepUsage = formatUsageStats(r.usage, r.model);
+							if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
+						}
 					}
 
 					const usageStr = formatUsageStats(aggregateUsage(details.results));
@@ -1940,20 +2006,22 @@ WHEN NOT TO USE SUBAGENTS:
 					icon +
 					" " +
 					theme.fg("toolTitle", theme.bold("chain ")) +
-					theme.fg("accent", `${successCount}/${details.results.length} steps`);
-				for (const r of details.results) {
-					const rIcon =
-						r.exitCode === 0
-							? theme.fg("success", getIcon("success"))
-							: theme.fg("error", getIcon("error"));
-					const displayItems = getDisplayItems(r.messages);
-					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}`;
-					if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
-					else text += `\n${renderDisplayItems(displayItems, 5)}`;
+					theme.fg("accent", `${successCount}/${totalSteps} steps`);
+				for (let si = 0; si < totalSteps; si++) {
+					const stepNum = si + 1;
+					const r = details.results.find((res) => res.step === stepNum);
+					const stepAgent = r?.agent ?? details.chainSteps?.[si]?.agent ?? `step ${stepNum}`;
+					const rIcon = getStepIcon(stepNum);
+					text += `\n\n${theme.fg("muted", `─── Step ${stepNum}: `)}${theme.fg("accent", stepAgent)}${rIcon}`;
+					if (r) {
+						const displayItems = getDisplayItems(r.messages);
+						if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
+						else text += `\n${renderDisplayItems(displayItems, 5)}`;
+					}
 				}
 				const usageStr = formatUsageStats(aggregateUsage(details.results));
 				if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
-				text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+				if (!isRunning) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				return new Text(text, 0, 0);
 			}
 
