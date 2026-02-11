@@ -30,11 +30,11 @@ import {
 import { Type } from "@sinclair/typebox";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.js";
 
-/** Tools available in plan mode (read-only) */
-const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
+/** Base tools available in plan mode (read-only) */
+const PLAN_MODE_BASE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 
-/** Tools available in normal mode (full access) */
-const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+/** Base tools available in normal mode (full access) */
+const NORMAL_MODE_BASE_TOOLS = ["read", "bash", "edit", "write"];
 
 /**
  * Type guard to check if a message is an assistant message.
@@ -98,6 +98,22 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
+
+	/**
+	 * Builds the full tool list by merging base tools with all non-base
+	 * (extension-registered) tools. This ensures extension tools like
+	 * plan_mode itself and MCP adapter tools are never dropped.
+	 * @param baseTools - The base tool names to include
+	 * @returns Full list of tool names including extension tools
+	 */
+	function buildToolList(baseTools: string[]): string[] {
+		const knownBaseTools = new Set([...NORMAL_MODE_BASE_TOOLS, ...PLAN_MODE_BASE_TOOLS]);
+		const extensionTools = pi
+			.getAllTools()
+			.map((t) => t.name)
+			.filter((name) => !knownBaseTools.has(name));
+		return [...baseTools, ...extensionTools];
+	}
 
 	pi.registerFlag("plan", {
 		description: "Start in plan mode (read-only exploration)",
@@ -176,10 +192,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		todoItems = [];
 
 		if (planModeEnabled) {
-			pi.setActiveTools(PLAN_MODE_TOOLS);
-			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_TOOLS.join(", ")}`);
+			pi.setActiveTools(buildToolList(PLAN_MODE_BASE_TOOLS));
+			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_BASE_TOOLS.join(", ")}`);
 		} else {
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
 			ctx.ui.notify("Plan mode disabled. Full access restored.");
 		}
 		updateStatus(ctx);
@@ -255,7 +271,7 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 
 			if (action === "status") {
 				const mode = executionMode ? "executing" : planModeEnabled ? "planning" : "normal";
-				const tools = planModeEnabled ? PLAN_MODE_TOOLS : NORMAL_MODE_TOOLS;
+				const tools = planModeEnabled ? PLAN_MODE_BASE_TOOLS : NORMAL_MODE_BASE_TOOLS;
 				return {
 					content: [
 						{
@@ -290,9 +306,9 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 			todoItems = [];
 
 			if (planModeEnabled) {
-				pi.setActiveTools(PLAN_MODE_TOOLS);
+				pi.setActiveTools(buildToolList(PLAN_MODE_BASE_TOOLS));
 			} else {
-				pi.setActiveTools(NORMAL_MODE_TOOLS);
+				pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
 			}
 
 			if (ctx.hasUI) {
@@ -305,7 +321,7 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 					{
 						type: "text",
 						text: planModeEnabled
-							? `Plan mode enabled. Tools restricted to: ${PLAN_MODE_TOOLS.join(", ")}. Write operations are blocked.`
+							? `Plan mode enabled. Tools restricted to: ${PLAN_MODE_BASE_TOOLS.join(", ")}. Write operations are blocked.`
 							: "Plan mode disabled. Full tool access restored.",
 					},
 				],
@@ -428,7 +444,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				);
 				executionMode = false;
 				todoItems = [];
-				pi.setActiveTools(NORMAL_MODE_TOOLS);
+				pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
 				updateStatus(ctx);
 				persistState(); // Save cleared state so resume doesn't restore old execution mode
 			}
@@ -468,7 +484,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
 			executionMode = todoItems.length > 0;
-			pi.setActiveTools(NORMAL_MODE_TOOLS);
+			pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
 			updateStatus(ctx);
 
 			const execMessage =
@@ -542,7 +558,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		}
 
 		if (planModeEnabled) {
-			pi.setActiveTools(PLAN_MODE_TOOLS);
+			pi.setActiveTools(buildToolList(PLAN_MODE_BASE_TOOLS));
 		}
 		updateStatus(ctx);
 	});
