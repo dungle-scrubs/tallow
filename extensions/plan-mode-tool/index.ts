@@ -28,6 +28,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getIcon } from "../_icons/index.js";
 import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.js";
 
 /** Base tools available in plan mode (read-only) */
@@ -58,7 +59,7 @@ function getTextContent(message: AssistantMessage): string {
 }
 
 /** Plan mode label shown in the editor border */
-const PLAN_LABEL = " ⏸ PLAN ";
+const PLAN_LABEL = ` ${getIcon("plan_mode")} PLAN `;
 
 /**
  * Custom editor that renders a warning-colored border in plan mode.
@@ -133,10 +134,13 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			const completed = todoItems.filter((t) => t.completed).length;
 			ctx.ui.setStatus(
 				"plan-mode",
-				ctx.ui.theme.fg("accent", `📋 ${completed}/${todoItems.length}`)
+				ctx.ui.theme.fg("accent", `${getIcon("task_list")} ${completed}/${todoItems.length}`)
 			);
 		} else if (planModeEnabled) {
-			ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", "⏸ PLAN MODE — read-only"));
+			ctx.ui.setStatus(
+				"plan-mode",
+				ctx.ui.theme.fg("warning", `${getIcon("plan_mode")} PLAN MODE — read-only`)
+			);
 		} else {
 			ctx.ui.setStatus("plan-mode", undefined);
 		}
@@ -174,7 +178,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 						ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
 					);
 				}
-				return `${ctx.ui.theme.fg("muted", "☐ ")}${item.text}`;
+				return `${ctx.ui.theme.fg("muted", `${getIcon("pending")} `)}${item.text}`;
 			});
 			ctx.ui.setWidget("plan-todos", lines);
 		} else {
@@ -225,7 +229,10 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 				return;
 			}
 			const list = todoItems
-				.map((item, i) => `${i + 1}. ${item.completed ? "✓" : "○"} ${item.text}`)
+				.map(
+					(item, i) =>
+						`${i + 1}. ${item.completed ? getIcon("success") : getIcon("idle")} ${item.text}`
+				)
 				.join("\n");
 			ctx.ui.notify(`Plan Progress:\n${list}`, "info");
 		},
@@ -437,7 +444,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				pi.sendMessage(
 					{
 						customType: "plan-complete",
-						content: `**Plan Complete!** ✓\n\n${completedList}`,
+						content: `**Plan Complete!** ${getIcon("success")}\n\n${completedList}`,
 						display: true,
 					},
 					{ triggerTurn: false }
@@ -464,7 +471,9 @@ After completing a step, include a [DONE:n] tag in your response.`,
 
 		// Show plan steps and prompt for next action
 		if (todoItems.length > 0) {
-			const todoListText = todoItems.map((t, i) => `${i + 1}. ☐ ${t.text}`).join("\n");
+			const todoListText = todoItems
+				.map((t, i) => `${i + 1}. ${getIcon("pending")} ${t.text}`)
+				.join("\n");
 			pi.sendMessage(
 				{
 					customType: "plan-todo-list",

@@ -19,6 +19,7 @@ import {
 	type ExtensionAPI,
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { getIcon } from "../_icons/index.js";
 import {
 	formatTruncationIndicator,
 	getToolDisplayConfig,
@@ -156,7 +157,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 			const exitCode = exitMatch ? Number(exitMatch[1]) : 0;
 
 			// Exit 0–1: normal (grep no-match, diff, test false, etc.)
-			const statusIcon = exitCode <= 1 ? "✓" : "✗";
+			const statusIcon = exitCode <= 1 ? getIcon("success") : getIcon("error");
 			const statusColor = exitCode <= 1 ? "muted" : "error";
 			const summary = `${statusIcon} bash (${lineCount} lines, ${sizeKb}KB, exit ${exitCode})`;
 			const fullPathSuffix = details?.fullOutputPath

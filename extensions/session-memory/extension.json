@@ -1,0 +1,12 @@
+{
+	"name": "session-memory",
+	"version": "0.1.0",
+	"description": "Search and recall context from previous tallow sessions using FTS5 + LLM curator",
+	"category": "tool",
+	"tags": ["sessions", "memory", "search", "recall"],
+	"files": ["index.ts", "indexer.ts", "curator-prompt.ts", "types.ts"],
+	"relationships": [],
+	"npmDependencies": {
+		"better-sqlite3": "^11.0.0"
+	}
+}

@@ -26,6 +26,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { getIcon } from "../_icons/index.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -511,10 +512,10 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 			const lines: string[] = [];
 			for (const server of servers.values()) {
 				const status = server.failed
-					? "✗ failed"
+					? `${getIcon("error")} failed`
 					: server.ready
-						? `● connected (${server.tools.length} tools)`
-						: "○ not started";
+						? `${getIcon("in_progress")} connected (${server.tools.length} tools)`
+						: `${getIcon("idle")} not started`;
 
 				lines.push(`${server.name}: ${status}`);
 

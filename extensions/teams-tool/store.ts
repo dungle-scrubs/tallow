@@ -5,6 +5,8 @@
  * unit-tested without importing pi-ai, pi-coding-agent, or pi-tui.
  */
 
+import { getIcon } from "../_icons/index.js";
+
 // ════════════════════════════════════════════════════════════════
 // Types
 // ════════════════════════════════════════════════════════════════
@@ -213,13 +215,13 @@ export function formatTeamStatus(team: Team): string {
 			const ready = isTaskReady(team, t);
 			const icon =
 				t.status === "completed"
-					? "✓"
+					? getIcon("success")
 					: t.status === "failed"
-						? "✗"
+						? getIcon("error")
 						: t.status === "claimed"
-							? "⏳"
+							? getIcon("waiting")
 							: ready
-								? "○"
+								? getIcon("idle")
 								: "◌";
 			const assignee = t.assignee ? ` → ${t.assignee}` : "";
 			const blocked =
@@ -244,7 +246,7 @@ export function formatTeamStatus(team: Team): string {
 				mate.status === "idle"
 					? "💤"
 					: mate.status === "working"
-						? "⚡"
+						? getIcon("active")
 						: mate.status === "error"
 							? "❌"
 							: "⏹️";

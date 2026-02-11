@@ -14,6 +14,7 @@ import {
 	truncateToWidth,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getIcon } from "../_icons/index.js";
 
 /** An option with a label and optional description */
 interface OptionWithDesc {
@@ -327,7 +328,7 @@ WHEN NOT TO USE:
 
 			if (details.wasCustom) {
 				return new Text(
-					theme.fg("success", "✓ ") +
+					theme.fg("success", `${getIcon("success")} `) +
 						theme.fg("muted", "(wrote) ") +
 						theme.fg("accent", details.answer),
 					0,
@@ -336,7 +337,11 @@ WHEN NOT TO USE:
 			}
 			const idx = details.options.indexOf(details.answer) + 1;
 			const display = idx > 0 ? `${idx}. ${details.answer}` : details.answer;
-			return new Text(theme.fg("success", "✓ ") + theme.fg("accent", display), 0, 0);
+			return new Text(
+				theme.fg("success", `${getIcon("success")} `) + theme.fg("accent", display),
+				0,
+				0
+			);
 		},
 	});
 }

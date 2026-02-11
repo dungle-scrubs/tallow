@@ -28,6 +28,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getIcon, getSpinner } from "../_icons/index.js";
 
 // ANSI escape codes for Catppuccin Macchiato colors (medium-dark variant)
 // Crust bg: #181926, Mauve: #c6a0f6, Text: #cad3f5
@@ -394,7 +395,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						(s) => theme.fg("muted", s),
 						"Running..."
 					);
-					(loader as unknown as Record<string, string[]>).frames = ["◐", "◓", "◑", "◒"];
+					(loader as unknown as Record<string, string[]>).frames = getSpinner();
 					activeLoaders.set(tid, loader);
 				}
 				if (loader) {
@@ -529,15 +530,15 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			let statusColor: "success" | "warning" | "error" | "accent";
 			switch (status) {
 				case "running":
-					icon = "●";
+					icon = getIcon("in_progress");
 					statusColor = "accent";
 					break;
 				case "completed":
-					icon = "✓";
+					icon = getIcon("success");
 					statusColor = "success";
 					break;
 				default:
-					icon = "✗";
+					icon = getIcon("error");
 					statusColor = "error";
 			}
 
@@ -640,7 +641,12 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			}
 			const status = details?.status ?? "unknown";
 			const duration = details?.duration ?? "";
-			const icon = status === "running" ? "●" : status === "completed" ? "✓" : "✗";
+			const icon =
+				status === "running"
+					? getIcon("in_progress")
+					: status === "completed"
+						? getIcon("success")
+						: getIcon("error");
 			const color: "success" | "accent" | "error" =
 				status === "completed" ? "success" : status === "running" ? "accent" : "error";
 			return new Text(
@@ -708,7 +714,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				const text = result.content[0];
 				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
 			}
-			return new Text(theme.fg("warning", "✗ Killed"), 0, 0);
+			return new Text(theme.fg("warning", `${getIcon("error")} Killed`), 0, 0);
 		},
 	});
 
@@ -920,15 +926,15 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 							let iconColor: string;
 							switch (task.status) {
 								case "running":
-									statusIcon = "●";
+									statusIcon = getIcon("in_progress");
 									iconColor = FG_PURPLE; // Light blue dot
 									break;
 								case "completed":
-									statusIcon = "✓";
+									statusIcon = getIcon("success");
 									iconColor = FG_LIGHT_GREEN; // Light green
 									break;
 								case "killed":
-									statusIcon = "✗";
+									statusIcon = getIcon("error");
 									iconColor = FG_LIGHT_RED; // Light red
 									break;
 								default:
@@ -965,13 +971,13 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						let statusText: string;
 						switch (task.status) {
 							case "running":
-								statusText = `${FG_PURPLE}● RUNNING${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
+								statusText = `${FG_PURPLE}${getIcon("in_progress")} RUNNING${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
 								break;
 							case "completed":
-								statusText = `${FG_LIGHT_GREEN}✓ COMPLETED${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
+								statusText = `${FG_LIGHT_GREEN}${getIcon("success")} COMPLETED${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
 								break;
 							case "killed":
-								statusText = `${FG_LIGHT_RED}✗ KILLED${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
+								statusText = `${FG_LIGHT_RED}${getIcon("error")} KILLED${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
 								break;
 							default:
 								statusText = `${FG_LIGHT_RED}! FAILED${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}`;
@@ -1076,7 +1082,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			} else {
 				const lines = running.map((t) => {
 					const duration = formatDuration(Date.now() - t.startTime);
-					return `● ${t.id}: ${truncateCommand(t.command, 40)} (${duration})`;
+					return `${getIcon("in_progress")} ${t.id}: ${truncateCommand(t.command, 40)} (${duration})`;
 				});
 				ctx.ui.notify(`Running Background Tasks:\n${lines.join("\n")}`, "info");
 			}

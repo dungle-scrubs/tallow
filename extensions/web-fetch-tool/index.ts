@@ -11,6 +11,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { getIcon } from "../_icons/index.js";
 
 /** Minimal TUI component — raw render function for explicit line order. */
 interface RenderComponent {
@@ -250,13 +251,13 @@ WHEN TO USE:
 			// Build the summary footer
 			let footer: string;
 			if (details.isError) {
-				footer = theme.fg("error", `✗ ${details.error || "Failed"}`);
+				footer = theme.fg("error", `${getIcon("error")} ${details.error || "Failed"}`);
 			} else {
 				const source = details.source === "firecrawl" ? " via Firecrawl" : "";
 				const size = details.totalBytes ? ` (${(details.totalBytes / 1024).toFixed(1)}KB)` : "";
 				const truncNote = details.truncated && details.source !== "firecrawl" ? " [truncated]" : "";
 				footer =
-					theme.fg("success", "✓ ") +
+					theme.fg("success", `${getIcon("success")} `) +
 					theme.fg("dim", details.url ?? "") +
 					theme.fg("muted", size + source + truncNote);
 			}
