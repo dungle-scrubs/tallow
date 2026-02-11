@@ -45,7 +45,7 @@ Read the full [documentation](https://tallow.dungle-scrubs.com).
 
 ```bash
 npm install -g tallow
-tallow install
+npx tallow install
 ```
 
 ### From source
