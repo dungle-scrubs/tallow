@@ -9,7 +9,7 @@ function buildExtensionSidebar() {
 	const groups = new Map();
 
 	for (const entry of readdirSync(extDir, { withFileTypes: true })) {
-		if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+		if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
 		const jsonPath = join(extDir, entry.name, "extension.json");
 		try {
 			const meta = JSON.parse(readFileSync(jsonPath, "utf-8"));
