@@ -37,8 +37,13 @@ const TALLOW_HOME = join(homedir(), ".tallow");
 const SETTINGS_PATH = join(TALLOW_HOME, "settings.json");
 const TEMPLATES_DIR = join(PACKAGE_DIR, "templates");
 
-/** True when running from a git clone (dev), false when installed from npm. */
-const IS_SOURCE_INSTALL = existsSync(join(PACKAGE_DIR, ".git"));
+/**
+ * True when running from a git clone (dev), false when installed from npm.
+ * Checks for both .git (repo) and tsconfig (can compile). Without tsconfig,
+ * there's nothing to build even if .git somehow exists.
+ */
+const IS_SOURCE_INSTALL =
+	existsSync(join(PACKAGE_DIR, ".git")) && existsSync(join(PACKAGE_DIR, "tsconfig.build.json"));
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
