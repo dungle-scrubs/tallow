@@ -35,7 +35,9 @@ program
 	.version(TALLOW_VERSION)
 	.option("-p, --print <prompt>", "Single-shot: run prompt and print result")
 	.option("-c, --continue", "Continue most recent session")
-	.option("-m, --model <model>", "Model to use (provider/id)")
+	.option("-m, --model <model>", "Model to use (provider/model-id)")
+	.option("--provider <provider>", "Provider to use (anthropic, openai, google, etc.)")
+	.option("--api-key <key>", "Runtime API key (not persisted). Requires --provider or -m")
 	.option("--mode <mode>", "Run mode: interactive, rpc, json", "interactive")
 	.option("--thinking <level>", "Thinking level: off, minimal, low, medium, high, xhigh")
 	.option("--no-session", "Don't persist session (in-memory only)")
@@ -52,6 +54,14 @@ program
 	.command("install")
 	.description("Interactive installer — choose extensions, themes, and set up tallow")
 	.option("-y, --yes", "Non-interactive: keep all settings, update templates")
+	.option("--default-provider <provider>", "Set default provider (anthropic, openai, google)")
+	.option("--default-model <model>", "Set default model ID (e.g., claude-sonnet-4)")
+	.option("--api-key <key>", "Set API key for the default provider")
+	.option("--theme <name>", "Set default theme")
+	.option(
+		"--thinking <level>",
+		"Set default thinking level (off, minimal, low, medium, high, xhigh)"
+	)
 	.action(async () => {
 		// Dynamically import so the main CLI stays lightweight
 		await import("./install.js");
@@ -62,19 +72,21 @@ program.parse();
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function run(opts: {
-	print?: string;
+	apiKey?: string;
 	continue?: boolean;
-	model?: string;
-	mode: string;
-	thinking?: string;
-	session?: boolean;
 	extension?: string[];
 	extensions?: boolean;
-	list?: boolean;
 	home?: boolean;
 	init?: boolean;
 	initOnly?: boolean;
+	list?: boolean;
 	maintenance?: boolean;
+	mode: string;
+	model?: string;
+	print?: string;
+	provider?: string;
+	session?: boolean;
+	thinking?: string;
 }): Promise<void> {
 	// Quick info commands
 	if (opts.home) {
@@ -107,10 +119,29 @@ async function run(opts: {
 
 	// ── Build session options ────────────────────────────────────────────────
 
+	// ── Parse model string (provider/model-id) ──────────────────────────────
+
+	let provider = opts.provider;
+	let modelId: string | undefined;
+
+	if (opts.model) {
+		const slashIdx = opts.model.indexOf("/");
+		if (slashIdx !== -1) {
+			provider = opts.model.slice(0, slashIdx);
+			modelId = opts.model.slice(slashIdx + 1);
+		} else {
+			// Bare model name — use as modelId, provider from --provider or settings
+			modelId = opts.model;
+		}
+	}
+
 	const sessionOpts: TallowSessionOptions = {
 		additionalExtensions: opts.extension,
+		apiKey: opts.apiKey,
+		modelId,
 		noBundledExtensions: opts.extensions === false,
 		noBundledSkills: opts.extensions === false,
+		provider,
 	};
 
 	// Session strategy

@@ -23,8 +23,17 @@ export interface TallowSessionOptions {
 	/** Working directory. Default: process.cwd() */
 	cwd?: string;
 
-	/** Model provider/id to use. If omitted, uses default from settings or first available. */
+	/** Pre-resolved Model object. Takes precedence over provider/modelId strings. */
 	model?: CreateAgentSessionOptions["model"];
+
+	/** Provider name (e.g., "anthropic"). Used with modelId for string-based resolution. */
+	provider?: string;
+
+	/** Model ID (e.g., "claude-sonnet-4"). Used with provider for string-based resolution. */
+	modelId?: string;
+
+	/** Runtime API key override (not persisted to auth.json). Requires provider to be set. */
+	apiKey?: string;
 
 	/** Thinking level. Default: from settings or "off" */
 	thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
@@ -121,6 +130,16 @@ export async function createTallowSession(
 
 	const authStorage = new AuthStorage(join(TALLOW_HOME, "auth.json"));
 	const modelRegistry = new ModelRegistry(authStorage, join(TALLOW_HOME, "models.json"));
+
+	// ── Runtime API key (not persisted) ──────────────────────────────────────
+
+	if (options.apiKey) {
+		const keyProvider = options.provider ?? options.model?.provider;
+		if (!keyProvider) {
+			throw new Error("--api-key requires --provider or --model to be specified");
+		}
+		authStorage.setRuntimeApiKey(keyProvider, options.apiKey);
+	}
 
 	// ── Settings ─────────────────────────────────────────────────────────────
 
@@ -242,12 +261,32 @@ export async function createTallowSession(
 			break;
 	}
 
+	// ── Model resolution (string → Model object) ────────────────────────────
+
+	let resolvedModel = options.model;
+	if (!resolvedModel && options.provider) {
+		const modelId = options.modelId ?? settingsManager.getDefaultModel();
+		if (modelId) {
+			resolvedModel = modelRegistry.find(options.provider, modelId) ?? undefined;
+			if (!resolvedModel) {
+				throw new Error(`Model ${options.provider}/${modelId} not found`);
+			}
+		} else {
+			// Provider without model: find any available model for this provider
+			const available = modelRegistry.getAll().filter((m) => m.provider === options.provider);
+			if (available.length === 0) {
+				throw new Error(`No models found for provider "${options.provider}"`);
+			}
+			resolvedModel = available[0];
+		}
+	}
+
 	// ── Create Session ───────────────────────────────────────────────────────
 
 	const result = await createAgentSession({
 		cwd,
 		agentDir: TALLOW_HOME,
-		model: options.model,
+		model: resolvedModel,
 		thinkingLevel: options.thinkingLevel,
 		authStorage,
 		modelRegistry,
