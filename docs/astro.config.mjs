@@ -81,10 +81,10 @@ export default defineConfig({
 				{
 					label: "Extensions",
 					items: [
-					{ label: "Overview", slug: "extensions/overview" },
-					{ label: "Aliases", slug: "extensions/aliases" },
-					...buildExtensionSidebar(),
-				],
+						{ label: "Overview", slug: "extensions/overview" },
+						{ label: "Aliases", slug: "extensions/aliases" },
+						...buildExtensionSidebar(),
+					],
 				},
 				{
 					label: "Development",

@@ -15,7 +15,14 @@
  */
 
 import { execSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +36,9 @@ const PACKAGE_DIR = resolve(__dirname_, "..");
 const TALLOW_HOME = join(homedir(), ".tallow");
 const SETTINGS_PATH = join(TALLOW_HOME, "settings.json");
 const TEMPLATES_DIR = join(PACKAGE_DIR, "templates");
+
+/** True when running from a git clone (dev), false when installed from npm. */
+const IS_SOURCE_INSTALL = existsSync(join(PACKAGE_DIR, ".git"));
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -301,13 +311,15 @@ async function runNonInteractive(): Promise<void> {
 	console.log("🕯️  tallow install (non-interactive)");
 	console.log("");
 
-	console.log("Building...");
-	try {
-		exec("npm run build", PACKAGE_DIR);
-		console.log("✓ Built successfully");
-	} catch (error) {
-		console.error("✗ Build failed:", error instanceof Error ? error.message : String(error));
-		process.exit(1);
+	if (IS_SOURCE_INSTALL) {
+		console.log("Building...");
+		try {
+			exec("npm run build", PACKAGE_DIR);
+			console.log("✓ Built successfully");
+		} catch (error) {
+			console.error("✗ Build failed:", error instanceof Error ? error.message : String(error));
+			process.exit(1);
+		}
 	}
 
 	const templates = installTemplates();
@@ -315,17 +327,19 @@ async function runNonInteractive(): Promise<void> {
 		console.log(`✓ Added ${templates.copied} new template files`);
 	}
 
-	console.log("Installing globally...");
-	try {
-		exec("npm link", PACKAGE_DIR);
-		console.log("✓ Installed globally");
-	} catch (error) {
-		console.error(
-			"✗ Global install failed:",
-			error instanceof Error ? error.message : String(error)
-		);
-		console.log(`  Try manually: cd ${PACKAGE_DIR} && npm link`);
-		process.exit(1);
+	if (IS_SOURCE_INSTALL) {
+		console.log("Installing globally...");
+		try {
+			exec("npm link", PACKAGE_DIR);
+			console.log("✓ Installed globally");
+		} catch (error) {
+			console.error(
+				"✗ Global install failed:",
+				error instanceof Error ? error.message : String(error)
+			);
+			console.log(`  Try manually: cd ${PACKAGE_DIR} && npm link`);
+			process.exit(1);
+		}
 	}
 
 	console.log("");
@@ -423,14 +437,16 @@ async function runUpgrade(existing: ExistingInstall): Promise<void> {
 
 	const s = p.spinner();
 
-	s.start("Building tallow...");
-	try {
-		exec("npm run build", PACKAGE_DIR);
-		s.stop("Built successfully");
-	} catch (error) {
-		s.stop("Build failed");
-		p.log.error(error instanceof Error ? error.message : String(error));
-		process.exit(1);
+	if (IS_SOURCE_INSTALL) {
+		s.start("Building tallow...");
+		try {
+			exec("npm run build", PACKAGE_DIR);
+			s.stop("Built successfully");
+		} catch (error) {
+			s.stop("Build failed");
+			p.log.error(error instanceof Error ? error.message : String(error));
+			process.exit(1);
+		}
 	}
 
 	// Copy any new agents/commands — preserves user edits
@@ -439,14 +455,16 @@ async function runUpgrade(existing: ExistingInstall): Promise<void> {
 		p.log.info(`Added ${templates.copied} new template files`);
 	}
 
-	s.start("Reinstalling globally...");
-	try {
-		exec("npm link", PACKAGE_DIR);
-		s.stop("Installed globally ✓");
-	} catch (error) {
-		s.stop("Global install failed");
-		p.log.error(error instanceof Error ? error.message : String(error));
-		p.log.info(`Try manually: cd ${PACKAGE_DIR} && npm link`);
+	if (IS_SOURCE_INSTALL) {
+		s.start("Reinstalling globally...");
+		try {
+			exec("npm link", PACKAGE_DIR);
+			s.stop("Installed globally ✓");
+		} catch (error) {
+			s.stop("Global install failed");
+			p.log.error(error instanceof Error ? error.message : String(error));
+			p.log.info(`Try manually: cd ${PACKAGE_DIR} && npm link`);
+		}
 	}
 
 	p.note(
@@ -622,19 +640,21 @@ async function runFullInstall(
 
 	if (isCancel(confirm) || !confirm) cancelled();
 
-	// ── Step 3: Build ────────────────────────────────────────────────────────
+	// ── Step 3: Build (source installs only) ─────────────────────────────────
 
 	const s = p.spinner();
 
-	s.start("Building tallow...");
-	try {
-		exec("npm run build", PACKAGE_DIR);
-		s.stop("Built successfully");
-	} catch (error) {
-		s.stop("Build failed");
-		const msg = error instanceof Error ? error.message : String(error);
-		p.log.error(msg);
-		process.exit(1);
+	if (IS_SOURCE_INSTALL) {
+		s.start("Building tallow...");
+		try {
+			exec("npm run build", PACKAGE_DIR);
+			s.stop("Built successfully");
+		} catch (error) {
+			s.stop("Build failed");
+			const msg = error instanceof Error ? error.message : String(error);
+			p.log.error(msg);
+			process.exit(1);
+		}
 	}
 
 	// ── Step 4: Set up ~/.tallow/ ────────────────────────────────────────────
@@ -648,7 +668,9 @@ async function runFullInstall(
 	// Copy agents and commands — skips files the user already has
 	const templates = installTemplates();
 	if (templates.copied > 0) {
-		p.log.info(`Installed ${templates.copied} template files (${templates.skipped} already existed)`);
+		p.log.info(
+			`Installed ${templates.copied} template files (${templates.skipped} already existed)`
+		);
 	}
 
 	// Merge into existing settings — only touch what the installer manages
@@ -670,7 +692,7 @@ async function runFullInstall(
 
 	// ── Step 5: Global install ───────────────────────────────────────────────
 
-	if (installGlobal) {
+	if (installGlobal && IS_SOURCE_INSTALL) {
 		s.start("Installing globally via npm link...");
 		try {
 			exec("npm link", PACKAGE_DIR);
