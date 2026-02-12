@@ -113,8 +113,10 @@ export function visibleWidth(str: string): number {
 		// Strip all CSI sequences: ESC [ (optional ?/!/>) params final-byte
 		// Covers SGR (m), cursor movement (A-H), erase (J/K), DEC private mode (?25l/h), etc.
 		clean = clean.replace(/\x1b\[[?!>]?[0-9;]*[a-zA-Z]/g, "");
-		// Strip OSC 8 hyperlinks: \x1b]8;;URL\x07 and \x1b]8;;\x07
-		clean = clean.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
+		// Strip all OSC sequences: \x1b]...\x07 or \x1b]...\x1b\\
+		// Covers OSC 8 hyperlinks, OSC 1337 (iTerm2 SetUserVar), and any other OSC
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+		clean = clean.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 		// Strip APC sequences: \x1b_...\x07 or \x1b_...\x1b\\ (used for cursor marker)
 		clean = clean.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 	}
