@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
@@ -298,6 +299,22 @@ function filterByTags(themes: readonly ThemeEntry[], tags: string[]): readonly T
 }
 
 /**
+ * Read the `randomThemeOnStart` setting from settings.json.
+ *
+ * @returns `false` (disabled), `true` (pick from all), or `string[]` (filter by tags)
+ */
+function readRandomThemeSetting(): false | true | string[] {
+	const settingsPath = join(homedir(), ".tallow", "settings.json");
+	try {
+		const raw = readFileSync(settingsPath, "utf-8");
+		const settings = JSON.parse(raw) as { randomThemeOnStart?: boolean | string[] };
+		return settings.randomThemeOnStart ?? false;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Persist theme selection to settings.json so it survives restarts.
  */
 function persistTheme(themeName: string): void {
@@ -326,7 +343,38 @@ function persistTheme(themeName: string): void {
 
 // ── Extension ────────────────────────────────────────────────────────────────
 
+/** Guards against re-rolling the theme on `/reload` (which re-fires session_start). */
+let isInitialLaunch = true;
+
 export default function (pi: ExtensionAPI) {
+	// ── Random theme on fresh launch ─────────────────────────────
+
+	pi.on("session_start", async (_event, ctx) => {
+		if (!isInitialLaunch) return;
+		isInitialLaunch = false;
+
+		if (!ctx.hasUI) return;
+
+		const setting = readRandomThemeSetting();
+		if (setting === false) return;
+
+		const availableThemes = ctx.ui.getAllThemes();
+		let pool: readonly ThemeEntry[] = THEMES.filter((t) =>
+			availableThemes.some((at) => at.name === t.name)
+		);
+
+		if (Array.isArray(setting)) {
+			pool = filterByTags(pool, setting);
+			if (pool.length === 0) return; // no tag matches — keep persisted theme
+		}
+
+		if (pool.length === 0) return;
+
+		const theme = pickRandom(pool);
+		ctx.ui.setTheme(theme.name);
+		// Intentionally NOT calling persistTheme() — random picks are ephemeral
+	});
+
 	pi.registerCommand("theme", {
 		description:
 			"Switch color theme. Usage: /theme [name|tag…|random [tag…]]. Tags: warm, cool, muted, vibrant, minimal, neon, earthy, retro, pastel, high-contrast, low-contrast",
