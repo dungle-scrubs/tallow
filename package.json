@@ -85,6 +85,11 @@
 	"bugs": {
 		"url": "https://github.com/dungle-scrubs/tallow/issues"
 	},
+	"pnpm": {
+		"overrides": {
+			"@mariozechner/pi-tui": "file:packages/tallow-tui"
+		}
+	},
 	"author": "Kevin Frilot",
 	"license": "MIT",
 	"keywords": [

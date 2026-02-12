@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@mariozechner/pi-tui': file:packages/tallow-tui
+
 importers:
 
   .:
@@ -33,6 +36,9 @@ importers:
       '@mariozechner/pi-ai':
         specifier: 0.52.9
         version: 0.52.9(ws@8.19.0)(zod@3.25.76)
+      '@mariozechner/pi-tui':
+        specifier: file:packages/tallow-tui
+        version: '@tallow/tui@file:packages/tallow-tui'
       '@types/node':
         specifier: ^25.2.2
         version: 25.2.3
@@ -365,10 +371,6 @@ packages:
     engines: {node: '>=20.0.0'}
     hasBin: true
 
-  '@mariozechner/pi-tui@0.52.9':
-    resolution: {integrity: sha512-YHVZLRz9ULVlubRi51P1AQj7oOb+caiTv/HsNa7r587ale8kLNBx2Sa99fRWuFhNPu+SniwVi4pgqvkrWAcd/w==}
-    engines: {node: '>=20.0.0'}
-
   '@mistralai/mistralai@1.10.0':
     resolution: {integrity: sha512-tdIgWs4Le8vpvPiUEWne6tK0qbVc+jMenujnvTqOjogrJUsCSQhus0tHTU1avDDh5//Rq2dFgP9mWRAdIEoBqg==}
 
@@ -603,6 +605,10 @@ packages:
   '@smithy/uuid@1.1.0':
     resolution: {integrity: sha512-4aUIteuyxtBUhVdiQqcDhKFitwfd9hqoSDYY2KRXiWtgoWJ9Bmise+KfEPDiVHWeJepvF8xJO9/9+WDIciMFFw==}
     engines: {node: '>=18.0.0'}
+
+  '@tallow/tui@file:packages/tallow-tui':
+    resolution: {directory: packages/tallow-tui, type: directory}
+    engines: {node: '>=22'}
 
   '@tokenizer/inflate@0.4.1':
     resolution: {integrity: sha512-2mAv+8pkG6GIZiF1kNg1jAjh27IDxEPKwdGul3snfztFerfPGI1LjDezZp3i7BElXompqEtPmoPx6c2wgtWsOA==}
@@ -1927,7 +1933,7 @@ snapshots:
       '@mariozechner/jiti': 2.6.5
       '@mariozechner/pi-agent-core': 0.52.9(ws@8.19.0)(zod@3.25.76)
       '@mariozechner/pi-ai': 0.52.9(ws@8.19.0)(zod@3.25.76)
-      '@mariozechner/pi-tui': 0.52.9
+      '@mariozechner/pi-tui': '@tallow/tui@file:packages/tallow-tui'
       '@silvia-odwyer/photon-node': 0.3.4
       chalk: 5.6.2
       cli-highlight: 2.1.11
@@ -1950,14 +1956,6 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
-
-  '@mariozechner/pi-tui@0.52.9':
-    dependencies:
-      '@types/mime-types': 2.1.4
-      chalk: 5.6.2
-      get-east-asian-width: 1.4.0
-      marked: 15.0.12
-      mime-types: 3.0.2
 
   '@mistralai/mistralai@1.10.0':
     dependencies:
@@ -2297,6 +2295,14 @@ snapshots:
   '@smithy/uuid@1.1.0':
     dependencies:
       tslib: 2.8.1
+
+  '@tallow/tui@file:packages/tallow-tui':
+    dependencies:
+      '@types/mime-types': 2.1.4
+      chalk: 5.6.2
+      get-east-asian-width: 1.4.0
+      marked: 15.0.12
+      mime-types: 3.0.2
 
   '@tokenizer/inflate@0.4.1':
     dependencies:
