@@ -110,8 +110,9 @@ export function visibleWidth(str: string): number {
 		clean = clean.replace(/\t/g, "   ");
 	}
 	if (clean.includes("\x1b")) {
-		// Strip SGR codes (\x1b[...m) and cursor codes (\x1b[...G/K/H/J)
-		clean = clean.replace(/\x1b\[[0-9;]*[mGKHJ]/g, "");
+		// Strip all CSI sequences: ESC [ (optional ?/!/>) params final-byte
+		// Covers SGR (m), cursor movement (A-H), erase (J/K), DEC private mode (?25l/h), etc.
+		clean = clean.replace(/\x1b\[[?!>]?[0-9;]*[a-zA-Z]/g, "");
 		// Strip OSC 8 hyperlinks: \x1b]8;;URL\x07 and \x1b]8;;\x07
 		clean = clean.replace(/\x1b\]8;;[^\x07]*\x07/g, "");
 		// Strip APC sequences: \x1b_...\x07 or \x1b_...\x1b\\ (used for cursor marker)
@@ -144,11 +145,18 @@ export function extractAnsiCode(str: string, pos: number): { code: string; lengt
 
 	const next = str[pos + 1];
 
-	// CSI sequence: ESC [ ... m/G/K/H/J
+	// CSI sequence: ESC [ (optional ?/!/>) digits/semicolons then final letter
+	// Covers SGR, cursor movement, erase, DEC private mode, etc.
 	if (next === "[") {
 		let j = pos + 2;
-		while (j < str.length && !/[mGKHJ]/.test(str[j]!)) j++;
-		if (j < str.length) return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+		// Skip optional DEC private mode prefix (?, !, >)
+		if (j < str.length && (str[j] === "?" || str[j] === "!" || str[j] === ">")) j++;
+		// Skip parameter bytes (digits and semicolons)
+		while (j < str.length && /[0-9;]/.test(str[j]!)) j++;
+		// Must end with a letter (final byte of CSI sequence)
+		if (j < str.length && /[a-zA-Z]/.test(str[j]!)) {
+			return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+		}
 		return null;
 	}
 
@@ -899,4 +907,31 @@ export function extractSegments(
 	}
 
 	return { before, beforeWidth, after, afterWidth };
+}
+
+// ─── OSC 8 Hyperlinks ────────────────────────────────────────────────────────
+
+/**
+ * Wrap visible text in an OSC 8 terminal hyperlink.
+ * The text remains visible; clicking it opens the URL in the terminal's handler.
+ *
+ * @param url - Target URL (e.g. "file:///path/to/file", "https://...")
+ * @param text - Visible text to display
+ * @returns Text wrapped in OSC 8 escape sequences
+ */
+export function hyperlink(url: string, text: string): string {
+	return `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+}
+
+/**
+ * Wrap a file path in an OSC 8 hyperlink using the file:// protocol.
+ * The display text is the path itself (or a custom label).
+ *
+ * @param filePath - Absolute file path
+ * @param displayText - Optional display text (defaults to filePath)
+ * @returns Path wrapped in a file:// OSC 8 hyperlink
+ */
+export function fileLink(filePath: string, displayText?: string): string {
+	const url = `file://${encodeURI(filePath)}`;
+	return hyperlink(url, displayText ?? filePath);
 }
