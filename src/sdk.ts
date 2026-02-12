@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
 	AuthStorage,
 	type CreateAgentSessionOptions,
@@ -94,6 +94,38 @@ export interface TallowSession {
 
 	/** Bundled extensions overridden by user extensions (name → user path) */
 	extensionOverrides: Array<{ name: string; userPath: string }>;
+}
+
+// ─── Skill Name Normalization ────────────────────────────────────────────────
+
+/**
+ * Normalize all skill names to their parent directory name.
+ *
+ * The directory name is the canonical skill identifier — Claude Code works
+ * the same way. The frontmatter `name` field is treated as a display hint,
+ * not an identifier. This strips name-related diagnostics from the framework
+ * which validates frontmatter `name` against the Agent Skills spec.
+ *
+ * @param result - Skills and diagnostics from loadSkills
+ * @returns Skills with directory-based names and filtered diagnostics
+ */
+function normalizeSkillNames<D extends { message: string }>(result: {
+	skills: Skill[];
+	diagnostics: D[];
+}): { skills: Skill[]; diagnostics: D[] } {
+	const skills = result.skills.map((skill) => {
+		const dirName = basename(dirname(skill.filePath));
+		if (skill.name === dirName) return skill;
+		return { ...skill, name: dirName };
+	});
+
+	const diagnostics = result.diagnostics.filter(
+		(d) =>
+			!d.message.includes("does not match parent directory") &&
+			!d.message.includes("invalid characters")
+	);
+
+	return { skills, diagnostics };
 }
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
@@ -211,15 +243,14 @@ export async function createTallowSession(
 					return append ? [...base, append] : base;
 				}
 			: undefined,
-		skillsOverride: options.additionalSkills
-			? (base) => {
-					const extra = options.additionalSkills;
-					return {
-						skills: extra ? [...base.skills, ...extra] : base.skills,
-						diagnostics: base.diagnostics,
-					};
-				}
-			: undefined,
+		skillsOverride: (base) => {
+			const normalized = normalizeSkillNames(base);
+			const extra = options.additionalSkills;
+			return {
+				skills: extra ? [...normalized.skills, ...extra] : normalized.skills,
+				diagnostics: normalized.diagnostics,
+			};
+		},
 		promptsOverride: options.additionalPrompts
 			? (base) => {
 					const extra = options.additionalPrompts;
