@@ -103,8 +103,8 @@ async function run(opts: {
 		}
 		for (const s of sessions) {
 			const date = s.modified.toLocaleDateString();
-			const msg = s.firstMessage?.slice(0, 60) ?? "(empty)";
-			console.log(`  ${date}  ${s.messageCount} msgs  ${msg}`);
+			const label = s.name ?? s.firstMessage?.slice(0, 60) ?? "(empty)";
+			console.log(`  ${date}  ${s.messageCount} msgs  ${label}`);
 		}
 		return;
 	}
