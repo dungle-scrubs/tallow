@@ -1,0 +1,53 @@
+---
+title: random-spinner
+description: Random cli-spinners preset on each session start.
+---
+
+Replaces the default loader spinner (dots) with a randomly-picked
+preset from 56 curated [cli-spinners](https://github.com/sindresorhus/cli-spinners)
+on each session start. All presets are inlined — no external
+dependency at runtime.
+
+## Configuration
+
+Pin a specific spinner in `~/.tallow/settings.json`:
+
+```json
+{
+  "spinner": "arc"
+}
+```
+
+Omit the key (or set `"random"`) to get a different spinner each
+session. Disable the extension entirely to always use the default
+dots.
+
+## Available presets
+
+56 presets selected for reliable rendering in common monospace
+terminal fonts. Only frames using well-supported Unicode blocks
+(ASCII, Braille, Box Drawing, Block Elements, Geometric Shapes,
+etc.) are included.
+
+Some examples: `dots`, `arc`, `arrow`, `bouncingBar`, `clock`,
+`earth`, `moon`, `runner`, `star`, `toggle`.
+
+## How it works
+
+At `session_start`, the extension reads the `spinner` setting. If
+absent or `"random"`, it picks a random preset from the built-in
+map. The chosen frames and interval are applied to the global
+`Loader` instance via `Loader.setDefaultSpinner()`.
+
+The [\_icons](/extensions/overview/) extension sets a baseline
+spinner via `getSpinner()`. This extension overrides that baseline
+— it loads after `_icons` in the extension order.
+
+## Relationships with other extensions
+
+### [\_icons](/extensions/overview/)
+
+The icon registry provides `getSpinner()` which returns the
+user-configured spinner frames. `random-spinner` overrides the
+Loader's spinner directly, taking precedence over the icon
+registry's default.

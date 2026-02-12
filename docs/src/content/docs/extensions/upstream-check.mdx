@@ -1,0 +1,33 @@
+---
+title: upstream-check
+description: Dev-only version check for upstream pi dependencies.
+---
+
+Compares pinned versions of `@mariozechner/pi-coding-agent` and
+`@mariozechner/pi-tui` against the npm registry. Only registers
+when `packages/tallow-tui/` exists — i.e. inside the tallow dev
+checkout. Does nothing when tallow is installed as a package.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/upstream` | Check for new upstream versions |
+
+## How it works
+
+The extension reads the current pinned versions from
+`package.json` (both `dependencies` and `devDependencies`), then
+fetches the latest published versions from the npm registry with
+a 4-second timeout. If a newer version is available, it displays
+a notification with the current and latest versions.
+
+Multiple outdated packages are combined into a single
+notification rather than showing one per package.
+
+## When it loads
+
+The extension checks for `packages/tallow-tui/` at startup. If
+that directory doesn't exist, it skips registration entirely —
+no commands, no network calls. This ensures it only activates
+in the tallow development environment.

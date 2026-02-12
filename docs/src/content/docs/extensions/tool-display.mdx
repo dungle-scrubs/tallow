@@ -11,3 +11,13 @@ Tools can opt out of truncation entirely.
 This is a library extension, other tool extensions (bash-live,
 read-summary, etc.) import its configuration to ensure consistent
 display behavior across all tools.
+
+## Clickable file paths
+
+File tool headers (read, edit, write) emit
+[OSC 8 hyperlinks](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda),
+making file paths clickable in supported terminals (iTerm2,
+WezTerm, Kitty, Windows Terminal, GNOME Terminal 3.26+, etc.).
+Clicking a path opens the file in the system default handler.
+Terminals that don't support OSC 8 display the path as plain
+text — no visual difference.
