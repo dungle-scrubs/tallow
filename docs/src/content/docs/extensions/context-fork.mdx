@@ -1,0 +1,238 @@
+---
+title: context-fork
+description: Run commands and skills in isolated pi subprocesses.
+---
+
+Execute slash commands and skills with `context: fork` frontmatter in isolated
+pi subprocesses. Each fork gets its own context window, optional agent configuration,
+and model routing. Results flow back into the main conversation.
+
+## Fork vs inline execution
+
+Commands and skills normally run **inline** — their content is expanded and sent
+directly to the current conversation. With `context: fork`, the command spawns a
+separate pi process that:
+
+- Has no access to the parent conversation history
+- Can use a different model than the parent
+- Can be restricted to specific tools and skills via agent config
+- Returns only the final assistant output to the parent
+
+This is useful for:
+
+- **Heavy tasks** that need isolation to avoid polluting the main context
+- **Specialized agents** with different tool access or system prompts
+- **Model routing** — run cheap tasks on Haiku, complex ones on Sonnet
+
+## Frontmatter fields
+
+Add these to command/skill markdown files:
+
+```yaml
+---
+context: fork        # Required: tells context-fork to intercept
+agent: researcher    # Optional: load agent config from .tallow/agents/
+model: haiku         # Optional: model alias or full ID
+allowed-tools: "*"   # Parsed but ignored (no permission system)
+---
+```
+
+### `context: fork | inline`
+
+- **fork** — spawn subprocess, isolated execution
+- **inline** (default) — expand inline, no subprocess
+
+### `agent: <name>`
+
+Loads agent configuration from:
+
+1. Bundled agents (shipped with tallow)
+2. Package agents (from settings.json packages)
+3. `~/.claude/agents/` (user-level, Claude Code compatibility)
+4. `~/.tallow/agents/` (user-level, tallow)
+5. `.claude/agents/` (project-level, Claude Code compatibility)
+6. `.tallow/agents/` (project-level, tallow)
+
+Priority: last wins per name. `.tallow/` takes precedence over `.claude/`.
+
+Agent config provides:
+
+- `tools: bash, read, edit` — tool allowlist for subprocess
+- `skills: path/to/skill` — skills to load
+- `model: sonnet` — default model if the command doesn't specify one
+- System prompt — injected via `--append-system-prompt`
+
+If the agent is not found, the command shows an error notification with available
+agent names.
+
+### `model: <value>`
+
+Model to use for the subprocess. Can be:
+
+- **Alias**: `sonnet`, `haiku`, `opus` — maps to latest 4.5 release
+- **Full ID**: `claude-sonnet-4-5-20250514` — passes through as-is
+- **inherit** (default) — subprocess uses the default model from config
+
+Priority: command model > agent model > inherit.
+
+The resolved model is shown in the fork result display.
+
+### `allowed-tools`
+
+Parsed but ignored. Tallow has no permission system — tool access is controlled
+via the agent's `tools:` frontmatter field.
+
+## Model aliases
+
+Short aliases map to full Anthropic model IDs:
+
+| Alias | Full model ID |
+|-------|---------------|
+| `sonnet` | `claude-sonnet-4-5-20250514` |
+| `haiku` | `claude-haiku-4-5-20250514` |
+| `opus` | `claude-opus-4-5-20250514` |
+
+Full model IDs pass through unchanged.
+
+## Display
+
+Fork commands show a compact `🔀` prefix in chat:
+
+```
+🔀 /research quantum computing
+```
+
+The working indicator shows:
+
+```
+🔀 forking: /research → researcher (haiku)
+```
+
+When complete, the result includes:
+
+- Command name
+- Agent name (if configured)
+- Model used
+- Execution duration
+
+## Subprocess behavior
+
+Each fork:
+
+1. Spawns `pi --mode json -p --no-session` in the current working directory
+2. Passes `--models <model>` if a model is specified
+3. Passes `--tools <tool1>,<tool2>` from agent config
+4. Passes `--skill <path>` for each skill in agent config
+5. Writes the agent system prompt to a temp file and passes `--append-system-prompt`
+6. Sends the command content as the task input
+7. Collects JSON events from stdout
+8. Extracts the final assistant `message_end` text
+9. Sends that text back to the parent conversation with `triggerTurn: true`
+
+Shell interpolation (`$(command)`) and file references (`@file.txt`) are expanded
+**before** the content is sent to the subprocess.
+
+Timeout: 5 minutes. The subprocess receives SIGTERM, then SIGKILL after 5 seconds.
+
+## Argument substitution
+
+Fork commands support the same argument substitution as inline commands:
+
+- `$ARGUMENTS` — full argument string
+- `$@` — same as `$ARGUMENTS`
+- `$1`, `$2`, `$3` — individual positional arguments
+- `${@:2}` — all arguments starting from the 2nd
+- `${@:2:3}` — 3 arguments starting from the 2nd
+
+Example:
+
+```markdown
+---
+name: search
+description: Search codebase with agent
+context: fork
+agent: searcher
+model: haiku
+---
+
+Find all occurrences of "$1" in the codebase and explain the pattern.
+Focus on: $2
+```
+
+Usage: `/search DatabaseConnection usage patterns`
+
+## Example: research agent fork
+
+```markdown
+---
+name: research
+description: Deep research task with isolation
+context: fork
+agent: researcher
+model: sonnet
+---
+
+Research the following topic in depth. Use web search, read documentation,
+and synthesize findings into a structured report.
+
+Topic: $ARGUMENTS
+```
+
+Agent config at `~/.tallow/agents/researcher.md`:
+
+```markdown
+---
+name: researcher
+description: Research specialist with web access
+tools: bash, read
+skills: ~/.tallow/skills/web-search
+model: haiku
+---
+
+You are a research specialist. Your job is to gather information from
+multiple sources, cross-reference facts, and produce clear, cited reports.
+
+Always include sources and confidence levels for claims.
+```
+
+When you run `/research quantum computing`, the extension:
+
+1. Loads the researcher agent config
+2. Resolves model: command says `sonnet`, agent says `haiku` → sonnet wins
+3. Spawns pi subprocess with `--tools bash,read --skill ~/.tallow/skills/web-search`
+4. Injects the researcher system prompt
+5. Sends "Research the following topic in depth... Topic: quantum computing"
+6. Collects final output
+7. Sends it back to the main conversation
+
+## Extension order
+
+This extension must hook `input` **before** command-prompt and minimal-skill-display
+to intercept fork commands. Alphabetically, `context-fork` comes before both, which
+is correct.
+
+The extension returns `{ action: "handled" }` for fork commands, preventing other
+extensions from processing them inline.
+
+## Relationships with other extensions
+
+### [command-prompt](/extensions/command-prompt/)
+
+context-fork enhances command-prompt by adding fork execution mode. When a command
+has `context: fork` frontmatter, context-fork intercepts it before command-prompt
+can expand it inline.
+
+### [skill-commands](/extensions/skill-commands/)
+
+Same enhancement for skills. Skills with `context: fork` spawn subprocesses instead
+of inline expansion.
+
+### [minimal-skill-display](/extensions/minimal-skill-display/)
+
+context-fork must run before minimal-skill-display to intercept fork skills first.
+Extension load order is alphabetical, which ensures correct priority.
+
+### [claude-bridge](/extensions/claude-bridge/)
+
+Agent loading scans both `.tallow/agents/` and `.claude/agents/` directories.
+`.tallow/` wins on name collision.

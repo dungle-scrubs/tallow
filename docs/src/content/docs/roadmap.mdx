@@ -78,7 +78,7 @@ extension, agents run in the background with log files.
   <div class="roadmap-header">
     <h3>Unified Plugin System (Claude Code + pi compatible)</h3>
     <span class="roadmap-badge" data-complexity="high">High complexity</span>
-    <span class="roadmap-badge" data-status="in-progress">Nearly complete</span>
+    <span class="roadmap-badge" data-status="in-progress">Mostly shipped</span>
   </div>
   <div class="roadmap-description">
 
@@ -107,7 +107,7 @@ project level.
 **Scopes:**
 
 <ul class="roadmap-checklist">
-  <li data-done><strong>Commands.</strong> .tallow/commands/ project-local and ~/.tallow/commands/ global, via commands-folder extension. Also scans commands/ in local paths listed in settings.json packages.</li>
+  <li data-done><strong>Commands.</strong> .tallow/commands/ and .claude/commands/ at project and user levels, via command-prompt extension. Also scans commands/ in local paths listed in settings.json packages.</li>
   <li data-done><strong>Prompts.</strong> .tallow/prompts/ and ~/.tallow/prompts/ natively discovered by pi. Registered as /name slash commands.</li>
   <li data-done><strong>CC Hooks.</strong> hooks.json from packages, extensions, and project/global paths all merged additively. Extension-level hooks.json scanning in ~/.tallow/extensions/*/hooks.json and .tallow/extensions/*/hooks.json. Runtime hooks via hooks:merge event bus.</li>
   <li data-done><strong>CC Context.</strong> CLAUDE.md and AGENTS.md loaded natively by pi from cwd, ancestor directories, and ~/.tallow/. Injected into system prompt automatically. The <a href="/extensions/context-files/">context-files</a> extension supplements this by loading both files when they coexist (pi picks only one) and scanning subdirectories.</li>
@@ -118,7 +118,7 @@ project level.
   <li data-done><strong>Extensions.</strong> .tallow/extensions/ discovered natively by pi at project level, alongside ~/.tallow/extensions/.</li>
 </ul>
 
-**Remaining:** `.claude/commands/` directory scanning (currently only `.tallow/commands/`), `.claude.json` settings passthrough.
+**Remaining:** `.claude.json` settings passthrough.
 
   </div>
   <div class="roadmap-meta">

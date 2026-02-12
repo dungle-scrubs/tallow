@@ -1,0 +1,141 @@
+---
+title: claude-bridge
+description: Bridge .claude/ directories for Claude Code compatibility.
+---
+
+Makes tallow discover and use resources from `.claude/` directories, providing
+compatibility with Claude Code's file layout conventions. Bridges skills, agents,
+and commands.
+
+## What gets bridged
+
+The extension enables cross-compatibility with Claude Code by scanning both
+`.tallow/` and `.claude/` directories:
+
+| Resource | Bridged by | Paths |
+|----------|------------|-------|
+| **Skills** | claude-bridge | `~/.claude/skills/`, `.claude/skills/` |
+| **Agents** | subagent-tool, agent-commands-tool, context-fork | `~/.claude/agents/`, `.claude/agents/` |
+| **Commands** | command-prompt | `~/.claude/commands/`, `.claude/commands/` |
+
+## Skill bridging
+
+This extension hooks `resources_discover` to inject `.claude/skills/` paths
+into the pi framework's skill loader. Discovered skills:
+
+- Appear in the system prompt's skill descriptions
+- Are callable via `/skill:name` commands
+- Work identically to `.tallow/skills/` skills
+
+Paths checked:
+
+1. **~/.claude/skills/** — user-level
+2. **.claude/skills/** — project-level (relative to cwd)
+
+The pi framework merges these with `.tallow/skills/` paths from built-in discovery.
+
+## Agent and command bridging
+
+Agents and commands use **inline bridging** — each extension that loads these
+resources scans both `.tallow/` and `.claude/` directories directly:
+
+- **Agents**: [subagent-tool](/extensions/subagent-tool/),
+  [agent-commands-tool](/extensions/agent-commands-tool/),
+  [context-fork](/extensions/context-fork/)
+- **Commands**: [command-prompt](/extensions/command-prompt/)
+
+This is different from skills because agents and commands are extension-specific,
+not framework-level resources.
+
+## Priority on name collision
+
+When a resource exists in both `.tallow/` and `.claude/`, **.tallow/ wins**:
+
+```
+.tallow/skills/researcher/    ← loaded (priority)
+.claude/skills/researcher/    ← skipped (collision)
+```
+
+This applies at each scope level:
+
+- User level: `~/.tallow/skills/` > `~/.claude/skills/`
+- Project level: `.tallow/skills/` > `.claude/skills/`
+
+The priority is implemented via **load order** — `.claude/` paths are loaded first,
+then `.tallow/` paths overwrite any duplicate names in the map.
+
+## Why separate extension for skills?
+
+Skills use the `resources_discover` hook to integrate with the pi framework's
+built-in skill loader. This needs to run **before** skills are processed during
+session initialization.
+
+Agents and commands are extension-owned resources, so each extension handles
+`.claude/` scanning directly in its own discovery logic.
+
+## Directory structure example
+
+```
+~/
+├── .claude/
+│   ├── skills/
+│   │   └── web-search/
+│   ├── agents/
+│   │   └── researcher.md
+│   └── commands/
+│       └── analyze.md
+└── .tallow/
+    ├── skills/
+    │   └── code-review/
+    ├── agents/
+    │   └── tester.md
+    └── commands/
+        └── refactor.md
+
+project/
+├── .claude/
+│   ├── skills/
+│   │   └── project-utils/
+│   ├── agents/
+│   │   └── deployer.md
+│   └── commands/
+│       └── build.md
+└── .tallow/
+    ├── skills/
+    │   └── test-runner/
+    ├── agents/
+    │   └── reviewer.md
+    └── commands/
+        └── deploy.md
+```
+
+All resources from both `.claude/` and `.tallow/` directories are available.
+If both have a resource with the same name, `.tallow/` version is used.
+
+## Relationships with other extensions
+
+### [skill-commands](/extensions/skill-commands/)
+
+claude-bridge enhances skill-commands by providing `.claude/skills/` paths via
+the `resources_discover` hook. skill-commands processes these paths the same
+way it handles `.tallow/skills/` paths.
+
+### [subagent-tool](/extensions/subagent-tool/)
+
+subagent-tool handles `.claude/agents/` bridging directly in its agent discovery
+logic, not via this extension.
+
+### [agent-commands-tool](/extensions/agent-commands-tool/)
+
+agent-commands-tool handles `.claude/agents/` bridging directly, same as
+subagent-tool.
+
+### [context-fork](/extensions/context-fork/)
+
+context-fork scans `.claude/agents/` alongside `.tallow/agents/` when resolving
+agent configurations for fork commands.
+
+### [command-prompt](/extensions/command-prompt/)
+
+command-prompt scans `.claude/commands/` alongside `.tallow/commands/` when
+building the command index.

@@ -19,16 +19,17 @@
 
 ---
 
-36 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
+38 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
 ## Features
 
-- **36 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
+- **38 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
 - **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
 - **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
 - **8 specialized agents** — architect, debug, planner, refactor, reviewer, scout, worker, tallow-expert
 - **Multi-agent teams** — coordinate multiple agents with task boards, messaging, and archive/resume
+- **Claude Code compatible** — `.claude/` directory bridging for seamless use of Tallow skills, agents, and commands in Claude Code
 - **SDK** — embed Tallow in your own scripts and orchestrators
 - **User-owned config** — agents and commands are installed to `~/.tallow/` where you can edit, remove, or add your own
 
