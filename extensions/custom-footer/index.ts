@@ -300,14 +300,17 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 								: `${modelName} • ${thinkingLevel}`;
 					}
 
+					// Session name (set by session-namer extension)
+					const sessionName = sessionManager.getSessionName?.() ?? "";
+
 					// Responsive layout
 					const useWide = width >= MIN_WIDE_WIDTH;
 
 					if (useWide) {
-						// 2-line layout
+						// 2-line layout (+ optional 3rd for session name)
 						const line1 = alignLeftRight(
-							theme.fg("dim", truncateToWidth(pwd, width - gitBranch.length - 2, "...")),
-							theme.fg("accent", gitBranch),
+							theme.fg("dim", truncateToWidth(pwd, width - visibleWidth(gitBranch) - 2, "...")),
+							gitBranch,
 							width
 						);
 						const line2 = alignLeftRight(
@@ -315,15 +318,24 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 							theme.fg("dim", modelStr),
 							width
 						);
-						return [line1, line2];
+						if (!sessionName) return [line1, line2];
+						const nameStr = theme.fg("dim", `─ ${sessionName}`);
+						const pad = Math.max(0, width - visibleWidth(nameStr));
+						return [line1, line2, " ".repeat(pad) + nameStr];
 					}
-					// 4-line stacked layout
-					return [
+					// Narrow stacked layout (+ optional row for session name)
+					const lines = [
 						theme.fg("dim", truncateToWidth(pwd, width, "...")),
 						theme.fg("accent", gitBranch || "(no branch)"),
 						theme.fg("dim", truncateToWidth(statsAndStatus, width, "...")),
 						theme.fg("dim", truncateToWidth(modelStr, width, "...")),
 					];
+					if (sessionName) {
+						const nameStr = theme.fg("dim", `─ ${sessionName}`);
+						const pad = Math.max(0, width - visibleWidth(nameStr));
+						lines.push(" ".repeat(pad) + nameStr);
+					}
+					return lines;
 				},
 
 				invalidate(): void {
