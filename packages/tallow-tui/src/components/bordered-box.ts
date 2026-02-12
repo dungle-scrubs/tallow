@@ -8,7 +8,7 @@
  */
 
 import { type BorderStyle, defaultBorderStyle } from "../border-styles.js";
-import { visibleWidth } from "../utils.js";
+import { truncateToWidth, visibleWidth } from "../utils.js";
 import { Text } from "./text.js";
 
 /** Configuration for a BorderedBox. */
@@ -73,13 +73,13 @@ export class BorderedBox extends Text {
 		if (this.options.title) {
 			const titleStr = ` ${colorTitle(this.options.title)} `;
 			const titleVisLen = visibleWidth(titleStr);
-			const remaining = width - 2 - titleVisLen;
-			const rightFill = Math.max(0, remaining);
+			// topLeft(1) + leftBar(1) + titleStr + rightBar(rightFill) + topRight(1)
+			const rightFill = Math.max(0, width - 3 - titleVisLen);
 			topBar =
 				colorBorder(style.topLeft) +
 				colorBorder(style.horizontal) +
 				titleStr +
-				colorBorder(style.horizontal.repeat(Math.max(0, rightFill))) +
+				colorBorder(style.horizontal.repeat(rightFill)) +
 				colorBorder(style.topRight);
 		} else {
 			topBar =
@@ -90,12 +90,12 @@ export class BorderedBox extends Text {
 
 		// Content lines with side borders
 		const bodyLines = this.contentLines.map((line) => {
-			const lineWidth = visibleWidth(line);
-			const fill = Math.max(0, innerWidth - lineWidth);
+			const clamped = visibleWidth(line) > innerWidth ? truncateToWidth(line, innerWidth) : line;
+			const fill = Math.max(0, innerWidth - visibleWidth(clamped));
 			return (
 				colorBorder(style.vertical) +
 				pad +
-				line +
+				clamped +
 				" ".repeat(fill) +
 				pad +
 				colorBorder(style.vertical)
