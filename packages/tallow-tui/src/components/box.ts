@@ -17,6 +17,9 @@ export class Box implements Component {
 	private paddingY: number;
 	private bgFn?: (text: string) => string;
 
+	/** Optional badge rendered in the lower-right corner of the box. */
+	private _badge: string | null = null;
+
 	// Cache for rendered output
 	private cache?: RenderCache;
 
@@ -24,6 +27,27 @@ export class Box implements Component {
 		this.paddingX = paddingX;
 		this.paddingY = paddingY;
 		this.bgFn = bgFn;
+	}
+
+	/**
+	 * Get the current badge text.
+	 *
+	 * @returns Badge string or null if no badge is set
+	 */
+	get badge(): string | null {
+		return this._badge;
+	}
+
+	/**
+	 * Set a badge to render in the lower-right corner of the box.
+	 * Pass null to clear. Does NOT invalidate content cache — the badge
+	 * is composited on top of cached content at render time, so badge
+	 * changes don't trigger expensive re-renders of parent components.
+	 *
+	 * @param value - Badge text (may include ANSI codes) or null
+	 */
+	set badge(value: string | null) {
+		this._badge = value;
 	}
 
 	addChild(component: Component): void {
@@ -95,32 +119,54 @@ export class Box implements Component {
 		// Check if bgFn output changed by sampling
 		const bgSample = this.bgFn ? this.bgFn("test") : undefined;
 
-		// Check cache validity
-		if (this.matchCache(width, childLines, bgSample)) {
-			return this.cache!.lines;
+		// Check cache validity (badge excluded — applied on top below)
+		if (!this.matchCache(width, childLines, bgSample)) {
+			// Apply background and padding
+			const result: string[] = [];
+
+			// Top padding
+			for (let i = 0; i < this.paddingY; i++) {
+				result.push(this.applyBg("", width));
+			}
+
+			// Content
+			for (const line of childLines) {
+				result.push(this.applyBg(line, width));
+			}
+
+			// Bottom padding
+			for (let i = 0; i < this.paddingY; i++) {
+				result.push(this.applyBg("", width));
+			}
+
+			// Update cache (base content only, no badge)
+			this.cache = { childLines, width, bgSample, lines: result };
 		}
 
-		// Apply background and padding
-		const result: string[] = [];
+		return this.applyBadge(this.cache!.lines, width);
+	}
 
-		// Top padding
-		for (let i = 0; i < this.paddingY; i++) {
-			result.push(this.applyBg("", width));
-		}
+	/**
+	 * Composite the badge onto the last line of rendered output.
+	 * Returns the original array if no badge is set; clones and
+	 * modifies the last element otherwise (avoids mutating cache).
+	 *
+	 * @param lines - Base rendered lines (from cache)
+	 * @param width - Full render width
+	 * @returns Lines with badge composited, or original if no badge
+	 */
+	private applyBadge(lines: string[], width: number): string[] {
+		if (this._badge == null || lines.length === 0) return lines;
 
-		// Content
-		for (const line of childLines) {
-			result.push(this.applyBg(line, width));
-		}
+		const badgeWidth = visibleWidth(this._badge);
+		const insertCol = width - badgeWidth - this.paddingX;
+		if (insertCol < this.paddingX) return lines;
 
-		// Bottom padding
-		for (let i = 0; i < this.paddingY; i++) {
-			result.push(this.applyBg("", width));
-		}
-
-		// Update cache
-		this.cache = { childLines, width, bgSample, lines: result };
-
+		// Clone to avoid mutating cached lines
+		const result = [...lines];
+		const lastIdx = result.length - 1;
+		const line = " ".repeat(insertCol) + this._badge + " ".repeat(this.paddingX);
+		result[lastIdx] = this.applyBg(line, width);
 		return result;
 	}
 

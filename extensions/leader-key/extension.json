@@ -1,0 +1,10 @@
+{
+	"name": "leader-key",
+	"version": "0.1.0",
+	"description": "Leader key layer — Ctrl+X activates a secondary keymap with visual feedback",
+	"category": "input",
+	"tags": ["keybindings", "input", "modal"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}

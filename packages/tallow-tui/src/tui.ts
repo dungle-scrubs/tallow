@@ -928,8 +928,8 @@ export class TUI extends Container {
 		const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
 		const logRedraw = (reason: string): void => {
 			if (!debugRedraw) return;
-			const logPath = path.join(os.homedir(), ".pi", "agent", "pi-debug.log");
-			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
+			const logPath = path.join(os.homedir(), ".pi", "agent", "redraw.log");
+			const msg = `[${new Date().toISOString()}] fullRender(clear): ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, max=${this.maxLinesRendered}, height=${height})\n`;
 			fs.appendFileSync(logPath, msg);
 		};
 
@@ -1035,10 +1035,31 @@ export class TUI extends Container {
 		// Use previousLines.length (not maxLinesRendered) to avoid false positives after content shrinks
 		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
 		if (firstChanged < previousContentViewportTop) {
-			// First change is above previous viewport - need full re-render
-			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${previousContentViewportTop})`);
-			fullRender(true);
-			return;
+			// Changes exist above viewport. Instead of a full clear+redraw (which
+			// resets scroll position), clamp to the visible range and only render
+			// what's on screen. Above-viewport changes are absorbed into
+			// previousLines so the next comparison uses the updated content.
+			let visFirst = -1;
+			let visLast = -1;
+			for (let i = previousContentViewportTop; i < maxLines; i++) {
+				const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
+				const newLine = i < newLines.length ? newLines[i] : "";
+				if (oldLine !== newLine) {
+					if (visFirst === -1) visFirst = i;
+					visLast = i;
+				}
+			}
+			if (visFirst === -1) {
+				// No visible changes — silently absorb above-viewport diffs
+				this.positionHardwareCursor(cursorPos, newLines.length);
+				this.previousLines = newLines;
+				this.previousWidth = width;
+				this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+				return;
+			}
+			firstChanged = visFirst;
+			lastChanged = visLast;
+			// Fall through to incremental render for the visible portion
 		}
 
 		// Render from first changed line to end
