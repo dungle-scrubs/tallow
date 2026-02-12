@@ -7,7 +7,7 @@
  * title so named sessions are identifiable across tabs.
  *
  * - On agent_end (first turn): fires-and-forgets a Haiku call to name the session
- * - /name command: manual view/override
+ * - Built-in /name command handles manual view/override
  * - --no-session-name flag: opt out
  */
 
@@ -187,24 +187,5 @@ export default function (pi: ExtensionAPI): void {
 		})();
 	});
 
-	// ── /name command: view or override session name ──
-	pi.registerCommand("name", {
-		description: "View or set the session name",
-		handler: async (args, ctx) => {
-			if (!args || !args.trim()) {
-				const name = pi.getSessionName();
-				if (name) {
-					ctx.ui.notify(`Session name: ${name}`, "info");
-				} else {
-					ctx.ui.notify("No session name set. Use /name <text> to set one.", "info");
-				}
-				return;
-			}
-
-			const name = args.trim();
-			pi.setSessionName(name);
-			ctx.ui.setTitle(`tallow — ${name}`);
-			ctx.ui.notify(`Session name set: ${name}`, "info");
-		},
-	});
+	// Built-in /name command handles view/set — no need to register one here.
 }
