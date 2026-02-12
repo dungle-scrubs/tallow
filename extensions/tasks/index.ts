@@ -2382,7 +2382,7 @@ EXAMPLES:
 ${taskList}
 ${focusText}
 
-When you complete a task, mark it with [DONE] or include "completed:" followed by the task description.
+Complete a task the moment its work succeeds — call manage_tasks complete BEFORE responding to anything else. Never answer a new question while finished tasks remain in_progress.
 Before calling manage_tasks complete/update, call manage_tasks list first so indices are current.`,
 				display: false,
 			},
