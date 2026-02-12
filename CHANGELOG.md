@@ -86,17 +86,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - "Tallow Slash Commands" design constraints moved to `command-prompt`'s
     `before_agent_start` hook
   - Instructions now only appear when their owning extension is loaded
+- **TUI fork** — `@mariozechner/pi-tui` forked as `packages/tallow-tui` for
+  direct control over TUI primitives
+  - `BorderedBox` component with configurable border styles (single, double,
+    rounded, heavy, double-single, single-double)
+  - `Loader` hide/show support with `HIDE` sentinel for suppressing spinners
+  - OSC 8 hyperlink utilities for clickable terminal links
+- **Random spinner** — new `random-spinner` extension picks a random spinner
+  preset from 56 curated cli-spinners on each session start. Pin a specific
+  spinner via `{ "spinner": "arc" }` in `settings.json`, or disable the
+  extension to use the default dots
+- **Clickable file paths** — tool output headers (read, edit, write) now emit
+  OSC 8 hyperlinks, making file paths clickable in supported terminals
+- **Health bordered output** — `/health` diagnostics wrapped in a rounded
+  border box for cleaner visual separation
+- **Upstream check** — dev-only `upstream-check` extension with `/upstream`
+  command. Compares pinned versions of pi-coding-agent and pi-tui against the
+  npm registry. Only loads inside the tallow dev checkout
 
 ### Changed
 
 - **Subagent UI** — animated progress indicators for chain mode (spinner while
   running, checkmark/X on completion). Agent prose uses subdued color to recede
   behind structural elements.
+- **Session namer** — `/name` is now a built-in pi command; removed the
+  duplicate registration from the session-namer extension
+- **Session memory** — replaced `better-sqlite3` native addon with a pure
+  JavaScript sqlite adapter for lighter installation
 
 ### Fixed
 
 - **Plan mode** — extension tools now preserved across mode transitions instead
   of being dropped when toggling plan mode on/off.
+- **Tasks** — fallback spinner frames when `getSpinner()` returns null; validate
+  `index` param before using it
+- **Ask-user-question** — hide "Working..." loader during question prompt and
+  restore it after the user answers
+- **Claude bridge** — package-aware collision detection for SKILL.md paths; skip
+  `.claude/skills/` entries that collide with tallow skills
+- **SDK** — normalize skill names to directory name (e.g. `my-skill/SKILL.md` →
+  `my-skill`)
+- **Skill commands** — validate and normalize skill names before registration
+- **CLI** — prefer session name over truncated first message in `--list` output
+- **TUI fork** — override pi-tui to use tallow fork for all packages; clamp
+  content and fix title width in BorderedBox
+- **Upstream check** — check devDependencies in addition to dependencies;
+  combine multiple version notifications into a single message
+- **File tool headers** — show full relative path instead of truncated basename
 
 ## [0.1.0] - 2025-02-11
 

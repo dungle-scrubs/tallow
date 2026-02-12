@@ -19,12 +19,12 @@
 
 ---
 
-38 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
+42 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
 ## Features
 
-- **38 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
+- **42 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
 - **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
 - **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
 - **8 specialized agents** — architect, debug, planner, refactor, reviewer, scout, worker, tallow-expert
