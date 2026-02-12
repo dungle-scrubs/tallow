@@ -2,7 +2,7 @@
  * Enhanced write tool — shows full written content with summary footer.
  */
 import { createWriteTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { fileLink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { renderLines } from "../tool-display/index.js";
 
@@ -25,7 +25,11 @@ export default function writePreview(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
-			return new Text(theme.fg("toolTitle", theme.bold("write ")) + theme.fg("muted", path), 0, 0);
+			return new Text(
+				theme.fg("toolTitle", theme.bold("write ")) + theme.fg("muted", fileLink(path)),
+				0,
+				0
+			);
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
@@ -60,7 +64,14 @@ export default function writePreview(pi: ExtensionAPI): void {
 				return renderLines((textContent?.text ?? "").split("\n"));
 			}
 
-			const footer = theme.fg("muted", `${getIcon("success")} ${details._summary ?? "file"}`);
+			const summary = details._summary ?? "file";
+			// Linkify the file path portion of the summary (everything before the parens)
+			const parenIdx = summary.indexOf(" (");
+			const linkedSummary =
+				parenIdx > 0
+					? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
+					: fileLink(summary);
+			const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
 			const body = details._content ?? "";
 			const contentLines = body.split("\n").map((line) => theme.fg("dim", line));
 			return renderLines([...contentLines, "", footer]);
