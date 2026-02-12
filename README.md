@@ -19,6 +19,10 @@
 
 ---
 
+<p align="center">
+  <img src="assets/screenshot.jpg" alt="Tallow multi-agent team coordinating a docs audit" />
+</p>
+
 41 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
