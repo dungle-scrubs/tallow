@@ -1,17 +1,10 @@
 /**
  * Leader Key Extension
  *
- * Ctrl+X activates Vimium-style hint labels. A floating panel lists all
- * hintable elements (tool outputs). Type the label characters to act on
- * that element — opening a full-screen pager with the complete content.
- *
- * The screen is "frozen" while the panel is visible: the overlay covers
- * normal interaction, and the LeaderKeyLayer middleware intercepts all
- * keystrokes until the user selects a hint or cancels.
- *
- * Supported hintable types:
- * - Tool outputs (bash, etc.) → full-screen pager showing complete content
- * - File tools (read/write/edit) → pager with option to open in yazi
+ * Ctrl+X activates leader mode: two-char hint labels appear at the
+ * bottom-right of every visible tool component. Scroll is frozen so
+ * labels render in place without jumping. Type the two chars to open
+ * a full-screen pager with that tool's complete output.
  */
 
 import { spawnSync } from "node:child_process";
@@ -36,33 +29,10 @@ import {
 } from "@mariozechner/pi-tui";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Hintable abstraction — generic target for leader key actions
+// Tool component discovery
 // ═══════════════════════════════════════════════════════════════════════════
 
-/**
- * Action to perform when a hint is selected.
- * Extend this union to support new element types.
- */
-type HintAction =
-	| { kind: "pager"; title: string; content: string; filePath?: string }
-	| { kind: "open"; filePath: string };
-
-/**
- * An interactive element that can be labeled and acted upon.
- */
-interface Hintable {
-	title: string;
-	action: HintAction;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Hint finders — discover hintable elements in the TUI tree
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Shape of an expandable tool component (duck-typed).
- * Matches ToolExecutionComponent, BashExecutionComponent, etc.
- */
+/** Duck-typed expandable tool component. */
 interface ToolLikeComponent extends Component {
 	setExpanded(expanded: boolean): void;
 	contentBox: { badge: string | null };
@@ -111,6 +81,20 @@ function isToolLike(c: unknown): c is ToolLikeComponent {
 }
 
 /**
+ * Find all tool components in the TUI tree (most recent first).
+ *
+ * @param tui - TUI instance to walk
+ * @returns Array of tool components
+ */
+function findTools(tui: TUI): ToolLikeComponent[] {
+	return [...walkTree(tui)].filter(isToolLike).reverse() as ToolLikeComponent[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Content extraction
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
  * Extract text content from a tool component's result.
  * For bash tools with truncated output, reads the full output file.
  *
@@ -126,7 +110,6 @@ function extractContent(comp: ToolLikeComponent): string {
 			// Fall through to result content
 		}
 	}
-
 	if (!comp.result?.content) return "(no output)";
 	const text = comp.result.content
 		.filter((c) => c.type === "text" && c.text)
@@ -149,28 +132,8 @@ function extractTitle(comp: ToolLikeComponent): string {
 	return name;
 }
 
-/**
- * Find all hintable tool components in the TUI tree.
- * Returns them in reverse document order (most recent first).
- *
- * @param tui - TUI instance to walk
- * @returns Array of hintables
- */
-function findToolHintables(tui: TUI): Hintable[] {
-	const tools = [...walkTree(tui)].filter(isToolLike).reverse();
-	return tools.map((comp) => {
-		const title = extractTitle(comp);
-		const content = extractContent(comp);
-		const filePath = typeof comp.args?.path === "string" ? (comp.args.path as string) : undefined;
-		return {
-			title,
-			action: { kind: "pager" as const, title, content, filePath },
-		};
-	});
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
-// HintListOverlay — floating panel listing hintable elements
+// Label styling
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** Magenta ANSI foreground */
@@ -183,105 +146,20 @@ const D = "\x1b[2m";
 const R = "\x1b[0m";
 
 /**
- * Build a styled label showing the full hint with typed prefix dimmed.
- * Returns null for labels that don't match the current buffer.
+ * Build a styled badge showing the full label with typed prefix dimmed.
+ * Returns null for non-matching labels.
  *
- * @param label - Full hint label (e.g., "ab")
- * @param buffer - Characters typed so far (e.g., "a")
- * @returns Styled label string, or null if label doesn't match buffer
+ * @param label - Full label (e.g., "ab")
+ * @param buffer - Characters typed so far
+ * @returns Styled badge string or null
  */
-function styledLabel(label: string, buffer: string): string | null {
+function styledBadge(label: string, buffer: string): string | null {
 	if (buffer && !label.startsWith(buffer)) return null;
-	if (buffer.length === 0) return `${M}${B}${label}${R}`;
+	if (buffer.length === 0) return `\x1b[38;5;201;1m ${label} \x1b[22;39m`;
 	const typed = label.slice(0, buffer.length);
 	const remaining = label.slice(buffer.length);
-	if (!remaining) return null; // fully matched — handler should have fired
-	return `${D}${typed}${M}${B}${remaining}${R}`;
-}
-
-/**
- * Floating panel that displays hintable elements with their labels.
- * Display-only — input is handled by the LeaderKeyLayer middleware.
- */
-class HintListOverlay implements Component {
-	private items: { label: string; title: string }[];
-	private tui: TUI;
-
-	/** Current typed buffer — updated by the extension on each keystroke. */
-	buffer = "";
-
-	/**
-	 * @param tui - TUI instance for terminal dimensions
-	 * @param items - Hintable items with labels and display titles
-	 */
-	constructor(tui: TUI, items: { label: string; title: string }[]) {
-		this.tui = tui;
-		this.items = items;
-	}
-
-	invalidate(): void {
-		// No cached state to invalidate
-	}
-
-	/**
-	 * Render the hint list as a bordered panel.
-	 *
-	 * @param width - Available width from overlay layout
-	 * @returns Rendered lines
-	 */
-	render(width: number): string[] {
-		const innerWidth = width - 2; // border chars
-		const padWidth = innerWidth - 2; // inner padding
-		if (padWidth < 4) return [];
-
-		const result: string[] = [];
-
-		// ── Top border ──
-		const headerText = " ⌨ LEADER ";
-		const headerVis = visibleWidth(headerText);
-		const headerFill = Math.max(0, innerWidth - headerVis - 1);
-		result.push(`${M}╭─${B}${headerText}${R}${M}${"─".repeat(headerFill)}╮${R}`);
-
-		// ── Empty line for spacing ──
-		result.push(`${M}│${R}${" ".repeat(innerWidth)}${M}│${R}`);
-
-		// ── Items ──
-		const maxItems = this.tui.terminal.rows - 6; // leave room for borders/footer
-		let visibleCount = 0;
-
-		for (const { label, title } of this.items) {
-			if (visibleCount >= maxItems) break;
-			const badge = styledLabel(label, this.buffer);
-			if (badge == null) continue;
-			visibleCount++;
-
-			const labelColWidth = Math.max(...this.items.map((i) => i.label.length)) + 1;
-			const labelPad = " ".repeat(Math.max(0, labelColWidth - label.length));
-			const itemText = ` ${badge}${labelPad} ${title}`;
-			const itemVis = visibleWidth(itemText);
-			const truncated = itemVis > padWidth ? truncateToWidth(itemText, padWidth, "…") : itemText;
-			const truncVis = visibleWidth(truncated);
-			const truncPad = Math.max(0, padWidth - truncVis);
-			result.push(`${M}│${R} ${truncated}${" ".repeat(truncPad)} ${M}│${R}`);
-		}
-
-		if (visibleCount === 0) {
-			const msg = "No matching hints";
-			const pad = Math.max(0, padWidth - msg.length);
-			result.push(`${M}│${R} ${msg}${" ".repeat(pad)} ${M}│${R}`);
-		}
-
-		// ── Empty line for spacing ──
-		result.push(`${M}│${R}${" ".repeat(innerWidth)}${M}│${R}`);
-
-		// ── Bottom border with hints ──
-		const footer = `${D}type label · esc cancel${R}`;
-		const footerVis = visibleWidth(footer);
-		const footerFill = Math.max(0, innerWidth - footerVis - 2);
-		result.push(`${M}╰${"─".repeat(footerFill)} ${footer} ${M}╯${R}`);
-
-		return result;
-	}
+	if (!remaining) return null;
+	return `\x1b[38;5;240m ${typed}\x1b[38;5;201;1m${remaining} \x1b[22;39m`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -289,16 +167,9 @@ class HintListOverlay implements Component {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
- * Full-screen pager component with rounded border, scrolling,
- * and optional "open in yazi" support.
+ * Full-screen pager with scroll, yazi integration.
  *
- * Keybindings:
- * - Escape / q → dismiss
- * - ↑ / k → scroll up
- * - ↓ / j → scroll down
- * - PgUp / PgDn → page scroll
- * - g / G → top / bottom
- * - o → open in yazi (when filePath is set)
+ * Keys: esc/q dismiss, ↑↓/jk scroll, PgUp/PgDn page, g/G top/bottom, o yazi
  */
 class ContentViewer implements Component, Focusable {
 	focused = false;
@@ -316,11 +187,11 @@ class ContentViewer implements Component, Focusable {
 	onDismiss?: () => void;
 
 	/**
-	 * @param tui - TUI instance for terminal dimensions and render requests
+	 * @param tui - TUI instance
 	 * @param title - Header title
-	 * @param content - Full text content to display
-	 * @param filePath - Optional file path for "open in yazi" support
-	 * @param cwd - Working directory for resolving relative paths
+	 * @param content - Full text content
+	 * @param filePath - Optional file path for yazi
+	 * @param cwd - Working directory
 	 */
 	constructor(tui: TUI, title: string, content: string, filePath?: string, cwd?: string) {
 		this.tui = tui;
@@ -335,13 +206,11 @@ class ContentViewer implements Component, Focusable {
 	}
 
 	/**
-	 * Render the pager as a bordered frame filling the overlay area.
-	 *
-	 * @param width - Available width from overlay
-	 * @returns Rendered lines
+	 * @param width - Available width
+	 * @returns Rendered pager lines
 	 */
 	render(width: number): string[] {
-		const padWidth = width - 4; // 2 border + 2 inner padding
+		const padWidth = width - 4;
 		if (padWidth < 1) return [];
 
 		if (this.lastWrapWidth !== padWidth) {
@@ -358,7 +227,7 @@ class ContentViewer implements Component, Focusable {
 
 		const termHeight = this.tui.terminal.rows;
 		const frameHeight = Math.max(5, termHeight - 2);
-		const contentHeight = frameHeight - 2; // top + bottom border
+		const contentHeight = frameHeight - 2;
 		const totalLines = this.wrappedLines.length;
 		const maxScroll = Math.max(0, totalLines - contentHeight);
 		this.scrollOffset = Math.min(this.scrollOffset, maxScroll);
@@ -366,13 +235,11 @@ class ContentViewer implements Component, Focusable {
 		const innerWidth = width - 2;
 		const result: string[] = [];
 
-		// ── Top border with title ──
 		const titleText = ` ${this.title} `;
 		const titleVis = visibleWidth(titleText);
 		const topFill = Math.max(0, innerWidth - titleVis - 1);
 		result.push(`${M}╭─${B}${titleText}${R}${M}${"─".repeat(topFill)}╮${R}`);
 
-		// ── Content lines ──
 		const visible = this.wrappedLines.slice(this.scrollOffset, this.scrollOffset + contentHeight);
 		for (let i = 0; i < contentHeight; i++) {
 			const line = visible[i] ?? "";
@@ -381,9 +248,8 @@ class ContentViewer implements Component, Focusable {
 			result.push(`${M}│${R} ${line}${" ".repeat(pad)} ${M}│${R}`);
 		}
 
-		// ── Bottom border with hints + scroll position ──
 		const hints: string[] = [`${D}esc/q close · ↑↓/jk scroll${R}`];
-		if (this.filePath) hints.push(`${D}o open in yazi${R}`);
+		if (this.filePath) hints.push(`${D}o yazi${R}`);
 		const scrollInfo =
 			totalLines > contentHeight
 				? `${M}${this.scrollOffset + 1}-${Math.min(this.scrollOffset + contentHeight, totalLines)}/${totalLines}${R}`
@@ -397,8 +263,6 @@ class ContentViewer implements Component, Focusable {
 	}
 
 	/**
-	 * Handle keyboard input for scrolling and dismissal.
-	 *
 	 * @param data - Raw terminal input
 	 */
 	handleInput(data: string): void {
@@ -406,7 +270,6 @@ class ContentViewer implements Component, Focusable {
 			this.onDismiss?.();
 			return;
 		}
-
 		if (matchesKey(data, "o") && this.filePath) {
 			const resolved = path.isAbsolute(this.filePath)
 				? this.filePath
@@ -438,31 +301,29 @@ class ContentViewer implements Component, Focusable {
 }
 
 /**
- * Stop the TUI, spawn yazi at the given path, then restart.
+ * Stop TUI, spawn yazi, restart.
  *
- * @param tui - TUI instance to suspend/resume
- * @param filePath - File or directory path to open
+ * @param tui - TUI instance
+ * @param filePath - Path to open
  */
 function openInYazi(tui: TUI, filePath: string): void {
 	tui.stop();
 	try {
 		spawnSync("yazi", [filePath], { stdio: "inherit" });
 	} catch {
-		// yazi not installed or failed — silently ignore
+		// yazi not installed — silently ignore
 	}
 	tui.start();
 	tui.requestRender(true);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Editor border label
+// Editor with LEADER indicator
 // ═══════════════════════════════════════════════════════════════════════════
 
 const LEADER_LABEL = " ⌨ LEADER ";
 
-/**
- * Editor that shows a LEADER label in its top border when active.
- */
+/** Editor that shows LEADER in its top border when active. */
 class LeaderModeEditor extends CustomEditor {
 	public leaderActive = false;
 
@@ -473,7 +334,6 @@ class LeaderModeEditor extends CustomEditor {
 	override render(width: number): string[] {
 		const lines = super.render(width);
 		if (!this.leaderActive || lines.length === 0) return lines;
-
 		const first = lines[0];
 		const labelVis = visibleWidth(LEADER_LABEL);
 		const lineVis = visibleWidth(first);
@@ -489,7 +349,6 @@ class LeaderModeEditor extends CustomEditor {
 // Extension entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
-/** Bright magenta border for leader mode */
 const ACTIVE_BORDER_COLOR = (s: string): string => `\x1b[38;5;201m${s}\x1b[39m`;
 
 /**
@@ -501,94 +360,78 @@ export default function leaderKeyExtension(pi: ExtensionAPI): void {
 	let layer: LeaderKeyLayer | null = null;
 	let editor: LeaderModeEditor | null = null;
 	let tuiRef: TUI | null = null;
-	let overlayHandle: { hide: () => void } | null = null;
-	let hintOverlay: HintListOverlay | null = null;
-	let hints: { label: string; action: HintAction }[] = [];
+	let hints: { tool: ToolLikeComponent; label: string }[] = [];
 	let cwd = process.cwd();
 
 	/**
-	 * Execute a hint action (pager, open, etc.).
+	 * Open a pager showing the full content of a tool component.
 	 *
-	 * @param action - The action to perform
+	 * @param tool - Tool component to show
 	 */
-	function executeAction(action: HintAction): void {
+	function openPager(tool: ToolLikeComponent): void {
 		if (!tuiRef) return;
-		switch (action.kind) {
-			case "pager": {
-				const viewer = new ContentViewer(
-					tuiRef,
-					action.title,
-					action.content,
-					action.filePath,
-					cwd
-				);
-				const handle = tuiRef.showOverlay(viewer, {
-					width: "100%",
-					maxHeight: "100%",
-					margin: { top: 1, bottom: 1, left: 2, right: 2 },
-				});
-				viewer.onDismiss = () => handle.hide();
-				break;
-			}
-			case "open":
-				openInYazi(tuiRef, action.filePath);
-				break;
-		}
+		const title = extractTitle(tool);
+		const content = extractContent(tool);
+		const filePath = typeof tool.args?.path === "string" ? (tool.args.path as string) : undefined;
+		const viewer = new ContentViewer(tuiRef, title, content, filePath, cwd);
+		const handle = tuiRef.showOverlay(viewer, {
+			width: "100%",
+			maxHeight: "100%",
+			margin: { top: 1, bottom: 1, left: 2, right: 2 },
+		});
+		viewer.onDismiss = () => handle.hide();
 	}
 
-	/**
-	 * Show the hint overlay listing all discoverable tools.
-	 */
-	function showHints(): void {
+	/** Find tools, assign badges, freeze scroll. */
+	function activate(): void {
 		if (!tuiRef || !layer) return;
 
-		const hintables = findToolHintables(tuiRef);
-		if (hintables.length === 0) {
+		const tools = findTools(tuiRef);
+		if (tools.length === 0) {
 			layer.deactivate();
 			return;
 		}
 
-		const labels = generateHintLabels(hintables.length);
-		hints = hintables.map((h, i) => ({ label: labels[i], action: h.action }));
+		const labels = generateHintLabels(tools.length);
+		hints = tools.map((tool, i) => ({ tool, label: labels[i] }));
 
-		// Register sequences with the leader layer
-		for (const { label, action } of hints) {
-			layer.registerSequence(label, () => executeAction(action));
+		// Set badges on all tool contentBoxes
+		for (const { tool, label } of hints) {
+			tool.contentBox.badge = styledBadge(label, "");
+			layer.registerSequence(label, () => openPager(tool));
 		}
 
-		// Create and show the overlay panel
-		const items = hintables.map((h, i) => ({ label: labels[i], title: h.title }));
-		hintOverlay = new HintListOverlay(tuiRef, items);
-		overlayHandle = tuiRef.showOverlay(hintOverlay, {
-			width: "80%",
-			margin: { top: 2, bottom: 2 },
-		});
-
+		// Freeze scroll so badge render doesn't jump
+		tuiRef.setScrollFrozen(true);
 		tuiRef.requestRender();
 	}
 
-	/** Hide the hint overlay and clean up. */
-	function hideHints(): void {
-		overlayHandle?.hide();
-		overlayHandle = null;
-		hintOverlay = null;
+	/** Clear badges, unfreeze scroll. */
+	function deactivate(): void {
+		for (const { tool } of hints) {
+			tool.contentBox.badge = null;
+		}
 		hints = [];
 		layer?.clearSequences();
-	}
-
-	/**
-	 * Update the overlay to reflect the current typed buffer.
-	 *
-	 * @param buffer - Characters typed so far
-	 */
-	function narrowHints(buffer: string): void {
-		if (hintOverlay) {
-			hintOverlay.buffer = buffer;
-			tuiRef?.requestRender();
+		if (tuiRef) {
+			tuiRef.setScrollFrozen(false);
+			tuiRef.requestRender();
 		}
 	}
 
-	/** Update footer status indicator. */
+	/**
+	 * Update badges: matching labels show next char, others hide.
+	 *
+	 * @param buffer - Characters typed so far
+	 */
+	function narrowLabels(buffer: string): void {
+		for (const { tool, label } of hints) {
+			tool.contentBox.badge = styledBadge(label, buffer);
+		}
+		tuiRef?.requestRender();
+	}
+
+	/** Update status bar indicator. */
 	function setStatus(ctx: ExtensionContext, active: boolean): void {
 		ctx.ui.setStatus("leader-key", active ? "\x1b[38;5;201m⌨ LEADER\x1b[39m" : undefined);
 	}
@@ -603,14 +446,14 @@ export default function leaderKeyExtension(pi: ExtensionAPI): void {
 			onActivate: () => {
 				if (editor) editor.leaderActive = true;
 				setStatus(ctx, true);
-				showHints();
+				activate();
 			},
 			onDeactivate: () => {
 				if (editor) editor.leaderActive = false;
 				setStatus(ctx, false);
-				hideHints();
+				deactivate();
 			},
-			onBufferChange: narrowHints,
+			onBufferChange: narrowLabels,
 		});
 
 		ctx.ui.setEditorComponent((tui, theme, keybindings) => {
@@ -623,7 +466,7 @@ export default function leaderKeyExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", async () => {
-		hideHints();
+		deactivate();
 		layer?.detach();
 		layer = null;
 		editor = null;

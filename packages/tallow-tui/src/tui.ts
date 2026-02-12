@@ -220,6 +220,8 @@ export class TUI extends Container {
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
 	private fullRedrawCount = 0;
 	private stopped = false;
+	private scrollFrozen = false;
+	private frozenViewportTop = 0;
 
 	// Overlay stack for modal components rendered on top of base content
 	private overlayStack: {
@@ -265,6 +267,20 @@ export class TUI extends Container {
 	 */
 	setClearOnShrink(enabled: boolean): void {
 		this.clearOnShrink = enabled;
+	}
+
+	/**
+	 * Freeze or unfreeze scroll. While frozen the viewport stays put:
+	 * badge changes and spinner updates render in place, but new content
+	 * below the viewport is silently absorbed — no terminal scroll.
+	 *
+	 * @param frozen - true to freeze, false to resume normal scrolling
+	 */
+	setScrollFrozen(frozen: boolean): void {
+		if (frozen && !this.scrollFrozen) {
+			this.frozenViewportTop = Math.max(0, this.maxLinesRendered - this.terminal.rows);
+		}
+		this.scrollFrozen = frozen;
 	}
 
 	setFocus(component: Component | null): void {
@@ -875,7 +891,9 @@ export class TUI extends Container {
 		if (this.stopped) return;
 		const width = this.terminal.columns;
 		const height = this.terminal.rows;
-		let viewportTop = Math.max(0, this.maxLinesRendered - height);
+		let viewportTop = this.scrollFrozen
+			? this.frozenViewportTop
+			: Math.max(0, this.maxLinesRendered - height);
 		let prevViewportTop = this.previousViewportTop;
 		let hardwareCursorRow = this.hardwareCursorRow;
 		const computeLineDiff = (targetRow: number): number => {
@@ -1062,12 +1080,27 @@ export class TUI extends Container {
 			// Fall through to incremental render for the visible portion
 		}
 
+		// When scroll is frozen, clamp render range to the frozen viewport
+		if (this.scrollFrozen) {
+			const vpBottom = viewportTop + height - 1;
+			if (firstChanged > vpBottom) {
+				// All changes below frozen viewport — absorb silently
+				this.positionHardwareCursor(cursorPos, newLines.length);
+				this.previousLines = newLines;
+				this.previousWidth = width;
+				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+				this.previousViewportTop = viewportTop;
+				return;
+			}
+			lastChanged = Math.min(lastChanged, vpBottom);
+		}
+
 		// Render from first changed line to end
 		// Build buffer with all updates wrapped in synchronized output
 		let buffer = "\x1b[?2026h"; // Begin synchronized output
 		const prevViewportBottom = prevViewportTop + height - 1;
 		const moveTargetRow = appendStart ? firstChanged - 1 : firstChanged;
-		if (moveTargetRow > prevViewportBottom) {
+		if (!this.scrollFrozen && moveTargetRow > prevViewportBottom) {
 			const currentScreenRow = Math.max(
 				0,
 				Math.min(height - 1, hardwareCursorRow - prevViewportTop)
