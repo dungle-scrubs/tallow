@@ -19,16 +19,19 @@
 
 ---
 
-42 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
+41 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
 ## Features
 
-- **42 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
+- **41 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
 - **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
 - **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
 - **8 specialized agents** — architect, debug, planner, refactor, reviewer, scout, worker, tallow-expert
 - **Multi-agent teams** — coordinate multiple agents with task boards, messaging, and archive/resume
+- **Session naming** — auto-generated descriptive names for each session, shown in footer and `--list`
+- **Context fork** — run skills and commands in isolated subprocesses via `context: fork` frontmatter
+- **Debug mode** — structured JSONL diagnostic logging with `/diag` command
 - **Claude Code compatible** — `.claude/` directory bridging for seamless use of Tallow skills, agents, and commands in Claude Code
 - **SDK** — embed Tallow in your own scripts and orchestrators
 - **User-owned config** — agents and commands are installed to `~/.tallow/` where you can edit, remove, or add your own
@@ -104,8 +107,17 @@ tallow -e ./my-extension
 # List saved sessions (shows auto-generated names)
 tallow --list
 
-# Disable automatic session naming
-tallow --no-session-name
+# Specify provider and API key (headless startup)
+tallow --provider anthropic --api-key sk-ant-...
+
+# Run in RPC or JSON mode
+tallow --mode rpc
+
+# Disable all extensions
+tallow --no-extensions
+
+# Print tallow home directory
+tallow --home
 ```
 
 ### Shell interpolation
@@ -144,7 +156,8 @@ Use Tallow programmatically in your own tools:
 import { createTallowSession } from "tallow";
 
 const { session } = await createTallowSession({
-  model: "anthropic/claude-sonnet-4-20250514",
+  provider: "anthropic",
+  modelId: "claude-sonnet-4-20250514",
 });
 
 session.subscribe((event) => {
@@ -162,12 +175,14 @@ session.dispose();
 ```typescript
 const tallow = await createTallowSession({
   cwd: "/path/to/project",
-  model: "anthropic/claude-sonnet-4-20250514",
+  provider: "anthropic",
+  modelId: "claude-sonnet-4-20250514",
   thinkingLevel: "high",
   session: { type: "memory" },        // Don't persist
   noBundledExtensions: true,           // Start clean
   additionalExtensions: ["./my-ext"],  // Add your own
   systemPrompt: "You are a test bot.", // Override system prompt
+  apiKey: "sk-ant-...",               // Runtime key (not persisted)
 });
 ```
 
@@ -224,10 +239,9 @@ Extensions are TypeScript files that receive the pi `ExtensionAPI`:
 import type { ExtensionAPI } from "tallow";
 
 export default function myExtension(api: ExtensionAPI): void {
-  api.registerCommand({
-    name: "greet",
+  api.registerCommand("greet", {
     description: "Say hello",
-    execute: async (ctx) => {
+    handler: async (_args, ctx) => {
       ctx.ui.notify("Hello from my extension!", "info");
     },
   });

@@ -78,7 +78,7 @@ extension, agents run in the background with log files.
   <div class="roadmap-header">
     <h3>Unified Plugin System (Claude Code + pi compatible)</h3>
     <span class="roadmap-badge" data-complexity="high">High complexity</span>
-    <span class="roadmap-badge" data-status="in-progress">Mostly shipped</span>
+    <span class="roadmap-badge" data-status="mostly-shipped">Mostly shipped</span>
   </div>
   <div class="roadmap-description">
 
@@ -130,19 +130,66 @@ project level.
 
 <div class="roadmap-item" data-status="planned">
   <div class="roadmap-header">
+    <h3>Complexity Tiers</h3>
+    <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
+    <span class="roadmap-badge" data-status="planned">Planned</span>
+  </div>
+  <div class="roadmap-description">
+
+Basic model resolution already shipped via the [context-fork](/extensions/context-fork/)
+extension — `model: sonnet` resolves to the right Anthropic model ID. What's
+next: intent-based tiers that work across providers.
+
+Define `complexity: light`, `medium`, or `heavy` in agent/command frontmatter.
+Users map their available models to tiers in settings. A `scout` agent that says
+"use something fast and cheap" works the same whether you're on Anthropic, OpenAI,
+or Google — the tier resolves to the right model for your setup.
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>Config:</strong> settings.json or models.json</span>
+    <span class="roadmap-meta-item"><strong>Shipped:</strong> Static model aliases (sonnet, haiku, opus) via context-fork</span>
+  </div>
+</div>
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
+    <h3>Plugin Source Caching &amp; Git Support</h3>
+    <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
+    <span class="roadmap-badge" data-status="planned">Planned</span>
+  </div>
+  <div class="roadmap-description">
+
+The plugin system re-scans all local sources from disk on every session start.
+Git sources (`git:github.com/user/plugin@v1.0.0`) warn and skip entirely.
+
+The fix: mtime-based caching for local sources (skip re-scan if unchanged),
+immutable caching for pinned git sources (clone once), and TTL-based refresh
+for unpinned git sources (1-hour TTL, re-clone when stale).
+
+  </div>
+  <div class="roadmap-meta">
+    <span class="roadmap-meta-item"><strong>Extension:</strong> plugins</span>
+    <span class="roadmap-meta-item"><strong>Cache:</strong> ~/.tallow/plugins-cache/</span>
+  </div>
+</div>
+
+<div class="roadmap-item" data-status="planned">
+  <div class="roadmap-header">
     <h3>Prompt Stash (Ctrl+S)</h3>
     <span class="roadmap-badge" data-complexity="low">Low complexity</span>
     <span class="roadmap-badge" data-status="planned">Planned</span>
   </div>
   <div class="roadmap-description">
 
-`Ctrl+S` stashes the current input, `Ctrl+U` restores it. Stack
-semantics with last-in-first-out. In-memory only. Not yet implemented.
+`Ctrl+S` stashes the current input. `Ctrl+S` again pops it back
+(toggle behavior based on whether input is empty). Stack semantics
+with last-in-first-out. In-memory only. Not yet implemented.
 
   </div>
   <div class="roadmap-meta">
     <span class="roadmap-meta-item"><strong>Extension:</strong> stash-prompt (planned)</span>
-    <span class="roadmap-meta-item"><strong>Keybinding:</strong> Ctrl+S / Ctrl+U</span>
+    <span class="roadmap-meta-item"><strong>Keybinding:</strong> Ctrl+S (modal toggle)</span>
   </div>
 </div>
 
