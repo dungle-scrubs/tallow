@@ -1,0 +1,16 @@
+{
+	"name": "random-spinner",
+	"version": "0.1.0",
+	"description": "Replaces the default loader spinner with a random cli-spinners preset each session",
+	"category": "ui",
+	"tags": ["spinner", "loader", "cli-spinners", "visual"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "_icons",
+			"kind": "enhances",
+			"reason": "Overrides the default spinner frames set by the icon registry"
+		}
+	],
+	"npmDependencies": {}
+}
