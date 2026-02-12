@@ -32,17 +32,11 @@ export default function editLive(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
-			const filename = path.split("/").pop() ?? path;
-			return new Text(
-				theme.fg("toolTitle", theme.bold("edit ")) + theme.fg("muted", filename),
-				0,
-				0
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("edit ")) + theme.fg("muted", path), 0, 0);
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
 			const path = params.path ?? "file";
-			const filename = path.split("/").pop() ?? path;
 			const result = await baseEditTool.execute(toolCallId, params, signal, onUpdate);
 			const details = result.details as EditToolDetails | undefined;
 			const diff = details?.diff ?? "";
@@ -53,7 +47,7 @@ export default function editLive(pi: ExtensionAPI): void {
 					...details,
 					[EDIT_MARKER]: true,
 					_diff: diff,
-					_filename: filename,
+					_filename: path,
 				},
 			};
 		},
