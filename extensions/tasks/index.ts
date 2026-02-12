@@ -2519,6 +2519,14 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 
 		updateWidget(ctx);
 
+		// Register callback for team view changes (called by teams-tool on state mutations/shutdown)
+		if (!isSubagent) {
+			(globalThis as Record<string, unknown>).__piOnTeamViewChange = () => {
+				updateWidget(ctx);
+				updateAgentBar(ctx);
+			};
+		}
+
 		// Start interval to animate subagents and background tasks (main process only)
 		if (!isSubagent) {
 			if (G.__piTasksInterval) clearInterval(G.__piTasksInterval);

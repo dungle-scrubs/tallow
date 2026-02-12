@@ -161,14 +161,26 @@ function refreshTeamView(team: Team<Teammate>): void {
 		// All done — keep a final snapshot for a brief display, then remove
 		activeTeamViews.set(team.name, buildTeamView(team));
 	}
+	notifyTeamViewChanged();
 }
 
 /**
  * Remove a team from the global view (on shutdown).
+ * Notifies the tasks extension to refresh widget and agent bar.
  * @param teamName - Team name to remove
  */
 function removeTeamView(teamName: string): void {
 	activeTeamViews.delete(teamName);
+	notifyTeamViewChanged();
+}
+
+/**
+ * Notify the tasks extension that team view state has changed.
+ * Calls the global callback registered by the tasks extension (if any).
+ */
+function notifyTeamViewChanged(): void {
+	const callback = (globalThis as Record<string, unknown>).__piOnTeamViewChange;
+	if (typeof callback === "function") callback();
 }
 
 // ════════════════════════════════════════════════════════════════
