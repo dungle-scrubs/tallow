@@ -28,7 +28,7 @@
 		"themes"
 	],
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json && chmod +x dist/cli.js dist/install.js",
+		"build": "tsc -p packages/tallow-tui/tsconfig.build.json && tsc -p tsconfig.build.json && chmod +x dist/cli.js dist/install.js",
 		"dev": "tsc -p tsconfig.build.json --watch",
 		"start": "bun dist/cli.js",
 		"typecheck": "tsc --noEmit",
@@ -67,7 +67,7 @@
 		"@biomejs/biome": "^2.3.14",
 		"@mariozechner/pi-agent-core": "0.52.9",
 		"@mariozechner/pi-ai": "0.52.9",
-		"@mariozechner/pi-tui": "0.52.9",
+		"@mariozechner/pi-tui": "file:packages/tallow-tui",
 
 		"@types/node": "^25.2.2",
 		"husky": "^9.1.7",
