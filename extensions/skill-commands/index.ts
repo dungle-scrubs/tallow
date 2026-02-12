@@ -110,8 +110,19 @@ function disableBuiltinSkillCommands(): void {
 export default function (pi: ExtensionAPI) {
 	disableBuiltinSkillCommands();
 
+	// Include .claude/skills/ directories for Claude Code compatibility
+	const claudeSkillPaths: string[] = [];
+	const userClaudeSkills = join(
+		process.env.HOME ?? process.env.USERPROFILE ?? "~",
+		".claude",
+		"skills"
+	);
+	const projectClaudeSkills = join(process.cwd(), ".claude", "skills");
+	if (fs.existsSync(userClaudeSkills)) claudeSkillPaths.push(userClaudeSkills);
+	if (fs.existsSync(projectClaudeSkills)) claudeSkillPaths.push(projectClaudeSkills);
+
 	// Load skills synchronously during extension init for autocomplete to work
-	const { skills } = loadSkills();
+	const { skills } = loadSkills({ skillPaths: claudeSkillPaths });
 
 	for (const skill of skills) {
 		// Read skill file to check frontmatter

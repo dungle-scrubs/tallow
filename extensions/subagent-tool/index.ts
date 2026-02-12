@@ -42,9 +42,12 @@ interface AgentConfig {
 	name: string;
 	description: string;
 	tools?: string[];
+	disallowedTools?: string[];
 	skills?: string[];
 	/** Agent types this agent is allowed to spawn (from Task(type) in tools frontmatter) */
 	allowedAgentTypes?: string[];
+	mcpServers?: string[];
+	maxTurns?: number;
 	model?: string;
 	systemPrompt: string;
 	source: "user" | "project";
@@ -122,12 +125,50 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			}
 		}
 
+		const disallowedTools = frontmatter.disallowedTools
+			?.split(",")
+			.map((t: string) => t.trim())
+			.filter(Boolean);
+
+		const parsedMaxTurns = frontmatter.maxTurns
+			? Number.parseInt(frontmatter.maxTurns, 10)
+			: undefined;
+		const maxTurns = parsedMaxTurns && parsedMaxTurns > 0 ? parsedMaxTurns : undefined;
+
+		let mcpServers: string[] | undefined;
+		if (frontmatter.mcpServers) {
+			if (Array.isArray(frontmatter.mcpServers)) {
+				mcpServers = frontmatter.mcpServers
+					.filter((entry: unknown) => {
+						if (typeof entry === "string") return true;
+						if (typeof entry === "object" && entry !== null) {
+							console.warn(
+								`MCP: Inline server definitions not supported in agent "${frontmatter.name}". ` +
+									`Use a string reference to a configured server name.`
+							);
+							return false;
+						}
+						return false;
+					})
+					.map((s: string) => s.trim())
+					.filter(Boolean);
+			} else if (typeof frontmatter.mcpServers === "string") {
+				mcpServers = frontmatter.mcpServers
+					.split(",")
+					.map((s: string) => s.trim())
+					.filter(Boolean);
+			}
+		}
+
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			tools: tools.length > 0 ? tools : undefined,
+			disallowedTools: disallowedTools && disallowedTools.length > 0 ? disallowedTools : undefined,
 			skills: skills && skills.length > 0 ? skills : undefined,
 			allowedAgentTypes: allowedAgentTypes.length > 0 ? allowedAgentTypes : undefined,
+			mcpServers: mcpServers && mcpServers.length > 0 ? mcpServers : undefined,
+			maxTurns,
 			model: frontmatter.model,
 			systemPrompt: body,
 			source,
@@ -151,34 +192,61 @@ function isDirectory(p: string): boolean {
 }
 
 /**
- * Finds the nearest .tallow/agents directory by traversing up from cwd.
+ * Finds the nearest project agents directories by traversing up from cwd.
+ * Checks both .tallow/agents and .claude/agents at each level.
+ * Returns 0-2 paths; .claude/ first so .tallow/ wins via last-wins in the map.
+ *
  * @param cwd - Starting directory
- * @returns Path to project agents directory or null if not found
+ * @returns Array of project agent directory paths found at the nearest level
  */
-function findNearestProjectAgentsDir(cwd: string): string | null {
+function findNearestProjectAgentsDirs(cwd: string): string[] {
 	let currentDir = cwd;
 	while (true) {
-		const candidate = path.join(currentDir, ".tallow", "agents");
-		if (isDirectory(candidate)) return candidate;
+		const tallowDir = path.join(currentDir, ".tallow", "agents");
+		const claudeDir = path.join(currentDir, ".claude", "agents");
+		const hasTallow = isDirectory(tallowDir);
+		const hasClaude = isDirectory(claudeDir);
+		if (hasTallow || hasClaude) {
+			const dirs: string[] = [];
+			if (hasClaude) dirs.push(claudeDir);
+			if (hasTallow) dirs.push(tallowDir);
+			return dirs;
+		}
 		const parentDir = path.dirname(currentDir);
-		if (parentDir === currentDir) return null;
+		if (parentDir === currentDir) return [];
 		currentDir = parentDir;
 	}
 }
 
 /**
  * Discovers available agents based on the specified scope.
+ * Scans both .tallow/ and .claude/ directories for Claude Code compatibility.
+ * Priority: .claude/ loaded first, .tallow/ overwrites on name collision (last wins).
+ *
  * @param cwd - Current working directory for project agent discovery
  * @param scope - Which agent sources to include (user, project, or both)
  * @returns Discovery result with agents and project directory path
  */
 function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
-	const userDir = path.join(os.homedir(), ".tallow", "agents");
-	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
+	const userTallowDir = path.join(os.homedir(), ".tallow", "agents");
+	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
+	const projectDirs = findNearestProjectAgentsDirs(cwd);
+	// Use the last dir (.tallow/ preferred) for confirmation dialog
+	const projectAgentsDir = projectDirs.at(-1) ?? null;
 
-	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
-	const projectAgents =
-		scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
+	// Load in priority order: .claude/ first so .tallow/ wins via last-wins
+	const userAgents: AgentConfig[] = [];
+	if (scope !== "project") {
+		for (const a of loadAgentsFromDir(userClaudeDir, "user")) userAgents.push(a);
+		for (const a of loadAgentsFromDir(userTallowDir, "user")) userAgents.push(a);
+	}
+
+	const projectAgents: AgentConfig[] = [];
+	if (scope !== "user") {
+		for (const dir of projectDirs) {
+			for (const a of loadAgentsFromDir(dir, "project")) projectAgents.push(a);
+		}
+	}
 
 	const agentMap = new Map<string, AgentConfig>();
 	if (scope === "both") {
@@ -196,6 +264,28 @@ function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 const COLLAPSED_ITEM_COUNT = 10;
+
+/** Built-in tools available in a default pi subprocess. */
+const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
+/**
+ * Computes the effective tool list from allowlist and denylist.
+ *
+ * @param tools - Explicit allowlist from frontmatter (undefined = inherit all)
+ * @param disallowedTools - Denylist from frontmatter (undefined = no exclusions)
+ * @returns Tool list for --tools flag, or undefined if no filtering needed
+ */
+function computeEffectiveTools(
+	tools: string[] | undefined,
+	disallowedTools: string[] | undefined
+): string[] | undefined {
+	if (!tools && !disallowedTools) return undefined;
+	if (tools && !disallowedTools) return tools;
+
+	const base = tools ?? PI_BUILTIN_TOOLS;
+	const deny = new Set(disallowedTools);
+	return base.filter((t) => !deny.has(t));
+}
 
 /**
  * Coerce a value that should be an array but may arrive as a JSON string.
@@ -652,7 +742,8 @@ function spawnBackgroundSubagent(
 		? ["--mode", "json", "-p", "--session", session]
 		: ["--mode", "json", "-p", "--no-session"];
 	if (agent.model) args.push("--models", agent.model);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	const effectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
+	if (effectiveTools && effectiveTools.length > 0) args.push("--tools", effectiveTools.join(","));
 	if (agent.skills && agent.skills.length > 0) {
 		for (const skill of agent.skills) args.push("--skill", skill);
 	}
@@ -660,8 +751,15 @@ function spawnBackgroundSubagent(
 	let tmpPromptDir: string | undefined;
 	let tmpPromptPath: string | undefined;
 
-	if (agent.systemPrompt.trim()) {
-		const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
+	// Inject maxTurns budget hint into system prompt
+	let systemPrompt = agent.systemPrompt;
+	if (agent.maxTurns) {
+		const budget = `You have a maximum of ${agent.maxTurns} tool-use turns for this task. Plan your approach to complete within this budget. If you are running low, output your best result immediately.\n\n`;
+		systemPrompt = budget + systemPrompt;
+	}
+
+	if (systemPrompt.trim()) {
+		const tmp = writePromptToTempFile(agent.name, systemPrompt);
 		tmpPromptDir = tmp.dir;
 		tmpPromptPath = tmp.filePath;
 		args.push("--append-system-prompt", tmpPromptPath);
@@ -676,6 +774,9 @@ function spawnBackgroundSubagent(
 	>;
 	if (agent.allowedAgentTypes) {
 		childEnv.PI_ALLOWED_AGENT_TYPES = agent.allowedAgentTypes.join(",");
+	}
+	if (agent.mcpServers && agent.mcpServers.length > 0) {
+		childEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
 	}
 
 	const proc = spawn("pi", args, {
@@ -730,6 +831,7 @@ function spawnBackgroundSubagent(
 
 	// Collect output
 	let buffer = "";
+	let bgTurnCount = 0;
 	proc.stdout.on("data", (data) => {
 		buffer += data.toString();
 		const lines = buffer.split("\n");
@@ -741,6 +843,12 @@ function spawnBackgroundSubagent(
 
 				// Emit subagent_tool_call when tool starts
 				if (event.type === "tool_call_start") {
+					bgTurnCount++;
+					// Hard enforcement: kill after maxTurns tool calls
+					if (agent.maxTurns && bgTurnCount >= agent.maxTurns) {
+						proc.kill("SIGTERM");
+					}
+
 					piEvents?.emit("subagent_tool_call", {
 						agent_id: id,
 						agent_type: agentName,
@@ -906,7 +1014,9 @@ async function runSingleAgent(
 		? ["--mode", "json", "-p", "--session", session]
 		: ["--mode", "json", "-p", "--no-session"];
 	if (agent.model) args.push("--models", agent.model);
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	const fgEffectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
+	if (fgEffectiveTools && fgEffectiveTools.length > 0)
+		args.push("--tools", fgEffectiveTools.join(","));
 	if (agent.skills && agent.skills.length > 0) {
 		for (const skill of agent.skills) args.push("--skill", skill);
 	}
@@ -944,8 +1054,15 @@ async function runSingleAgent(
 	};
 
 	try {
-		if (agent.systemPrompt.trim()) {
-			const tmp = writePromptToTempFile(agent.name, agent.systemPrompt);
+		// Inject maxTurns budget hint into system prompt
+		let fgSystemPrompt = agent.systemPrompt;
+		if (agent.maxTurns) {
+			const budget = `You have a maximum of ${agent.maxTurns} tool-use turns for this task. Plan your approach to complete within this budget. If you are running low, output your best result immediately.\n\n`;
+			fgSystemPrompt = budget + fgSystemPrompt;
+		}
+
+		if (fgSystemPrompt.trim()) {
+			const tmp = writePromptToTempFile(agent.name, fgSystemPrompt);
 			tmpPromptDir = tmp.dir;
 			tmpPromptPath = tmp.filePath;
 			args.push("--append-system-prompt", tmpPromptPath);
@@ -965,7 +1082,11 @@ async function runSingleAgent(
 		if (agent.allowedAgentTypes) {
 			fgChildEnv.PI_ALLOWED_AGENT_TYPES = agent.allowedAgentTypes.join(",");
 		}
+		if (agent.mcpServers && agent.mcpServers.length > 0) {
+			fgChildEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
+		}
 
+		let fgTurnCount = 0;
 		const exitCode = await new Promise<number>((resolve) => {
 			const proc = spawn("pi", args, {
 				cwd: cwd ?? defaultCwd,
@@ -987,6 +1108,12 @@ async function runSingleAgent(
 
 				// Emit subagent_tool_call when tool starts
 				if (event.type === "tool_call_start") {
+					fgTurnCount++;
+					// Hard enforcement: kill after maxTurns tool calls
+					if (agent.maxTurns && fgTurnCount >= agent.maxTurns) {
+						proc.kill("SIGTERM");
+					}
+
 					piEvents?.emit("subagent_tool_call", {
 						agent_id: taskId,
 						agent_type: agentName,
@@ -1068,6 +1195,11 @@ async function runSingleAgent(
 
 		currentResult.exitCode = exitCode;
 		if (wasAborted) throw new Error("Subagent was aborted");
+
+		// Annotate result when maxTurns killed the process
+		if (agent.maxTurns && fgTurnCount >= agent.maxTurns) {
+			currentResult.stderr += `\n[Terminated: reached maxTurns limit of ${agent.maxTurns}]`;
+		}
 
 		// Emit subagent_stop event
 		piEvents?.emit("subagent_stop", {
