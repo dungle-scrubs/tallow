@@ -1888,7 +1888,29 @@ EXAMPLES:
 					};
 				}
 				case "update": {
-					const updateIdx = (params.index || 1) - 1;
+					if (params.indices) {
+						return {
+							details: {},
+							content: [
+								{
+									type: "text",
+									text: "The update action operates on a single task. Use 'index' (singular), not 'indices'. To update multiple tasks, call update once per task.",
+								},
+							],
+						};
+					}
+					if (params.index === undefined) {
+						return {
+							details: {},
+							content: [
+								{
+									type: "text",
+									text: "Missing required 'index' parameter for update action.",
+								},
+							],
+						};
+					}
+					const updateIdx = params.index - 1;
 					if (updateIdx < 0 || updateIdx >= state.tasks.length) {
 						const reason =
 							state.tasks.length === 0
@@ -2061,7 +2083,18 @@ EXAMPLES:
 					}
 
 					// Single task completion
-					const idx = (params.index || 1) - 1;
+					if (params.index === undefined) {
+						return {
+							details: {},
+							content: [
+								{
+									type: "text",
+									text: "Missing required 'index' parameter for complete action (or use 'indices' for batch completion).",
+								},
+							],
+						};
+					}
+					const idx = params.index - 1;
 					if (idx < 0 || idx >= state.tasks.length) {
 						const reason =
 							state.tasks.length === 0
@@ -2146,7 +2179,18 @@ EXAMPLES:
 					return { details: {}, content: [{ type: "text", text: list }] };
 				}
 				case "get": {
-					const getIdx = (params.index || 1) - 1;
+					if (params.index === undefined) {
+						return {
+							details: {},
+							content: [
+								{
+									type: "text",
+									text: "Missing required 'index' parameter for get action.",
+								},
+							],
+						};
+					}
+					const getIdx = params.index - 1;
 					if (getIdx < 0 || getIdx >= state.tasks.length) {
 						const reason =
 							state.tasks.length === 0
@@ -2181,7 +2225,18 @@ EXAMPLES:
 							content: [{ type: "text", text: "Missing owner for claim action" }],
 						};
 					}
-					const claimIdx = (params.index || 1) - 1;
+					if (params.index === undefined) {
+						return {
+							details: {},
+							content: [
+								{
+									type: "text",
+									text: "Missing required 'index' parameter for claim action.",
+								},
+							],
+						};
+					}
+					const claimIdx = params.index - 1;
 					if (claimIdx < 0 || claimIdx >= state.tasks.length) {
 						const reason =
 							state.tasks.length === 0
