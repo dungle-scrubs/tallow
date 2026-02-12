@@ -108,7 +108,6 @@ export default function readSummary(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
-			const filename = path.split("/").pop() ?? path;
 
 			// Skill file: show 📚 skill: name with expand hint
 			if (isSkillPath(path)) {
@@ -130,16 +129,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 				};
 			}
 
-			return new Text(
-				theme.fg("toolTitle", theme.bold("read ")) + theme.fg("muted", filename),
-				0,
-				0
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("read ")) + theme.fg("muted", path), 0, 0);
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
 			let path = params.path ?? "file";
-			let filename = path.split("/").pop() ?? path;
 
 			let result: Awaited<ReturnType<typeof baseReadTool.execute>>;
 			try {
@@ -154,7 +148,6 @@ export default function readSummary(pi: ExtensionAPI): void {
 					const correctPath = resolveSkillFallback(path);
 					if (correctPath) {
 						path = correctPath;
-						filename = path.split("/").pop() ?? path;
 						result = await baseReadTool.execute(
 							toolCallId,
 							{ ...params, path: correctPath },
@@ -195,7 +188,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 
 			const lines = fullText.split("\n").length;
 			const sizeKb = (fullText.length / 1024).toFixed(1);
-			const summary = `${filename} (${lines} lines, ${sizeKb}KB)`;
+			const summary = `${path} (${lines} lines, ${sizeKb}KB)`;
 
 			return {
 				content: [{ type: "text", text: summary }],
@@ -204,7 +197,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 					[SUMMARY_MARKER]: true,
 					_fullText: fullText,
 					_path: path,
-					_filename: filename,
+					_filename: path,
 					_isSkill: isSkillContent(fullText),
 				},
 			};

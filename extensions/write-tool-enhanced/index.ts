@@ -25,21 +25,15 @@ export default function writePreview(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
-			const filename = path.split("/").pop() ?? path;
-			return new Text(
-				theme.fg("toolTitle", theme.bold("write ")) + theme.fg("muted", filename),
-				0,
-				0
-			);
+			return new Text(theme.fg("toolTitle", theme.bold("write ")) + theme.fg("muted", path), 0, 0);
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
 			const path = params.path ?? "file";
 			const content = params.content ?? "";
-			const filename = path.split("/").pop() ?? path;
 			const lines = content.split("\n").length;
 			const sizeKb = (content.length / 1024).toFixed(1);
-			const summary = `${filename} (${lines} lines, ${sizeKb}KB)`;
+			const summary = `${path} (${lines} lines, ${sizeKb}KB)`;
 
 			const result = await baseWriteTool.execute(toolCallId, params, signal, onUpdate);
 			return {
