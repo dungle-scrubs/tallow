@@ -736,7 +736,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 	let lastWidgetContent = "";
 
 	// Spinner frames for animation
-	const SPINNER_FRAMES = getSpinner();
+	const SPINNER_FRAMES = getSpinner() ?? ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 	let spinnerFrame = 0;
 
 	/**
