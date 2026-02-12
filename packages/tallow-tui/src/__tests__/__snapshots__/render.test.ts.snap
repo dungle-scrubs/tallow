@@ -1,0 +1,121 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`Text renders plain text at width 40 1`] = `"Hello, world!                           "`;
+
+exports[`Text wraps long text at narrow width 1`] = `
+"This is a longer    
+piece of text that  
+should wrap at      
+narrow widths       "
+`;
+
+exports[`Text renders with padding 1`] = `
+"                                        
+  Padded text                           
+                                        "
+`;
+
+exports[`Text handles empty text 1`] = `""`;
+
+exports[`Text handles multiline text 1`] = `
+"Line one                                
+Line two                                
+Line three                              "
+`;
+
+exports[`Markdown renders heading 1`] = `
+"Hello World                             
+                                        "
+`;
+
+exports[`Markdown renders paragraph text 1`] = `
+"Some paragraph text that should be      
+rendered normally.                      "
+`;
+
+exports[`Markdown renders code block 1`] = `
+"\`\`\`ts                                   
+  const x = 1;                          
+  const y = 2;                          
+\`\`\`                                     
+                                        "
+`;
+
+exports[`Markdown renders unordered list 1`] = `
+"- Item one                              
+- Item two                              
+- Item three                            "
+`;
+
+exports[`Markdown renders ordered list 1`] = `
+"1. First                                
+2. Second                               
+3. Third                                "
+`;
+
+exports[`Markdown renders blockquote 1`] = `
+"│ This is a quote                       
+                                        "
+`;
+
+exports[`Markdown renders at narrow width (20) 1`] = `
+"Hello World         
+                    
+Some paragraph text 
+that should wrap at 
+this narrow width.  "
+`;
+
+exports[`Markdown renders inline formatting 1`] = `"Text with bold and italic and code.                         "`;
+
+exports[`Markdown renders horizontal rule 1`] = `
+"Above                                   
+                                        
+────────────────────────────────────────
+                                        
+Below                                   "
+`;
+
+exports[`Markdown handles empty content 1`] = `""`;
+
+exports[`BorderedBox renders content with default border 1`] = `
+"┌────────────────────────────┐
+│ Hello                      │
+│ World                      │
+└────────────────────────────┘"
+`;
+
+exports[`BorderedBox renders with title 1`] = `
+"┌─ My Box ───────────────────┐
+│ Content line               │
+└────────────────────────────┘"
+`;
+
+exports[`BorderedBox renders with custom padding 1`] = `
+"┌────────────────────────────┐
+│   Padded                   │
+└────────────────────────────┘"
+`;
+
+exports[`BorderedBox handles empty content 1`] = `
+"┌────────────────────────────┐
+└────────────────────────────┘"
+`;
+
+exports[`BorderedBox handles very narrow width 1`] = `
+"┌───┐
+│ . │
+└───┘"
+`;
+
+exports[`TruncatedText renders short text without truncation 1`] = `"Short                                   "`;
+
+exports[`TruncatedText truncates long text 1`] = `"This text is much..."`;
+
+exports[`TruncatedText renders with padding 1`] = `
+"                              
+  Padded                      
+                              "
+`;
+
+exports[`TruncatedText handles multiline text (takes first line) 1`] = `"First line                              "`;
