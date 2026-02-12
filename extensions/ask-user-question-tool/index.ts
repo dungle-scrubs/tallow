@@ -255,6 +255,9 @@ WHEN NOT TO USE:
 				};
 			});
 
+			// Restore the working loader now that user has answered
+			ctx.ui.setWorkingMessage();
+
 			// Build simple options list for details
 			const simpleOptions = params.options.map((o) => o.label);
 
