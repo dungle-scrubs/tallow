@@ -10,3 +10,6 @@ node_modules/
 # environment
 .env
 .env.production
+
+# generated from root CHANGELOG.md by scripts/sync-changelog.mjs
+src/content/docs/changelog.md

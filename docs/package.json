@@ -4,7 +4,9 @@
 	"version": "0.1.0",
 	"private": true,
 	"scripts": {
+		"predev": "node scripts/sync-changelog.mjs",
 		"dev": "astro dev",
+		"prebuild": "node scripts/sync-changelog.mjs",
 		"build": "astro build",
 		"preview": "astro preview"
 	},
