@@ -1,0 +1,16 @@
+{
+	"name": "session-namer",
+	"version": "0.1.0",
+	"description": "Auto-generates session names via Haiku and displays them in a persistent top bar",
+	"category": "ui",
+	"tags": ["sessions", "naming", "header"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "session-memory",
+			"kind": "enhances",
+			"reason": "Named sessions are easier to recall and search"
+		}
+	],
+	"npmDependencies": {}
+}
