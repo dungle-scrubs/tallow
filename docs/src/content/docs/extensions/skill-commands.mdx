@@ -11,3 +11,18 @@ Enable by setting `enableSkillCommands: false` in `settings.json`
 to disable the built-in syntax, then this extension provides the
 replacement.
 
+## `.claude/` skill bridging
+
+In addition to standard `.tallow/skills/` paths, this extension
+scans `.claude/skills/` directories for Claude Code compatibility:
+
+- **~/.claude/skills/** — user-level
+- **.claude/skills/** — project-level (relative to cwd)
+
+Skills found in `.claude/skills/` are registered as commands
+identically to `.tallow/skills/` skills. On name collision,
+`.tallow/` wins.
+
+See [claude-bridge](/extensions/claude-bridge/) for the full
+bridging architecture.
+

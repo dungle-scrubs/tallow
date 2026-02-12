@@ -31,15 +31,23 @@ Relay that answer to the user.
 | Component | Location |
 |-----------|----------|
 | Core source | `src/` (config.ts, sdk.ts, cli.ts) |
-| Extensions | `extensions/` — extension.json + index.ts each |
+| Extensions | `extensions/` — extension.json + index.ts each (39 bundled) |
+| **Key extensions** | `context-fork` (subprocess isolation), `claude-bridge` (.claude/ compat) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
 | Themes | `themes/` — JSON files |
 | Pi framework types | `node_modules/@mariozechner/pi-coding-agent/dist/` |
 | User config | `~/.tallow/` (settings.json, auth.json, keybindings.json) |
 | User extensions | `~/.tallow/extensions/` |
-| User agents | `~/.tallow/agents/` |
+| User agents | `~/.tallow/agents/`, `~/.claude/agents/` |
+| User skills | `~/.tallow/skills/`, `~/.claude/skills/` |
+| User commands | `~/.tallow/commands/`, `~/.claude/commands/` |
+| Project agents | `.tallow/agents/`, `.claude/agents/` |
+| Project skills | `.tallow/skills/`, `.claude/skills/` |
+| Project commands | `.tallow/commands/`, `.claude/commands/` |
 | Sessions | `~/.tallow/sessions/` |
+
+**Agent frontmatter fields**: `tools`, `disallowedTools`, `maxTurns`, `mcpServers`, `context: fork`, `agent`, `model`
 
 ### Extension API Surface
 
@@ -50,5 +58,8 @@ Extensions export a default function receiving `ExtensionAPI`:
 - `registerShortcut(key, { handler })` — keyboard shortcuts
 - `registerMessageRenderer(type, renderer)` — custom message display
 - `sendMessage({ customType, content, display, details })` — emit messages
-- `on(event, handler)` — lifecycle hooks (session_start, tool_call, etc.)
+- `on(event, handler)` — lifecycle hooks (session_start, tool_call, resources_discover, etc.)
+- `appendEntry(path)` — add skill/agent/command to discovery index
 - `getCommands()`, `getActiveTools()`, `getAllTools()`
+
+**Key hooks**: `session_start`, `before_agent_start`, `tool_call_start`, `tool_call_end`, `resources_discover`, `message_update`

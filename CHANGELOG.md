@@ -38,6 +38,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Migrated all 17 extensions from hardcoded literals to registry lookups
   - JSON Schema for settings.json with `$schema` for IDE autocompletion
   - Installer injects `$schema` reference on `tallow install`
+- **Context fork extension** — run skills and commands in isolated subprocesses
+  with independent context windows via `context: fork` frontmatter
+  - Model resolution: `sonnet` → claude-sonnet-4-20250514, `haiku` →
+    claude-haiku-3-5-20241022, `opus` → claude-opus-4-20250514, `inherit` →
+    parent model
+  - `agent: <name>` frontmatter applies agent config (tools, skills, system prompt)
+    to subprocess
+  - `model: <alias>` frontmatter specifies model for forked context
+  - `allowed-tools` frontmatter (no-op placeholder for future)
+  - Compact display with 🔀 prefix and custom message renderer
+- **Agent frontmatter extensions** — new control fields for agents, skills, and
+  commands
+  - `disallowedTools` frontmatter — denylist complement to `tools`. Effective tool
+    list = (allowlist or PI\_BUILTIN\_TOOLS) minus denied tools
+  - `maxTurns` frontmatter — caps agentic turns. Hard enforcement in subagent-tool
+    via tool\_call\_start event counting. Soft enforcement in agent-commands-tool.
+    System prompt budget hint injected
+  - `computeEffectiveTools()` helper and `PI_BUILTIN_TOOLS` constant added
+- **Claude directory bridging** — `.claude/` directories now bridged alongside
+  `.tallow/` for cross-tool compatibility
+  - New `claude-bridge` extension hooks `resources_discover` to inject `.claude/skills/`
+    paths
+  - `skill-commands` scans `.claude/skills/` alongside `.tallow/skills/`
+  - `subagent-tool` scans `~/.claude/agents/` and `cwd/.claude/agents/`
+  - `agent-commands-tool` scans `.claude/` directories (priority: bundled →
+    packages → `.claude/user` → `.tallow/user` → `.claude/project` → `.tallow/project`)
+  - `context-fork` loads agents from `.claude/` directories
+  - `command-prompt` scans `.claude/commands/` at project and global levels
+  - `.tallow/` always wins on name collision (last-wins semantics)
+- **Agent-scoped MCP servers** — agents can declare which MCP servers they need
+  - `mcpServers` frontmatter — comma-separated server name references
+  - `PI_MCP_SERVERS` env var passed to subprocesses to filter which MCP servers
+    connect
+  - `mcp-adapter-tool` filters servers at session\_start based on PI\_MCP\_SERVERS
+  - Inline MCP server definitions (objects) log warning and are skipped (v1 =
+    reference mode only)
+- **Co-located extension instructions** — instructions moved from AGENTS.md to
+  their owning extensions
+  - "Documentation Lookup", "MCP Server Policy", "Tool Proxy Modes" moved to
+    `mcp-adapter-tool`'s `before_agent_start` hook
+  - "Tallow Slash Commands" design constraints moved to `command-prompt`'s
+    `before_agent_start` hook
+  - Instructions now only appear when their owning extension is loaded
 
 ### Changed
 

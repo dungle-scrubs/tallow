@@ -45,6 +45,76 @@ automatic restart on the next tool call. If the restart fails,
 the server's tools are marked unavailable and a notification is
 shown. No retry loops.
 
+## Agent-scoped MCP servers
+
+Agents can restrict which MCP servers connect in their subprocess by declaring
+`mcpServers:` in frontmatter. This is passed to the subprocess as the
+`PI_MCP_SERVERS` environment variable.
+
+```yaml
+---
+name: github-helper
+description: Agent with GitHub MCP access only
+mcpServers: github
+---
+```
+
+When PI_MCP_SERVERS is set, the adapter only connects to the listed servers:
+
+```bash
+PI_MCP_SERVERS=slack,github pi --skill task.md
+# Only connects to slack and github servers
+```
+
+Multiple servers can be specified as comma-separated values:
+
+```yaml
+mcpServers: slack, github, linear
+```
+
+Or as a YAML array:
+
+```yaml
+mcpServers:
+  - slack
+  - github
+```
+
+This feature is used by [subagent-tool](/extensions/subagent-tool/) and
+[agent-commands-tool](/extensions/agent-commands-tool/) to control MCP
+access in agent subprocesses. See those extensions for usage examples.
+
+Inline server definitions (objects instead of string references) are **not
+supported** and will show a warning.
+
+## Co-located instructions
+
+The extension injects usage documentation into the system prompt via the
+`before_agent_start` hook. This includes:
+
+### Documentation Lookup (when tool-proxy docs tools are available)
+
+Mandatory workflow for looking up documentation:
+
+1. Check local docs first with `search_docs`
+2. If found, read with `get_doc`
+3. If not found, add with `add_doc`, then read with `get_doc`
+4. Never use `web-fetch` for documentation
+
+This applies to all official documentation but not general web content.
+
+### MCP Server Policy
+
+Guidelines for managing MCP server configurations in the tool-proxy system.
+
+### Tool Proxy Modes
+
+Reference table for the three transport modes (STDIO with Varlock, STDIO with
+env files, Docker HTTP/SSE) and their configuration.
+
+These instructions are co-located with the extension rather than in a global
+`AGENTS.md` file, keeping documentation close to the implementation.
+
 ## /mcp command
 
 Run `/mcp` to see all configured servers, their connection state,

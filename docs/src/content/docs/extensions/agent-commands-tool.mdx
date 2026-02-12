@@ -5,8 +5,7 @@ description: Register agents as slash commands for direct invocation.
 
 import Gallery from '../../../components/Gallery.astro';
 
-Registers every agent defined in `~/.tallow/agents/` or
-`.tallow/agents/` as a `/agent-name` slash command. Typing
+Registers every agent as a `/agent-name` slash command. Typing
 `/planner implement user authentication` directly spawns the
 planner agent as a subprocess with that task.
 
@@ -16,3 +15,41 @@ process with full access to its configured tools and context.
 <Gallery images={[
   { src: "/screenshots/extensions/agent-commands/agent-command-picker.jpg", alt: "Agent command picker showing available agents after typing /agent" },
 ]} />
+
+## Agent directories
+
+Agents are loaded from multiple locations with last-wins priority:
+
+1. **Bundled agents** — shipped with tallow
+2. **Package agents** — from settings.json packages
+3. **~/.claude/agents/** — user-level, Claude Code compatibility
+4. **~/.tallow/agents/** — user-level
+5. **Project .claude/agents/** — project-level Claude Code
+6. **Project .tallow/agents/** — project-level (highest priority)
+
+`.tallow/` takes precedence over `.claude/` at each scope level.
+See [claude-bridge](/extensions/claude-bridge/) for details.
+
+## Frontmatter fields
+
+Agents support the same frontmatter fields as
+[subagent-tool](/extensions/subagent-tool/#agent-frontmatter-fields):
+
+- **`disallowedTools`** — tool denylist, filters against the
+  built-in set (`read, bash, edit, write, grep, find, ls`)
+- **`maxTurns`** — turn budget hint injected into the system
+  prompt. **Soft enforcement only** — unlike subagent-tool, this
+  extension does not kill the process at the limit because it
+  doesn't use `--mode json` for event-based turn counting.
+- **`mcpServers`** — restrict MCP server access via
+  `PI_MCP_SERVERS` env var
+
+```yaml
+---
+name: safe-reviewer
+description: Read-only code reviewer
+disallowedTools: bash, write, edit
+mcpServers: github
+maxTurns: 20
+---
+```

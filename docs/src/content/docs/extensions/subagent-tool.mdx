@@ -69,6 +69,151 @@ watchers) are infrastructure that should keep running.
   { src: "/screenshots/extensions/subagent/full-dashboard.png", alt: "Tasks, foreground agents, background agents, and background tasks running together" },
 ]} />
 
+## Agent configuration
+
+Agents are defined in markdown files in agent directories. They support
+frontmatter fields that control tool access, resource limits, and model routing.
+
+### Agent directories
+
+Agents are loaded from multiple locations with a priority system:
+
+1. **Bundled agents** — shipped with tallow
+2. **Package agents** — from settings.json packages
+3. **~/.claude/agents/** — user-level, Claude Code compatibility
+4. **~/.tallow/agents/** — user-level, tallow
+5. **Project .claude/agents/** — nearest ancestor with .claude/agents/
+6. **Project .tallow/agents/** — nearest ancestor with .tallow/agents/
+
+Priority: last wins per name. Within a scope, `.tallow/` takes precedence over
+`.claude/`. This means a project `.tallow/agents/researcher.md` overrides both
+`.claude/agents/researcher.md` in the same directory and `~/.tallow/agents/researcher.md`.
+
+### Agent frontmatter fields
+
+#### `disallowedTools`
+
+Tool denylist — removes tools from the default set. Takes precedence over the
+`tools:` allowlist.
+
+```yaml
+---
+name: researcher
+description: Research agent with restricted write access
+tools: read, bash, edit, write
+disallowedTools: bash, write
+---
+```
+
+Effective tools: `read, edit` (allowlist minus denylist).
+
+If only `disallowedTools` is set, it filters against the built-in tool set:
+`read, bash, edit, write, grep, find, ls`.
+
+```yaml
+---
+name: safe-analyzer
+description: Read-only analysis agent
+disallowedTools: bash, write, edit
+---
+```
+
+Effective tools: `read, grep, find, ls`.
+
+The subprocess is spawned with `--tools <effective-list>`.
+
+#### `maxTurns`
+
+Hard limit on tool-use turns. When the subprocess reaches this many `tool_call_start`
+events, it receives SIGTERM (then SIGKILL after 5 seconds).
+
+```yaml
+---
+name: quick-search
+description: Fast search with budget limit
+maxTurns: 5
+---
+```
+
+The extension injects a budget hint into the subprocess system prompt:
+
+> You have a maximum of 5 tool-use turns for this task. Plan your approach to
+> complete within this budget. If you are running low, output your best result
+> immediately.
+
+When the limit is reached, the result includes a `[Terminated: reached maxTurns
+limit of 5]` annotation.
+
+This is **hard enforcement** — the process is killed. Compare with
+[agent-commands-tool](/extensions/agent-commands-tool/) which does soft
+enforcement only (system prompt hint, no kill).
+
+#### `mcpServers`
+
+Restrict which MCP servers connect in the subprocess. Passes server names as
+`PI_MCP_SERVERS=slack,github` environment variable.
+
+```yaml
+---
+name: github-helper
+description: Agent with GitHub MCP access only
+mcpServers: github
+---
+```
+
+Multiple servers:
+
+```yaml
+mcpServers: slack, github, linear
+```
+
+Or as YAML array:
+
+```yaml
+mcpServers:
+  - slack
+  - github
+```
+
+Inline server definitions (objects) are **not supported** in v1:
+
+```yaml
+mcpServers:
+  - name: custom-server
+    command: node
+    args: [server.js]
+```
+
+This will show a warning and be skipped. Use string references to servers
+configured in `~/.tallow/settings.json` or `.tallow/settings.json`.
+
+See [mcp-adapter-tool](/extensions/mcp-adapter-tool/) for how PI_MCP_SERVERS
+filtering works.
+
+### Full agent example
+
+```markdown
+---
+name: test-writer
+description: Writes tests with restricted tool access and turn limit
+tools: read, bash, edit, write
+disallowedTools: write
+mcpServers: github
+maxTurns: 15
+model: sonnet
+---
+
+You are a test writing specialist. Your job is to read existing code,
+understand the patterns, and write comprehensive test suites.
+
+Focus on:
+- Edge cases and error handling
+- Clear test names and descriptions
+- Minimal setup/teardown
+
+Use the GitHub MCP server to check for existing test conventions in the repo.
+```
+
 ## Relationships with other extensions
 
 ### [tasks](/extensions/tasks/)
