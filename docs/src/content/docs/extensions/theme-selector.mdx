@@ -43,6 +43,32 @@ matching one. You can also request a specific theme by name
 (`"switch to dracula"`) or ask for a random pick with optional
 tag filters.
 
+## Random theme on launch
+
+Start each tallow session with a different theme. Add
+`randomThemeOnStart` to `~/.tallow/settings.json`:
+
+```json
+{
+  "randomThemeOnStart": true
+}
+```
+
+Filter by tags to stay within a mood:
+
+```json
+{
+  "randomThemeOnStart": ["warm", "earthy"]
+}
+```
+
+Set to `false` (or omit) to use the persisted `theme` setting
+as usual. Random picks are **ephemeral** — they don't overwrite
+your saved theme. Explicit `/theme <name>` still persists normally.
+
+The random roll only happens on fresh tallow launches. `/new`,
+`/clear`, and `/reload` keep whatever theme is currently active.
+
 <Gallery images={[
   { src: "/screenshots/extensions/theme/switch-theme.gif", alt: "Switching themes with the switch_theme tool" },
 ]} />
