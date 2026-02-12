@@ -1,17 +1,14 @@
 /**
  * Tests for the SessionIndexer.
  *
- * Uses node:test instead of bun:test because better-sqlite3 is a native
- * Node.js addon that isn't supported by Bun's runtime.
- *
- * Run with: npx tsx --test extensions/session-memory/__tests__/indexer.test.ts
+ * Uses bun:test (project standard). The indexer's sqlite-adapter
+ * auto-selects bun:sqlite when running under Bun.
  */
 
-import assert from "node:assert/strict";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
 import { SessionIndexer } from "../indexer.js";
 
 /**
@@ -67,14 +64,14 @@ describe("SessionIndexer", () => {
 	let sessionsDir: string;
 	let indexer: SessionIndexer;
 
-	before(() => {
+	beforeAll(() => {
 		tmpDir = mkdtempSync(join(tmpdir(), "session-memory-test-"));
 		sessionsDir = join(tmpDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
 		indexer = new SessionIndexer(join(sessionsDir, "index.db"));
 	});
 
-	after(() => {
+	afterAll(() => {
 		indexer.close();
 		rmSync(tmpDir, { recursive: true, force: true });
 	});
@@ -91,9 +88,9 @@ describe("SessionIndexer", () => {
 		await indexer.indexSessions(sessionsDir);
 
 		const results = indexer.search("visual sell standalone");
-		assert.ok(results.length > 0, "Should find at least one result");
-		assert.ok(results[0].matchedTurn.userText.includes("visual sell"));
-		assert.equal(results[0].project, "my-app");
+		expect(results.length).toBeGreaterThan(0);
+		expect(results[0].matchedTurn.userText).toContain("visual sell");
+		expect(results[0].project).toBe("my-app");
 	});
 
 	it("pairs user and assistant messages into turns", async () => {
@@ -107,9 +104,9 @@ describe("SessionIndexer", () => {
 		await indexer.indexSessions(sessionsDir);
 
 		const results = indexer.search("first question");
-		assert.equal(results.length, 1);
-		assert.equal(results[0].matchedTurn.userText, "first question");
-		assert.equal(results[0].matchedTurn.assistantText, "first answer");
+		expect(results.length).toBe(1);
+		expect(results[0].matchedTurn.userText).toBe("first question");
+		expect(results[0].matchedTurn.assistantText).toBe("first answer");
 	});
 
 	it("provides ±1 context turns around matches", async () => {
@@ -125,9 +122,9 @@ describe("SessionIndexer", () => {
 		await indexer.indexSessions(sessionsDir);
 
 		const results = indexer.search("matched query");
-		assert.equal(results.length, 1);
-		assert.equal(results[0].contextBefore?.userText, "context before this turn");
-		assert.equal(results[0].contextAfter?.userText, "context after this turn");
+		expect(results.length).toBe(1);
+		expect(results[0].contextBefore?.userText).toBe("context before this turn");
+		expect(results[0].contextAfter?.userText).toBe("context after this turn");
 	});
 
 	it("excludes the current session from indexing", async () => {
@@ -145,7 +142,7 @@ describe("SessionIndexer", () => {
 		await indexer.indexSessions(sessionsDir, "current-session");
 
 		const results = indexer.search("xyzzy");
-		assert.equal(results.length, 0);
+		expect(results.length).toBe(0);
 	});
 
 	it("filters by project name", async () => {
@@ -161,11 +158,11 @@ describe("SessionIndexer", () => {
 		await indexer.indexSessions(sessionsDir);
 
 		const alphaResults = indexer.search("deploy application", { project: "alpha" });
-		assert.equal(alphaResults.length, 1);
-		assert.equal(alphaResults[0].project, "alpha");
+		expect(alphaResults.length).toBe(1);
+		expect(alphaResults[0].project).toBe("alpha");
 
 		const allResults = indexer.search("deploy application");
-		assert.equal(allResults.length, 2);
+		expect(allResults.length).toBe(2);
 	});
 
 	it("handles sessions with only user messages (no assistant response)", async () => {
@@ -180,8 +177,8 @@ describe("SessionIndexer", () => {
 		await indexer.indexSessions(sessionsDir);
 
 		const results = indexer.search("orphaned question");
-		assert.equal(results.length, 1);
-		assert.equal(results[0].matchedTurn.assistantText, "");
+		expect(results.length).toBe(1);
+		expect(results[0].matchedTurn.assistantText).toBe("");
 	});
 
 	it("strips thinking and toolCall blocks from assistant messages", async () => {
@@ -201,22 +198,22 @@ describe("SessionIndexer", () => {
 		// "internal thoughts" is in the thinking block — should NOT be searchable
 		const thinkingResults = indexer.search("internal thoughts indexed");
 		const hasThisSession = thinkingResults.some((r) => r.sessionId === "sess-clean");
-		assert.equal(hasThisSession, false, "Thinking blocks should not be indexed");
+		expect(hasThisSession).toBe(false);
 
 		// The text block should be searchable
 		const textResults = indexer.search("visible text indexed");
-		assert.ok(textResults.length > 0);
+		expect(textResults.length).toBeGreaterThan(0);
 	});
 
 	it("listSessions returns indexed session metadata", async () => {
 		// Sessions from previous tests should be indexed
 		const sessions = indexer.listSessions();
-		assert.ok(sessions.length > 0);
+		expect(sessions.length).toBeGreaterThan(0);
 
 		// Most recent first
 		const dates = sessions.map((s) => s.startedAt);
 		const sorted = [...dates].sort().reverse();
-		assert.deepEqual(dates, sorted);
+		expect(dates).toEqual(sorted);
 	});
 
 	it("uses FTS5 stemming — 'designing' matches 'design'", async () => {
@@ -229,6 +226,6 @@ describe("SessionIndexer", () => {
 
 		// Search for "design" should match "designing"
 		const results = indexer.search("zqplayout design");
-		assert.ok(results.length > 0, "Porter stemming should match 'designing' with 'design'");
+		expect(results.length).toBeGreaterThan(0);
 	});
 });

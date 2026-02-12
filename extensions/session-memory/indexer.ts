@@ -5,13 +5,15 @@
  * Incrementally indexes new/changed sessions by tracking file mtime.
  * Pairs consecutive user+assistant messages into "turns" for search.
  *
- * Uses better-sqlite3 (native Node.js addon) with FTS5 + porter stemming.
+ * Uses node:sqlite (Node ≥22.5) or bun:sqlite via a thin adapter.
+ * FTS5 with porter stemming for full-text search.
  */
 
 import { createReadStream, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
-import Database from "better-sqlite3";
+import type { SqliteDatabase } from "./sqlite-adapter.js";
+import { openDatabase } from "./sqlite-adapter.js";
 import type { SearchOptions, SearchResult, SessionMeta } from "./types.js";
 
 /** Extracted text from a message event in the session JSONL. */
@@ -22,7 +24,7 @@ interface ParsedMessage {
 }
 
 /**
- * FTS5-backed session indexer using better-sqlite3.
+ * FTS5-backed session indexer using the sqlite-adapter shim.
  *
  * @example
  * ```typescript
@@ -32,15 +34,15 @@ interface ParsedMessage {
  * ```
  */
 export class SessionIndexer {
-	private db: Database.Database;
+	private db: SqliteDatabase;
 
 	/**
 	 * @param dbPath - Path to the SQLite database file
 	 */
 	constructor(dbPath: string) {
-		this.db = new Database(dbPath);
-		this.db.pragma("journal_mode = WAL");
-		this.db.pragma("synchronous = NORMAL");
+		this.db = openDatabase(dbPath);
+		this.db.exec("PRAGMA journal_mode = WAL");
+		this.db.exec("PRAGMA synchronous = NORMAL");
 		this.ensureSchema();
 	}
 
@@ -421,7 +423,7 @@ export class SessionIndexer {
 			LIMIT ?
 		`;
 
-		return this.db.prepare(sql).all(...params) as SessionMeta[];
+		return this.db.prepare(sql).all(...params) as unknown as SessionMeta[];
 	}
 
 	/** Close the database connection. */
