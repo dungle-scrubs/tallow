@@ -36,13 +36,14 @@ import {
  * counted as visible characters, causing "exceeds terminal width" crashes.
  *
  * We strip all OSC sequences EXCEPT OSC 8 (hyperlinks) which pi-tui handles.
- * Format: \x1b] <params> (\x07 | \x1b\\)
+ * Handles both terminated (\x07 or \x1b\\) and unterminated sequences —
+ * programs like bun test emit bare \x1b]1337;SetUserVar=... without a terminator.
  *
  * @param line - Raw output line from bash
  * @returns Line with non-display OSC sequences removed
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escape sequences requires control chars
-const NON_DISPLAY_OSC_RE = /\x1b\](?!8;;)[^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const NON_DISPLAY_OSC_RE = /\x1b\](?!8;;)[^\x07\x1b]*(?:\x07|\x1b\\)?/g;
 
 /** @internal */
 export function stripNonDisplayOsc(line: string): string {

@@ -110,15 +110,23 @@ export function visibleWidth(str: string): number {
 		clean = clean.replace(/\t/g, "   ");
 	}
 	if (clean.includes("\x1b")) {
+		// Order matters: strip OSC/APC BEFORE CSI. Unterminated OSC sequences
+		// use [^\x07\x1b]* which stops at the next ESC byte. If CSI sequences
+		// (like \x1b[39m) are stripped first, the ESC boundary disappears and
+		// the unterminated OSC consumes visible text that followed the CSI.
+		//
+		// Strip all OSC sequences: \x1b]...\x07 or \x1b]...\x1b\\
+		// Also handles unterminated OSC sequences (no BEL/ST) that run to
+		// the next ESC or end-of-string. Programs like bun test emit bare
+		// \x1b]1337;SetUserVar=... without a terminator.
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
+		clean = clean.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, "");
+		// Strip APC sequences: \x1b_...\x07 or \x1b_...\x1b\\
+		// Also handles unterminated APC sequences.
+		clean = clean.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)?/g, "");
 		// Strip all CSI sequences: ESC [ (optional ?/!/>) params final-byte
 		// Covers SGR (m), cursor movement (A-H), erase (J/K), DEC private mode (?25l/h), etc.
 		clean = clean.replace(/\x1b\[[?!>]?[0-9;]*[a-zA-Z]/g, "");
-		// Strip all OSC sequences: \x1b]...\x07 or \x1b]...\x1b\\
-		// Covers OSC 8 hyperlinks, OSC 1337 (iTerm2 SetUserVar), and any other OSC
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequences
-		clean = clean.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
-		// Strip APC sequences: \x1b_...\x07 or \x1b_...\x1b\\ (used for cursor marker)
-		clean = clean.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
 	}
 
 	// Calculate width
