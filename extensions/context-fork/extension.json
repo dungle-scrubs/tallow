@@ -1,0 +1,26 @@
+{
+	"name": "context-fork",
+	"version": "0.1.0",
+	"description": "Runs commands/skills with context: fork frontmatter in isolated pi subprocesses",
+	"category": "command",
+	"tags": ["fork", "context", "subprocess", "agents", "isolation"],
+	"files": ["index.ts", "model-resolver.ts", "frontmatter-index.ts", "spawn.ts"],
+	"relationships": [
+		{
+			"name": "command-prompt",
+			"kind": "enhances",
+			"reason": "Intercepts commands with context: fork before they are sent inline"
+		},
+		{
+			"name": "skill-commands",
+			"kind": "enhances",
+			"reason": "Intercepts skills with context: fork before they are sent inline"
+		},
+		{
+			"name": "minimal-skill-display",
+			"kind": "enhances",
+			"reason": "Must run before minimal-skill-display to intercept fork skills first"
+		}
+	],
+	"npmDependencies": {}
+}
