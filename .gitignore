@@ -36,3 +36,4 @@ AGENTS.md
 # Docs site
 docs/node_modules/
 docs/dist/
+.sidecar/
