@@ -6,7 +6,7 @@ description: Why tallow exists and what it does.
 ## What is tallow?
 
 tallow is an opinionated coding agent built on pi. It bundles
-36 extensions, 8 agent profiles, 34 themes, and a skill system
+42 extensions, 8 agent profiles, 34 themes, and a skill system
 into a single install. No manual extension management —
 everything ships together, ready to use.
 
@@ -19,20 +19,22 @@ hooks, skills, and commands.
 
 ## What ships out of the box
 
-### Extensions (36)
+### Extensions (42)
 
 Every feature is an extension. They're organized by category:
 
 | Category | Extensions | Examples |
 |----------|-----------|----------|
-| **Tools** (15) | Core coding tools and agent capabilities | bash, edit, read, write, cd, web-fetch, subagent, teams, tasks, plan-mode, LSP, MCP adapter |
-| **UI & Display** (4) | Terminal rendering and status | custom footer, git status, tool display, minimal skill display |
-| **Commands** (2) | Prompt/command system | command-prompt, command-expansion |
-| **Utilities** (5) | Helper features | cheatsheet, context-usage, init, show-system-prompt, read-tool-enhanced |
-| **Integrations** (1) | External system hooks | lifecycle hooks |
+| **Tools** (15) | Core coding tools and agent capabilities | bash, edit, read, write, cd, web-fetch, subagent, teams, tasks, plan-mode, MCP adapter, session-memory |
+| **UI & Display** (5) | Terminal rendering and status | custom footer, git status, tool display, minimal skill display, session-namer, random-spinner |
+| **Commands** (7) | Prompt/command system | command-prompt, command-expansion, context-fork, health, shell-interpolation, skill-commands |
+| **Utilities** (6) | Helper features | cheatsheet, context-usage, debug, init, show-system-prompt, read-tool-enhanced |
+| **Integrations** (2) | External system hooks | lifecycle hooks, claude-bridge |
 | **Language Support** (1) | IDE-like features | LSP (TypeScript, Python, Rust, Swift, PHP) |
 | **Context** (1) | Instruction loading | context-files (CLAUDE.md + AGENTS.md) |
+| **Dev** (1) | Development tools | upstream-check |
 | **Aliases** (1) | Convenience shortcuts | /clear → /new |
+| **Core** (1) | Internal infrastructure | \_icons (icon registry) |
 
 Each extension has an `extension.json` manifest with a
 `category` property that drives the documentation sidebar
@@ -81,7 +83,7 @@ Skills have frontmatter metadata including `name`,
 
 ## What makes it different
 
-- **Batteries included** — 36 extensions loaded automatically.
+- **Batteries included** — 42 extensions loaded automatically.
   No separate install step.
 - **Extensible from the ground up** — features are extensions,
   not hard-coded. Don't like how bash output renders? Replace
