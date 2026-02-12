@@ -12,17 +12,24 @@ import * as fs from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills, stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import {
+	DEFAULT_SKILL_ICON,
+	getPackageSkillPaths,
+	readSkillIcon,
+} from "../read-tool-enhanced/index.js";
 
 interface Skill {
 	name: string;
 	filePath: string;
 	baseDir: string;
 	description: string;
+	icon: string;
 }
 
 interface MinimalSkillDetails {
 	skillName: string;
 	location: string;
+	icon: string;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -31,12 +38,13 @@ export default function (pi: ExtensionAPI) {
 
 	function reloadSkills() {
 		try {
-			const loaded = loadSkills();
+			const loaded = loadSkills({ skillPaths: getPackageSkillPaths() });
 			skills = loaded.skills.map((s) => ({
 				name: s.name,
 				filePath: s.filePath,
 				baseDir: s.baseDir,
 				description: s.description || "",
+				icon: readSkillIcon(s.filePath),
 			}));
 		} catch {
 			skills = [];
@@ -53,8 +61,9 @@ export default function (pi: ExtensionAPI) {
 	// Register minimal renderer for our custom skill message type
 	pi.registerMessageRenderer<MinimalSkillDetails>("minimal-skill", (message, _options, theme) => {
 		const details = message.details;
+		const icon = details?.icon || DEFAULT_SKILL_ICON;
 		const text =
-			theme.fg("dim", "📚 ") +
+			theme.fg("dim", `${icon} `) +
 			theme.fg("muted", "skill: ") +
 			theme.fg("accent", details?.skillName || "unknown");
 		return new Text(text, 0, 0);
@@ -94,11 +103,12 @@ export default function (pi: ExtensionAPI) {
 		// Send minimal display message (custom type with our renderer)
 		pi.sendMessage({
 			customType: "minimal-skill",
-			content: `📚 skill: ${skillName}`,
+			content: `${skill.icon} skill: ${skillName}`,
 			display: true,
 			details: {
 				skillName: skill.name,
 				location: skill.filePath,
+				icon: skill.icon,
 			},
 		});
 
