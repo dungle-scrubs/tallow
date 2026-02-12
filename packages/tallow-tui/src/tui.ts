@@ -8,7 +8,13 @@ import * as path from "node:path";
 import { isKeyRelease, matchesKey } from "./keys.js";
 import type { Terminal } from "./terminal.js";
 import { getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.js";
-import { extractSegments, sliceByColumn, sliceWithWidth, visibleWidth } from "./utils.js";
+import {
+	extractSegments,
+	sliceByColumn,
+	sliceWithWidth,
+	truncateToWidth,
+	visibleWidth,
+} from "./utils.js";
 
 /**
  * Component interface - all components must implement this
@@ -1072,35 +1078,27 @@ export class TUI extends Container {
 		for (let i = firstChanged; i <= renderEnd; i++) {
 			if (i > firstChanged) buffer += "\r\n";
 			buffer += "\x1b[2K"; // Clear current line
-			const line = newLines[i];
+			let line = newLines[i];
 			const isImage = isImageLine(line);
 			if (!isImage && visibleWidth(line) > width) {
-				// Log all lines to crash file for debugging
+				// Defensive clamp: truncate the line instead of crashing.
+				// This catches any extension that fails to truncate its output,
+				// unterminated OSC sequences that inflate visibleWidth, or any
+				// other edge case. Log for debugging so the source can be fixed.
 				const crashLogPath = path.join(os.homedir(), ".pi", "agent", "pi-crash.log");
-				const crashData = [
-					`Crash at ${new Date().toISOString()}`,
-					`Terminal width: ${width}`,
-					`Line ${i} visible width: ${visibleWidth(line)}`,
-					"",
-					"=== All rendered lines ===",
-					...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
+				const entry = [
+					`[${new Date().toISOString()}] Width overflow: line ${i} is ${visibleWidth(line)}, terminal is ${width}. Clamped.`,
+					`  Content: ${line.slice(0, 200)}${line.length > 200 ? "..." : ""}`,
 					"",
 				].join("\n");
-				fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
-				fs.writeFileSync(crashLogPath, crashData);
-
-				// Clean up terminal state before throwing
-				this.stop();
-
-				const errorMsg = [
-					`Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
-					"",
-					"This is likely caused by a custom TUI component not truncating its output.",
-					"Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
-					"",
-					`Debug log written to: ${crashLogPath}`,
-				].join("\n");
-				throw new Error(errorMsg);
+				try {
+					fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
+					fs.appendFileSync(crashLogPath, entry);
+				} catch {
+					// Best-effort logging — never crash over logging
+				}
+				line = truncateToWidth(line, width, "");
+				newLines[i] = line;
 			}
 			buffer += line;
 		}

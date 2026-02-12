@@ -56,6 +56,70 @@ describe("visibleWidth", () => {
 		const w = visibleWidth("🔥🎉✅");
 		expect(w).toBeGreaterThanOrEqual(4); // at least 2 wide emoji
 	});
+
+	// ── OSC sequence handling ────────────────────────────────────────────
+
+	it("strips terminated OSC 1337 SetUserVar (BEL)", () => {
+		expect(visibleWidth("\x1b]1337;SetUserVar=pi_status=ZG9uZQ==\x07(pass)")).toBe(6);
+	});
+
+	it("strips terminated OSC 1337 SetUserVar (ST)", () => {
+		expect(visibleWidth("\x1b]1337;SetUserVar=pi_status=ZG9uZQ==\x1b\\(pass)")).toBe(6);
+	});
+
+	it("strips unterminated OSC without crashing (may over-strip)", () => {
+		// Without a terminator, visible text after the OSC body is ambiguous.
+		// The regex consumes everything until the next ESC or end-of-string.
+		// Over-stripping is acceptable — crashing is not.
+		const width = visibleWidth("\x1b]1337;SetUserVar=pi_status=ZG9uZQ==(pass)");
+		expect(width).toBeLessThanOrEqual(6);
+	});
+
+	it("strips chained unterminated OSC sequences without crashing", () => {
+		// Each unterminated OSC consumes up to the next ESC. The last one
+		// consumes to end-of-string, eating any trailing visible text.
+		const line =
+			"\x1b]1337;SetUserVar=pi_status=" +
+			"\x1b]1337;SetUserVar=pi_status=d29ya2luZw==" +
+			"\x1b]1337;SetUserVar=pi_status=ZG9uZQ==" +
+			"(pass)";
+		expect(visibleWidth(line)).toBeLessThanOrEqual(6);
+	});
+
+	it("unterminated OSC stops at next ESC (preserves text after next escape)", () => {
+		// Unterminated OSC consumes to next ESC, but text AFTER the next CSI is preserved.
+		const line =
+			"\x1b]1337;SetUserVar=pi_status=ZG9uZQ==" +
+			"\x1b[39m" + // CSI resets color — next ESC stops the unterminated OSC
+			"visible";
+		expect(visibleWidth(line)).toBe(7);
+	});
+
+	it("handles real crash pattern: chained unterminated OSC between CSI sequences", () => {
+		// Reproduces the actual crash: CSI color + unterminated OSC chain + CSI reset
+		const line =
+			"\x1b[48;2;10;10;20m" +
+			"\x1b[38;2;152;152;152m" +
+			"\x1b]1337;SetUserVar=pi_status=" +
+			"\x1b]1337;SetUserVar=pi_status=d29ya2luZw==" +
+			"\x1b]1337;SetUserVar=pi_status=ZG9uZQ==" +
+			"\x1b]1337;SetUserVar=pi_status=d29ya2luZw==" +
+			"\x1b]1337;SetUserVar=pi_status=ZG9uZQ==" +
+			"(pass)" +
+			"\x1b[49m\x1b[0m";
+		// Must not exceed any reasonable terminal width — the original crash was 182
+		expect(visibleWidth(line)).toBeLessThan(20);
+	});
+
+	it("strips unterminated APC sequences without crashing", () => {
+		const width = visibleWidth("\x1b_some-apc-data(pass)");
+		expect(width).toBeLessThanOrEqual(6);
+	});
+
+	it("strips arbitrary unterminated OSC numbers", () => {
+		const width = visibleWidth("\x1b]999;custom=datavisible");
+		expect(width).toBeLessThanOrEqual(7);
+	});
 });
 
 // ── truncateToWidth ──────────────────────────────────────────────────────────
