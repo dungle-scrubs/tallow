@@ -13,6 +13,7 @@ import {
 	matchesKey,
 	Text,
 	truncateToWidth,
+	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
@@ -203,7 +204,10 @@ WHEN NOT TO USE:
 					const add = (s: string) => lines.push(truncateToWidth(s, width));
 
 					add(theme.fg("accent", "─".repeat(width)));
-					add(theme.fg("text", ` ${params.question}`));
+					// Wrap question text instead of truncating
+					for (const line of wrapTextWithAnsi(theme.fg("text", ` ${params.question}`), width)) {
+						lines.push(line);
+					}
 					lines.push("");
 
 					for (let i = 0; i < allOptions.length; i++) {
