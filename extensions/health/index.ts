@@ -15,7 +15,7 @@ import type {
 	ExtensionContext,
 	Theme,
 } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { BorderedBox, ROUNDED, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -405,12 +405,20 @@ export default function healthExtension(pi: ExtensionAPI): void {
 
 		return {
 			/**
-			 * Renders the health diagnostic tree.
+			 * Renders the health diagnostic tree inside a rounded border.
 			 * @param width - Available terminal width
 			 * @returns Array of styled lines
 			 */
 			render(width: number): string[] {
-				return renderHealth(details, theme, width);
+				const innerWidth = width - 4; // 2 borders + 2 padding
+				const contentLines = renderHealth(details, theme, innerWidth);
+				const box = new BorderedBox(contentLines, {
+					borderStyle: ROUNDED,
+					title: "Health",
+					borderColorFn: (s) => theme.fg("muted", s),
+					titleColorFn: (s) => theme.fg("accent", s),
+				});
+				return box.render(width);
 			},
 			invalidate() {},
 		};
