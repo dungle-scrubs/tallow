@@ -9,7 +9,7 @@
  */
 
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills } from "@mariozechner/pi-coding-agent";
 
@@ -78,10 +78,26 @@ function substituteArguments(content: string, args: string): string {
 	return result;
 }
 
+/** Valid skill command name: lowercase alphanumeric with hyphens. */
+const VALID_NAME_RE = /^[a-z0-9-]+$/;
+
 /**
- * Registers skills as /skill-name commands (Claude Code style).
- * @param pi - Extension API
+ * Resolves a valid command name for a skill.
+ * Prefers the skill's declared name; falls back to the parent directory name
+ * when the declared name contains invalid characters (spaces, uppercase, etc).
+ *
+ * @param skill - Skill object with name and filePath
+ * @returns Valid kebab-case command name, or null if no valid name can be derived
  */
+export function resolveCommandName(skill: { name: string; filePath: string }): string | null {
+	if (VALID_NAME_RE.test(skill.name)) return skill.name;
+
+	const dirName = basename(dirname(skill.filePath));
+	if (VALID_NAME_RE.test(dirName)) return dirName;
+
+	return null;
+}
+
 /**
  * Disable the built-in `/skill:name` commands so this extension's
  * `/skill-name` style is the sole entry point. Reads and writes
@@ -125,6 +141,10 @@ export default function (pi: ExtensionAPI) {
 	const { skills } = loadSkills({ skillPaths: claudeSkillPaths });
 
 	for (const skill of skills) {
+		// Validate name before registration — invalid names produce broken commands
+		const commandName = resolveCommandName(skill);
+		if (!commandName) continue;
+
 		// Read skill file to check frontmatter
 		let frontmatter: SkillFrontmatter = {};
 		try {
@@ -142,7 +162,7 @@ export default function (pi: ExtensionAPI) {
 		const hint = frontmatter["argument-hint"];
 		const description = hint ? `${skill.description} ${hint}` : skill.description;
 
-		pi.registerCommand(skill.name, {
+		pi.registerCommand(commandName, {
 			description,
 			handler: async (args, cmdCtx) => {
 				// Read full skill content
