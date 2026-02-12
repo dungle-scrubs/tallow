@@ -537,14 +537,16 @@ export default function (pi: ExtensionAPI): void {
 	// Paired prompts/ and commands/ directories per scope
 	const projectPromptsDir = path.join(process.cwd(), ".tallow", "prompts");
 	const projectCommandsDir = path.join(process.cwd(), ".tallow", "commands");
+	const projectClaudeCommandsDir = path.join(process.cwd(), ".claude", "commands");
 	const globalPromptsDir = path.join(agentDir, "prompts");
 	const globalCommandsDir = path.join(agentDir, "commands");
+	const globalClaudeCommandsDir = path.join(os.homedir(), ".claude", "commands");
 
 	// ----- Local top-level: commands/ files not already in prompts/ -----
 	// Pi built-in handles prompts/ top-level; we cover commands/ top-level.
-	// Project first so it wins on collisions with global.
+	// .tallow/ dirs first so they win on first-seen collision; .claude/ after.
 	for (const cmd of discoverLocalTopLevelCommands(
-		[projectCommandsDir, globalCommandsDir],
+		[projectCommandsDir, projectClaudeCommandsDir, globalCommandsDir, globalClaudeCommandsDir],
 		[projectPromptsDir, globalPromptsDir]
 	)) {
 		registerPrompt(pi, cmd.name, cmd.filePath, registered, () => promptVisibilityMode);
@@ -552,10 +554,11 @@ export default function (pi: ExtensionAPI): void {
 
 	// ----- Local nested: subfolder:command (merged from prompts/ + commands/) -----
 	// Project-local first so it wins on collisions with global.
-	// Within each scope, prompts/ comes first so it wins over commands/.
+	// Within each scope, prompts/ first, .tallow/commands/ second, .claude/commands/ last
+	// (first-seen wins in discoverLocalNestedPrompts).
 	for (const dirs of [
-		[projectPromptsDir, projectCommandsDir],
-		[globalPromptsDir, globalCommandsDir],
+		[projectPromptsDir, projectCommandsDir, projectClaudeCommandsDir],
+		[globalPromptsDir, globalCommandsDir, globalClaudeCommandsDir],
 	]) {
 		for (const prompt of discoverLocalNestedPrompts(dirs)) {
 			const commandName = `${prompt.dir}:${prompt.name}`;
@@ -586,6 +589,18 @@ export default function (pi: ExtensionAPI): void {
 			// to avoid duplicate entries in the command palette.
 		}
 	}
+
+	// Inject slash command design constraints into agent context
+	pi.on("before_agent_start", async (event) => {
+		const hint = [
+			"\n## Slash Command Design Constraints\n",
+			"Slash commands (`/command`) do not support space-separated subcommands — autocomplete can't handle spaces.",
+			"`/debug on` won't work; it must be `/debug-on` or `/debug_on`. Design commands as either:",
+			"- Separate commands: `/debug`, `/debug-on`, `/debug-off`, `/debug-tail`",
+			"- Single command with no arguments: `/debug` (toggles or shows status)\n",
+		].join("\n");
+		return { systemPrompt: event.systemPrompt + hint };
+	});
 
 	// Restore persisted mode and log registered command diagnostics on session start.
 	pi.on("session_start", async (_event, ctx) => {

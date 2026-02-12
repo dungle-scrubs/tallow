@@ -1,0 +1,16 @@
+{
+	"name": "claude-bridge",
+	"version": "0.1.0",
+	"description": "Bridges .claude/ directories so tallow discovers Claude Code skills, agents, and commands",
+	"category": "integration",
+	"tags": ["claude-code", "compatibility", "bridging"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "skill-commands",
+			"kind": "enhances",
+			"reason": "Provides .claude/skills/ paths for skill discovery"
+		}
+	],
+	"npmDependencies": {}
+}

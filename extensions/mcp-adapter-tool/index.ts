@@ -431,11 +431,25 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		const mcpConfig = loadMcpConfig(ctx.cwd);
-		const serverNames = Object.keys(mcpConfig);
+		let serverNames = Object.keys(mcpConfig);
 		if (serverNames.length === 0) return;
 
-		// Create server instances
-		for (const [name, config] of Object.entries(mcpConfig)) {
+		// Filter servers if PI_MCP_SERVERS env var is set (agent-scoped MCP)
+		const allowedServers = process.env.PI_MCP_SERVERS;
+		if (allowedServers !== undefined && allowedServers !== "") {
+			const allowed = new Set(
+				allowedServers
+					.split(",")
+					.map((s) => s.trim())
+					.filter(Boolean)
+			);
+			serverNames = serverNames.filter((name) => allowed.has(name));
+			if (serverNames.length === 0) return;
+		}
+
+		// Create server instances (only for allowed servers)
+		for (const name of serverNames) {
+			const config = mcpConfig[name];
 			servers.set(name, {
 				name,
 				config,
@@ -463,7 +477,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 		ctx.ui.setWorkingMessage();
 	});
 
-	// Inject MCP context into system prompt so the agent knows what's available
+	// Inject MCP context and usage instructions into system prompt
 	pi.on("before_agent_start", async (event) => {
 		const connectedServers = [...servers.values()].filter((s) => s.ready);
 		if (connectedServers.length === 0) return;
@@ -481,6 +495,45 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 			}
 			lines.push("");
 		}
+
+		// Documentation lookup instructions (only relevant when tool-proxy docs tools are available)
+		const hasDocsTools = connectedServers.some((s) =>
+			s.tools.some((t) => t.name === "search_docs" || t.name === "get_doc")
+		);
+		if (hasDocsTools) {
+			lines.push("## Documentation Lookup (MANDATORY)\n");
+			lines.push(
+				"When you need documentation for any software tool, library, framework, API, SDK, CLI, or service:\n",
+				'1. **ALWAYS check local docs first** with `execute_tool(app: "docs", tool: "search_docs", args: { query: "..." })`',
+				'2. **If found locally**, read it with `execute_tool(app: "docs", tool: "get_doc", args: { name: "..." })`',
+				'3. **If NOT found locally**, add it with `execute_tool(app: "docs", tool: "add_doc", args: { name: "<Name>", url: "<official docs URL>" })`, then read with `get_doc`',
+				"4. **NEVER use `web-fetch` for documentation.** The docs tool scrapes, caches, and auto-refreshes. `web-fetch` wastes tokens on raw HTML and the content is lost after the session.\n",
+				"This applies to ALL documentation: official docs, API references, SDK guides, configuration docs, CLI references, getting started guides, changelogs, migration guides.",
+				"This does NOT apply to: search engine results, blog posts, news articles, Stack Overflow, GitHub issues/PRs, social media, Wikipedia, general web content.\n"
+			);
+		}
+
+		// MCP Server Policy
+		lines.push("## MCP Server Policy\n");
+		lines.push(
+			"- NEVER add MCP servers directly to Claude Code configuration (~/.claude/.claude.json)",
+			"- Add MCP servers to the tool-proxy system at ~/dev/ai/mcp/apps/",
+			"- Run the indexer after adding new apps: `cd ~/dev/ai/services/tool-proxy && pnpm index`\n"
+		);
+
+		// Tool Proxy Modes
+		lines.push("## Tool Proxy Modes\n");
+		lines.push(
+			"| Mode | Transport | Secrets | Use case |",
+			"|------|-----------|---------|----------|",
+			"| `start.sh` | STDIO | Varlock/1Password | Local Claude Code with Touch ID |",
+			"| `start-local.sh` | STDIO | env files | Local dev, simpler |",
+			"| Docker | HTTP/SSE | `OP_SERVICE_ACCOUNT_TOKEN` | Remote access, orchestrator |\n",
+			"Docker mode (`docker compose up tool-proxy`):",
+			"- `TOOL_PROXY_HTTP=1` enables HTTP/SSE on port 3100",
+			"- `TOOL_PROXY_MODE`: `local` (all) / `api` (locality=api only) / `remote-cc` (whitelist)",
+			"- Don't run Docker alongside local STDIO - they share Neo4j and will conflict\n"
+		);
 
 		return { systemPrompt: event.systemPrompt + lines.join("\n") };
 	});

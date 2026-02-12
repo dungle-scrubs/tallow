@@ -17,7 +17,10 @@ interface AgentFrontmatter {
 	name?: string;
 	description?: string;
 	tools?: string;
+	disallowedTools?: string;
 	skills?: string;
+	mcpServers?: string;
+	maxTurns?: string;
 	model?: string;
 	"argument-hint"?: string;
 	[key: string]: unknown;
@@ -28,9 +31,34 @@ interface Agent {
 	description: string;
 	filePath: string;
 	tools?: string[];
+	disallowedTools?: string[];
 	skills?: string[];
+	mcpServers?: string[];
+	maxTurns?: number;
 	model?: string;
 	systemPrompt: string;
+}
+
+/** Built-in tools available in a default pi subprocess. */
+const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
+/**
+ * Computes the effective tool list from allowlist and denylist.
+ *
+ * @param tools - Explicit allowlist from frontmatter (undefined = inherit all)
+ * @param disallowedTools - Denylist from frontmatter (undefined = no exclusions)
+ * @returns Tool list for --tools flag, or undefined if no filtering needed
+ */
+function computeEffectiveTools(
+	tools: string[] | undefined,
+	disallowedTools: string[] | undefined
+): string[] | undefined {
+	if (!tools && !disallowedTools) return undefined;
+	if (tools && !disallowedTools) return tools;
+
+	const base = tools ?? PI_BUILTIN_TOOLS;
+	const deny = new Set(disallowedTools);
+	return base.filter((t) => !deny.has(t));
 }
 
 /**
@@ -100,6 +128,14 @@ function loadAgentsFromDir(dir: string): Agent[] {
 						.filter(Boolean)
 				: undefined;
 
+		const disallowedTools =
+			typeof frontmatter.disallowedTools === "string"
+				? frontmatter.disallowedTools
+						.split(",")
+						.map((t) => t.trim())
+						.filter(Boolean)
+				: undefined;
+
 		const skills =
 			typeof frontmatter.skills === "string"
 				? frontmatter.skills
@@ -108,12 +144,31 @@ function loadAgentsFromDir(dir: string): Agent[] {
 						.filter(Boolean)
 				: undefined;
 
+		const mcpServers =
+			typeof frontmatter.mcpServers === "string"
+				? frontmatter.mcpServers
+						.split(",")
+						.map((s) => s.trim())
+						.filter(Boolean)
+				: undefined;
+
+		const parsedMaxTurns =
+			typeof frontmatter.maxTurns === "string"
+				? Number.parseInt(frontmatter.maxTurns, 10)
+				: typeof frontmatter.maxTurns === "number"
+					? frontmatter.maxTurns
+					: undefined;
+		const maxTurns = parsedMaxTurns && parsedMaxTurns > 0 ? parsedMaxTurns : undefined;
+
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description,
 			filePath,
 			tools,
+			disallowedTools: disallowedTools && disallowedTools.length > 0 ? disallowedTools : undefined,
 			skills,
+			mcpServers: mcpServers && mcpServers.length > 0 ? mcpServers : undefined,
+			maxTurns,
 			model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
 			systemPrompt: body.trim(),
 		});
@@ -176,14 +231,18 @@ function getPackageAgentDirs(settingsPath: string): string[] {
 }
 
 /**
- * Loads agents from user, project, and package directories.
- * Priority: project > user > packages (last wins per name).
+ * Loads agents from user, project, package, and .claude/ directories.
+ * Priority: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
+ * Last wins per name, so .tallow/ takes precedence over .claude/.
+ *
  * @returns Merged array of unique agents
  */
 function loadAgents(): Agent[] {
 	const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".tallow");
 	const userDir = path.join(agentDir, "agents");
+	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
 	const projectDir = path.join(process.cwd(), ".tallow", "agents");
+	const projectClaudeDir = path.join(process.cwd(), ".claude", "agents");
 
 	// Bundled agents shipped with the package.
 	// Walk up from this extension's directory to the package root.
@@ -201,13 +260,15 @@ function loadAgents(): Agent[] {
 		...getPackageAgentDirs(projectSettingsPath),
 	];
 
-	// Load in priority order: bundled (lowest) → packages → user → project (highest)
+	// Load in priority order: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
 	const agentMap = new Map<string, Agent>();
 	for (const agent of loadAgentsFromDir(bundledDir)) agentMap.set(agent.name, agent);
 	for (const dir of packageDirs) {
 		for (const agent of loadAgentsFromDir(dir)) agentMap.set(agent.name, agent);
 	}
+	for (const agent of loadAgentsFromDir(userClaudeDir)) agentMap.set(agent.name, agent);
 	for (const agent of loadAgentsFromDir(userDir)) agentMap.set(agent.name, agent);
+	for (const agent of loadAgentsFromDir(projectClaudeDir)) agentMap.set(agent.name, agent);
 	for (const agent of loadAgentsFromDir(projectDir)) agentMap.set(agent.name, agent);
 
 	return Array.from(agentMap.values());
@@ -247,8 +308,9 @@ export default function (pi: ExtensionAPI) {
 				// Build command args
 				const piArgs: string[] = ["-p"];
 				if (agent.model) piArgs.push("--model", agent.model);
-				if (agent.tools && agent.tools.length > 0) {
-					piArgs.push("--tools", agent.tools.join(","));
+				const effectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
+				if (effectiveTools && effectiveTools.length > 0) {
+					piArgs.push("--tools", effectiveTools.join(","));
 				}
 				if (agent.skills && agent.skills.length > 0) {
 					for (const skill of agent.skills) {
@@ -256,10 +318,18 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 
+				// Inject maxTurns budget hint into system prompt (soft enforcement only —
+				// agent-commands-tool doesn't use --mode json so no event-based hard kill)
+				let systemPrompt = agent.systemPrompt;
+				if (agent.maxTurns) {
+					const budget = `You have a maximum of ${agent.maxTurns} tool-use turns for this task. Plan your approach to complete within this budget. If you are running low, output your best result immediately.\n\n`;
+					systemPrompt = budget + systemPrompt;
+				}
+
 				// Add system prompt if present
 				let tmpPromptPath: string | null = null;
-				if (agent.systemPrompt) {
-					tmpPromptPath = writeTempPrompt(agent.name, agent.systemPrompt);
+				if (systemPrompt) {
+					tmpPromptPath = writeTempPrompt(agent.name, systemPrompt);
 					piArgs.push("--append-system-prompt", tmpPromptPath);
 				}
 
@@ -267,11 +337,18 @@ export default function (pi: ExtensionAPI) {
 				piArgs.push(`Task: ${args}`);
 
 				// Spawn pi process
+				const spawnEnv: Record<string, string> = {
+					...process.env,
+					PI_IS_SUBAGENT: "1",
+				} as Record<string, string>;
+				if (agent.mcpServers && agent.mcpServers.length > 0) {
+					spawnEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
+				}
 				const proc = spawn("pi", piArgs, {
 					cwd: ctx.cwd,
 					shell: false,
 					stdio: ["ignore", "pipe", "pipe"],
-					env: { ...process.env, PI_IS_SUBAGENT: "1" },
+					env: spawnEnv,
 				});
 
 				let stdout = "";

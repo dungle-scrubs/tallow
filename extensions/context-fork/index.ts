@@ -181,15 +181,18 @@ function getPackageAgentDirs(settingsPath: string): string[] {
 }
 
 /**
- * Loads all agents from bundled, package, user, and project directories.
- * Priority: project > user > packages > bundled (last wins per name).
+ * Loads all agents from bundled, package, user, project, and .claude/ directories.
+ * Priority: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
+ * Last wins per name, so .tallow/ takes precedence over .claude/.
  *
  * @returns Map of agent name → config
  */
 function loadAllAgents(): Map<string, AgentConfig> {
 	const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".tallow");
 	const userDir = path.join(agentDir, "agents");
+	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
 	const projectDir = path.join(process.cwd(), ".tallow", "agents");
+	const projectClaudeDir = path.join(process.cwd(), ".claude", "agents");
 
 	// Bundled agents from the package
 	const extensionFile = import.meta.url.startsWith("file:")
@@ -204,13 +207,15 @@ function loadAllAgents(): Map<string, AgentConfig> {
 		...getPackageAgentDirs(projectSettingsPath),
 	];
 
-	// Load in priority order: bundled → packages → user → project (last wins)
+	// Load in priority order: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
 	const agentMap = new Map<string, AgentConfig>();
 	for (const agent of loadAgentsFromDir(bundledDir)) agentMap.set(agent.name, agent);
 	for (const dir of packageDirs) {
 		for (const agent of loadAgentsFromDir(dir)) agentMap.set(agent.name, agent);
 	}
+	for (const agent of loadAgentsFromDir(userClaudeDir)) agentMap.set(agent.name, agent);
 	for (const agent of loadAgentsFromDir(userDir)) agentMap.set(agent.name, agent);
+	for (const agent of loadAgentsFromDir(projectClaudeDir)) agentMap.set(agent.name, agent);
 	for (const agent of loadAgentsFromDir(projectDir)) agentMap.set(agent.name, agent);
 
 	return agentMap;
