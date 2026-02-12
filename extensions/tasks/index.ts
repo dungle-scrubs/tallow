@@ -62,8 +62,11 @@ interface TaskComment {
 	timestamp: number;
 }
 
-/** A single task with subject, description, bidirectional deps, and comments. */
-interface Task {
+/**
+ * A single task with subject, description, bidirectional deps, and comments.
+ * @internal
+ */
+export interface Task {
 	/** Sequential integer ID as string ("1", "2", ...). */
 	id: string;
 	/** Short summary (was "title" in old schema). */
@@ -144,7 +147,8 @@ const agentActivity = new Map<string, AgentActivity>();
  * Generated agent identity: a display name and type label.
  * Populated on subagent_start with keyword heuristic, refined by Haiku.
  */
-interface AgentIdentity {
+/** @internal */
+export interface AgentIdentity {
 	/** Display name shown in widget and used as task owner (e.g. "scout", "auditor"). */
 	displayName: string;
 	/** Activity type label (e.g. "Explore", "Review"). */
@@ -174,11 +178,12 @@ const AGENT_TYPE_LABELS = [
 
 /**
  * Classify an agent's task into a display name + type label using keyword heuristics.
+ * @internal
  * @param task - The task description
  * @param agentName - The agent definition name (e.g. "worker")
  * @returns An AgentIdentity with displayName and typeLabel
  */
-function classifyAgent(task: string, agentName: string): AgentIdentity {
+export function classifyAgent(task: string, agentName: string): AgentIdentity {
 	const combined = `${agentName} ${task}`.toLowerCase();
 	const patterns: [RegExp, string, string][] = [
 		[/\b(review|critique|feedback|inspect|evaluate)\b/, "reviewer", "Review"],
@@ -635,10 +640,11 @@ function nextTaskId(state: TasksState): string {
 // Extract tasks from text (numbered lists, checkboxes, etc.)
 /**
  * Extract task titles from markdown-style task list text.
+ * @internal
  * @param text - Text containing task list items
  * @returns Array of task title strings
  */
-function _extractTasksFromText(text: string): string[] {
+export function _extractTasksFromText(text: string): string[] {
 	const tasks: string[] = [];
 
 	// Match numbered lists: "1. task", "1) task"
@@ -677,11 +683,12 @@ function _extractTasksFromText(text: string): string[] {
 
 /**
  * Finds tasks marked as completed in the given text.
+ * @internal
  * @param text - Text to search for completion markers
  * @param tasks - Tasks to check for completion
  * @returns Array of completed task IDs
  */
-function findCompletedTasks(text: string, tasks: Task[]): string[] {
+export function findCompletedTasks(text: string, tasks: Task[]): string[] {
 	const completed: string[] = [];
 
 	for (const task of tasks) {
@@ -707,10 +714,11 @@ function findCompletedTasks(text: string, tasks: Task[]): string[] {
 
 /**
  * Escapes special regex characters in a string.
+ * @internal
  * @param str - String to escape
  * @returns Escaped string safe for use in regex
  */
-function escapeRegex(str: string): string {
+export function escapeRegex(str: string): string {
 	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 

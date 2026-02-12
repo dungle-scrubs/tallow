@@ -36,8 +36,9 @@ interface Skill {
 
 /**
  * Parse command arguments respecting quoted strings (bash-style).
+ * @internal
  */
-function parseCommandArgs(argsString: string): string[] {
+export function parseCommandArgs(argsString: string): string[] {
 	const args: string[] = [];
 	let current = "";
 	let inQuote: string | null = null;
@@ -70,8 +71,9 @@ function parseCommandArgs(argsString: string): string[] {
 /**
  * Substitute argument placeholders in template content.
  * Supports $1, $2, ..., $@, $ARGUMENTS, ${@:N}, ${@:N:L}
+ * @internal
  */
-function substituteArgs(content: string, args: string[]): string {
+export function substituteArgs(content: string, args: string[]): string {
 	let result = content;
 
 	// Replace $1, $2, etc. with positional args FIRST
@@ -266,8 +268,9 @@ function expandCommands(
 /**
  * Extract the outer command and its arguments.
  * Returns { outerCommand, args } for "/cmd1 /cmd2 args" -> { outerCommand: "/cmd1", args: "/cmd2 args" }
+ * @internal
  */
-function splitOuterCommand(text: string): { outerCommand: string; args: string } | null {
+export function splitOuterCommand(text: string): { outerCommand: string; args: string } | null {
 	if (!text.startsWith("/")) return null;
 
 	const spaceIndex = text.indexOf(" ");

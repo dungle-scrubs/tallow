@@ -44,7 +44,8 @@ import {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching terminal escape sequences requires control chars
 const NON_DISPLAY_OSC_RE = /\x1b\](?!8;;)[^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
-function stripNonDisplayOsc(line: string): string {
+/** @internal */
+export function stripNonDisplayOsc(line: string): string {
 	if (!line.includes("\u001b]")) return line;
 	return line.replace(NON_DISPLAY_OSC_RE, "");
 }
@@ -75,7 +76,8 @@ function hasAnsiEscape(line: string): boolean {
  * @param dim - Theme dim color function
  * @returns Safely styled line for display
  */
-function styleBashLine(line: string, dim: (value: string) => string): string {
+/** @internal */
+export function styleBashLine(line: string, dim: (value: string) => string): string {
 	const clean = stripNonDisplayOsc(line);
 	return hasAnsiEscape(clean) ? clean : dim(clean);
 }
