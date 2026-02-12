@@ -9,7 +9,7 @@ import {
 	type ExtensionAPI,
 	renderDiff,
 } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { fileLink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { renderLines } from "../tool-display/index.js";
 
@@ -32,7 +32,11 @@ export default function editLive(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
-			return new Text(theme.fg("toolTitle", theme.bold("edit ")) + theme.fg("muted", path), 0, 0);
+			return new Text(
+				theme.fg("toolTitle", theme.bold("edit ")) + theme.fg("muted", fileLink(path)),
+				0,
+				0
+			);
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
@@ -75,7 +79,10 @@ export default function editLive(pi: ExtensionAPI): void {
 			}
 
 			const finalFilename = details._filename ?? "file";
-			const footer = theme.fg("muted", `${getIcon("success")} ${finalFilename} (edit applied)`);
+			const footer = theme.fg(
+				"muted",
+				`${getIcon("success")} ${fileLink(finalFilename)} (edit applied)`
+			);
 
 			if (details._diff) {
 				const diffLines = renderDiff(details._diff).split("\n");

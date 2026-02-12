@@ -22,7 +22,7 @@ import {
 	keyHint,
 	loadSkills,
 } from "@mariozechner/pi-coding-agent";
-import { Text, visibleWidth } from "@mariozechner/pi-tui";
+import { fileLink, Text, visibleWidth } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { getToolDisplayConfig, renderLines, truncateForDisplay } from "../tool-display/index.js";
 
@@ -129,7 +129,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 				};
 			}
 
-			return new Text(theme.fg("toolTitle", theme.bold("read ")) + theme.fg("muted", path), 0, 0);
+			return new Text(
+				theme.fg("toolTitle", theme.bold("read ")) + theme.fg("muted", fileLink(path)),
+				0,
+				0
+			);
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
@@ -245,7 +249,13 @@ export default function readSummary(pi: ExtensionAPI): void {
 			}
 
 			const summary = textContent?.text ?? "file";
-			const footer = theme.fg("muted", `${getIcon("success")} ${summary}`);
+			// Linkify the file path portion of the summary (everything before the parens)
+			const parenIdx = summary.indexOf(" (");
+			const linkedSummary =
+				parenIdx > 0
+					? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
+					: fileLink(summary);
+			const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
 
 			// Expanded: full content, then summary footer at bottom
 			if (expanded && details?._fullText) {
