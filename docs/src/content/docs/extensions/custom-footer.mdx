@@ -13,19 +13,25 @@ name, and thinking level.
 
 The footer adapts to terminal width:
 
-**Wide terminals (2 lines):**
+**Wide terminals (2–3 lines):**
 ```
 ~/dev/project                                              main*
 ↑1.2k ↓39k R12M W708k $11.444 (sub) 68.4%/200k (auto) model • high
+                                         ─ Refactoring auth to JWT
 ```
 
-**Narrow terminals (4 lines):**
+**Narrow terminals (4–5 lines):**
 ```
 ~/dev/project
  main*
 ↑1.2k ↓39k R12M W708k $11.444 (sub) 68.4%/200k (auto)
 model • high
+                                         ─ Refactoring auth to JWT
 ```
+
+The third row (session name) only appears when a name has been set
+by the [session-namer](/extensions/session-namer/) extension. It's
+right-aligned and dimmed so it stays unobtrusive.
 
 The wide layout puts the working directory and git branch on the
 first line (directory left, branch right), then metrics and model

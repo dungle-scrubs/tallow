@@ -101,8 +101,11 @@ tallow --no-session
 # Load additional extensions
 tallow -e ./my-extension
 
-# List saved sessions
+# List saved sessions (shows auto-generated names)
 tallow --list
+
+# Disable automatic session naming
+tallow --no-session-name
 ```
 
 ### Shell interpolation

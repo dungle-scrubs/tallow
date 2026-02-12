@@ -1,0 +1,56 @@
+---
+title: session-namer
+description: Auto-generates meaningful session names using Haiku after the first response.
+---
+
+Automatically names sessions after the first agent response using a
+lightweight model (Haiku). Names appear in the footer, terminal tab
+title, session selector, and `tallow --list`.
+
+## How it works
+
+After your first message gets a response, the extension fires a
+non-blocking Haiku call with the opening exchange. Haiku returns
+a 3–8 word descriptive name like "Refactoring auth middleware to
+JWT". The name is persisted via `setSessionName()` and picked up
+by the [custom-footer](/extensions/custom-footer/) on its next
+render cycle — appearing as a dim, right-aligned third row.
+
+Resumed sessions show their name immediately. The Haiku call only
+runs once per session and only for unnamed sessions.
+
+## Manual naming
+
+Use the `/name` command to view or override:
+
+```
+/name                    # Show current name
+/name Fix auth tests     # Set/override the name
+```
+
+## Opt out
+
+```bash
+tallow --no-session-name
+```
+
+## Model selection
+
+Prefers `claude-haiku-4-5` (fast, cheap). Falls back to
+`claude-sonnet-4-5`, then the first available model. If no model
+or API key is available, the extension silently does nothing.
+
+## Relationships with other extensions
+
+### [custom-footer](/extensions/custom-footer/)
+
+The footer reads `sessionManager.getSessionName()` each render
+and displays the name as a right-aligned third row. The
+session-namer extension only writes the name — display is
+entirely handled by custom-footer.
+
+### [session-memory](/extensions/session-memory/)
+
+Named sessions are easier to find when using session recall.
+The name appears in session listings and helps identify sessions
+without reading truncated first messages.

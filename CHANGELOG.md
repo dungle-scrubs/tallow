@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Session naming** — new `session-namer` extension auto-generates a descriptive
+  3–8 word name for each session using Haiku after the first response. Names display
+  as a right-aligned third row in the footer, appear in `tallow --list`, and set
+  the terminal tab title. Use `/name` to view or override, `--no-session-name` to
+  disable.
 - **Shell interpolation** — expand `` !`command` `` patterns in input by executing
   shell commands and inlining stdout. CC-compatible syntax. 5s timeout, 1MB max
   output, non-recursive. Exported `expandShellCommands()` for use by other extensions.
