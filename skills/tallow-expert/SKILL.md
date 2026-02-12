@@ -1,5 +1,6 @@
 ---
 name: tallow-expert
+icon: 🔧
 description: "Auto-triggers on tallow internals, architecture, extensions, configuration, or the pi framework API. Spawns the tallow-expert agent for codebase discovery."
 ---
 

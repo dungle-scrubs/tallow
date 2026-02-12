@@ -16,37 +16,123 @@
  *           ✓ index.ts (150 lines, 4.2KB)
  * Skill:    📚 skill: git (collapsed by default)
  */
+
+import * as fs from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import {
 	createReadTool,
 	type ExtensionAPI,
 	keyHint,
 	loadSkills,
+	parseFrontmatter,
 } from "@mariozechner/pi-coding-agent";
 import { fileLink, Text, visibleWidth } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { getToolDisplayConfig, renderLines, truncateForDisplay } from "../tool-display/index.js";
 
-/** Skill name → correct absolute file path cache. Populated lazily on first miss. */
-let skillPathMap: Map<string, string> | null = null;
+interface SkillCacheEntry {
+	path: string;
+	icon: string;
+}
+
+export const DEFAULT_SKILL_ICON = "📚";
 
 /**
- * Build a map of skill name → filePath from loaded skills.
- * Cached after first call; cleared on session start.
- * @returns Map from skill name to absolute SKILL.md path
+ * Resolve `~` to home directory.
+ * @param p - Path that may start with ~/
+ * @returns Absolute path
  */
-function getSkillPathMap(): Map<string, string> {
+function resolveHome(p: string): string {
+	return p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+}
+
+/**
+ * Get skill directory paths from settings.json packages.
+ * Mirrors the pattern used by context-fork for agent dirs.
+ * @returns Array of resolved skill directory paths from packages
+ */
+export function getPackageSkillPaths(): string[] {
+	const settingsPath = join(
+		process.env.TALLOW_CODING_AGENT_DIR ?? join(homedir(), ".tallow"),
+		"settings.json"
+	);
+	if (!fs.existsSync(settingsPath)) return [];
+
+	try {
+		const raw = fs.readFileSync(settingsPath, "utf-8");
+		const settings = JSON.parse(raw) as { packages?: Array<string | { source: string }> };
+		if (!Array.isArray(settings.packages)) return [];
+
+		const settingsDir = dirname(settingsPath);
+		const paths: string[] = [];
+
+		for (const pkg of settings.packages) {
+			const source = typeof pkg === "string" ? pkg : pkg.source;
+			if (source.startsWith("npm:") || source.startsWith("git:") || source.startsWith("https://"))
+				continue;
+
+			const resolved = resolveHome(
+				source.startsWith("./") || source.startsWith("../") ? join(settingsDir, source) : source
+			);
+			const skillsDir = join(resolved, "skills");
+			if (fs.existsSync(skillsDir)) paths.push(skillsDir);
+		}
+
+		return paths;
+	} catch {
+		return [];
+	}
+}
+
+/** Skill name → { path, icon } cache. Populated lazily on first miss. */
+let skillPathMap: Map<string, SkillCacheEntry> | null = null;
+
+/**
+ * Read the `icon` field from a SKILL.md file's YAML frontmatter.
+ * @param filePath - Absolute path to SKILL.md
+ * @returns The icon string, or the default emoji if missing/empty/unreadable
+ */
+export function readSkillIcon(filePath: string): string {
+	try {
+		const raw = fs.readFileSync(filePath, "utf-8");
+		const { frontmatter } = parseFrontmatter<{ icon?: string }>(raw);
+		return frontmatter.icon || DEFAULT_SKILL_ICON;
+	} catch {
+		return DEFAULT_SKILL_ICON;
+	}
+}
+
+/**
+ * Build a map of skill name → { path, icon } from loaded skills.
+ * Cached after first call; cleared on session start.
+ * @returns Map from skill name to cache entry with path and icon
+ */
+function getSkillPathMap(): Map<string, SkillCacheEntry> {
 	if (!skillPathMap) {
 		skillPathMap = new Map();
 		try {
-			const { skills } = loadSkills();
+			const { skills } = loadSkills({ skillPaths: getPackageSkillPaths() });
 			for (const s of skills) {
-				skillPathMap.set(s.name, s.filePath);
+				skillPathMap.set(s.name, {
+					path: s.filePath,
+					icon: readSkillIcon(s.filePath),
+				});
 			}
 		} catch {
 			// Best-effort — if loading fails, map stays empty
 		}
 	}
 	return skillPathMap;
+}
+
+/**
+ * Get the icon for a skill by name.
+ * @param name - Skill name
+ * @returns The skill's custom icon, or default 📚
+ */
+function getSkillIcon(name: string): string {
+	return getSkillPathMap().get(name)?.icon ?? DEFAULT_SKILL_ICON;
 }
 
 /**
@@ -58,8 +144,8 @@ function getSkillPathMap(): Map<string, string> {
 function resolveSkillFallback(failedPath: string): string | null {
 	const name = getSkillName(failedPath);
 	if (name === "unknown") return null;
-	const correctPath = getSkillPathMap().get(name);
-	if (correctPath && correctPath !== failedPath) return correctPath;
+	const entry = getSkillPathMap().get(name);
+	if (entry && entry.path !== failedPath) return entry.path;
 	return null;
 }
 
@@ -109,10 +195,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
 
-			// Skill file: show 📚 skill: name with expand hint
+			// Skill file: show icon + skill: name with expand hint
 			if (isSkillPath(path)) {
 				const skillName = getSkillName(path);
-				const left = theme.fg("accent", `📚 skill: ${skillName}`);
+				const icon = getSkillIcon(skillName);
+				const left = theme.fg("accent", `${icon} skill: ${skillName}`);
 				const right = theme.fg("dim", keyHint("expandTools", "to expand"));
 
 				return {
