@@ -32,7 +32,7 @@ Relay that answer to the user.
 |-----------|----------|
 | Core source | `src/` (config.ts, sdk.ts, cli.ts) |
 | Extensions | `extensions/` — extension.json + index.ts each (39 bundled) |
-| **Key extensions** | `context-fork` (subprocess isolation), `claude-bridge` (.claude/ compat) |
+| **Key extensions** | `context-fork` (subprocess isolation), `claude-bridge` (.claude/ compat), `session-namer` (auto-names sessions via Haiku, displayed in custom-footer) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
 | Themes | `themes/` — JSON files |
