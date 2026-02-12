@@ -18,11 +18,6 @@ describe("Icon Registry", () => {
 		expect(registry.getString("comment")).toBe("💬");
 	});
 
-	it("should return default spinner frames", () => {
-		const registry = createIconRegistry({});
-		expect(registry.getSpinner()).toEqual(["◐", "◓", "◑", "◒"]);
-	});
-
 	it("should apply user overrides", () => {
 		const registry = createIconRegistry({
 			success: "✔",
@@ -33,13 +28,6 @@ describe("Icon Registry", () => {
 		// Non-overridden keys keep defaults
 		expect(registry.getString("pending")).toBe("☐");
 		expect(registry.getString("in_progress")).toBe("●");
-	});
-
-	it("should override spinner frames", () => {
-		const registry = createIconRegistry({
-			spinner: ["⠋", "⠙", "⠹", "⠸"],
-		});
-		expect(registry.getSpinner()).toEqual(["⠋", "⠙", "⠹", "⠸"]);
 	});
 
 	it("should return undefined for unknown keys via get()", () => {
@@ -68,20 +56,6 @@ describe("Icon Registry", () => {
 		const registry = createIconRegistry(overrides);
 		expect(registry.getString("success")).toBe("✓");
 		expect(registry.getString("error")).toBe("✗");
-	});
-
-	it("should fall back to defaults for spinner if override is empty array", () => {
-		const registry = createIconRegistry({
-			spinner: [] as unknown as string[],
-		});
-		expect(registry.getSpinner()).toEqual(["◐", "◓", "◑", "◒"]);
-	});
-
-	it("should return spinner value via get() as array", () => {
-		const registry = createIconRegistry({});
-		const spinner = registry.get("spinner");
-		expect(Array.isArray(spinner)).toBe(true);
-		expect(spinner).toEqual(["◐", "◓", "◑", "◒"]);
 	});
 
 	it("should have all ICON_DEFAULTS keys accessible", () => {

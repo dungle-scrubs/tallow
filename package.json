@@ -60,7 +60,6 @@
 		"@clack/prompts": "^1.0.0",
 		"@mariozechner/pi-coding-agent": "0.52.9",
 		"@sinclair/typebox": "0.34.48",
-		"cli-spinners": "^3.4.0",
 		"commander": "^14.0.3"
 	},
 	"devDependencies": {
