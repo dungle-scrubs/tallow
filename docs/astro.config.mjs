@@ -95,6 +95,10 @@ export default defineConfig({
 					label: "Roadmap",
 					items: [{ label: "What's Next", slug: "roadmap" }],
 				},
+				{
+					label: "Changelog",
+					items: [{ label: "All Changes", slug: "changelog" }],
+				},
 			],
 		}),
 	],
