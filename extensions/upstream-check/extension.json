@@ -1,0 +1,8 @@
+{
+	"name": "upstream-check",
+	"version": "0.1.0",
+	"description": "Dev-only: notify when upstream pi-coding-agent or pi-tui have new versions",
+	"category": "dev",
+	"tags": ["dev", "upstream", "version"],
+	"files": ["index.ts"]
+}
