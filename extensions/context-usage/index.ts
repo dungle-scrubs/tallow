@@ -148,10 +148,11 @@ const BOLD = "\x1b[1m";
 
 /**
  * Estimates token count from a string using chars/4 heuristic.
+ * @internal
  * @param text - Input text
  * @returns Estimated token count
  */
-function estimateTokensFromText(text: string): number {
+export function estimateTokensFromText(text: string): number {
 	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
@@ -173,7 +174,8 @@ function estimateToolTokens(
 
 // ── System prompt parsing ────────────────────────────────────────────────────
 
-interface PromptBreakdown {
+/** @internal */
+export interface PromptBreakdown {
 	basePromptTokens: number;
 	contextFileTokens: number;
 	skillTokens: number;
@@ -183,10 +185,11 @@ interface PromptBreakdown {
  * Parses the system prompt to estimate token usage per section.
  * Looks for known section markers injected by tallow extensions.
  *
+ * @internal
  * @param systemPrompt - Full system prompt string
  * @returns Token breakdown by section
  */
-function parsePromptSections(systemPrompt: string): PromptBreakdown {
+export function parsePromptSections(systemPrompt: string): PromptBreakdown {
 	let contextFileTokens = 0;
 	let skillTokens = 0;
 
@@ -233,10 +236,11 @@ function parsePromptSections(systemPrompt: string): PromptBreakdown {
 
 /**
  * Formats a token count with k/M suffixes.
+ * @internal
  * @param count - Token count
  * @returns Human-readable token string
  */
-function formatTokens(count: number): string {
+export function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
 	if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
