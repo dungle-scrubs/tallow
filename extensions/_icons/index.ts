@@ -9,6 +9,7 @@
  *   - Merges user overrides with ICON_DEFAULTS
  *   - Stores resolved map on globalThis.__tallowIcons
  *   - getIcon() / getSpinner() read from the global (zero overhead)
+ *   - Spinner accepts named presets from cli-spinners or "random"
  *
  * Underscore prefix (_icons) ensures this extension loads before
  * others that depend on it.
@@ -18,6 +19,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Loader } from "@mariozechner/pi-tui";
+import cliSpinners from "cli-spinners";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -37,7 +40,7 @@ export type IconKey =
 	| "task_list"
 	| "comment";
 
-/** Icon values — single glyph or array of frames (for spinners). */
+/** Icon values — single glyph, array of frames, or named preset for spinners. */
 export type IconValue = string | string[];
 
 /** User overrides from settings.json `icons` field. */
@@ -51,9 +54,50 @@ export interface IconRegistry {
 	getString(key: IconKey, fallback?: string): string;
 	/** Get spinner frames array. */
 	getSpinner(): string[];
+	/** Get the resolved spinner interval in ms (from cli-spinners preset or default 80). */
+	getSpinnerInterval(): number;
+}
+
+// ─── cli-spinners helpers ────────────────────────────────────────────────────
+
+/** All valid preset names from cli-spinners (excludes module metadata keys). */
+const SPINNER_NAMES = (Object.keys(cliSpinners) as (keyof typeof cliSpinners)[]).filter(
+	(k) => {
+		const val = cliSpinners[k];
+		return val && typeof val === "object" && "frames" in val;
+	},
+);
+
+/**
+ * Pick a random spinner from the full cli-spinners library.
+ * @returns Spinner definition with frames and interval
+ */
+function pickRandomSpinner(): { frames: string[]; interval: number } {
+	const pick = SPINNER_NAMES[Math.floor(Math.random() * SPINNER_NAMES.length)];
+	return cliSpinners[pick];
+}
+
+/**
+ * Resolve a spinner by name from cli-spinners.
+ * @param name - Preset name (e.g. "dots", "arc", "random")
+ * @returns Spinner definition with frames and interval, or undefined
+ */
+function resolveSpinnerPreset(name: string): { frames: string[]; interval: number } | undefined {
+	if (name === "random") return pickRandomSpinner();
+	const preset = cliSpinners[name as keyof typeof cliSpinners];
+	return preset ?? undefined;
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
+
+/**
+ * Default spinner preset name. "random" picks a new one each session.
+ * Users can override with any cli-spinners name or "random".
+ */
+const DEFAULT_SPINNER_PRESET = "random";
+
+/** Hardcoded fallback when preset resolution fails (ora's default). */
+const FALLBACK_SPINNER = cliSpinners.dots;
 
 /** Default icon glyphs — matches the hardcoded values across all extensions. */
 export const ICON_DEFAULTS: Record<IconKey, IconValue> = {
@@ -66,7 +110,7 @@ export const ICON_DEFAULTS: Record<IconKey, IconValue> = {
 	active: "⚡",
 	blocked: "◇",
 	unavailable: "⊘",
-	spinner: ["◐", "◓", "◑", "◒"],
+	spinner: DEFAULT_SPINNER_PRESET,
 	plan_mode: "⏸",
 	task_list: "📋",
 	comment: "💬",
@@ -76,6 +120,7 @@ export const ICON_DEFAULTS: Record<IconKey, IconValue> = {
 
 /**
  * Create an icon registry by merging user overrides with defaults.
+ * Spinner values are resolved: string → cli-spinners preset, array → raw frames.
  *
  * @param overrides - User icon overrides from settings.json
  * @returns Resolved icon registry
@@ -95,6 +140,24 @@ export function createIconRegistry(overrides: IconOverrides): IconRegistry {
 		}
 	}
 
+	// Resolve spinner — "random" re-rolls on every call, others resolve once
+	const spinnerVal = resolved.get("spinner");
+	const isRandom = spinnerVal === "random";
+
+	/** Resolve a fixed spinner from a named preset or raw frames. */
+	function resolveFixed(): { frames: string[]; interval: number } {
+		if (typeof spinnerVal === "string") {
+			return resolveSpinnerPreset(spinnerVal) ?? FALLBACK_SPINNER;
+		}
+		if (Array.isArray(spinnerVal) && spinnerVal.length > 0) {
+			return { frames: spinnerVal, interval: 80 };
+		}
+		return FALLBACK_SPINNER;
+	}
+
+	// Pre-resolve for non-random mode (zero overhead per call)
+	const fixed = isRandom ? undefined : resolveFixed();
+
 	return {
 		get(key: IconKey): IconValue | undefined {
 			return resolved.get(key);
@@ -107,9 +170,11 @@ export function createIconRegistry(overrides: IconOverrides): IconRegistry {
 		},
 
 		getSpinner(): string[] {
-			const val = resolved.get("spinner");
-			if (Array.isArray(val) && val.length > 0) return val;
-			return ICON_DEFAULTS.spinner as string[];
+			return (isRandom ? pickRandomSpinner() : fixed!).frames;
+		},
+
+		getSpinnerInterval(): number {
+			return (isRandom ? pickRandomSpinner() : fixed!).interval;
 		},
 	};
 }
@@ -149,7 +214,7 @@ export function getSpinner(): string[] {
 	if (registry) {
 		return registry.getSpinner();
 	}
-	return ICON_DEFAULTS.spinner as string[];
+	return FALLBACK_SPINNER.frames;
 }
 
 // ─── Settings Reader ─────────────────────────────────────────────────────────
@@ -182,6 +247,31 @@ function readIconSettings(): IconOverrides {
 export default function iconRegistryExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async () => {
 		const overrides = readIconSettings();
-		globalThis.__tallowIcons = createIconRegistry(overrides);
+		const registry = createIconRegistry(overrides);
+		globalThis.__tallowIcons = registry;
+
+		// Bridge into Loader so the "Working..." loader uses the icon registry's spinner.
+		// When random, a getter re-rolls on every Loader construction.
+		const spinnerVal = registry.get("spinner");
+		if (spinnerVal === "random") {
+			// Cache one roll so both getters return values from the same spinner.
+			// Re-rolls on the next defaultFrames access (i.e. next Loader construction).
+			let cached: { frames: string[]; interval: number } | undefined;
+			const roll = () => (cached ??= pickRandomSpinner());
+			Object.defineProperty(Loader, "defaultFrames", {
+				get: () => {
+					cached = undefined; // invalidate so this roll is fresh
+					return roll().frames;
+				},
+				configurable: true,
+			});
+			Object.defineProperty(Loader, "defaultIntervalMs", {
+				get: () => roll().interval, // reuses same roll from defaultFrames
+				configurable: true,
+			});
+		} else {
+			Loader.defaultFrames = registry.getSpinner();
+			Loader.defaultIntervalMs = registry.getSpinnerInterval();
+		}
 	});
 }

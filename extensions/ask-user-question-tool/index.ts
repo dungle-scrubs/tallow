@@ -9,6 +9,7 @@ import {
 	Editor,
 	type EditorTheme,
 	Key,
+	Loader,
 	matchesKey,
 	Text,
 	truncateToWidth,
@@ -104,7 +105,7 @@ WHEN NOT TO USE:
 				{ label: "Type something.", isOther: true },
 			];
 
-			ctx.ui.setWorkingMessage("Waiting for your answer...");
+			ctx.ui.setWorkingMessage(Loader.HIDE);
 
 			const result = await ctx.ui.custom<{
 				answer: string;
