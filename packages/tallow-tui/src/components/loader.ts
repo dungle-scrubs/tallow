@@ -56,7 +56,29 @@ export class Loader extends Text {
 	 */
 	static defaultIntervalMs: number | undefined;
 
+	/** Whether the loader is hidden (renders as empty space). */
+	private hidden = false;
+
+	/**
+	 * Hide the loader — renders nothing but keeps the interval alive.
+	 * Call show() to restore.
+	 */
+	hide() {
+		this.hidden = true;
+		this.setText("");
+		this.ui?.requestRender();
+	}
+
+	/**
+	 * Show the loader after a hide() call.
+	 */
+	show() {
+		this.hidden = false;
+		this.updateDisplay();
+	}
+
 	render(width: number): string[] {
+		if (this.hidden) return [""];
 		return ["", ...super.render(width)];
 	}
 
@@ -75,7 +97,19 @@ export class Loader extends Text {
 		}
 	}
 
+	/** Sentinel value — pass to setWorkingMessage() to hide the loader. */
+	static readonly HIDE = "\u200B";
+
+	/**
+	 * Set the loader message. Pass Loader.HIDE to hide, any other string to show.
+	 * @param message - Message text or Loader.HIDE sentinel
+	 */
 	setMessage(message: string) {
+		if (message === Loader.HIDE) {
+			this.hide();
+			return;
+		}
+		if (this.hidden) this.show();
 		this.message = message;
 		this.updateDisplay();
 	}
