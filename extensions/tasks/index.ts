@@ -761,7 +761,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 
 			// Check if a running agent is actively working on this task.
 			// No owner = main agent is working on it (always active while in_progress).
-			// With owner = check if that subagent is still running.
+			// With owner = check if that subagent or team teammate is still running.
 			const hasActiveAgent = task.owner
 				? [...agentIdentities.values()].some((id) => id.displayName === task.owner) ||
 					[...(G.__piRunningSubagents?.values() ?? [])].some(
@@ -769,7 +769,10 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 					) ||
 					[...(G.__piBackgroundSubagents?.values() ?? [])]
 						.filter((s: unknown) => (s as SubagentView).status === "running")
-						.some((s: unknown) => (s as SubagentView).agent === task.owner)
+						.some((s: unknown) => (s as SubagentView).agent === task.owner) ||
+					[...(G.__piActiveTeams?.values() ?? [])]
+						.flatMap((t: unknown) => (t as TeamWidgetView).teammates)
+						.some((m) => m.name === task.owner && m.status === "working")
 				: true;
 
 			switch (task.status) {
@@ -2535,8 +2538,18 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 							.length
 					: 0;
 				const hasActiveTask = state.tasks.some((t) => t.status === "in_progress");
+				const hasWorkingTeammates = G.__piActiveTeams
+					? [...(G.__piActiveTeams as Map<string, TeamWidgetView>).values()].some((t) =>
+							t.teammates.some((m) => m.status === "working")
+						)
+					: false;
 
-				const hasRunning = fgRunning > 0 || bgRunning > 0 || bgTaskRunning > 0 || hasActiveTask;
+				const hasRunning =
+					fgRunning > 0 ||
+					bgRunning > 0 ||
+					bgTaskRunning > 0 ||
+					hasActiveTask ||
+					hasWorkingTeammates;
 
 				// Update on every tick when background items running (for animation), or when count changes
 				if (hasRunning || bgRunning !== lastBgCount || bgTaskRunning !== lastBgTaskCount) {
