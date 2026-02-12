@@ -29,5 +29,16 @@
 	},
 	"files": {
 		"includes": ["**", "!**/node_modules", "!**/dist", "!**/coverage", "!docs/.astro"]
-	}
+	},
+	"overrides": [
+		{
+			"includes": ["packages/tallow-tui/src/**"],
+			"linter": {
+				"rules": {
+					"style": { "noNonNullAssertion": "off" },
+					"suspicious": { "noControlCharactersInRegex": "off", "noExplicitAny": "off" }
+				}
+			}
+		}
+	]
 }
