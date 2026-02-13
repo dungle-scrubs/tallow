@@ -60,5 +60,8 @@ jobs:
 
       - run: npm ci
 
+      - name: Build tallow-tui fork
+        run: cd packages/tallow-tui && npm run build
+
       - name: Unit tests
         run: bun test
