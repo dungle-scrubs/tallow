@@ -1,7 +1,10 @@
 ---
 title: tallow
-description: The extensible coding agent for your terminal.
+description: An extensible, multi-model coding agent for your terminal. 30+ extensions, 34 themes, multi-agent teams, and lifecycle hooks. Compatible with Claude Code.
 template: splash
+head:
+  - tag: title
+    content: "tallow — The extensible coding agent for your terminal"
 hero:
   image:
     file: ../../../../assets/logo.jpg
@@ -18,6 +21,7 @@ hero:
 ---
 
 import { Aside } from '@astrojs/starlight/components';
+import ThemePreview from '../../components/ThemePreview.astro';
 
 <div class="stats-row">
   <div class="stat">
@@ -144,39 +148,7 @@ Intercept any point in the agent lifecycle — before/after tool execution, on t
 
 ## Themes
 
-<div class="theme-strip">
-  <div class="theme-swatch" style="background: #1a1b26"><span class="theme-swatch-label">Tokyo Night</span></div>
-  <div class="theme-swatch" style="background: #191724"><span class="theme-swatch-label">Rosé Pine</span></div>
-  <div class="theme-swatch" style="background: #282a36"><span class="theme-swatch-label">Dracula</span></div>
-  <div class="theme-swatch" style="background: #1e1e2e"><span class="theme-swatch-label">Catppuccin</span></div>
-  <div class="theme-swatch" style="background: #2e3440"><span class="theme-swatch-label">Nord</span></div>
-  <div class="theme-swatch" style="background: #282828"><span class="theme-swatch-label">Gruvbox</span></div>
-  <div class="theme-swatch" style="background: #0d1117"><span class="theme-swatch-label">GitHub Dark</span></div>
-  <div class="theme-swatch" style="background: #002b36"><span class="theme-swatch-label">Solarized</span></div>
-  <div class="theme-swatch" style="background: #282c34"><span class="theme-swatch-label">One Dark</span></div>
-  <div class="theme-swatch" style="background: #1e1e1e"><span class="theme-swatch-label">Trash Panda</span></div>
-  <div class="theme-swatch" style="background: #1b1e28"><span class="theme-swatch-label">Material Ocean</span></div>
-  <div class="theme-swatch" style="background: #2b2d3a"><span class="theme-swatch-label">Moonlight</span></div>
-  <div class="theme-swatch" style="background: #1c1e26"><span class="theme-swatch-label">Horizon</span></div>
-  <div class="theme-swatch" style="background: #2a2139"><span class="theme-swatch-label">Synthwave 84</span></div>
-</div>
-
-Every color token — accent, borders, tool status, thinking indicators, message backgrounds — is fully configurable. Create your own theme as a single JSON file.
-
-</div>
-
----
-
-<div class="quick-start">
-
-## Quick start
-
-```bash
-git clone https://github.com/dungle-scrubs/tallow.git
-cd tallow && npm install && npm run build
-node dist/install.js
-tallow
-```
+<ThemePreview />
 
 </div>
 

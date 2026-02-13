@@ -1,0 +1,148 @@
+---
+/**
+ * Interactive theme preview for the landing page.
+ * Renders a swatch strip and a Quick Start terminal widget whose colors
+ * swap on hover via CSS custom properties. All theme data is resolved
+ * at build time — no runtime file reads.
+ */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { resolveThemeColors, type ThemeColors } from "../lib/resolve-theme";
+
+/** Featured themes in display order, matching the swatch strip. */
+const FEATURED_THEMES = [
+	{ name: "Tokyo Night", file: "tokyo-night.json" },
+	{ name: "Rosé Pine", file: "rose-pine.json" },
+	{ name: "Dracula", file: "dracula.json" },
+	{ name: "Catppuccin", file: "catppuccin-mocha.json" },
+	{ name: "Nord", file: "nord.json" },
+	{ name: "Gruvbox", file: "gruvbox-dark.json" },
+	{ name: "GitHub Dark", file: "github-dark.json" },
+	{ name: "Solarized", file: "solarized-dark.json" },
+	{ name: "One Dark", file: "one-dark.json" },
+	{ name: "Trash Panda", file: "trash-panda.json" },
+	{ name: "Material Ocean", file: "material-ocean.json" },
+	{ name: "Moonlight", file: "moonlight.json" },
+	{ name: "Horizon", file: "horizon.json" },
+	{ name: "Synthwave 84", file: "synthwave-84.json" },
+];
+
+interface ThemeEntry {
+	name: string;
+	swatchBg: string;
+	colors: ThemeColors;
+}
+
+/* Build-time: read theme JSONs and resolve semantic tokens to hex values */
+const themesDir = join(process.cwd(), "..", "themes");
+
+const themeData: ThemeEntry[] = FEATURED_THEMES.map(({ name, file }) => {
+	const raw = readFileSync(join(themesDir, file), "utf-8");
+	const theme = JSON.parse(raw);
+	const colors = resolveThemeColors(theme);
+	return { name, swatchBg: colors.bg, colors };
+});
+
+const defaultColors = themeData[0].colors;
+
+/** Color arrays for the client script — no names needed at runtime. */
+const clientData = themeData.map((t) => t.colors);
+---
+
+<div
+	class="theme-preview not-content"
+	style={`--qs-bg:${defaultColors.bg};--qs-bg-dark:${defaultColors.bgDark};--qs-border:${defaultColors.border};--qs-text:${defaultColors.text};--qs-muted:${defaultColors.muted};--qs-keyword:${defaultColors.keyword};--qs-string:${defaultColors.string};--qs-function:${defaultColors.function};--qs-accent:${defaultColors.accent}`}
+	data-themes={JSON.stringify(clientData)}
+>
+	<div class="theme-strip">
+		{themeData.map((theme, i) => (
+			<div
+				class="theme-swatch"
+				style={`background:${theme.swatchBg}`}
+				data-theme-index={i}
+			>
+				<span class="theme-swatch-label">{theme.name}</span>
+			</div>
+		))}
+	</div>
+
+	<p class="theme-description">
+		Every color token — accent, borders, tool status, thinking indicators, message
+		backgrounds — is fully configurable. Create your own theme as a single JSON file.
+	</p>
+
+	<div class="qs-terminal">
+		<div class="qs-titlebar">
+			<div class="qs-dots"><span></span><span></span><span></span></div>
+			<span class="qs-title">QUICK START</span>
+		</div>
+		<div class="qs-content">
+			<div class="qs-line"><span class="qs-prompt">$</span> <span class="qs-cmd">git</span> <span class="qs-fn">clone</span> <span class="qs-str">https://github.com/dungle-scrubs/tallow.git</span></div>
+			<div class="qs-line"><span class="qs-prompt">$</span> <span class="qs-cmd">cd</span> <span class="qs-str">tallow</span> <span class="qs-op">{'&&'}</span> <span class="qs-fn">npm</span> <span class="qs-text">install</span> <span class="qs-op">{'&&'}</span> <span class="qs-fn">npm</span> <span class="qs-text">run build</span></div>
+			<div class="qs-line"><span class="qs-prompt">$</span> <span class="qs-cmd">node</span> <span class="qs-str">dist/install.js</span></div>
+			<div class="qs-line"><span class="qs-prompt">$</span> <span class="qs-str">tallow</span></div>
+		</div>
+		<div class="qs-accent-bar"></div>
+	</div>
+</div>
+
+<script>
+	/**
+	 * Theme preview hover controller.
+	 * Swaps CSS custom properties on the .theme-preview container
+	 * when hovering over theme swatches in the strip.
+	 */
+	interface ThemeColorMap {
+		bg: string;
+		bgDark: string;
+		border: string;
+		text: string;
+		muted: string;
+		keyword: string;
+		string: string;
+		function: string;
+		accent: string;
+	}
+
+	/** Maps ThemeColorMap keys to their CSS custom property names. */
+	const CSS_PROPS: Record<keyof ThemeColorMap, string> = {
+		bg: "--qs-bg",
+		bgDark: "--qs-bg-dark",
+		border: "--qs-border",
+		text: "--qs-text",
+		muted: "--qs-muted",
+		keyword: "--qs-keyword",
+		string: "--qs-string",
+		function: "--qs-function",
+		accent: "--qs-accent",
+	};
+
+	const container = document.querySelector<HTMLDivElement>(".theme-preview");
+
+	if (container) {
+		const themes: ThemeColorMap[] = JSON.parse(container.dataset.themes ?? "[]");
+		const defaultColors = themes[0];
+
+		/**
+		 * Applies a resolved color map to the container's CSS custom properties.
+		 * @param colors - Hex color map from build-time theme resolution
+		 */
+		function applyColors(colors: ThemeColorMap): void {
+			for (const [key, prop] of Object.entries(CSS_PROPS)) {
+				container!.style.setProperty(prop, colors[key as keyof ThemeColorMap]);
+			}
+		}
+
+		const strip = container.querySelector<HTMLDivElement>(".theme-strip");
+
+		if (strip && defaultColors) {
+			for (const swatch of strip.querySelectorAll<HTMLDivElement>(".theme-swatch")) {
+				const index = Number(swatch.dataset.themeIndex);
+				swatch.addEventListener("mouseenter", () => {
+					if (themes[index]) applyColors(themes[index]);
+				});
+			}
+			strip.addEventListener("mouseleave", () => applyColors(defaultColors));
+		}
+	}
+</script>
