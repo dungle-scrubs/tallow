@@ -11,7 +11,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { expandFileReferences } from "../file-reference/index.js";
-import { expandShellCommands } from "../shell-interpolation/index.js";
 
 /** Configuration for spawning a forked subprocess. */
 export interface ForkOptions {
@@ -119,11 +118,8 @@ export function buildForkArgs(options: ForkOptions, systemPromptPath?: string): 
 		args.push("--append-system-prompt", systemPromptPath);
 	}
 
-	// Expand shell interpolation and file references before sending
-	const expandedContent = expandFileReferences(
-		expandShellCommands(options.content, options.cwd),
-		options.cwd
-	);
+	// Expand file references (shell commands already expanded at template boundary)
+	const expandedContent = expandFileReferences(options.content, options.cwd);
 	args.push(`Task: ${expandedContent}`);
 
 	return args;

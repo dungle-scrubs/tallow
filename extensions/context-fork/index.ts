@@ -23,6 +23,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { expandShellCommands } from "../shell-interpolation/index.js";
 import type { FrontmatterIndex } from "./frontmatter-index.js";
 import { buildFrontmatterIndex } from "./frontmatter-index.js";
 import { resolveModel } from "./model-resolver.js";
@@ -372,6 +373,11 @@ export default function (pi: ExtensionAPI): void {
 		if (args) {
 			content = substituteArguments(content, args);
 		}
+
+		// Expand shell commands at the template boundary — user-authored content
+		// is safe to expand here; by the time an agent sees this text, !`cmd`
+		// patterns are already resolved and can't be injected.
+		content = expandShellCommands(content, ctx.cwd);
 
 		// Resolve agent config
 		let agentConfig: AgentConfig | undefined;
