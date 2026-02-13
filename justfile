@@ -43,6 +43,10 @@ fix:
 format:
     npm run format
 
+# Format check (no write)
+format-check:
+    npm run format:check
+
 # ── Test ─────────────────────────────────────────
 
 # Run all tests
@@ -68,6 +72,9 @@ test-e2e:
 run:
     bun dist/cli.js
 
+# Alias for run
+start: run
+
 # Run tallow with a single-shot prompt
 # Usage: just prompt "Fix the tests"
 prompt msg:
@@ -76,6 +83,20 @@ prompt msg:
 # Run the interactive installer
 install:
     bun dist/install.js
+
+# ── Docs ──────────────────────────────────────────
+
+# Dev server for docs site
+docs-dev:
+    cd docs && npm run dev
+
+# Build docs site
+docs-build:
+    cd docs && npm run build
+
+# Preview docs build
+docs-preview:
+    cd docs && npm run preview
 
 # ── Cleanup ──────────────────────────────────────
 
