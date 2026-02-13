@@ -173,6 +173,15 @@ async function run(opts: {
 
 	switch (opts.mode) {
 		case "interactive": {
+			// Guard: block nested interactive sessions (two TUIs on one terminal)
+			if (!opts.print && process.env.TALLOW_INTERACTIVE === "1") {
+				console.error(
+					"Error: Cannot start interactive tallow inside an existing interactive session.\n" +
+						'Use `tallow -p "..."` for single-shot prompts, or exit the current session first.'
+				);
+				process.exit(1);
+			}
+
 			if (opts.print) {
 				// Print mode: single-shot
 				await runPrintMode(tallow.session, {
@@ -188,6 +197,9 @@ async function run(opts: {
 						"\x1b[2m  To use bundled versions, rename yours or remove from ~/.tallow/extensions/\x1b[0m"
 					);
 				}
+				// Sentinel so child processes (bash tool, subagents) know they're inside
+				// an interactive session. Print/RPC mode intentionally skips this.
+				process.env.TALLOW_INTERACTIVE = "1";
 				const mode = new InteractiveMode(tallow.session, {
 					modelFallbackMessage: tallow.modelFallbackMessage,
 				});
