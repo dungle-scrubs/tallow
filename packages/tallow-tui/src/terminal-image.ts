@@ -187,16 +187,52 @@ export function encodeITerm2(
 	return `\x1b]1337;File=${params.join(";")}:${base64Data}\x07`;
 }
 
-export function calculateImageRows(
+/** Layout dimensions for a rendered image in terminal cells. */
+export interface ImageLayout {
+	/** Number of terminal rows the image occupies. */
+	rows: number;
+	/** Number of terminal columns the image occupies. */
+	columns: number;
+}
+
+/**
+ * Calculate the cell layout for an image at a given max width.
+ * Clamps to the image's natural pixel width (prevents upscaling),
+ * then optionally clamps height and back-calculates width to preserve aspect ratio.
+ *
+ * @param imageDimensions - Native pixel dimensions of the image
+ * @param maxWidthCells - Maximum column count for the image
+ * @param cellDims - Terminal cell pixel dimensions
+ * @param maxHeightCells - Optional row cap (portrait images)
+ * @returns Layout with rows and columns the image will occupy
+ */
+export function calculateImageLayout(
 	imageDimensions: ImageDimensions,
-	targetWidthCells: number,
-	cellDimensions: CellDimensions = { widthPx: 9, heightPx: 18 }
-): number {
-	const targetWidthPx = targetWidthCells * cellDimensions.widthPx;
+	maxWidthCells: number,
+	cellDims: CellDimensions = { widthPx: 9, heightPx: 18 },
+	maxHeightCells?: number
+): ImageLayout {
+	// Clamp to natural width — prevents upscaling small images
+	const naturalCols = Math.ceil(imageDimensions.widthPx / cellDims.widthPx);
+	let columns = Math.min(maxWidthCells, naturalCols);
+
+	// Calculate rows from effective column width
+	const targetWidthPx = columns * cellDims.widthPx;
 	const scale = targetWidthPx / imageDimensions.widthPx;
 	const scaledHeightPx = imageDimensions.heightPx * scale;
-	const rows = Math.ceil(scaledHeightPx / cellDimensions.heightPx);
-	return Math.max(1, rows);
+	let rows = Math.ceil(scaledHeightPx / cellDims.heightPx);
+	rows = Math.max(1, rows);
+
+	// Clamp to max height and back-calculate columns to preserve aspect ratio
+	if (maxHeightCells && rows > maxHeightCells) {
+		rows = maxHeightCells;
+		const targetHeightPx = rows * cellDims.heightPx;
+		const heightScale = targetHeightPx / imageDimensions.heightPx;
+		columns = Math.floor((imageDimensions.widthPx * heightScale) / cellDims.widthPx);
+		columns = Math.max(1, Math.min(columns, maxWidthCells));
+	}
+
+	return { rows, columns };
 }
 
 export function getPngDimensions(base64Data: string): ImageDimensions | null {
@@ -340,11 +376,21 @@ export function getImageDimensions(base64Data: string, mimeType: string): ImageD
 	return null;
 }
 
+/**
+ * Render an image as a terminal escape sequence (Kitty or iTerm2 protocol).
+ * Returns the escape sequence, the number of rows/columns it occupies, and
+ * an optional Kitty image ID for later cleanup.
+ *
+ * @param base64Data - Base64-encoded image data
+ * @param imageDimensions - Native pixel dimensions
+ * @param options - Width/height caps, aspect ratio, image ID
+ * @returns Rendered sequence with layout info, or null if unsupported
+ */
 export function renderImage(
 	base64Data: string,
 	imageDimensions: ImageDimensions,
 	options: ImageRenderOptions = {}
-): { sequence: string; rows: number; imageId?: number } | null {
+): { sequence: string; rows: number; columns: number; imageId?: number } | null {
 	const caps = getCapabilities();
 
 	if (!caps.images) {
@@ -352,21 +398,30 @@ export function renderImage(
 	}
 
 	const maxWidth = options.maxWidthCells ?? 80;
-	const rows = calculateImageRows(imageDimensions, maxWidth, getCellDimensions());
+	const layout = calculateImageLayout(
+		imageDimensions,
+		maxWidth,
+		getCellDimensions(),
+		options.maxHeightCells
+	);
 
 	if (caps.images === "kitty") {
-		// Only use imageId if explicitly provided - static images don't need IDs
-		const sequence = encodeKitty(base64Data, { columns: maxWidth, rows, imageId: options.imageId });
-		return { sequence, rows, imageId: options.imageId };
+		// Omit rows — let Kitty auto-calculate from the image's native aspect ratio.
+		// This avoids rounding errors in our row calculation that cause subtle stretching.
+		const sequence = encodeKitty(base64Data, {
+			columns: layout.columns,
+			imageId: options.imageId,
+		});
+		return { sequence, rows: layout.rows, columns: layout.columns, imageId: options.imageId };
 	}
 
 	if (caps.images === "iterm2") {
 		const sequence = encodeITerm2(base64Data, {
-			width: maxWidth,
+			width: layout.columns,
 			height: "auto",
 			preserveAspectRatio: options.preserveAspectRatio ?? true,
 		});
-		return { sequence, rows };
+		return { sequence, rows: layout.rows, columns: layout.columns };
 	}
 
 	return null;

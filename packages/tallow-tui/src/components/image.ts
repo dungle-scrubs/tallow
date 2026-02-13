@@ -1,3 +1,12 @@
+/**
+ * Image component for the TUI.
+ * Renders images via Kitty/iTerm2 protocols with optional border framing.
+ * Caps portrait images to a sensible height and prevents small-image upscaling.
+ *
+ * @module
+ */
+
+import { type BorderStyle, ROUNDED } from "../border-styles.js";
 import {
 	getCapabilities,
 	getImageDimensions,
@@ -17,8 +26,30 @@ export interface ImageOptions {
 	filename?: string;
 	/** Kitty image ID. If provided, reuses this ID (for animations/updates). */
 	imageId?: number;
+	/** Show a border around the image. Default: true. */
+	border?: boolean;
+	/** Border style. Default: ROUNDED. */
+	borderStyle?: BorderStyle;
+	/** Color function for border characters. */
+	borderColorFn?: (str: string) => string;
 }
 
+/** Default max image height in terminal rows (~half a typical 50-row terminal). */
+const DEFAULT_MAX_HEIGHT_CELLS = 25;
+
+/** Border overhead: │ + space on each side = 4 columns. */
+const BORDER_OVERHEAD = 4;
+
+/**
+ * TUI component that renders an inline image using terminal graphics protocols.
+ * Falls back to a text placeholder when the terminal lacks image support.
+ *
+ * Features:
+ * - Portrait images capped to ~25 rows by default (configurable via maxHeightCells)
+ * - Small images not upscaled beyond native pixel width
+ * - Rounded border frame by default (configurable or disableable)
+ * - Kitty warping fix: omits r= param so terminal auto-calculates rows
+ */
 export class Image implements Component {
 	private base64Data: string;
 	private mimeType: string;
@@ -46,22 +77,35 @@ export class Image implements Component {
 		this.imageId = options.imageId;
 	}
 
-	/** Get the Kitty image ID used by this image (if any). */
+	/**
+	 * Get the Kitty image ID used by this image (if any).
+	 * @returns Image ID or undefined
+	 */
 	getImageId(): number | undefined {
 		return this.imageId;
 	}
 
+	/** Clears cached render output so the next render() recomputes. */
 	invalidate(): void {
 		this.cachedLines = undefined;
 		this.cachedWidth = undefined;
 	}
 
+	/**
+	 * Render the image into terminal lines.
+	 *
+	 * @param width - Available terminal width in columns
+	 * @returns Array of strings (lines) for the TUI to output
+	 */
 	render(width: number): string[] {
 		if (this.cachedLines && this.cachedWidth === width) {
 			return this.cachedLines;
 		}
 
-		const maxWidth = Math.min(width - 2, this.options.maxWidthCells ?? 60);
+		const showBorder = this.options.border === true;
+		const borderCols = showBorder ? BORDER_OVERHEAD : 0;
+		const maxWidth = Math.min(width - 2, this.options.maxWidthCells ?? 60) - borderCols;
+		const maxHeight = this.options.maxHeightCells ?? DEFAULT_MAX_HEIGHT_CELLS;
 
 		const caps = getCapabilities();
 		let lines: string[];
@@ -69,37 +113,121 @@ export class Image implements Component {
 		if (caps.images) {
 			const result = renderImage(this.base64Data, this.dimensions, {
 				maxWidthCells: maxWidth,
+				maxHeightCells: maxHeight,
 				imageId: this.imageId,
 			});
 
 			if (result) {
-				// Store the image ID for later cleanup
 				if (result.imageId) {
 					this.imageId = result.imageId;
 				}
 
-				// Return `rows` lines so TUI accounts for image height
-				// First (rows-1) lines are empty (TUI clears them)
-				// Last line: move cursor back up, then output image sequence
-				lines = [];
-				for (let i = 0; i < result.rows - 1; i++) {
-					lines.push("");
-				}
-				// Move cursor up to first row, then output image
-				const moveUp = result.rows > 1 ? `\x1b[${result.rows - 1}A` : "";
-				lines.push(moveUp + result.sequence);
+				lines = showBorder
+					? this.buildBorderedImage(result.sequence, result.rows, result.columns)
+					: this.buildUnborderedImage(result.sequence, result.rows);
 			} else {
-				const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
-				lines = [this.theme.fallbackColor(fallback)];
+				lines = this.buildFallback(showBorder);
 			}
 		} else {
-			const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
-			lines = [this.theme.fallbackColor(fallback)];
+			lines = this.buildFallback(showBorder);
 		}
 
 		this.cachedLines = lines;
 		this.cachedWidth = width;
 
 		return lines;
+	}
+
+	/**
+	 * Builds image output without a border (original behavior).
+	 * First N-1 lines are empty (TUI clears them for vertical space),
+	 * last line moves cursor up and outputs the image escape sequence.
+	 *
+	 * @param sequence - Terminal escape sequence for the image
+	 * @param rows - Number of terminal rows the image occupies
+	 * @returns Lines array for the TUI
+	 */
+	private buildUnborderedImage(sequence: string, rows: number): string[] {
+		const lines: string[] = [];
+		for (let i = 0; i < rows - 1; i++) {
+			lines.push("");
+		}
+		const moveUp = rows > 1 ? `\x1b[${rows - 1}A` : "";
+		lines.push(moveUp + sequence);
+		return lines;
+	}
+
+	/**
+	 * Builds image output wrapped in a border.
+	 * Border characters occupy the text layer; the image fills the inner
+	 * cell range via the graphics layer (Kitty/iTerm2).
+	 *
+	 * The last content line outputs a full bordered row (text layer), then
+	 * repositions the cursor back to the first content row and places the
+	 * image sequence. The graphics layer draws over the inner spaces while
+	 * border characters at the edges remain visible.
+	 *
+	 * @param sequence - Terminal escape sequence for the image
+	 * @param rows - Number of terminal rows the image occupies
+	 * @param columns - Number of terminal columns the image occupies
+	 * @returns Lines array for the TUI
+	 */
+	private buildBorderedImage(sequence: string, rows: number, columns: number): string[] {
+		const style = this.options.borderStyle ?? ROUNDED;
+		const colorFn = this.options.borderColorFn ?? ((s: string) => s);
+
+		const innerWidth = columns;
+		const totalWidth = innerWidth + BORDER_OVERHEAD;
+
+		const top = colorFn(style.topLeft + style.horizontal.repeat(totalWidth - 2) + style.topRight);
+		const bottom = colorFn(
+			style.bottomLeft + style.horizontal.repeat(totalWidth - 2) + style.bottomRight
+		);
+		const leftBorder = `${colorFn(style.vertical)} `;
+		const rightBorder = ` ${colorFn(style.vertical)}`;
+		const emptyInner = " ".repeat(innerWidth);
+		const borderedLine = leftBorder + emptyInner + rightBorder;
+
+		const lines: string[] = [top];
+
+		// Bordered empty lines — image fills the inner area via the graphics layer
+		for (let i = 0; i < rows - 1; i++) {
+			lines.push(borderedLine);
+		}
+
+		// Last content line: full bordered text, then reposition cursor for image placement.
+		// CUU (cursor up) + CUB (cursor backward) positions to column 2 of the first content row.
+		const moveUp = rows > 1 ? `\x1b[${rows - 1}A` : "";
+		const moveToImageStart = `\x1b[${totalWidth - 2}D`;
+		lines.push(borderedLine + moveUp + moveToImageStart + sequence);
+
+		lines.push(bottom);
+
+		return lines;
+	}
+
+	/**
+	 * Builds fallback text when the terminal doesn't support images.
+	 * Optionally wrapped in a border for visual consistency.
+	 *
+	 * @param showBorder - Whether to wrap the fallback in a border
+	 * @returns Lines array for the TUI
+	 */
+	private buildFallback(showBorder: boolean): string[] {
+		const fallback = imageFallback(this.mimeType, this.dimensions, this.options.filename);
+		const text = this.theme.fallbackColor(fallback);
+
+		if (showBorder) {
+			const style = this.options.borderStyle ?? ROUNDED;
+			const colorFn = this.options.borderColorFn ?? ((s: string) => s);
+			const innerWidth = fallback.length + 2; // 1 space padding each side
+			const top = colorFn(style.topLeft + style.horizontal.repeat(innerWidth) + style.topRight);
+			const bottom = colorFn(
+				style.bottomLeft + style.horizontal.repeat(innerWidth) + style.bottomRight
+			);
+			return [top, `${colorFn(style.vertical)} ${text} ${colorFn(style.vertical)}`, bottom];
+		}
+
+		return [text];
 	}
 }
