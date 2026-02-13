@@ -8,6 +8,7 @@ import {
 	classifyAgent,
 	escapeRegex,
 	findCompletedTasks,
+	shouldClearOnAgentEnd,
 	type Task,
 } from "../index.js";
 
@@ -196,5 +197,50 @@ describe("escapeRegex", () => {
 	it("escapes mixed content", () => {
 		const result = escapeRegex("file.ts (test)");
 		expect(result).toBe("file\\.ts \\(test\\)");
+	});
+});
+
+// ── shouldClearOnAgentEnd ────────────────────────────────────────────────────
+
+describe("shouldClearOnAgentEnd", () => {
+	/** Helper to build a minimal Task with the given status. */
+	function makeTask(status: Task["status"]): Task {
+		return {
+			id: "1",
+			subject: "Test task",
+			status,
+			createdAt: Date.now(),
+			description: undefined,
+			activeForm: undefined,
+			blockedBy: [],
+			blocks: [],
+			comments: [],
+			metadata: {},
+			owner: undefined,
+		};
+	}
+
+	it("returns true when any task is in_progress", () => {
+		const tasks = [makeTask("completed"), makeTask("in_progress"), makeTask("pending")];
+		expect(shouldClearOnAgentEnd(tasks)).toBe(true);
+	});
+
+	it("returns false when all tasks are pending", () => {
+		const tasks = [makeTask("pending"), makeTask("pending")];
+		expect(shouldClearOnAgentEnd(tasks)).toBe(false);
+	});
+
+	it("returns false when all tasks are completed", () => {
+		const tasks = [makeTask("completed"), makeTask("completed")];
+		expect(shouldClearOnAgentEnd(tasks)).toBe(false);
+	});
+
+	it("returns false when task list is empty", () => {
+		expect(shouldClearOnAgentEnd([])).toBe(false);
+	});
+
+	it("returns false with mix of pending and completed (no in_progress)", () => {
+		const tasks = [makeTask("pending"), makeTask("completed"), makeTask("deleted")];
+		expect(shouldClearOnAgentEnd(tasks)).toBe(false);
 	});
 });
