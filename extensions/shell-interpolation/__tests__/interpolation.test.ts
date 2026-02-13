@@ -44,9 +44,9 @@ describe("expandShellCommands", () => {
 
 	test("is non-recursive (output not re-scanned)", () => {
 		// printf outputs a string containing the !`...` pattern.
-		// Hex \x60 = backtick, avoiding literal backticks in the input command.
+		// Octal \140 = backtick (portable across POSIX shells used in CI).
 		// The output must NOT be re-expanded — prevents injection.
-		const result = expandShellCommands("!`printf '!\\x60echo injected\\x60'`", CWD);
+		const result = expandShellCommands("!`printf '!\\140echo injected\\140'`", CWD);
 		expect(result).toBe("!`echo injected`");
 	});
 

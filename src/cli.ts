@@ -187,6 +187,16 @@ async function run(opts: {
 		sessionOpts.thinkingLevel = opts.thinking as TallowSessionOptions["thinkingLevel"];
 	}
 
+	// Guard: block nested interactive sessions (two TUIs on one terminal)
+	// Do this before session setup so it fails fast without requiring model/auth resolution.
+	if (opts.mode === "interactive" && !opts.print && process.env.TALLOW_INTERACTIVE === "1") {
+		console.error(
+			"Error: Cannot start interactive tallow inside an existing interactive session.\n" +
+				'Use `tallow -p "..."` for single-shot prompts, or exit the current session first.'
+		);
+		process.exit(1);
+	}
+
 	// ── Create session ───────────────────────────────────────────────────────
 
 	let tallow: Awaited<ReturnType<typeof createTallowSession>>;
@@ -215,15 +225,6 @@ async function run(opts: {
 
 	switch (opts.mode) {
 		case "interactive": {
-			// Guard: block nested interactive sessions (two TUIs on one terminal)
-			if (!opts.print && process.env.TALLOW_INTERACTIVE === "1") {
-				console.error(
-					"Error: Cannot start interactive tallow inside an existing interactive session.\n" +
-						'Use `tallow -p "..."` for single-shot prompts, or exit the current session first.'
-				);
-				process.exit(1);
-			}
-
 			if (opts.print) {
 				// Print mode: single-shot
 				await runPrintMode(tallow.session, {
