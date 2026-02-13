@@ -1,6 +1,6 @@
 ---
 title: edit-tool-enhanced
-description: Enhanced edit tool showing full colored diff preview.
+description: Enhanced edit tool showing full colored diff preview with optional lazygit integration.
 ---
 
 import Gallery from '../../../components/Gallery.astro';
@@ -16,3 +16,55 @@ summary line showing the file path and confirmation.
 <Gallery images={[
   { src: "/screenshots/extensions/edit-live/diff-preview.png", alt: "Colored diff showing insertions and deletions" },
 ]} />
+
+## Clickable diff link (lazygit)
+
+When [lazygit](https://github.com/jesseduffield/lazygit) is installed
+and the edited file is inside a git repo, each edit footer includes a
+clickable **diff** link. Clicking it opens lazygit filtered to that
+specific file, so you can stage or review the changes interactively.
+
+The link uses a `tallow://diff/<path>` custom URI scheme via
+[OSC 8 terminal hyperlinks](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda).
+Your terminal needs a handler for the `tallow://` scheme to make the
+click do something useful.
+
+### WezTerm setup
+
+Add the following to your WezTerm `open-uri` event handler
+(typically in your events config file):
+
+```lua
+-- Handle tallow://diff/<encoded-path> links
+if uri:match("^tallow://diff/") then
+    local encoded_path = uri:gsub("^tallow://diff/", "")
+    local file_path = url_decode(encoded_path)
+    window:mux_window():spawn_tab({
+        args = { "lazygit", "-f", file_path },
+    })
+    return false
+end
+```
+
+The `url_decode` function decodes percent-encoded characters. If you
+don't already have one in your config:
+
+```lua
+local function url_decode(str)
+    return str:gsub("%%(%x%x)", function(hex)
+        return string.char(tonumber(hex, 16))
+    end)
+end
+```
+
+### Behavior without a handler
+
+Terminals without a `tallow://` handler will either silently ignore
+the link or show a "can't open URL" notification. No crash, no error
+in tallow — the link is purely additive.
+
+### Requirements
+
+- **lazygit** on `PATH` — detected once at extension load time
+- Edited file inside a **git working tree** — checked per edit
+- Terminal supporting **OSC 8 hyperlinks** (WezTerm, iTerm2, most modern terminals)
