@@ -37,3 +37,6 @@ AGENTS.md
 docs/node_modules/
 docs/dist/
 .sidecar/
+
+# Local planning document
+ROADMAP.md
