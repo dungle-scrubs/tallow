@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { expandFileReferences } from "../../file-reference/index.js";
 import { expandShellCommands } from "../index.js";
 
 const CWD = process.cwd();
@@ -63,5 +64,25 @@ describe("expandShellCommands", () => {
 		const input = "no patterns here";
 		const result = expandShellCommands(input, CWD);
 		expect(result).toBe(input);
+	});
+});
+
+// ── Security invariant: subagent pipeline ───────────────────
+
+describe("subagent content pipeline (expandFileReferences only)", () => {
+	test("does NOT expand shell commands", () => {
+		// Subagent tasks now only go through expandFileReferences.
+		// If an agent-generated string contains !`cmd`, it must pass through verbatim.
+		const agentTask = "Install deps with !`rm -rf /` and continue";
+		const result = expandFileReferences(agentTask, CWD);
+
+		expect(result).toContain("!`rm -rf /`");
+	});
+
+	test("still expands @file references", () => {
+		// expandFileReferences should still work — it's read-only and safe
+		const result = expandFileReferences("Check @package.json for deps", CWD);
+
+		expect(result).toContain('"name"');
 	});
 });

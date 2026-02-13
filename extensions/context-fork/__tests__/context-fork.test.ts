@@ -279,6 +279,42 @@ describe("buildForkArgs", () => {
 	});
 });
 
+// ── Shell Interpolation Security ─────────────────────────────
+
+describe("shell interpolation boundary", () => {
+	test("buildForkArgs does NOT expand shell commands in content", () => {
+		const opts: ForkOptions = {
+			content: "Run this: !`echo INJECTED`",
+			cwd: process.cwd(),
+		};
+		const args = buildForkArgs(opts);
+		const taskArg = args[args.length - 1];
+
+		// The !`echo INJECTED` pattern must survive verbatim — NOT be replaced with "INJECTED"
+		expect(taskArg).toContain("!`echo INJECTED`");
+		expect(taskArg).not.toContain("Task: Run this: INJECTED");
+	});
+
+	test("buildForkArgs still expands @file references", () => {
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fork-shell-test-"));
+		fs.writeFileSync(path.join(tmpDir, "ref.txt"), "file content here");
+
+		try {
+			const opts: ForkOptions = {
+				content: "Check @ref.txt",
+				cwd: tmpDir,
+			};
+			const args = buildForkArgs(opts);
+			const taskArg = args[args.length - 1];
+
+			// File reference should be expanded (relative to cwd)
+			expect(taskArg).toContain("file content here");
+		} finally {
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
+	});
+});
+
 // ── Agent Resolution ────────────────────────────────────────
 
 describe("agent resolution", () => {
