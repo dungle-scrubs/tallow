@@ -32,8 +32,20 @@ const MIGRATE_PROMPT = `There is an existing CLAUDE.md in this project that can 
 After creating AGENTS.md, also analyze the codebase and suggest any improvements to the migrated content.`;
 
 /**
+ * Renames .claude/ to .tallow/ in the project directory.
+ * Moves all contents; tallow's claude-bridge extension still reads .claude/ if present,
+ * but .tallow/ is the canonical location.
+ * @param cwd - Project root directory
+ */
+function renameClaudeDir(cwd: string): void {
+	const claudeDir = path.join(cwd, ".claude");
+	const tallowDir = path.join(cwd, ".tallow");
+	fs.renameSync(claudeDir, tallowDir);
+}
+
+/**
  * Registers /init command to create or improve AGENTS.md for a project.
- * Handles migration from CLAUDE.md to AGENTS.md.
+ * Handles migration from CLAUDE.md to AGENTS.md and .claude/ to .tallow/.
  * @param pi - Extension API for registering commands
  */
 export default function (pi: ExtensionAPI) {
@@ -41,6 +53,23 @@ export default function (pi: ExtensionAPI) {
 		description: "Initialize AGENTS.md for the current project",
 		handler: async (_args, ctx) => {
 			const cwd = ctx.cwd;
+
+			// ── Offer .claude/ → .tallow/ rename ──────────────────────────
+			const claudeDirPath = path.join(cwd, ".claude");
+			const tallowDirPath = path.join(cwd, ".tallow");
+
+			if (fs.existsSync(claudeDirPath) && !fs.existsSync(tallowDirPath)) {
+				const ok = await ctx.ui.confirm(
+					"Rename .claude/ to .tallow/?",
+					"Found a .claude/ directory. Renaming to .tallow/ makes this a tallow-native project. All contents will be preserved."
+				);
+				if (ok) {
+					renameClaudeDir(cwd);
+					ctx.ui.notify("Renamed .claude/ → .tallow/", "info");
+				}
+			}
+
+			// ── AGENTS.md creation / migration ────────────────────────────
 			const claudeMdPath = path.join(cwd, "CLAUDE.md");
 			const agentsMdPath = path.join(cwd, "AGENTS.md");
 
@@ -48,15 +77,12 @@ export default function (pi: ExtensionAPI) {
 			const agentsExists = fs.existsSync(agentsMdPath);
 
 			if (agentsExists) {
-				// AGENTS.md already exists — suggest improvements
 				ctx.ui.notify("Found existing AGENTS.md — will suggest improvements", "info");
 				pi.sendUserMessage(INIT_PROMPT);
 			} else if (claudeExists) {
-				// Only CLAUDE.md exists — migrate to AGENTS.md
 				ctx.ui.notify("Found CLAUDE.md without AGENTS.md — will migrate to AGENTS.md", "info");
 				pi.sendUserMessage(MIGRATE_PROMPT);
 			} else {
-				// Neither exists — create fresh AGENTS.md
 				ctx.ui.notify("Analyzing codebase to create AGENTS.md...", "info");
 				pi.sendUserMessage(INIT_PROMPT);
 			}
