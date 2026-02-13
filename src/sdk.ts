@@ -15,6 +15,7 @@ import {
 	SettingsManager,
 	type Skill,
 } from "@mariozechner/pi-coding-agent";
+import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -235,7 +236,11 @@ export async function createTallowSession(
 		additionalSkillPaths,
 		additionalPromptTemplatePaths: additionalPromptPaths,
 		additionalThemePaths,
-		extensionFactories: [rebrandSystemPrompt, ...(options.extensionFactories ?? [])],
+		extensionFactories: [
+			rebrandSystemPrompt,
+			injectImageFilePaths,
+			...(options.extensionFactories ?? []),
+		],
 		systemPromptOverride: options.systemPrompt ? () => options.systemPrompt : undefined,
 		appendSystemPromptOverride: options.appendSystemPrompt
 			? (base) => {
@@ -418,6 +423,24 @@ function rebrandSystemPrompt(pi: ExtensionAPI): void {
 			.replace(/read pi \.md files/g, "read tallow .md files")
 			.replace(/the user asks about pi itself/g, "the user asks about tallow itself");
 		return { systemPrompt: prompt };
+	});
+}
+
+/**
+ * Injects file paths into Image components for clickable OSC 8 links.
+ * When the read tool returns an image, sets the pending file path so
+ * the next Image constructor picks it up automatically.
+ *
+ * @param pi - Extension API
+ */
+function injectImageFilePaths(pi: ExtensionAPI): void {
+	pi.on("tool_result", async (event) => {
+		if (event.toolName !== "read") return;
+		const hasImage = event.content?.some((c: { type: string }) => c.type === "image");
+		if (hasImage && event.input?.path) {
+			const filePath = resolve(String(event.input.path));
+			setNextImageFilePath(filePath);
+		}
 	});
 }
 
