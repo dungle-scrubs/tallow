@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rewind extension** — new `/rewind` command to undo file changes by rolling back
+  to a previous conversation turn. Tracks edit/write tool results per turn and creates
+  lightweight git ref-based snapshots at turn boundaries. Interactive turn selector shows
+  modified files and timestamps. Restores working tree state and deletes files created
+  after the snapshot point. Requires git. Refs stored at `refs/tallow/rewind/<session>/turn-<N>`.
+
+- **Session continuity (headless)** — deterministic session targeting for CI/CD and SDK:
+  `--session-id <id>` creates or continues a named session, `--resume <id>` opens an
+  existing session (fails if not found), `--fork-session <id>` branches from an existing
+  session. Flags are mutually exclusive with `--continue`. Session ID is emitted to stderr
+  after print mode for programmatic chaining. `TallowSession.sessionId` exposes the ID to
+  SDK consumers. `findSessionById()` and `createSessionWithId()` exported for programmatic use.
 - **Session naming** — new `session-namer` extension auto-generates a descriptive
   3–8 word name for each session using Haiku after the first response. Names display
   as a right-aligned third row in the footer, appear in `tallow --list`, and set

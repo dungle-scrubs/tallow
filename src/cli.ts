@@ -41,6 +41,27 @@ program
 	.option("--mode <mode>", "Run mode: interactive, rpc, json", "interactive")
 	.option("--thinking <level>", "Thinking level: off, minimal, low, medium, high, xhigh")
 	.option("--no-session", "Don't persist session (in-memory only)")
+	.addOption(
+		new Option("--session-id <id>", "Start or continue a named session by ID").conflicts([
+			"continue",
+			"resume",
+			"forkSession",
+		])
+	)
+	.addOption(
+		new Option("--resume <id>", "Resume a specific session by ID (fails if not found)").conflicts([
+			"continue",
+			"sessionId",
+			"forkSession",
+		])
+	)
+	.addOption(
+		new Option("--fork-session <id>", "Fork from an existing session into a new one").conflicts([
+			"continue",
+			"sessionId",
+			"resume",
+		])
+	)
 	.option("-e, --extension <path...>", "Additional extension paths")
 	.option("--no-extensions", "Disable all extensions (bundled + user)")
 	.option("--list", "List available sessions")
@@ -76,6 +97,7 @@ async function run(opts: {
 	continue?: boolean;
 	extension?: string[];
 	extensions?: boolean;
+	forkSession?: string;
 	home?: boolean;
 	init?: boolean;
 	initOnly?: boolean;
@@ -85,7 +107,9 @@ async function run(opts: {
 	model?: string;
 	print?: string;
 	provider?: string;
+	resume?: string;
 	session?: boolean;
+	sessionId?: string;
 	thinking?: string;
 }): Promise<void> {
 	// Quick info commands
@@ -143,9 +167,15 @@ async function run(opts: {
 		provider,
 	};
 
-	// Session strategy
+	// Session strategy (--no-session takes highest priority)
 	if (opts.session === false) {
 		sessionOpts.session = { type: "memory" };
+	} else if (opts.sessionId) {
+		sessionOpts.session = { type: "open-or-create", sessionId: opts.sessionId };
+	} else if (opts.resume) {
+		sessionOpts.session = { type: "resume", sessionId: opts.resume };
+	} else if (opts.forkSession) {
+		sessionOpts.session = { type: "fork", sourceSessionId: opts.forkSession };
 	} else if (opts.continue) {
 		sessionOpts.session = { type: "continue" };
 	} else {
@@ -159,7 +189,20 @@ async function run(opts: {
 
 	// ── Create session ───────────────────────────────────────────────────────
 
-	const tallow = await createTallowSession(sessionOpts);
+	let tallow: Awaited<ReturnType<typeof createTallowSession>>;
+	try {
+		tallow = await createTallowSession(sessionOpts);
+	} catch (error) {
+		if (error instanceof Error && error.message.startsWith("Session not found:")) {
+			console.error(`Error: ${error.message}`);
+			process.exit(1);
+		}
+		if (error instanceof Error && error.message.startsWith("Source session not found:")) {
+			console.error(`Error: ${error.message}`);
+			process.exit(1);
+		}
+		throw error;
+	}
 
 	// ── init-only: bind extensions (fires session_start → setup hooks), then exit ─
 
@@ -187,6 +230,7 @@ async function run(opts: {
 					mode: "text",
 					initialMessage: opts.print,
 				});
+				emitSessionId(tallow.sessionId);
 			} else {
 				// Interactive TUI
 				if (tallow.extensionOverrides.length > 0) {
@@ -221,11 +265,26 @@ async function run(opts: {
 				mode: "json",
 				initialMessage: opts.print,
 			});
+			emitSessionId(tallow.sessionId);
 			break;
 		}
 
 		default:
 			console.error(`Unknown mode: ${opts.mode}`);
 			process.exit(1);
+	}
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Emit the session ID to stderr for programmatic chaining.
+ * Keeps stdout clean for piping while exposing the ID via stderr.
+ *
+ * @param sessionId - Session ID to emit
+ */
+function emitSessionId(sessionId: string): void {
+	if (sessionId) {
+		process.stderr.write(`Session: ${sessionId}\n`);
 	}
 }

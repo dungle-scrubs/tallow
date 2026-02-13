@@ -1,0 +1,58 @@
+---
+title: rewind
+description: Undo file changes by rolling back to a previous conversation turn via git snapshots.
+---
+
+Roll back all file changes to a previous conversation turn. Tracks every
+file modification made by the agent (edits, writes) and creates lightweight
+git snapshots at turn boundaries. When you run `/rewind`, a turn selector
+lets you pick a rollback point, and the working tree is restored to that
+state.
+
+## Usage
+
+```
+/rewind
+```
+
+Shows a list of conversation turns with their modified files, most recent
+first. Select a turn to roll back to, confirm, and all files are restored
+to that point. Files created after the selected turn are deleted.
+
+## How it works
+
+1. **File tracking** — Intercepts `tool_result` events for `edit` and
+   `write` tools to record which files were modified each turn.
+2. **Git snapshots** — At each turn boundary (`turn_end`), creates a
+   lightweight git ref via `git stash create` + `git update-ref`. This
+   captures the full working tree state including bash side effects.
+3. **Restore** — Uses `git checkout <ref> -- .` to atomically restore
+   tracked files, then deletes files that were created after the snapshot.
+
+## Requirements
+
+- **Git repository** — The working directory must be inside a git repo.
+  The extension silently disables in non-git directories.
+- **Git in PATH** — Standard git commands must be available.
+
+## Snapshot storage
+
+Refs are stored at `refs/tallow/rewind/<session-id>/turn-<N>` to avoid
+collision with user refs, stashes, or other tools. Snapshot metadata is
+persisted in the session via custom entries, surviving session reloads and
+compaction.
+
+## Why git refs?
+
+- **Random access** — Unlike stashes (LIFO), refs give O(1) access to any
+  turn's snapshot.
+- **Memory efficient** — Git deduplicates file content; no in-memory copies.
+- **Persistent** — Refs survive crashes; in-memory state doesn't.
+- **Atomic** — `git checkout <ref> -- .` is atomic per-file.
+
+## Extension metadata
+
+| Field | Value |
+|-------|-------|
+| Category | tool |
+| Requires | git-status |

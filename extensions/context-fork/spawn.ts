@@ -100,7 +100,10 @@ function extractFinalOutput(events: PiJsonEvent[]): { text: string; model?: stri
  * @param systemPromptPath - Path to temp system prompt file, if any
  * @returns Argument array for the pi command
  */
-export function buildForkArgs(options: ForkOptions, systemPromptPath?: string): string[] {
+export async function buildForkArgs(
+	options: ForkOptions,
+	systemPromptPath?: string
+): Promise<string[]> {
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 
 	if (options.model) {
@@ -119,7 +122,7 @@ export function buildForkArgs(options: ForkOptions, systemPromptPath?: string): 
 	}
 
 	// Expand file references (shell commands already expanded at template boundary)
-	const expandedContent = expandFileReferences(options.content, options.cwd);
+	const expandedContent = await expandFileReferences(options.content, options.cwd);
 	args.push(`Task: ${expandedContent}`);
 
 	return args;
@@ -145,7 +148,7 @@ export async function spawnForkSubprocess(options: ForkOptions): Promise<ForkRes
 			systemPromptPath = tmpPath;
 		}
 
-		const args = buildForkArgs(options, systemPromptPath);
+		const args = await buildForkArgs(options, systemPromptPath);
 		const events: PiJsonEvent[] = [];
 
 		const exitCode = await new Promise<number>((resolve) => {

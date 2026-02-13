@@ -18,6 +18,7 @@ import {
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
+import { createSessionWithId, findSessionById } from "./session-utils.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,10 @@ export interface TallowSessionOptions {
 		| { type: "memory" }
 		| { type: "new" }
 		| { type: "continue" }
-		| { type: "open"; path: string };
+		| { type: "open"; path: string }
+		| { type: "open-or-create"; sessionId: string }
+		| { type: "resume"; sessionId: string }
+		| { type: "fork"; sourceSessionId: string };
 
 	/** Additional extension paths (on top of bundled + user) */
 	additionalExtensions?: string[];
@@ -96,6 +100,9 @@ export interface TallowSession {
 
 	/** Bundled extensions overridden by user extensions (name → user path) */
 	extensionOverrides: Array<{ name: string; userPath: string }>;
+
+	/** Session ID (UUID or user-provided) for programmatic chaining */
+	sessionId: string;
 }
 
 // ─── Skill Name Normalization ────────────────────────────────────────────────
@@ -288,6 +295,29 @@ export async function createTallowSession(
 		case "open":
 			sessionManager = SessionManager.open(sessionOpt.path);
 			break;
+		case "open-or-create": {
+			const existing = findSessionById(sessionOpt.sessionId, cwd);
+			sessionManager = existing
+				? SessionManager.open(existing)
+				: createSessionWithId(sessionOpt.sessionId, cwd);
+			break;
+		}
+		case "resume": {
+			const existing = findSessionById(sessionOpt.sessionId, cwd);
+			if (!existing) {
+				throw new Error(`Session not found: ${sessionOpt.sessionId}`);
+			}
+			sessionManager = SessionManager.open(existing);
+			break;
+		}
+		case "fork": {
+			const source = findSessionById(sessionOpt.sourceSessionId, cwd);
+			if (!source) {
+				throw new Error(`Source session not found: ${sessionOpt.sourceSessionId}`);
+			}
+			sessionManager = SessionManager.forkFrom(source, cwd);
+			break;
+		}
 	}
 
 	// ── Model resolution (string → Model object) ────────────────────────────
@@ -332,6 +362,7 @@ export async function createTallowSession(
 		modelFallbackMessage: result.modelFallbackMessage,
 		version: TALLOW_VERSION,
 		extensionOverrides,
+		sessionId: sessionManager.getSessionId(),
 	};
 }
 

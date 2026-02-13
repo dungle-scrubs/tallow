@@ -19,7 +19,7 @@
 
 import * as fs from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	createReadTool,
 	type ExtensionAPI,
@@ -28,8 +28,17 @@ import {
 	parseFrontmatter,
 } from "@mariozechner/pi-coding-agent";
 import { fileLink, Text, visibleWidth } from "@mariozechner/pi-tui";
+import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
 import { getToolDisplayConfig, renderLines, truncateForDisplay } from "../tool-display/index.js";
+import {
+	formatPdfOutput,
+	isPdf,
+	PdfEncryptedError,
+	PdfParseError,
+	parsePageRanges,
+	parsePdf,
+} from "./pdf.js";
 
 interface SkillCacheEntry {
 	path: string;
@@ -182,6 +191,116 @@ function isSkillContent(content: string): boolean {
 	);
 }
 
+/** Marker for PDF results in details, used by renderResult. */
+const PDF_MARKER = "__pdf_read__";
+
+/**
+ * Execute PDF reading: parse, format, and return a summarized result.
+ *
+ * @param absolutePath - Absolute path to the PDF file
+ * @param displayPath - Original user-facing path string
+ * @param pagesArg - Optional page range string from the user
+ * @param onUpdate - Streaming update callback for live preview
+ * @returns Tool result with PDF content and summary metadata
+ */
+async function executePdf(
+	absolutePath: string,
+	displayPath: string,
+	pagesArg: string | undefined,
+	onUpdate?: (partialResult: {
+		content: Array<{ type: "text"; text: string }>;
+		details: Record<string, unknown>;
+	}) => void
+): Promise<{
+	content: Array<{ type: "text"; text: string }>;
+	details: Record<string, unknown>;
+}> {
+	const buffer = fs.readFileSync(absolutePath);
+	let pages: number[] | undefined;
+
+	if (pagesArg) {
+		try {
+			pages = parsePageRanges(pagesArg);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return {
+				content: [{ type: "text" as const, text: `Error parsing page range: ${msg}` }],
+				details: {},
+			};
+		}
+	}
+
+	try {
+		const result = await parsePdf(buffer, pages);
+		const formatted = formatPdfOutput(result, pages);
+
+		// Stream a preview during execution
+		const previewLines = formatted.split("\n").slice(0, 10).join("\n");
+		onUpdate?.({
+			content: [{ type: "text" as const, text: previewLines }],
+			details: { _preview: true },
+		});
+
+		const sizeKb = (Buffer.byteLength(formatted, "utf-8") / 1024).toFixed(1);
+		const pagesLabel = pages ? `pages ${pagesArg}` : `${result.totalPages} pages`;
+		const summary = `${displayPath} (${pagesLabel}, ${sizeKb}KB extracted)`;
+		const emptyText = result.text.trim().length === 0;
+
+		return {
+			content: [
+				{
+					type: "text" as const,
+					text: emptyText
+						? `PDF has ${result.totalPages} pages but no extractable text (may be scanned/image-only)`
+						: summary,
+				},
+			],
+			details: {
+				[PDF_MARKER]: true,
+				_fullText: formatted,
+				_path: displayPath,
+				_filename: displayPath,
+				_totalPages: result.totalPages,
+				_isPdf: true,
+				_emptyText: emptyText,
+			},
+		};
+	} catch (err: unknown) {
+		if (err instanceof PdfEncryptedError) {
+			return {
+				content: [
+					{ type: "text" as const, text: "Cannot read PDF: file is encrypted/password-protected" },
+				],
+				details: {},
+			};
+		}
+		if (err instanceof PdfParseError) {
+			return {
+				content: [{ type: "text" as const, text: err.message }],
+				details: {},
+			};
+		}
+		throw err;
+	}
+}
+
+/**
+ * Extended read tool schema that adds a `pages` parameter for PDF page selection.
+ * Non-PDF files ignore this parameter.
+ */
+const enhancedReadSchema = Type.Object({
+	path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
+	offset: Type.Optional(
+		Type.Number({ description: "Line number to start reading from (1-indexed)" })
+	),
+	limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+	pages: Type.Optional(
+		Type.String({
+			description: 'Page range for PDF files (e.g. "1-5", "1,3,7-10"). Ignored for non-PDF files.',
+		})
+	),
+});
+
 export default function readSummary(pi: ExtensionAPI): void {
 	const baseReadTool = createReadTool(process.cwd());
 	const displayConfig = getToolDisplayConfig("read");
@@ -190,7 +309,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 		name: "read",
 		label: baseReadTool.label,
 		description: baseReadTool.description,
-		parameters: baseReadTool.parameters,
+		parameters: enhancedReadSchema,
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
@@ -216,6 +335,17 @@ export default function readSummary(pi: ExtensionAPI): void {
 				};
 			}
 
+			// PDF file: show pages if specified
+			const pagesArg = args.pages as string | undefined;
+			if (pagesArg) {
+				return new Text(
+					theme.fg("toolTitle", theme.bold("read ")) +
+						theme.fg("muted", `${fileLink(path)} (pages ${pagesArg})`),
+					0,
+					0
+				);
+			}
+
 			return new Text(
 				theme.fg("toolTitle", theme.bold("read ")) + theme.fg("muted", fileLink(path)),
 				0,
@@ -226,6 +356,13 @@ export default function readSummary(pi: ExtensionAPI): void {
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
 			let path = params.path ?? "file";
 
+			// ── PDF handling ────────────────────────────────────
+			const absolutePath = resolve(process.cwd(), path);
+			if (await isPdf(absolutePath)) {
+				return executePdf(absolutePath, path, params.pages as string | undefined, onUpdate);
+			}
+
+			// ── Standard file handling ──────────────────────────
 			let result: Awaited<ReturnType<typeof baseReadTool.execute>>;
 			try {
 				result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
@@ -302,7 +439,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 						_filename?: string;
 						_fullText?: string;
 						_isSkill?: boolean;
+						_isPdf?: boolean;
+						_totalPages?: number;
+						_emptyText?: boolean;
 						[SUMMARY_MARKER]?: boolean;
+						[PDF_MARKER]?: boolean;
 				  }
 				| undefined;
 
@@ -327,6 +468,23 @@ export default function readSummary(pi: ExtensionAPI): void {
 					return renderLines(details._fullText.split("\n"));
 				}
 				return renderLines([]);
+			}
+
+			// PDF file: compact summary collapsed, full text expanded
+			if (details?.[PDF_MARKER]) {
+				const summary = textContent?.text ?? "PDF";
+				const parenIdx = summary.indexOf(" (");
+				const linkedSummary =
+					parenIdx > 0
+						? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
+						: fileLink(summary);
+				const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
+
+				if (expanded && details?._fullText) {
+					const contentLines = details._fullText.split("\n").map((l) => theme.fg("dim", l));
+					return renderLines([...contentLines, footer]);
+				}
+				return renderLines([footer]);
 			}
 
 			// If not summarized, show raw content
@@ -369,7 +527,10 @@ export default function readSummary(pi: ExtensionAPI): void {
 			if (msg.role !== "toolResult") continue;
 
 			const details = msg.details as Record<string, unknown> | undefined;
-			if (!(details?.[SUMMARY_MARKER] && details._fullText)) continue;
+			// Restore full text for both summarized text files and PDF results
+			const isSummarized = details?.[SUMMARY_MARKER] && details._fullText;
+			const isPdfResult = details?.[PDF_MARKER] && details._fullText;
+			if (!(isSummarized || isPdfResult)) continue;
 
 			const textContent = msg.content.find(
 				(c): c is { type: "text"; text: string } => c.type === "text"

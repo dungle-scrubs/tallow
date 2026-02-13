@@ -12,6 +12,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { isPdfBuffer, parsePdf, parsePdfReference } from "../read-tool-enhanced/pdf.js";
 
 /**
  * Matches @path/to/file patterns.
@@ -119,15 +120,22 @@ function isBinaryContent(buffer: Buffer): boolean {
 	return false;
 }
 
+/** Page count threshold: PDFs with more pages get a lightweight reference. */
+const PDF_INLINE_THRESHOLD = 10;
+
 /**
  * Read file content with size truncation and binary detection.
+ * PDFs are detected but NOT read here (they need async handling).
  *
  * @param filePath - Absolute path to the file
  * @param fileSize - File size in bytes (from stat)
- * @returns Read result with content and truncation flag, or null for binary files
+ * @returns Read result, `"pdf"` for PDF files, or null for binary files
  */
-function readFileContent(filePath: string, fileSize: number): ReadResult | null {
+function readFileContent(filePath: string, fileSize: number): ReadResult | "pdf" | null {
 	const buffer = fs.readFileSync(filePath);
+
+	// PDF detection — before binary check since PDFs contain null bytes
+	if (isPdfBuffer(buffer)) return "pdf";
 
 	if (isBinaryContent(buffer)) return null;
 
@@ -137,6 +145,44 @@ function readFileContent(filePath: string, fileSize: number): ReadResult | null 
 		: buffer.toString("utf-8");
 
 	return { content, truncated };
+}
+
+/**
+ * Read PDF content for @-mention expansion (async).
+ * Small PDFs (≤10 pages) get full text inlined; large PDFs get a reference.
+ *
+ * @param filePath - Absolute path to the PDF file
+ * @param relPath - Relative path for display
+ * @returns Formatted string for prompt insertion, or null on failure
+ */
+async function readPdfForReference(filePath: string, relPath: string): Promise<string | null> {
+	try {
+		const buffer = fs.readFileSync(filePath);
+		const ref = await parsePdfReference(buffer);
+
+		if (ref.totalPages <= PDF_INLINE_THRESHOLD) {
+			// Small PDF: inline full text
+			const result = await parsePdf(buffer);
+			const lines: string[] = [`\`${relPath}\` [PDF, ${result.totalPages} pages]:`];
+			lines.push("```");
+			lines.push(result.text);
+			lines.push("```");
+			return lines.join("\n");
+		}
+
+		// Large PDF: lightweight reference
+		const lines: string[] = [`\`${relPath}\` [PDF, ${ref.totalPages} pages]:`];
+		if (ref.title) lines.push(`Title: ${ref.title}`);
+		if (ref.author) lines.push(`Author: ${ref.author}`);
+		lines.push("");
+		lines.push("Preview (page 1):");
+		lines.push(`> ${ref.preview.split("\n").join("\n> ")}`);
+		lines.push("");
+		lines.push(`Use \`read ${relPath} pages="1-5"\` to read specific pages.`);
+		return lines.join("\n");
+	} catch {
+		return `[unreadable PDF: ${relPath}]`;
+	}
 }
 
 /**
@@ -178,18 +224,26 @@ function formatFileContent(
  *
  * Non-recursive: output is never re-scanned for additional patterns.
  * Patterns inside fenced code blocks are skipped.
+ * PDFs are extracted asynchronously via `unpdf`.
  *
  * @param text - Input text potentially containing @file patterns
  * @param cwd - Working directory for path resolution
  * @returns Text with all valid patterns replaced by inlined file contents
  */
-export function expandFileReferences(text: string, cwd: string): string {
+export async function expandFileReferences(text: string, cwd: string): Promise<string> {
 	if (!FILE_PATTERN.test(text)) return text;
 	FILE_PATTERN.lastIndex = 0;
 
 	const fencedRegions = getFencedRegions(text);
-	let result = text;
-	let offset = 0;
+
+	// Collect all replacements first, then apply in reverse order to preserve indices
+	interface Replacement {
+		start: number;
+		end: number;
+		text: string;
+	}
+	const replacements: Replacement[] = [];
+	const pdfPromises: Array<{ index: number; filePath: string; resolved: string }> = [];
 
 	for (const match of text.matchAll(FILE_PATTERN)) {
 		const matchIndex = match.index ?? 0;
@@ -202,28 +256,53 @@ export function expandFileReferences(text: string, cwd: string): string {
 		try {
 			stat = fs.statSync(resolved);
 		} catch {
-			continue; // File doesn't exist
+			continue;
 		}
-		if (!stat.isFile()) continue; // Skip directories
+		if (!stat.isFile()) continue;
 
 		const readResult = readFileContent(resolved, stat.size);
+
+		if (readResult === "pdf") {
+			// Queue for async PDF processing
+			const repIdx = replacements.length;
+			replacements.push({ start: matchIndex, end: matchIndex + match[0].length, text: "" });
+			pdfPromises.push({ index: repIdx, filePath, resolved });
+			continue;
+		}
+
 		if (!readResult) {
-			// Binary file — replace with marker
-			const replacement = `[binary file: ${filePath}]`;
-			const start = matchIndex + offset;
-			const end = start + match[0].length;
-			result = result.slice(0, start) + replacement + result.slice(end);
-			offset += replacement.length - match[0].length;
+			replacements.push({
+				start: matchIndex,
+				end: matchIndex + match[0].length,
+				text: `[binary file: ${filePath}]`,
+			});
 			continue;
 		}
 
 		const lang = getLanguageHint(filePath);
-		const replacement = formatFileContent(filePath, readResult, lang, stat.size);
+		replacements.push({
+			start: matchIndex,
+			end: matchIndex + match[0].length,
+			text: formatFileContent(filePath, readResult, lang, stat.size),
+		});
+	}
 
-		const start = matchIndex + offset;
-		const end = start + match[0].length;
-		result = result.slice(0, start) + replacement + result.slice(end);
-		offset += replacement.length - match[0].length;
+	// Resolve PDF references in parallel
+	if (pdfPromises.length > 0) {
+		const results = await Promise.all(
+			pdfPromises.map(({ filePath, resolved }) => readPdfForReference(resolved, filePath))
+		);
+		for (let i = 0; i < pdfPromises.length; i++) {
+			replacements[pdfPromises[i].index].text =
+				results[i] ?? `[unreadable PDF: ${pdfPromises[i].filePath}]`;
+		}
+	}
+
+	// Apply replacements in reverse order (preserves indices)
+	let result = text;
+	for (let i = replacements.length - 1; i >= 0; i--) {
+		const r = replacements[i];
+		result = result.slice(0, r.start) + r.text + result.slice(r.end);
 	}
 
 	return result;
@@ -237,7 +316,7 @@ export function expandFileReferences(text: string, cwd: string): string {
  */
 export default function (pi: ExtensionAPI) {
 	pi.on("input", async (event) => {
-		const result = expandFileReferences(event.text, process.cwd());
+		const result = await expandFileReferences(event.text, process.cwd());
 		if (result === event.text) {
 			return { action: "continue" as const };
 		}
