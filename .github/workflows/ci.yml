@@ -29,6 +29,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build tallow-tui fork
+        run: cd packages/tallow-tui && npm run build
+
       - name: Typecheck
         run: npm run typecheck
 

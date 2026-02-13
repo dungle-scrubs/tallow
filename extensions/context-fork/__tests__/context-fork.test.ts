@@ -206,52 +206,52 @@ describe("buildForkArgs", () => {
 		cwd: "/tmp/test",
 	};
 
-	test("includes base args (json mode, prompt, no-session)", () => {
-		const args = buildForkArgs(baseOptions);
+	test("includes base args (json mode, prompt, no-session)", async () => {
+		const args = await buildForkArgs(baseOptions);
 		expect(args).toContain("--mode");
 		expect(args).toContain("json");
 		expect(args).toContain("-p");
 		expect(args).toContain("--no-session");
 	});
 
-	test("appends task content as last arg", () => {
-		const args = buildForkArgs(baseOptions);
+	test("appends task content as last arg", async () => {
+		const args = await buildForkArgs(baseOptions);
 		const lastArg = args[args.length - 1];
 		expect(lastArg).toStartWith("Task: ");
 		expect(lastArg).toContain("Do the thing");
 	});
 
-	test("adds --models when model provided", () => {
-		const args = buildForkArgs({ ...baseOptions, model: "claude-sonnet-4-5-20250514" });
+	test("adds --models when model provided", async () => {
+		const args = await buildForkArgs({ ...baseOptions, model: "claude-sonnet-4-5-20250514" });
 		const modelsIndex = args.indexOf("--models");
 		expect(modelsIndex).toBeGreaterThan(-1);
 		expect(args[modelsIndex + 1]).toBe("claude-sonnet-4-5-20250514");
 	});
 
-	test("omits --models when model is undefined", () => {
-		const args = buildForkArgs(baseOptions);
+	test("omits --models when model is undefined", async () => {
+		const args = await buildForkArgs(baseOptions);
 		expect(args).not.toContain("--models");
 	});
 
-	test("adds --tools when tools provided", () => {
-		const args = buildForkArgs({ ...baseOptions, tools: ["read", "bash", "edit"] });
+	test("adds --tools when tools provided", async () => {
+		const args = await buildForkArgs({ ...baseOptions, tools: ["read", "bash", "edit"] });
 		const toolsIndex = args.indexOf("--tools");
 		expect(toolsIndex).toBeGreaterThan(-1);
 		expect(args[toolsIndex + 1]).toBe("read,bash,edit");
 	});
 
-	test("omits --tools when tools is undefined", () => {
-		const args = buildForkArgs(baseOptions);
+	test("omits --tools when tools is undefined", async () => {
+		const args = await buildForkArgs(baseOptions);
 		expect(args).not.toContain("--tools");
 	});
 
-	test("omits --tools when tools is empty array", () => {
-		const args = buildForkArgs({ ...baseOptions, tools: [] });
+	test("omits --tools when tools is empty array", async () => {
+		const args = await buildForkArgs({ ...baseOptions, tools: [] });
 		expect(args).not.toContain("--tools");
 	});
 
-	test("adds --skill entries when skills provided", () => {
-		const args = buildForkArgs({ ...baseOptions, skills: ["git", "ts-standards"] });
+	test("adds --skill entries when skills provided", async () => {
+		const args = await buildForkArgs({ ...baseOptions, skills: ["git", "ts-standards"] });
 		const firstSkillIndex = args.indexOf("--skill");
 		expect(firstSkillIndex).toBeGreaterThan(-1);
 		expect(args[firstSkillIndex + 1]).toBe("git");
@@ -261,20 +261,20 @@ describe("buildForkArgs", () => {
 		expect(args[secondSkillIndex + 1]).toBe("ts-standards");
 	});
 
-	test("omits --skill when skills is undefined", () => {
-		const args = buildForkArgs(baseOptions);
+	test("omits --skill when skills is undefined", async () => {
+		const args = await buildForkArgs(baseOptions);
 		expect(args).not.toContain("--skill");
 	});
 
-	test("adds --append-system-prompt when system prompt path provided", () => {
-		const args = buildForkArgs(baseOptions, "/tmp/prompt.md");
+	test("adds --append-system-prompt when system prompt path provided", async () => {
+		const args = await buildForkArgs(baseOptions, "/tmp/prompt.md");
 		const promptIndex = args.indexOf("--append-system-prompt");
 		expect(promptIndex).toBeGreaterThan(-1);
 		expect(args[promptIndex + 1]).toBe("/tmp/prompt.md");
 	});
 
-	test("omits --append-system-prompt when path is undefined", () => {
-		const args = buildForkArgs(baseOptions);
+	test("omits --append-system-prompt when path is undefined", async () => {
+		const args = await buildForkArgs(baseOptions);
 		expect(args).not.toContain("--append-system-prompt");
 	});
 });
@@ -282,12 +282,12 @@ describe("buildForkArgs", () => {
 // ── Shell Interpolation Security ─────────────────────────────
 
 describe("shell interpolation boundary", () => {
-	test("buildForkArgs does NOT expand shell commands in content", () => {
+	test("buildForkArgs does NOT expand shell commands in content", async () => {
 		const opts: ForkOptions = {
 			content: "Run this: !`echo INJECTED`",
 			cwd: process.cwd(),
 		};
-		const args = buildForkArgs(opts);
+		const args = await buildForkArgs(opts);
 		const taskArg = args[args.length - 1];
 
 		// The !`echo INJECTED` pattern must survive verbatim — NOT be replaced with "INJECTED"
@@ -295,7 +295,7 @@ describe("shell interpolation boundary", () => {
 		expect(taskArg).not.toContain("Task: Run this: INJECTED");
 	});
 
-	test("buildForkArgs still expands @file references", () => {
+	test("buildForkArgs still expands @file references", async () => {
 		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fork-shell-test-"));
 		fs.writeFileSync(path.join(tmpDir, "ref.txt"), "file content here");
 
@@ -304,7 +304,7 @@ describe("shell interpolation boundary", () => {
 				content: "Check @ref.txt",
 				cwd: tmpDir,
 			};
-			const args = buildForkArgs(opts);
+			const args = await buildForkArgs(opts);
 			const taskArg = args[args.length - 1];
 
 			// File reference should be expanded (relative to cwd)
