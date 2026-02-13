@@ -1,0 +1,16 @@
+{
+	"name": "rewind",
+	"version": "0.1.0",
+	"description": "Undo file changes by rolling back to a previous conversation turn via git snapshots",
+	"category": "tool",
+	"tags": ["git", "undo", "rewind", "snapshot", "rollback"],
+	"files": ["index.ts", "tracker.ts", "snapshots.ts", "ui.ts"],
+	"relationships": [
+		{
+			"name": "git-status",
+			"kind": "requires",
+			"reason": "Requires a git repository; refreshes git status after rollback"
+		}
+	],
+	"npmDependencies": {}
+}

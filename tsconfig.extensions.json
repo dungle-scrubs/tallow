@@ -13,5 +13,10 @@
 		"isolatedModules": true
 	},
 	"include": ["src/extensions-global.d.ts", "extensions/**/*.ts"],
-	"exclude": ["node_modules", "extensions/**/__tests__/**", "extensions/__integration__/**", "extensions/lsp/node_modules"]
+	"exclude": [
+		"node_modules",
+		"extensions/**/__tests__/**",
+		"extensions/__integration__/**",
+		"extensions/lsp/node_modules"
+	]
 }

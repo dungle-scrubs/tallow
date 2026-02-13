@@ -722,7 +722,7 @@ function writePromptToTempFile(
  * @param session - Optional session file path for persistent teammates
  * @returns Background subagent ID, or null if agent not found
  */
-function spawnBackgroundSubagent(
+async function spawnBackgroundSubagent(
 	defaultCwd: string,
 	agents: AgentConfig[],
 	agentName: string,
@@ -731,7 +731,7 @@ function spawnBackgroundSubagent(
 	piEvents?: ExtensionAPI["events"],
 	session?: string,
 	modelOverride?: string
-): string | null {
+): Promise<string | null> {
 	const baseAgent = agents.find((a) => a.name === agentName);
 	const agent = baseAgent && modelOverride ? { ...baseAgent, model: modelOverride } : baseAgent;
 	if (!agent) return null;
@@ -764,7 +764,7 @@ function spawnBackgroundSubagent(
 		args.push("--append-system-prompt", tmpPromptPath);
 	}
 
-	const expandedTask = expandFileReferences(task, effectiveCwd);
+	const expandedTask = await expandFileReferences(task, effectiveCwd);
 	args.push(`Task: ${expandedTask}`);
 
 	const childEnv: Record<string, string> = { ...process.env, PI_IS_SUBAGENT: "1" } as Record<
@@ -1067,7 +1067,7 @@ async function runSingleAgent(
 			args.push("--append-system-prompt", tmpPromptPath);
 		}
 
-		const expandedTask = expandFileReferences(task, effectiveCwd);
+		const expandedTask = await expandFileReferences(task, effectiveCwd);
 		args.push(`Task: ${expandedTask}`);
 		let wasAborted = false;
 
@@ -1630,7 +1630,7 @@ WHEN NOT TO USE SUBAGENTS:
 				if (params.background) {
 					const taskIds: string[] = [];
 					for (const t of tasks) {
-						const id = spawnBackgroundSubagent(
+						const id = await spawnBackgroundSubagent(
 							ctx.cwd,
 							agents,
 							t.agent,
@@ -1768,7 +1768,7 @@ WHEN NOT TO USE SUBAGENTS:
 			if (params.agent && params.task) {
 				// Background mode for single agent: spawn without awaiting
 				if (params.background) {
-					const id = spawnBackgroundSubagent(
+					const id = await spawnBackgroundSubagent(
 						ctx.cwd,
 						agents,
 						params.agent,

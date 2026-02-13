@@ -103,6 +103,9 @@ configuration lives in `.tallow/` within your project directory.
 tallow                            Interactive mode
 tallow -p "Fix the tests"         Single-shot print mode
 tallow --continue                 Continue most recent session
+tallow --session-id my-run        Start or continue a named session
+tallow --resume <id>              Resume a specific session (fails if not found)
+tallow --fork-session <id>        Fork from an existing session
 tallow --list                     List available sessions
 tallow --model claude-sonnet      Use a specific model
 tallow --thinking high            Set thinking level
@@ -113,3 +116,25 @@ tallow --mode rpc                 RPC mode (for external integrations)
 tallow --home                     Print the tallow home directory
 tallow install                    Run the interactive installer
 ```
+
+### Session targeting (headless / CI)
+
+For deterministic session management in CI/CD pipelines and SDK consumers:
+
+```bash
+# Named session — creates on first use, continues on subsequent calls
+tallow -p "step 1" --session-id my-pipeline-run
+tallow -p "step 2" --session-id my-pipeline-run
+
+# Strict resume — fails with exit code 1 if session doesn't exist
+tallow -p "continue" --resume my-pipeline-run
+
+# Fork — branch from an existing session into a new one
+tallow -p "explore alternative" --fork-session my-pipeline-run
+
+# Session ID is emitted to stderr for programmatic chaining
+tallow -p "hello" --session-id run-1 2>session.txt
+```
+
+`--session-id`, `--resume`, `--fork-session`, and `--continue` are mutually exclusive.
+`--no-session` takes highest priority and disables all persistence.

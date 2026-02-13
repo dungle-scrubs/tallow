@@ -6,9 +6,9 @@
  */
 import { describe, expect, it } from "bun:test";
 import { renderSnapshot, stripAnsi } from "../../../../test-utils/virtual-terminal.js";
-import { Text } from "../components/text.js";
-import { Markdown, type MarkdownTheme } from "../components/markdown.js";
 import { BorderedBox } from "../components/bordered-box.js";
+import { Markdown, type MarkdownTheme } from "../components/markdown.js";
+import { Text } from "../components/text.js";
 import { TruncatedText } from "../components/truncated-text.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

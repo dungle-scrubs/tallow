@@ -24,6 +24,7 @@
 
 export { APP_NAME, BUNDLED, bootstrap, CONFIG_DIR, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 export { createTallowSession, type TallowSession, type TallowSessionOptions } from "./sdk.js";
+export { createSessionWithId, findSessionById } from "./session-utils.js";
 
 // ── Re-exports from pi (convenience) ─────────────────────────────────────────
 //

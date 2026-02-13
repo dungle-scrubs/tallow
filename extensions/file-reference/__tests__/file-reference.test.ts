@@ -37,46 +37,46 @@ afterAll(() => {
 // ── Pattern Matching ────────────────────────────────────────
 
 describe("pattern matching", () => {
-	test("matches @path/to/file.ts", () => {
-		const result = expandFileReferences("Review @src/main.py", tmpDir);
+	test("matches @path/to/file.ts", async () => {
+		const result = await expandFileReferences("Review @src/main.py", tmpDir);
 		expect(result).toContain("print('hello')");
 		expect(result).toContain("```python");
 	});
 
-	test("matches @README.md (top-level)", () => {
-		const result = expandFileReferences("Check @README.md", tmpDir);
+	test("matches @README.md (top-level)", async () => {
+		const result = await expandFileReferences("Check @README.md", tmpDir);
 		expect(result).toContain("# Title");
 		expect(result).toContain("```md");
 	});
 
-	test("matches @.env (dotfiles)", () => {
-		const result = expandFileReferences("See @.env", tmpDir);
+	test("matches @.env (dotfiles)", async () => {
+		const result = await expandFileReferences("See @.env", tmpDir);
 		expect(result).toContain("SECRET=abc");
 	});
 
-	test("does not match email addresses", () => {
+	test("does not match email addresses", async () => {
 		const input = "Contact user@example.com for help";
-		expect(expandFileReferences(input, tmpDir)).toBe(input);
+		expect(await expandFileReferences(input, tmpDir)).toBe(input);
 	});
 
-	test("does not match when preceded by word char", () => {
+	test("does not match when preceded by word char", async () => {
 		const input = "use foo@bar.ts as decorator";
-		expect(expandFileReferences(input, tmpDir)).toBe(input);
+		expect(await expandFileReferences(input, tmpDir)).toBe(input);
 	});
 
-	test("matches multiple refs in one input", () => {
-		const result = expandFileReferences("Compare @hello.ts and @README.md", tmpDir);
+	test("matches multiple refs in one input", async () => {
+		const result = await expandFileReferences("Compare @hello.ts and @README.md", tmpDir);
 		expect(result).toContain('const x = "hello"');
 		expect(result).toContain("# Title");
 	});
 
-	test("matches @path at start of line", () => {
-		const result = expandFileReferences("@hello.ts is the file", tmpDir);
+	test("matches @path at start of line", async () => {
+		const result = await expandFileReferences("@hello.ts is the file", tmpDir);
 		expect(result).toContain('const x = "hello"');
 	});
 
-	test("matches @path after whitespace", () => {
-		const result = expandFileReferences("file: @hello.ts", tmpDir);
+	test("matches @path after whitespace", async () => {
+		const result = await expandFileReferences("file: @hello.ts", tmpDir);
 		expect(result).toContain('const x = "hello"');
 	});
 });
@@ -84,29 +84,29 @@ describe("pattern matching", () => {
 // ── Fenced Code Block Exclusion ─────────────────────────────
 
 describe("fenced code block exclusion", () => {
-	test("skips @ref inside triple-backtick block", () => {
+	test("skips @ref inside triple-backtick block", async () => {
 		const input = "text\n```\n@hello.ts\n```\nmore";
-		const result = expandFileReferences(input, tmpDir);
+		const result = await expandFileReferences(input, tmpDir);
 		// @hello.ts inside fence should NOT be expanded
 		expect(result).not.toContain('const x = "hello"');
 		expect(result).toContain("@hello.ts");
 	});
 
-	test("skips @ref inside tilde fence block", () => {
+	test("skips @ref inside tilde fence block", async () => {
 		const input = "text\n~~~\n@hello.ts\n~~~\nmore";
-		const result = expandFileReferences(input, tmpDir);
+		const result = await expandFileReferences(input, tmpDir);
 		expect(result).not.toContain('const x = "hello"');
 	});
 
-	test("expands @ref outside code blocks", () => {
+	test("expands @ref outside code blocks", async () => {
 		const input = "```\ncode\n```\n@hello.ts";
-		const result = expandFileReferences(input, tmpDir);
+		const result = await expandFileReferences(input, tmpDir);
 		expect(result).toContain('const x = "hello"');
 	});
 
-	test("handles unclosed fence (extends to end)", () => {
+	test("handles unclosed fence (extends to end)", async () => {
 		const input = "```\n@hello.ts\nno closing fence";
-		const result = expandFileReferences(input, tmpDir);
+		const result = await expandFileReferences(input, tmpDir);
 		expect(result).not.toContain('const x = "hello"');
 	});
 });
@@ -114,56 +114,56 @@ describe("fenced code block exclusion", () => {
 // ── File Reading ────────────────────────────────────────────
 
 describe("file reading", () => {
-	test("reads file and formats with code block", () => {
-		const result = expandFileReferences("@hello.ts", tmpDir);
+	test("reads file and formats with code block", async () => {
+		const result = await expandFileReferences("@hello.ts", tmpDir);
 		expect(result).toContain("`hello.ts`:");
 		expect(result).toContain("```ts");
 		expect(result).toContain('const x = "hello";');
 		expect(result).toContain("```");
 	});
 
-	test("truncates files larger than 100KB", () => {
-		const result = expandFileReferences("@big.txt", tmpDir);
+	test("truncates files larger than 100KB", async () => {
+		const result = await expandFileReferences("@big.txt", tmpDir);
 		expect(result).toContain("[truncated:");
 		expect(result).toContain("showing first 100KB");
 	});
 
-	test("detects binary files and returns marker", () => {
-		const result = expandFileReferences("@image.png", tmpDir);
+	test("detects binary files and returns marker", async () => {
+		const result = await expandFileReferences("@image.png", tmpDir);
 		expect(result).toBe("[binary file: image.png]");
 	});
 
-	test("leaves non-existent files unchanged", () => {
+	test("leaves non-existent files unchanged", async () => {
 		const input = "see @nonexistent-file.ts";
-		expect(expandFileReferences(input, tmpDir)).toBe(input);
+		expect(await expandFileReferences(input, tmpDir)).toBe(input);
 	});
 
-	test("leaves directories unchanged", () => {
+	test("leaves directories unchanged", async () => {
 		const input = "see @subdir";
-		expect(expandFileReferences(input, tmpDir)).toBe(input);
+		expect(await expandFileReferences(input, tmpDir)).toBe(input);
 	});
 });
 
 // ── Language Hints ──────────────────────────────────────────
 
 describe("language hints", () => {
-	test("maps .ts to ts", () => {
-		const result = expandFileReferences("@hello.ts", tmpDir);
+	test("maps .ts to ts", async () => {
+		const result = await expandFileReferences("@hello.ts", tmpDir);
 		expect(result).toContain("```ts");
 	});
 
-	test("maps .py to python", () => {
-		const result = expandFileReferences("@src/main.py", tmpDir);
+	test("maps .py to python", async () => {
+		const result = await expandFileReferences("@src/main.py", tmpDir);
 		expect(result).toContain("```python");
 	});
 
-	test("maps .md to md", () => {
-		const result = expandFileReferences("@README.md", tmpDir);
+	test("maps .md to md", async () => {
+		const result = await expandFileReferences("@README.md", tmpDir);
 		expect(result).toContain("```md");
 	});
 
-	test("returns empty hint for extensionless files", () => {
-		const result = expandFileReferences("@noext", tmpDir);
+	test("returns empty hint for extensionless files", async () => {
+		const result = await expandFileReferences("@noext", tmpDir);
 		expect(result).toContain("```\n");
 	});
 });
@@ -171,18 +171,18 @@ describe("language hints", () => {
 // ── Integration ─────────────────────────────────────────────
 
 describe("expandFileReferences integration", () => {
-	test("returns input unchanged when no patterns present", () => {
+	test("returns input unchanged when no patterns present", async () => {
 		const input = "just a normal message";
-		expect(expandFileReferences(input, tmpDir)).toBe(input);
+		expect(await expandFileReferences(input, tmpDir)).toBe(input);
 	});
 
-	test("does not re-scan expanded output", () => {
+	test("does not re-scan expanded output", async () => {
 		// If file content contained @README.md, it should NOT be re-expanded.
 		// Create a file whose content contains an @ref pattern.
 		const metaPath = path.join(tmpDir, "meta.txt");
 		fs.writeFileSync(metaPath, "see @hello.ts for details\n");
 
-		const result = expandFileReferences("@meta.txt", tmpDir);
+		const result = await expandFileReferences("@meta.txt", tmpDir);
 		// meta.txt content is inlined, but the @hello.ts inside it
 		// should appear as literal text, not further expanded
 		expect(result).toContain("see @hello.ts for details");
@@ -191,8 +191,8 @@ describe("expandFileReferences integration", () => {
 		expect(helloOccurrences).toBe(0);
 	});
 
-	test("preserves surrounding text with multiple refs", () => {
-		const result = expandFileReferences("before @hello.ts middle @README.md after", tmpDir);
+	test("preserves surrounding text with multiple refs", async () => {
+		const result = await expandFileReferences("before @hello.ts middle @README.md after", tmpDir);
 		expect(result).toStartWith("before ");
 		expect(result).toEndWith("after");
 		expect(result).toContain("middle");
