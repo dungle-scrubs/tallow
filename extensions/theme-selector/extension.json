@@ -1,7 +1,7 @@
 {
 	"name": "theme-selector",
 	"version": "0.1.1",
-	"description": "Theme switcher with 22 dark themes — /theme to switch with live preview",
+	"description": "Theme switcher with 34 dark themes — /theme to switch with live preview",
 	"category": "tool",
 	"tags": ["theme", "colors", "catppuccin", "dracula", "nord"],
 	"files": ["index.ts"],
