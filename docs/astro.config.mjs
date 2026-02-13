@@ -65,6 +65,17 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: "tallow",
+			favicon: "/favicon.ico",
+			description:
+				"An extensible, multi-model coding agent for your terminal. 30+ extensions, 34 themes, multi-agent teams, and lifecycle hooks. Compatible with Claude Code.",
+			head: [
+				{
+					tag: "meta",
+					attrs: { property: "og:image", content: "https://tallow.dungle-scrubs.com/og-image.png" },
+				},
+				{ tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+				{ tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+			],
 			social: [
 				{ icon: "github", label: "GitHub", href: "https://github.com/dungle-scrubs/tallow" },
 			],
