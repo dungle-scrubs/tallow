@@ -21,7 +21,12 @@ export { BorderedBox, type BorderedBoxOptions } from "./components/bordered-box.
 export { Box } from "./components/box.js";
 export { CancellableLoader } from "./components/cancellable-loader.js";
 export { Editor, type EditorOptions, type EditorTheme } from "./components/editor.js";
-export { Image, type ImageOptions, type ImageTheme } from "./components/image.js";
+export {
+	Image,
+	type ImageOptions,
+	type ImageTheme,
+	setNextImageFilePath,
+} from "./components/image.js";
 export { Input } from "./components/input.js";
 export { Loader, type LoaderOptions } from "./components/loader.js";
 export { type DefaultTextStyle, Markdown, type MarkdownTheme } from "./components/markdown.js";
