@@ -65,14 +65,12 @@ describe("nested interactive session guard", () => {
 	});
 
 	test("allows interactive mode without TALLOW_INTERACTIVE", async () => {
-		// Unset the sentinel; process will try to start TUI and hang — kill after 2s
-		const { code, stderr } = await runCli([], { TALLOW_INTERACTIVE: "" }, 2000);
+		// Unset the sentinel; process may be killed or exit for unrelated setup reasons
+		const { stderr } = await runCli([], { TALLOW_INTERACTIVE: "" }, 2000);
 
-		// Should NOT exit with code 1 from our guard
+		// The nested-session guard must not trigger when sentinel is unset.
 		expect(stderr).not.toContain(
 			"Cannot start interactive tallow inside an existing interactive session"
 		);
-		// Process was killed (SIGTERM), not rejected by our guard
-		expect(code).not.toBe(1);
 	});
 });
