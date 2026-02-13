@@ -67,7 +67,7 @@ export { ProcessTerminal, type Terminal } from "./terminal.js";
 export {
 	allocateImageId,
 	type CellDimensions,
-	calculateImageRows,
+	calculateImageLayout,
 	deleteAllKittyImages,
 	deleteKittyImage,
 	detectCapabilities,
@@ -81,6 +81,7 @@ export {
 	getPngDimensions,
 	getWebpDimensions,
 	type ImageDimensions,
+	type ImageLayout,
 	type ImageProtocol,
 	type ImageRenderOptions,
 	imageFallback,
