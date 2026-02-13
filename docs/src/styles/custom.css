@@ -607,6 +607,7 @@ nav.sidebar [aria-current="page"]:focus {
 }
 
 .extension-tag {
+	display: inline-flex;
 	font-family: var(--sl-font-mono);
 	font-size: 0.75rem;
 	padding: 0.3em 0.65em;
@@ -615,12 +616,21 @@ nav.sidebar [aria-current="page"]:focus {
 	border-radius: 4px;
 	color: var(--sl-color-gray-2);
 	white-space: nowrap;
+	text-decoration: none;
 	transition:
 		border-color 150ms,
 		color 150ms;
 }
 
-.extension-tag:hover {
+.extension-tag-link,
+.extension-tag-link:visited {
+	color: var(--sl-color-gray-2);
+	text-decoration: none;
+}
+
+.extension-tag:hover,
+.extension-tag-link:hover,
+.extension-tag-link:visited:hover {
 	border-color: var(--sl-color-gray-4);
 	color: var(--sl-color-text);
 }

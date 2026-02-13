@@ -5,27 +5,9 @@
  * swap on hover via CSS custom properties. All theme data is resolved
  * at build time — no runtime file reads.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveThemeColors, type ThemeColors } from "../lib/resolve-theme";
-
-/** Featured themes in display order, matching the swatch strip. */
-const FEATURED_THEMES = [
-	{ name: "Tokyo Night", file: "tokyo-night.json" },
-	{ name: "Rosé Pine", file: "rose-pine.json" },
-	{ name: "Dracula", file: "dracula.json" },
-	{ name: "Catppuccin", file: "catppuccin-mocha.json" },
-	{ name: "Nord", file: "nord.json" },
-	{ name: "Gruvbox", file: "gruvbox-dark.json" },
-	{ name: "GitHub Dark", file: "github-dark.json" },
-	{ name: "Solarized", file: "solarized-dark.json" },
-	{ name: "One Dark", file: "one-dark.json" },
-	{ name: "Trash Panda", file: "trash-panda.json" },
-	{ name: "Material Ocean", file: "material-ocean.json" },
-	{ name: "Moonlight", file: "moonlight.json" },
-	{ name: "Horizon", file: "horizon.json" },
-	{ name: "Synthwave 84", file: "synthwave-84.json" },
-];
 
 interface ThemeEntry {
 	name: string;
@@ -33,15 +15,26 @@ interface ThemeEntry {
 	colors: ThemeColors;
 }
 
-/* Build-time: read theme JSONs and resolve semantic tokens to hex values */
+/* Build-time: read all theme JSONs and resolve semantic tokens to hex values */
 const themesDir = join(process.cwd(), "..", "themes");
+const themeFiles = readdirSync(themesDir)
+	.filter((file) => file.endsWith(".json"))
+	.sort();
 
-const themeData: ThemeEntry[] = FEATURED_THEMES.map(({ name, file }) => {
+const themeData: ThemeEntry[] = themeFiles.map((file) => {
 	const raw = readFileSync(join(themesDir, file), "utf-8");
-	const theme = JSON.parse(raw);
+	const theme = JSON.parse(raw) as { name?: string };
 	const colors = resolveThemeColors(theme);
-	return { name, swatchBg: colors.bg, colors };
+	return {
+		name: typeof theme.name === "string" && theme.name.length > 0 ? theme.name : file,
+		swatchBg: colors.bg,
+		colors,
+	};
 });
+
+if (themeData.length === 0) {
+	throw new Error("No themes found in themes directory");
+}
 
 const defaultColors = themeData[0].colors;
 
