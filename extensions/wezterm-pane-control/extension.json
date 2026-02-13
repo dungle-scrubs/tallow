@@ -1,0 +1,10 @@
+{
+	"name": "wezterm-pane-control",
+	"version": "0.1.0",
+	"description": "Control WezTerm panes, tabs, and splits via wezterm CLI. Gated by WEZTERM_PANE env var.",
+	"category": "tool",
+	"tags": ["wezterm", "terminal", "pane", "split", "multiplexer"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
