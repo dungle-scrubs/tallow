@@ -601,13 +601,17 @@ nav.sidebar [aria-current="page"]:focus {
 
 .extension-list {
 	display: flex;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	gap: 0.5rem;
 	margin-block: 1rem;
+	padding-inline: 0.5rem;
+	overflow-x: auto;
+	overflow-y: hidden;
 }
 
 .extension-tag {
 	display: inline-flex;
+	flex: 0 0 auto;
 	font-family: var(--sl-font-mono);
 	font-size: 0.75rem;
 	padding: 0.3em 0.65em;
@@ -616,7 +620,10 @@ nav.sidebar [aria-current="page"]:focus {
 	border-radius: 4px;
 	color: var(--sl-color-gray-2);
 	white-space: nowrap;
+	overflow-wrap: normal;
+	word-break: keep-all;
 	text-decoration: none;
+	cursor: pointer;
 	transition:
 		border-color 150ms,
 		color 150ms;
