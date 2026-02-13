@@ -15,7 +15,7 @@ import {
 	renderImage,
 } from "../terminal-image.js";
 import type { Component } from "../tui.js";
-import { fileLink } from "../utils.js";
+import { hyperlink } from "../utils.js";
 
 /**
  * Pending file path for the next Image instance.
@@ -150,19 +150,12 @@ export class Image implements Component {
 
 				lines = showBorder
 					? this.buildBorderedImage(result.sequence, result.rows, result.columns)
-					: this.buildUnborderedImage(result.sequence, result.rows);
+					: this.buildUnborderedImage(result.sequence, result.rows, result.columns);
 			} else {
 				lines = this.buildFallback(showBorder);
 			}
 		} else {
 			lines = this.buildFallback(showBorder);
-		}
-
-		// Append clickable file path link below the image
-		if (this.options.filePath) {
-			const label = this.options.filePath.split("/").pop() ?? this.options.filePath;
-			const link = fileLink(this.options.filePath, this.theme.fallbackColor(label));
-			lines.push(link);
 		}
 
 		this.cachedLines = lines;
@@ -172,21 +165,36 @@ export class Image implements Component {
 	}
 
 	/**
+	 * Wraps visible text in an OSC 8 file:// hyperlink if filePath is set.
+	 * Returns the text unchanged when no filePath is configured.
+	 *
+	 * @param text - Visible content to wrap (spaces, border chars, etc.)
+	 * @returns Text optionally wrapped in OSC 8 escape sequences
+	 */
+	private wrapFileLink(text: string): string {
+		if (!this.options.filePath) return text;
+		return hyperlink(`file://${encodeURI(this.options.filePath)}`, text);
+	}
+
+	/**
 	 * Builds image output without a border (original behavior).
-	 * First N-1 lines are empty (TUI clears them for vertical space),
-	 * last line moves cursor up and outputs the image escape sequence.
+	 * First N-1 lines are filled with OSC 8–wrapped spaces (when filePath
+	 * is set) so the image area is a clickable link in the text layer.
+	 * Last line moves cursor up and outputs the image escape sequence.
 	 *
 	 * @param sequence - Terminal escape sequence for the image
 	 * @param rows - Number of terminal rows the image occupies
+	 * @param columns - Number of terminal columns the image occupies
 	 * @returns Lines array for the TUI
 	 */
-	private buildUnborderedImage(sequence: string, rows: number): string[] {
+	private buildUnborderedImage(sequence: string, rows: number, columns: number): string[] {
 		const lines: string[] = [];
+		const filler = this.wrapFileLink(" ".repeat(columns));
 		for (let i = 0; i < rows - 1; i++) {
-			lines.push("");
+			lines.push(filler);
 		}
 		const moveUp = rows > 1 ? `\x1b[${rows - 1}A` : "";
-		lines.push(moveUp + sequence);
+		lines.push(`${this.wrapFileLink(" ".repeat(columns))}${moveUp}\x1b[${columns}D${sequence}`);
 		return lines;
 	}
 
@@ -218,7 +226,7 @@ export class Image implements Component {
 		);
 		const leftBorder = `${colorFn(style.vertical)} `;
 		const rightBorder = ` ${colorFn(style.vertical)}`;
-		const emptyInner = " ".repeat(innerWidth);
+		const emptyInner = this.wrapFileLink(" ".repeat(innerWidth));
 		const borderedLine = leftBorder + emptyInner + rightBorder;
 
 		const lines: string[] = [top];
