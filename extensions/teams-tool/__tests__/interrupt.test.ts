@@ -150,6 +150,139 @@ describe("agent_end interrupt (simulated)", () => {
 });
 
 // ════════════════════════════════════════════════════════════════
+// team_send wait=true abort behavior
+// ════════════════════════════════════════════════════════════════
+
+describe("team_send wait=true abort", () => {
+	afterEach(() => getTeams().clear());
+
+	/**
+	 * Simulate the team_send execute logic for wait=true.
+	 * Extracted from the tool's execute function so we can test
+	 * the Promise.race / abort-signal behavior in isolation.
+	 *
+	 * @param mate - Mock teammate
+	 * @param signal - AbortSignal to race against
+	 * @returns Tool result object
+	 */
+	async function simulateTeamSendWait(
+		mate: Teammate,
+		signal?: AbortSignal
+	): Promise<{ text: string; isError?: boolean }> {
+		if (signal?.aborted) {
+			return { text: "team_send was cancelled before execution.", isError: true };
+		}
+
+		const abortHandler = () => {
+			mate.session.abort().catch(() => {});
+		};
+		signal?.addEventListener("abort", abortHandler, { once: true });
+
+		try {
+			const abortPromise = new Promise<never>((_, reject) => {
+				if (signal?.aborted) {
+					reject(new DOMException("team_send aborted", "AbortError"));
+					return;
+				}
+				signal?.addEventListener(
+					"abort",
+					() => reject(new DOMException("team_send aborted", "AbortError")),
+					{ once: true }
+				);
+			});
+
+			if (mate.session.isStreaming) {
+				await mate.session.followUp("test");
+				await Promise.race([mate.session.agent.waitForIdle(), abortPromise]);
+			} else {
+				mate.status = "working";
+				await Promise.race([mate.session.prompt("test"), abortPromise]);
+			}
+			mate.status = "idle";
+			return { text: "completed" };
+		} catch {
+			if (signal?.aborted) {
+				return { text: "cancelled", isError: true };
+			}
+			mate.status = "error";
+			return { text: "errored", isError: true };
+		} finally {
+			signal?.removeEventListener("abort", abortHandler);
+		}
+	}
+
+	it("rejects immediately when signal fires during wait", async () => {
+		const { mate, calls } = mockTeammate("alice", "idle");
+		// Make prompt hang forever (simulating a slow teammate)
+		(mate.session as unknown as Record<string, unknown>).prompt = () => new Promise(() => {});
+
+		const ac = new AbortController();
+
+		// Fire abort after a short delay
+		setTimeout(() => ac.abort(), 10);
+
+		const result = await simulateTeamSendWait(mate, ac.signal);
+
+		expect(result.isError).toBe(true);
+		expect(result.text).toBe("cancelled");
+		expect(calls).toContain("abort"); // teammate abort was called
+	});
+
+	it("returns error when signal is already aborted at entry", async () => {
+		const { mate } = mockTeammate("alice", "idle");
+		const ac = new AbortController();
+		ac.abort(); // Already aborted
+
+		const result = await simulateTeamSendWait(mate, ac.signal);
+
+		expect(result.isError).toBe(true);
+		expect(result.text).toBe("team_send was cancelled before execution.");
+	});
+
+	it("handles abort during waitForIdle (streaming teammate)", async () => {
+		const { mate, calls } = mockTeammate("alice", "working", true);
+		// Make waitForIdle hang forever
+		(mate.session as unknown as Record<string, unknown>).agent = {
+			waitForIdle: () => new Promise(() => {}),
+		};
+
+		const ac = new AbortController();
+		setTimeout(() => ac.abort(), 10);
+
+		const result = await simulateTeamSendWait(mate, ac.signal);
+
+		expect(result.isError).toBe(true);
+		expect(result.text).toBe("cancelled");
+		expect(calls).toContain("abort");
+	});
+
+	it("completes normally when no abort signal fires", async () => {
+		const { mate } = mockTeammate("alice", "idle");
+		// prompt resolves immediately (default mock)
+
+		const ac = new AbortController();
+		const result = await simulateTeamSendWait(mate, ac.signal);
+
+		expect(result.isError).toBeUndefined();
+		expect(result.text).toBe("completed");
+		expect(mate.status).toBe("idle");
+	});
+
+	it("does not mark teammate as error on abort", async () => {
+		const { mate } = mockTeammate("alice", "idle");
+		(mate.session as unknown as Record<string, unknown>).prompt = () => new Promise(() => {});
+
+		const ac = new AbortController();
+		setTimeout(() => ac.abort(), 10);
+
+		await simulateTeamSendWait(mate, ac.signal);
+
+		// Status should be "working" (set before Promise.race), NOT "error"
+		expect(mate.status).toBe("working");
+	});
+});
+
+// ════════════════════════════════════════════════════════════════
 // session_shutdown behavior (simulated)
 // ════════════════════════════════════════════════════════════════
 
