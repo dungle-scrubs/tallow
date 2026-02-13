@@ -1,15 +1,19 @@
 /**
  * Custom Responsive Footer Extension
  *
- * Wide layout (2 lines):
+ * Wide layout (2-3 lines):
  *   ~/dev/project                                                  main*
- *   ↑1.2k ↓39k R12M W708k $11.444 (sub) 68.4%/200k (auto)   model • high
+ *   ↑1.2k ↓39k R12M W708k $11.444 68.4%/200k (auto) tp:ok   model • high
+ *   @main @alice @bob · 3 teammates                      ─ Session Name
  *
- * Narrow layout (4 lines):
+ * Line 3 only appears when agents or session name exist.
+ *
+ * Narrow layout (4-5 lines):
  *   ~/dev/project
  *    main*
- *   ↑1.2k ↓39k R12M W708k $11.444 (sub) 68.4%/200k (auto)
+ *   ↑1.2k ↓39k R12M W708k $11.444 68.4%/200k (auto)
  *   model • high
+ *   @main @alice · 2 teammates               ─ Session Name
  */
 
 import { execSync } from "node:child_process";
@@ -275,13 +279,16 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 					}
 					statsParts.push(contextStr);
 
-					// Extension statuses (exclude git since it's shown in top right)
+					// Extension statuses (exclude git — shown in top right; exclude agents — shown on line 3)
 					const extensionStatuses = footerData.getExtensionStatuses();
 					const statusParts: string[] = [];
 					for (const [key, status] of extensionStatuses) {
-						if (status && key !== "git") statusParts.push(sanitize(status));
+						if (status && key !== "git" && key !== "agents") statusParts.push(sanitize(status));
 					}
 					const statusStr = statusParts.join(" ");
+
+					// Agent bar (team/teammate names) — rendered on line 3 instead of line 2
+					const agentsStatus = extensionStatuses.get("agents") ?? "";
 
 					// Stats + statuses combined
 					const statsAndStatus = statsParts.join(" ") + (statusStr ? ` ${statusStr}` : "");
@@ -307,7 +314,7 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 					const useWide = width >= MIN_WIDE_WIDTH;
 
 					if (useWide) {
-						// 2-line layout (+ optional 3rd for session name)
+						// 2-line layout (+ optional 3rd for agents / session name)
 						const line1 = alignLeftRight(
 							theme.fg("dim", truncateToWidth(pwd, width - visibleWidth(gitBranch) - 2, "...")),
 							gitBranch,
@@ -318,10 +325,23 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 							theme.fg("dim", modelStr),
 							width
 						);
-						if (!sessionName) return [line1, line2];
-						const nameStr = theme.fg("dim", `─ ${sessionName}`);
-						const pad = Math.max(0, width - visibleWidth(nameStr));
-						return [line1, line2, " ".repeat(pad) + nameStr];
+
+						// Line 3: agents (left) | session name (right)
+						const hasAgents = agentsStatus.length > 0;
+						const hasSession = sessionName.length > 0;
+						if (!hasAgents && !hasSession) return [line1, line2];
+
+						let leftPart = hasAgents ? agentsStatus : "";
+						const rightPart = hasSession ? theme.fg("dim", `─ ${sessionName}`) : "";
+
+						// Truncate agents bar if it would overlap with session name
+						if (hasAgents && hasSession) {
+							const rightWidth = visibleWidth(rightPart);
+							const maxLeft = width - rightWidth - 2;
+							leftPart = truncateToWidth(leftPart, maxLeft, "...");
+						}
+
+						return [line1, line2, alignLeftRight(leftPart, rightPart, width)];
 					}
 					// Narrow stacked layout (+ optional row for session name)
 					const lines = [
@@ -330,10 +350,21 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 						theme.fg("dim", truncateToWidth(statsAndStatus, width, "...")),
 						theme.fg("dim", truncateToWidth(modelStr, width, "...")),
 					];
-					if (sessionName) {
-						const nameStr = theme.fg("dim", `─ ${sessionName}`);
-						const pad = Math.max(0, width - visibleWidth(nameStr));
-						lines.push(" ".repeat(pad) + nameStr);
+					const hasAgents = agentsStatus.length > 0;
+					const hasSession = sessionName.length > 0;
+					if (hasAgents || hasSession) {
+						let leftPart = hasAgents
+							? truncateToWidth(agentsStatus, Math.floor(width * 0.6), "...")
+							: "";
+						const rightPart = hasSession ? theme.fg("dim", `─ ${sessionName}`) : "";
+
+						// Further truncate agents if both are present and they'd overlap
+						if (hasAgents && hasSession) {
+							const rightWidth = visibleWidth(rightPart);
+							const maxLeft = width - rightWidth - 2;
+							leftPart = truncateToWidth(leftPart, maxLeft, "...");
+						}
+						lines.push(alignLeftRight(leftPart, rightPart, width));
 					}
 					return lines;
 				},
