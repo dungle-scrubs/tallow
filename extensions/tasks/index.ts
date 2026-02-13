@@ -723,6 +723,18 @@ export function escapeRegex(str: string): string {
 }
 
 /**
+ * Determine whether the task list should be cleared on agent_end.
+ * Returns true when any task is still in_progress — indicating the agent
+ * was interrupted mid-work and the tasks are orphaned.
+ *
+ * @param tasks - Current task list
+ * @returns True if the list should be cleared
+ */
+export function shouldClearOnAgentEnd(tasks: readonly Task[]): boolean {
+	return tasks.some((t) => t.status === "in_progress");
+}
+
+/**
  * Registers task management tools, commands, and widget.
  * @param pi - Extension API for registering tools, commands, and event handlers
  */
@@ -2382,10 +2394,10 @@ EXAMPLES:
 			}
 		}
 
-		// Auto-clear stale tasks: if the LLM hasn't touched manage_tasks in
-		// STALE_TURN_THRESHOLD turns, no subagents are running, AND tasks are
-		// old enough to be considered abandoned. Prevents clearing tasks that
-		// were just created but haven't been touched due to long tool calls.
+		// Auto-clear stale tasks when conversation drifts to a new topic:
+		// if the LLM hasn't touched manage_tasks in STALE_TURN_THRESHOLD turns,
+		// no subagents are running, AND tasks are old enough to be considered
+		// abandoned. Cancel/abort is handled by the agent_end handler above.
 		if (state.tasks.length > 0 && turnsSinceLastTaskTool >= STALE_TURN_THRESHOLD) {
 			const fgMap = G.__piRunningSubagents;
 			const bgMap = G.__piBackgroundSubagents;
@@ -2453,6 +2465,18 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 				display: false,
 			},
 		};
+	});
+
+	// Clear stale tasks when agent is interrupted mid-execution.
+	// If any task is still in_progress at agent_end, the agent was cancelled —
+	// in normal flow, tasks are either all completed (auto-clear handles it)
+	// or all pending (agent asked a question). Orphaned in_progress = clear.
+	pi.on("agent_end", async (_event, ctx) => {
+		if (!shouldClearOnAgentEnd(state.tasks)) return;
+
+		clearTasks();
+		updateWidget(ctx);
+		persistState();
 	});
 
 	// Typed global map references set by other extensions.
