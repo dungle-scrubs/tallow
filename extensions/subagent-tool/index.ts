@@ -7,7 +7,7 @@
  * Supports three modes:
  *   - Single: { agent: "name", task: "..." }
  *   - Parallel: { tasks: [{ agent: "name", task: "..." }, ...] }
- *   - Chain: { chain: [{ agent: "name", task: "... {previous} ..." }, ...] }
+ *   - Centipede: { centipede: [{ agent: "name", task: "... {previous} ..." }, ...] }
  *
  * Uses JSON mode to capture structured output from subagents.
  */
@@ -619,12 +619,12 @@ interface SingleResult {
 
 /** Details passed to renderResult for subagent tool execution display. */
 interface SubagentDetails {
-	mode: "single" | "parallel" | "chain";
+	mode: "single" | "parallel" | "centipede";
 	agentScope: AgentScope;
 	projectAgentsDir: string | null;
 	results: SingleResult[];
 	spinnerFrame?: number; // For animated spinner during execution
-	chainSteps?: { agent: string; task: string }[]; // All chain steps for progress display
+	centipedeSteps?: { agent: string; task: string }[]; // All centipede steps for progress display
 }
 
 /**
@@ -954,7 +954,7 @@ type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
  * @param agentName - Name of the agent to run
  * @param task - Task to delegate
  * @param cwd - Optional working directory override
- * @param step - Optional step index (for chain mode)
+ * @param step - Optional step index (for centipede mode)
  * @param signal - Optional abort signal
  * @param onUpdate - Optional callback for streaming partial results
  * @param makeDetails - Factory for SubagentDetails
@@ -1237,7 +1237,7 @@ const TaskItem = Type.Object({
 	),
 });
 
-const ChainItem = Type.Object({
+const CentipedeItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task with optional {previous} placeholder for prior output" }),
 	cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
@@ -1260,8 +1260,8 @@ const SubagentParams = Type.Object({
 	tasks: Type.Optional(
 		Type.Array(TaskItem, { description: "Array of {agent, task} for parallel execution" })
 	),
-	chain: Type.Optional(
-		Type.Array(ChainItem, { description: "Array of {agent, task} for sequential execution" })
+	centipede: Type.Optional(
+		Type.Array(CentipedeItem, { description: "Array of {agent, task} for sequential execution" })
 	),
 	agentScope: Type.Optional(AgentScopeSchema),
 	confirmProjectAgents: Type.Optional(
@@ -1380,7 +1380,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
-		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), chain (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To enable project-local agents in .tallow/agents, set agentScope: "both" (or "project").
+		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To enable project-local agents in .tallow/agents, set agentScope: "both" (or "project").
 
 WHEN TO USE PARALLEL:
 - Tasks are independent (don't depend on each other)
@@ -1392,7 +1392,7 @@ WHEN TO USE BACKGROUND (background: true):
 - Want to continue conversation while tasks run
 - Multiple async tasks to monitor later
 
-WHEN TO USE CHAIN:
+WHEN TO USE CENTIPEDE:
 - Sequential steps where each depends on previous
 - Use {previous} placeholder for prior output
 
@@ -1413,7 +1413,7 @@ WHEN NOT TO USE SUBAGENTS:
 				for (const t of coerceArray(params.tasks) ?? []) {
 					if (t?.agent) requestedAgents.push(t.agent);
 				}
-				for (const c of coerceArray(params.chain) ?? []) {
+				for (const c of coerceArray(params.centipede) ?? []) {
 					if (c?.agent) requestedAgents.push(c.agent);
 				}
 				const blocked = requestedAgents.filter((a) => !allowedTypes.includes(a));
@@ -1436,24 +1436,27 @@ WHEN NOT TO USE SUBAGENTS:
 			const agents = discovery.agents;
 			const confirmProjectAgents = params.confirmProjectAgents ?? true;
 
-			// Coerce tasks/chain: LLMs sometimes pass arrays as JSON strings,
+			// Coerce tasks/centipede: LLMs sometimes pass arrays as JSON strings,
 			// which causes .length to return character count instead of element count.
 			const tasks = coerceArray(params.tasks);
-			const chain = coerceArray(params.chain);
+			const centipede = coerceArray(params.centipede);
 
-			const hasChain = (chain?.length ?? 0) > 0;
+			const hasCentipede = (centipede?.length ?? 0) > 0;
 			const hasTasks = (tasks?.length ?? 0) > 0;
 			const hasSingle = Boolean(params.agent && params.task);
-			const modeCount = Number(hasChain) + Number(hasTasks) + Number(hasSingle);
+			const modeCount = Number(hasCentipede) + Number(hasTasks) + Number(hasSingle);
 
 			const makeDetails =
-				(mode: "single" | "parallel" | "chain", chainSteps?: { agent: string; task: string }[]) =>
+				(
+					mode: "single" | "parallel" | "centipede",
+					centipedeSteps?: { agent: string; task: string }[]
+				) =>
 				(results: SingleResult[]): SubagentDetails => ({
 					mode,
 					agentScope,
 					projectAgentsDir: discovery.projectAgentsDir,
 					results,
-					chainSteps,
+					centipedeSteps,
 				});
 
 			if (modeCount !== 1) {
@@ -1475,7 +1478,7 @@ WHEN NOT TO USE SUBAGENTS:
 				ctx.hasUI
 			) {
 				const requestedAgentNames = new Set<string>();
-				if (chain) for (const step of chain) requestedAgentNames.add(step.agent);
+				if (centipede) for (const step of centipede) requestedAgentNames.add(step.agent);
 				if (tasks) for (const t of tasks) requestedAgentNames.add(t.agent);
 				if (params.agent) requestedAgentNames.add(params.agent);
 
@@ -1493,29 +1496,31 @@ WHEN NOT TO USE SUBAGENTS:
 					if (!ok)
 						return {
 							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(hasChain ? "chain" : hasTasks ? "parallel" : "single")([]),
+							details: makeDetails(hasCentipede ? "centipede" : hasTasks ? "parallel" : "single")(
+								[]
+							),
 						};
 				}
 			}
 
-			if (chain && chain.length > 0) {
+			if (centipede && centipede.length > 0) {
 				const results: SingleResult[] = [];
 				let previousOutput = "";
-				const chainSteps = chain.map((s) => ({ agent: s.agent, task: s.task }));
-				const mkChainDetails = makeDetails("chain", chainSteps);
+				const centipedeSteps = centipede.map((s) => ({ agent: s.agent, task: s.task }));
+				const mkCentipedeDetails = makeDetails("centipede", centipedeSteps);
 
-				// Spinner animation for chain progress (same pattern as parallel mode)
-				let chainSpinnerFrame = 0;
+				// Spinner animation for centipede progress (same pattern as parallel mode)
+				let centipedeSpinnerFrame = 0;
 				let latestPartialResult: SingleResult | undefined;
 				let spinnerInterval: NodeJS.Timeout | null = null;
 
-				const emitChainUpdate = () => {
+				const emitCentipedeUpdate = () => {
 					if (onUpdate) {
 						const allResults = latestPartialResult
 							? [...results, latestPartialResult]
 							: [...results];
-						const details = mkChainDetails(allResults);
-						details.spinnerFrame = chainSpinnerFrame;
+						const details = mkCentipedeDetails(allResults);
+						details.spinnerFrame = centipedeSpinnerFrame;
 						onUpdate({
 							content: [
 								{
@@ -1530,25 +1535,27 @@ WHEN NOT TO USE SUBAGENTS:
 
 				if (onUpdate) {
 					spinnerInterval = setInterval(() => {
-						chainSpinnerFrame = (chainSpinnerFrame + 1) % SPINNER_FRAMES.length;
-						emitChainUpdate();
+						centipedeSpinnerFrame = (centipedeSpinnerFrame + 1) % SPINNER_FRAMES.length;
+						emitCentipedeUpdate();
 					}, 100);
 				}
 
 				try {
-					for (let i = 0; i < chain.length; i++) {
-						const step = chain[i];
-						ctx.ui.setWorkingMessage(`Running chain step ${i + 1}/${chain.length}: ${step.agent}`);
+					for (let i = 0; i < centipede.length; i++) {
+						const step = centipede[i];
+						ctx.ui.setWorkingMessage(
+							`Running centipede step ${i + 1}/${centipede.length}: ${step.agent}`
+						);
 						const taskWithContext = step.task.replace(/\{previous\}/g, previousOutput);
 						latestPartialResult = undefined;
 
 						// Create update callback that includes all previous results
-						const chainUpdate: OnUpdateCallback | undefined = onUpdate
+						const centipedeUpdate: OnUpdateCallback | undefined = onUpdate
 							? (partial) => {
 									const currentResult = partial.details?.results[0];
 									if (currentResult) {
 										latestPartialResult = currentResult;
-										emitChainUpdate();
+										emitCentipedeUpdate();
 									}
 								}
 							: undefined;
@@ -1561,8 +1568,8 @@ WHEN NOT TO USE SUBAGENTS:
 							step.cwd,
 							i + 1,
 							signal,
-							chainUpdate,
-							mkChainDetails,
+							centipedeUpdate,
+							mkCentipedeDetails,
 							pi.events,
 							undefined,
 							step.model
@@ -1586,10 +1593,10 @@ WHEN NOT TO USE SUBAGENTS:
 								content: [
 									{
 										type: "text",
-										text: `Chain stopped at step ${i + 1} (${step.agent}): ${errorMsg}`,
+										text: `Centipede stopped at step ${i + 1} (${step.agent}): ${errorMsg}`,
 									},
 								],
-								details: mkChainDetails(results),
+								details: mkCentipedeDetails(results),
 								isError: true,
 							};
 						}
@@ -1604,7 +1611,7 @@ WHEN NOT TO USE SUBAGENTS:
 								text: getFinalOutput(results.at(-1)?.messages ?? []) || "(no output)",
 							},
 						],
-						details: mkChainDetails(results),
+						details: mkCentipedeDetails(results),
 					};
 				} finally {
 					if (spinnerInterval) clearInterval(spinnerInterval);
@@ -1871,15 +1878,15 @@ WHEN NOT TO USE SUBAGENTS:
 
 		renderCall(args, theme) {
 			const scope: AgentScope = args.agentScope ?? "user";
-			const chainArr = coerceArray(args.chain);
+			const centipedeArr = coerceArray(args.centipede);
 			const tasksArr = coerceArray(args.tasks);
-			if (chainArr && chainArr.length > 0) {
+			if (centipedeArr && centipedeArr.length > 0) {
 				let text =
 					theme.fg("toolTitle", theme.bold("subagent ")) +
-					theme.fg("accent", `chain (${chainArr.length} steps)`) +
+					theme.fg("accent", `centipede (${centipedeArr.length} steps)`) +
 					theme.fg("muted", ` [${scope}]`);
-				for (let i = 0; i < Math.min(chainArr.length, 3); i++) {
-					const step = chainArr[i];
+				for (let i = 0; i < Math.min(centipedeArr.length, 3); i++) {
+					const step = centipedeArr[i];
 					// Clean up {previous} placeholder for display
 					const cleanTask = step.task.replace(/\{previous\}/g, "").trim();
 					const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
@@ -1890,8 +1897,8 @@ WHEN NOT TO USE SUBAGENTS:
 						theme.fg("accent", step.agent) +
 						theme.fg("dim", ` ${preview}`);
 				}
-				if (chainArr.length > 3)
-					text += `\n  ${theme.fg("muted", `... +${chainArr.length - 3} more`)}`;
+				if (centipedeArr.length > 3)
+					text += `\n  ${theme.fg("muted", `... +${centipedeArr.length - 3} more`)}`;
 				return new Text(text, 0, 0);
 			}
 			if (tasksArr && tasksArr.length > 0) {
@@ -2044,8 +2051,8 @@ WHEN NOT TO USE SUBAGENTS:
 				return total;
 			};
 
-			if (details.mode === "chain") {
-				const totalSteps = details.chainSteps?.length ?? details.results.length;
+			if (details.mode === "centipede") {
+				const totalSteps = details.centipedeSteps?.length ?? details.results.length;
 				const isRunning = details.results.some((r) => r.exitCode === -1);
 				const successCount = details.results.filter((r) => r.exitCode === 0).length;
 				const failCount = details.results.filter((r) => r.exitCode > 0).length;
@@ -2061,7 +2068,7 @@ WHEN NOT TO USE SUBAGENTS:
 						: theme.fg("success", getIcon("success"));
 
 				/**
-				 * Get the status icon for a chain step by index (1-based).
+				 * Get the status icon for a centipede step by index (1-based).
 				 * @param stepNum - 1-based step number
 				 * @returns Formatted icon string: spinner if running, ✓ if done, × if failed, empty if upcoming
 				 */
@@ -2079,7 +2086,7 @@ WHEN NOT TO USE SUBAGENTS:
 						new Text(
 							icon +
 								" " +
-								theme.fg("toolTitle", theme.bold("chain ")) +
+								theme.fg("toolTitle", theme.bold("centipede ")) +
 								theme.fg("accent", `${successCount}/${totalSteps} steps`),
 							0,
 							0
@@ -2089,7 +2096,7 @@ WHEN NOT TO USE SUBAGENTS:
 					for (let si = 0; si < totalSteps; si++) {
 						const stepNum = si + 1;
 						const r = details.results.find((res) => res.step === stepNum);
-						const stepAgent = r?.agent ?? details.chainSteps?.[si]?.agent ?? `step ${stepNum}`;
+						const stepAgent = r?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
 						const rIcon = getStepIcon(stepNum);
 
 						container.addChild(new Spacer(1));
@@ -2144,12 +2151,12 @@ WHEN NOT TO USE SUBAGENTS:
 				let text =
 					icon +
 					" " +
-					theme.fg("toolTitle", theme.bold("chain ")) +
+					theme.fg("toolTitle", theme.bold("centipede ")) +
 					theme.fg("accent", `${successCount}/${totalSteps} steps`);
 				for (let si = 0; si < totalSteps; si++) {
 					const stepNum = si + 1;
 					const r = details.results.find((res) => res.step === stepNum);
-					const stepAgent = r?.agent ?? details.chainSteps?.[si]?.agent ?? `step ${stepNum}`;
+					const stepAgent = r?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
 					const rIcon = getStepIcon(stepNum);
 					text += `\n\n${theme.fg("muted", `─── Step ${stepNum}: `)}${theme.fg("accent", stepAgent)}${rIcon}`;
 					if (r) {
