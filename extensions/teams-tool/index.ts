@@ -891,6 +891,15 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, signal) {
+			// Fast-path: already aborted before we start
+			if (signal?.aborted) {
+				return {
+					content: [{ type: "text", text: "team_send was cancelled before execution." }],
+					details: {},
+					isError: true,
+				};
+			}
+
 			const team = getRuntimeTeam(params.team);
 			if (!team) {
 				return {
@@ -936,13 +945,28 @@ export default function (pi: ExtensionAPI) {
 				signal?.addEventListener("abort", abortHandler, { once: true });
 
 				try {
+					// Build an abort promise that rejects when the signal fires.
+					// This lets Promise.race unblock immediately on cancellation,
+					// even if mate.session.prompt() swallows the abort internally.
+					const abortPromise = new Promise<never>((_, reject) => {
+						if (signal?.aborted) {
+							reject(new DOMException("team_send aborted", "AbortError"));
+							return;
+						}
+						signal?.addEventListener(
+							"abort",
+							() => reject(new DOMException("team_send aborted", "AbortError")),
+							{ once: true }
+						);
+					});
+
 					if (mate.session.isStreaming) {
 						// Already working — queue as followUp, then wait for idle
 						await mate.session.followUp(prompt);
-						await mate.session.agent.waitForIdle();
+						await Promise.race([mate.session.agent.waitForIdle(), abortPromise]);
 					} else {
 						mate.status = "working";
-						await mate.session.prompt(prompt);
+						await Promise.race([mate.session.prompt(prompt), abortPromise]);
 					}
 					mate.status = "idle";
 
@@ -953,6 +977,16 @@ export default function (pi: ExtensionAPI) {
 					};
 					// biome-ignore lint/suspicious/noExplicitAny: catch clause
 				} catch (err: any) {
+					if (signal?.aborted) {
+						// Abort path: return error result so the orchestrator's agent
+						// loop can proceed to its normal abort/end flow. Don't mark
+						// the teammate as error — agent_end cleanup will handle it.
+						return {
+							content: [{ type: "text", text: `team_send to "${params.to}" was cancelled.` }],
+							details: {},
+							isError: true,
+						};
+					}
 					mate.status = "error";
 					mate.error = String(err);
 					return {
