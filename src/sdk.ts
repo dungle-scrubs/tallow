@@ -17,6 +17,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -279,19 +280,11 @@ export async function createTallowSession(
 			sessionManager = SessionManager.inMemory();
 			break;
 		case "new":
-			sessionManager = SessionManager.create(cwd, join(TALLOW_HOME, "sessions"));
+			sessionManager = SessionManager.create(cwd);
 			break;
-		case "continue": {
-			const sessionsDir = join(TALLOW_HOME, "sessions");
-			const recentPath = findMostRecentSessionForCwd(sessionsDir, cwd);
-			if (recentPath) {
-				sessionManager = SessionManager.open(recentPath, sessionsDir);
-			} else {
-				// No session for this cwd — fall back to creating a new one
-				sessionManager = SessionManager.create(cwd, sessionsDir);
-			}
+		case "continue":
+			sessionManager = SessionManager.continueRecent(cwd);
 			break;
-		}
 		case "open":
 			sessionManager = SessionManager.open(sessionOpt.path);
 			break;
@@ -343,46 +336,6 @@ export async function createTallowSession(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Find the most recent session file in sessionDir whose cwd matches the given directory.
- * Reads the first line (JSONL header) of each session to check the cwd field.
- * Returns the file path, or null if none match.
- *
- * @param sessionDir - Directory containing session .jsonl files
- * @param cwd - Working directory to filter by
- * @returns Path to the most recent matching session, or null
- */
-function findMostRecentSessionForCwd(sessionDir: string, cwd: string): string | null {
-	try {
-		const resolvedCwd = resolve(cwd);
-		const candidates = readdirSync(sessionDir)
-			.filter((f) => f.endsWith(".jsonl"))
-			.map((f) => {
-				const fullPath = join(sessionDir, f);
-				return { path: fullPath, mtime: statSync(fullPath).mtime };
-			})
-			.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-
-		for (const { path } of candidates) {
-			try {
-				const content = readFileSync(path, "utf-8");
-				const firstNewline = content.indexOf("\n");
-				const headerLine = firstNewline === -1 ? content : content.slice(0, firstNewline);
-				const header = JSON.parse(headerLine);
-				if (header.type === "session" && resolve(header.cwd) === resolvedCwd) {
-					return path;
-				}
-			} catch {
-				// Corrupt or unreadable file — skip
-			}
-		}
-
-		return null;
-	} catch {
-		return null;
-	}
-}
 
 /**
  * Discover extension subdirectories — each dir with an index.ts is an extension.
@@ -452,6 +405,9 @@ function ensureTallowHome(): void {
 			mkdirSync(dir, { recursive: true });
 		}
 	}
+
+	// Migrate flat session files to per-cwd subdirectories (one-time, idempotent)
+	migrateSessionsToPerCwdDirs(join(TALLOW_HOME, "sessions"));
 
 	ensureKeybindings();
 }

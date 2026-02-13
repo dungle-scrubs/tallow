@@ -95,8 +95,7 @@ async function run(opts: {
 	}
 
 	if (opts.list) {
-		const sessionsDir = `${TALLOW_HOME}/sessions`;
-		const sessions = await SessionManager.list(process.cwd(), sessionsDir);
+		const sessions = await SessionManager.list(process.cwd());
 		if (sessions.length === 0) {
 			console.log("No sessions found.");
 			return;
