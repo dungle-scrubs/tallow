@@ -32,7 +32,7 @@ Relay that answer to the user.
 | Component | Location |
 |-----------|----------|
 | Core source | `src/` (config.ts, sdk.ts, cli.ts, install.ts, index.ts, session-utils.ts, session-migration.ts, extensions-global.d.ts) |
-| Extensions | `extensions/` — extension.json + index.ts each (42 bundled) |
+| Extensions | `extensions/` — extension.json + index.ts each (43 bundled) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
 | Themes | `themes/` — JSON files (34 dark-only themes) |
