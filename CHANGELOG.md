@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **upstream:** check devDependencies and combine notifications ([3c2de41](https://github.com/dungle-scrubs/tallow/commit/3c2de4126992e4bf2351980a56def091f7657213))
 * wrap long question text in ask-user-question tool ([794265e](https://github.com/dungle-scrubs/tallow/commit/794265e069891ef421adf868d8772a1d42b20118))
 
-## [0.3.0] - 2026-02-11
+## [0.3.0](https://github.com/dungle-scrubs/tallow/compare/v0.2.0...v0.3.0) (2026-02-11)
 
 ### Added
 
@@ -102,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running, checkmark/X on completion). Agent prose uses subdued color to recede
   behind structural elements.
 
-## [0.2.0] - 2026-02-11
+## [0.2.0](https://github.com/dungle-scrubs/tallow/compare/v0.1.0...v0.2.0) (2026-02-11)
 
 ### Added
 
@@ -115,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Plan mode** — extension tools now preserved across mode transitions instead
   of being dropped when toggling plan mode on/off.
 
-## [0.1.0] - 2026-02-11
+## [0.1.0](https://github.com/dungle-scrubs/tallow/releases/tag/v0.1.0) (2026-02-11)
 
 ### Added
 
