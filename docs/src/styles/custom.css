@@ -273,31 +273,112 @@ nav.sidebar [aria-current="page"]:focus {
 	flex-grow: 1;
 }
 
-/* Quick start block */
-.quick-start {
-	margin-block: 4rem;
-	padding: 2rem 2.5rem;
-	background: var(--sl-color-gray-6);
-	border: 1px solid var(--sl-color-gray-5);
-	border-radius: 10px;
-	max-width: 36rem;
+/* ────────────────────────────────────
+   Theme preview — interactive swatch → terminal widget
+   ──────────────────────────────────── */
+
+.theme-preview {
+	margin-block: 1.5rem;
 }
 
-.quick-start h2 {
-	font-size: 0.75rem;
+.theme-description {
+	font-size: 0.9rem;
+	color: var(--sl-color-gray-2);
+	line-height: 1.65;
+	max-width: 38ch;
+	margin-block: 1.25rem 1.5rem;
+}
+
+/* Quick Start terminal widget */
+.qs-terminal {
+	background: var(--qs-bg);
+	border: 1px solid var(--qs-border);
+	border-radius: 10px;
+	overflow: hidden;
+	max-width: 36rem;
+	font-family: var(--sl-font-mono);
+	transition:
+		background-color 300ms,
+		border-color 300ms;
+}
+
+.qs-titlebar {
+	background: var(--qs-bg-dark);
+	padding: 0.75rem 1rem;
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	transition: background-color 300ms;
+}
+
+.qs-dots {
+	display: flex;
+	gap: 6px;
+}
+
+.qs-dots span {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: var(--qs-border);
+	transition: background-color 300ms;
+}
+
+.qs-title {
+	font-size: 0.7rem;
 	font-weight: 700;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
-	color: var(--sl-color-gray-2);
-	margin: 0 0 1.25rem;
+	color: var(--qs-muted);
+	transition: color 300ms;
 }
 
-.quick-start pre {
-	margin: 0;
-	border: none;
-	background: transparent;
-	padding: 0;
-	font-size: 0.95rem;
+.qs-content {
+	padding: 1.25rem 1.5rem;
+}
+
+.qs-line {
+	line-height: 1.8;
+	font-size: 0.875rem;
+	white-space: nowrap;
+}
+
+.qs-prompt {
+	color: var(--qs-muted);
+	margin-inline-end: 0.5em;
+	transition: color 300ms;
+	user-select: none;
+}
+
+.qs-cmd {
+	color: var(--qs-keyword);
+	transition: color 300ms;
+}
+
+.qs-fn {
+	color: var(--qs-function);
+	transition: color 300ms;
+}
+
+.qs-str {
+	color: var(--qs-string);
+	transition: color 300ms;
+}
+
+.qs-op {
+	color: var(--qs-muted);
+	transition: color 300ms;
+}
+
+.qs-text {
+	color: var(--qs-text);
+	transition: color 300ms;
+}
+
+.qs-accent-bar {
+	height: 3px;
+	background: var(--qs-accent);
+	transition: background-color 300ms;
 }
 
 /* Stats / numbers row */
@@ -886,7 +967,18 @@ button.gallery-thumb {
 	.lightbox-img,
 	.lightbox-prev,
 	.lightbox-next,
-	.lightbox-close {
+	.lightbox-close,
+	.qs-terminal,
+	.qs-titlebar,
+	.qs-dots span,
+	.qs-title,
+	.qs-prompt,
+	.qs-cmd,
+	.qs-fn,
+	.qs-str,
+	.qs-op,
+	.qs-text,
+	.qs-accent-bar {
 		transition-duration: 0.01ms;
 	}
 }
