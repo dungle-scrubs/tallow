@@ -138,3 +138,6 @@ tallow -p "hello" --session-id run-1 2>session.txt
 
 `--session-id`, `--resume`, `--fork-session`, and `--continue` are mutually exclusive.
 `--no-session` takes highest priority and disables all persistence.
+
+Session discovery is project-scoped: `--list` and default resume flows read
+sessions for the current working directory only, not a global cross-project pool.

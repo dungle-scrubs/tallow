@@ -1,12 +1,48 @@
 ---
 title: read-tool-enhanced
-description: Smart file reading with compact summaries and SKILL.md rendering.
+description: Smart file reading with compact summaries, SKILL.md rendering, and PDF extraction.
 ---
 
 File reads show the first 7 lines while loading, then collapse to
-a compact summary, filename, line count, and size. The full
+a compact summary with filename, line count, and size. The full
 content is always sent to the LLM's context regardless of what's
 displayed.
 
 SKILL.md files get special rendering with a distinct visual
 treatment. Press `ctrl+o` to expand any read to its full content.
+
+## PDF support
+
+The `read` tool now parses PDF files and extracts text instead of
+returning binary garbage.
+
+### Read full PDF
+
+```text
+read path/to/spec.pdf
+```
+
+Returns extracted text plus a summary (`<path> (<N> pages, <size>KB extracted)`).
+
+### Read specific pages
+
+```text
+read path/to/spec.pdf pages="1-5"
+read path/to/spec.pdf pages="1,3,7-10"
+```
+
+`pages` is ignored for non-PDF files.
+
+### Error handling
+
+- Encrypted/password-protected PDFs return a clear error
+- Corrupt PDFs return parse errors
+- Image-only PDFs report that no extractable text was found
+
+## Interaction with @file references
+
+`file-reference` now understands PDFs too:
+
+- Small PDFs are inlined directly into prompt context
+- Large PDFs are summarized with metadata + first-page preview
+- The summary suggests `read <file> pages="..."` for targeted extraction

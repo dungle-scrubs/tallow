@@ -10,7 +10,7 @@ tallow process with its own context window. Three execution modes:
 
 - **Single**, one agent, one task, wait for result
 - **Parallel**, multiple independent tasks running concurrently
-- **Chain**, sequential steps where each receives the previous
+- **Centipede**, sequential steps where each receives the previous
   output via `{previous}` placeholder
 
 Each subagent can use a different model, have a different role
@@ -124,7 +124,7 @@ The subprocess is spawned with `--tools <effective-list>`.
 
 #### `maxTurns`
 
-Hard limit on tool-use turns. When the subprocess reaches this many `tool_call_start`
+Hard limit on tool-use turns. When the subprocess reaches this many `tool_call`
 events, it receives SIGTERM (then SIGKILL after 5 seconds).
 
 ```yaml

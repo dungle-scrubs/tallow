@@ -26,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a right-aligned third row in the footer, appear in `tallow --list`, and set
   the terminal tab title. Use `/name` to view or override, `--no-session-name` to
   disable.
+- **PDF reading** — `read` now supports PDF extraction with optional `pages` ranges
+  (`"1-5"`, `"1,3,7-10"`) and clear errors for encrypted/corrupt files. Large
+  PDF `@file` references are summarized with metadata + preview instead of flooding
+  context.
+- **Theme randomization on launch** — `randomThemeOnStart` in `settings.json`
+  applies a random theme on startup (optionally filtered by tag list) without
+  overwriting the persisted default theme.
+- **Docs landing theme preview** — homepage swatches now live-preview theme colors
+  in the Quick Start terminal widget on hover.
+- **Edit diff deep-link** — edit footers include clickable `diff` links
+  (`tallow://diff/<path>`) for terminal handlers (e.g. WezTerm + lazygit).
 - **Context fork extension** — run skills and commands in isolated subprocesses
   with independent context windows via `context: fork` frontmatter
   - Model resolution: `sonnet` → claude-sonnet-4-20250514, `haiku` →
@@ -93,11 +104,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplicate registration from the session-namer extension
 - **Session memory** — replaced `better-sqlite3` native addon with a pure
   JavaScript sqlite adapter for lighter installation
+- **Subagent mode naming** — `chain` mode renamed to `centipede` across tool
+  schema, render output, and docs.
+- **Footer layout** — agent/team bar moved from the crowded status row to the
+  bottom-left of footer line 3 (next to session name).
 
 ### Fixed
 
-- **Tasks** — fallback spinner frames when `getSpinner()` returns null; validate
-  `index` param before using it
+- **Session scoping** — `/resume` and `--list` now scope sessions to the current
+  project directory instead of mixing sessions from unrelated repos.
+- **Shell interpolation boundary** — command expansion moved to load-time on
+  user-authored templates; removed execution-time expansion on agent-generated
+  strings in subagent/context-fork paths.
+- **Nested interactive guard** — blocks starting an interactive TUI inside an
+  existing interactive session (`TALLOW_INTERACTIVE=1`).
+- **Tasks** — clear stale task lists when an agent is cancelled mid-run, plus
+  fallback spinner frames when `getSpinner()` returns null and stricter index
+  validation.
+- **Teams wait cancellation** — `team_send(wait=true)` now races against abort
+  signals so Escape cancels cleanly instead of hanging the orchestrator.
 - **Ask-user-question** — hide "Working..." loader during question prompt and
   restore it after the user answers
 - **Claude bridge** — package-aware collision detection for SKILL.md paths; skip
