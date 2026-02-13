@@ -39,6 +39,17 @@ Paths resolve relative to the project root. These all work:
 - `@package.json` — config files
 - `@.env` — dotfiles
 
+## PDF behavior
+
+PDF references are handled specially:
+
+- **Small PDFs (≤10 pages)** are fully extracted and inlined
+- **Large PDFs (>10 pages)** are summarized (title/author/preview) to avoid context bloat
+- Summaries include a follow-up hint like `read spec.pdf pages="1-5"`
+
+If a PDF cannot be parsed, the reference is replaced with
+`[unreadable PDF: <path>]`.
+
 ## What's skipped
 
 | Input | Behavior |
@@ -52,7 +63,7 @@ Paths resolve relative to the project root. These all work:
 
 | Setting | Value |
 |---------|-------|
-| Max file size | 100 KB (truncated with note) |
+| Max text file size | 100 KB (truncated with note) |
 | Binary files | Replaced with `[binary file: path]` |
 
 ## Language hints
@@ -68,7 +79,7 @@ Other extensions can import the transform directly:
 ```ts
 import { expandFileReferences } from "../file-reference/index.js";
 
-const expanded = expandFileReferences(text, cwd);
+const expanded = await expandFileReferences(text, cwd);
 ```
 
 The `subagent-tool` extension uses this alongside
