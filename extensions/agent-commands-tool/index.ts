@@ -13,7 +13,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-interface AgentFrontmatter {
+export interface AgentFrontmatter {
 	name?: string;
 	description?: string;
 	tools?: string;
@@ -26,7 +26,7 @@ interface AgentFrontmatter {
 	[key: string]: unknown;
 }
 
-interface Agent {
+export interface Agent {
 	name: string;
 	description: string;
 	filePath: string;
@@ -40,7 +40,7 @@ interface Agent {
 }
 
 /** Built-in tools available in a default pi subprocess. */
-const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+export const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 /**
  * Computes the effective tool list from allowlist and denylist.
@@ -49,7 +49,7 @@ const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"]
  * @param disallowedTools - Denylist from frontmatter (undefined = no exclusions)
  * @returns Tool list for --tools flag, or undefined if no filtering needed
  */
-function computeEffectiveTools(
+export function computeEffectiveTools(
 	tools: string[] | undefined,
 	disallowedTools: string[] | undefined
 ): string[] | undefined {
@@ -66,7 +66,7 @@ function computeEffectiveTools(
  * @param content - Raw markdown content with optional YAML frontmatter
  * @returns Object containing parsed frontmatter and body text
  */
-function parseAgent(content: string): { frontmatter: AgentFrontmatter; body: string } {
+export function parseAgent(content: string): { frontmatter: AgentFrontmatter; body: string } {
 	const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
 	if (!match) return { frontmatter: {}, body: content };
 
@@ -94,7 +94,7 @@ function parseAgent(content: string): { frontmatter: AgentFrontmatter; body: str
  * @param dir - Directory path to scan for .md files
  * @returns Array of parsed agent configurations
  */
-function loadAgentsFromDir(dir: string): Agent[] {
+export function loadAgentsFromDir(dir: string): Agent[] {
 	const agents: Agent[] = [];
 
 	if (!fs.existsSync(dir)) return agents;
@@ -182,7 +182,7 @@ function loadAgentsFromDir(dir: string): Agent[] {
  * @param p - Path that may contain ~ prefix
  * @returns Resolved absolute path
  */
-function resolvePath(p: string): string {
+export function resolvePath(p: string): string {
 	const trimmed = p.trim();
 	if (trimmed === "~") return os.homedir();
 	if (trimmed.startsWith("~/")) return path.join(os.homedir(), trimmed.slice(2));
@@ -195,7 +195,7 @@ function resolvePath(p: string): string {
  * @param settingsPath - Path to settings.json
  * @returns Array of resolved agent directory paths found in packages
  */
-function getPackageAgentDirs(settingsPath: string): string[] {
+export function getPackageAgentDirs(settingsPath: string): string[] {
 	const dirs: string[] = [];
 	if (!fs.existsSync(settingsPath)) return dirs;
 

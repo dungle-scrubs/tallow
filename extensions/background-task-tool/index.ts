@@ -144,7 +144,7 @@ function cleanupOldTasks(): void {
  * @param ms - Duration in milliseconds
  * @returns Formatted duration string
  */
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
 	const seconds = Math.floor(ms / 1000);
 	if (seconds < 60) return `${seconds}s`;
 	const minutes = Math.floor(seconds / 60);
@@ -161,9 +161,85 @@ function formatDuration(ms: number): string {
  * @param maxLen - Maximum length (default 40)
  * @returns Truncated command or original if short enough
  */
-function truncateCommand(cmd: string, maxLen = 40): string {
+export function truncateCommand(cmd: string, maxLen = 40): string {
 	if (cmd.length <= maxLen) return cmd;
 	return `${cmd.substring(0, maxLen - 3)}...`;
+}
+
+// ── Exported detection patterns (testable) ───────────────────────────────────
+
+/**
+ * Regex detecting a backgrounding `&` in a shell command.
+ * Matches single `&` not preceded by `&` (excludes `&&`) and not followed by `>` (excludes `&>`).
+ */
+export const BACKGROUND_AMPERSAND_PATTERN = /(?<!&)&(?!>)(?!&)(\s*$|\s*\n|\s*;|\s*\)|\s+[a-zA-Z])/;
+
+/** Regex detecting heredoc markers — used to exempt `&` inside heredocs. */
+export const HEREDOC_PATTERN = /<<[-]?\s*['"]?\w+['"]?/;
+
+/** Pattern/reason pairs for commands likely to hang. */
+export const HANG_PATTERNS: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
+	{
+		pattern: /docker exec[^|]*node -e/,
+		reason: "docker exec with inline node script may hang if connections aren't closed",
+	},
+	{
+		pattern: /docker exec[^|]*python -c/,
+		reason: "docker exec with inline python script may hang if connections aren't closed",
+	},
+	{
+		pattern: /docker exec[^|]*-it\s/,
+		reason: "docker exec with interactive flag will hang",
+	},
+	{
+		pattern: /docker exec[^|]*--interactive/,
+		reason: "docker exec with --interactive will hang",
+	},
+	{
+		pattern: /\bpsql\b[^|]*-c\s+["']/,
+		reason: "psql with inline query may hang on connection issues",
+	},
+	{
+		pattern: /\bmysql\b[^|]*-e\s+["']/,
+		reason: "mysql with inline query may hang on connection issues",
+	},
+	{
+		pattern: /\bnc\b[^|]*-l/,
+		reason: "netcat listen mode will hang waiting for connections",
+	},
+	{
+		pattern: /\btail\b[^|]*-f/,
+		reason: "tail -f will run forever - use bg_bash",
+	},
+	{
+		pattern: /\bwatch\b\s/,
+		reason: "watch command runs forever - use bg_bash",
+	},
+];
+
+/**
+ * Detect if a command uses `&` for backgrounding (which hangs in pi).
+ *
+ * @param command - Shell command string
+ * @returns True if the command backgrounds a process with `&`
+ */
+export function detectsBackgroundAmpersand(command: string): boolean {
+	const hasAmpersand = BACKGROUND_AMPERSAND_PATTERN.test(command);
+	const hasHeredoc = HEREDOC_PATTERN.test(command);
+	return hasAmpersand && !hasHeredoc;
+}
+
+/**
+ * Check if a command matches any known hang pattern.
+ *
+ * @param command - Shell command string
+ * @returns The matching reason if found, or null
+ */
+export function detectsHangPattern(command: string): string | null {
+	for (const { pattern, reason } of HANG_PATTERNS) {
+		if (pattern.test(command)) return reason;
+	}
+	return null;
 }
 
 /**
@@ -1184,25 +1260,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		const command = event.input?.command as string | undefined;
 		if (!command) return;
 
-		// Detect & used for backgrounding
-		// Key insight: a backgrounding & is a SINGLE & that is:
-		// - Not preceded by another & (that would be &&)
-		// - Not followed by > (that would be &> redirect)
-		// - Followed by: end of string, whitespace+newline, semicolon, ), or space+word
-
-		// Pattern: single & followed by end, newline, semicolon, paren, or space+word
-		// (?<!&) = not preceded by &
-		// (?!>) = not followed by > (excludes &>)
-		// (?!&) = not followed by & (excludes &&)
-		const backgroundPattern = /(?<!&)&(?!>)(?!&)(\s*$|\s*\n|\s*;|\s*\)|\s+[a-zA-Z])/;
-
-		const hasBackgroundAmpersand = backgroundPattern.test(command);
-
-		// Exclude if & only appears inside heredocs
-		// Simple heuristic: if there's a heredoc marker, be conservative
-		const hasHeredoc = /<<[-]?\s*['"]?\w+['"]?/.test(command);
-
-		if (hasBackgroundAmpersand && !hasHeredoc) {
+		if (detectsBackgroundAmpersand(command)) {
 			return {
 				block: true,
 				reason:
@@ -1211,54 +1269,12 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			};
 		}
 
-		// Detect commands likely to hang (should use bg_bash instead)
-		// These patterns open persistent connections or run interactive sessions
-		const hangPatterns: Array<{ pattern: RegExp; reason: string }> = [
-			{
-				pattern: /docker exec[^|]*node -e/,
-				reason: "docker exec with inline node script may hang if connections aren't closed",
-			},
-			{
-				pattern: /docker exec[^|]*python -c/,
-				reason: "docker exec with inline python script may hang if connections aren't closed",
-			},
-			{
-				pattern: /docker exec[^|]*-it\s/,
-				reason: "docker exec with interactive flag will hang",
-			},
-			{
-				pattern: /docker exec[^|]*--interactive/,
-				reason: "docker exec with --interactive will hang",
-			},
-			{
-				pattern: /\bpsql\b[^|]*-c\s+["']/,
-				reason: "psql with inline query may hang on connection issues",
-			},
-			{
-				pattern: /\bmysql\b[^|]*-e\s+["']/,
-				reason: "mysql with inline query may hang on connection issues",
-			},
-			{
-				pattern: /\bnc\b[^|]*-l/,
-				reason: "netcat listen mode will hang waiting for connections",
-			},
-			{
-				pattern: /\btail\b[^|]*-f/,
-				reason: "tail -f will run forever - use bg_bash",
-			},
-			{
-				pattern: /\bwatch\b\s/,
-				reason: "watch command runs forever - use bg_bash",
-			},
-		];
-
-		for (const { pattern, reason } of hangPatterns) {
-			if (pattern.test(command)) {
-				return {
-					block: true,
-					reason: `This command is likely to hang: ${reason}\n\nUse bg_bash instead for commands that may not exit promptly.`,
-				};
-			}
+		const hangReason = detectsHangPattern(command);
+		if (hangReason) {
+			return {
+				block: true,
+				reason: `This command is likely to hang: ${hangReason}\n\nUse bg_bash instead for commands that may not exit promptly.`,
+			};
 		}
 	});
 }
