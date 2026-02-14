@@ -49,3 +49,13 @@ information lives in the tasks widget. The footer focuses on
 token usage, cost, git state, and subagent counts. This avoids
 duplicating information that's already visible in the widget
 above it.
+
+## Shell policy
+
+Background commands follow the same shell policy as the bash tool.
+High-risk commands prompt for confirmation before spawning. Set
+`TALLOW_ALLOW_UNSAFE_SHELL=1` to bypass prompts in non-interactive
+environments (CI, scripts).
+
+All background commands are recorded in the
+[shell audit trail](/extensions/shell-interpolation/#audit-trail).
