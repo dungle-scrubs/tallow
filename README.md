@@ -49,25 +49,16 @@ Read the full [documentation](https://tallow.dungle-scrubs.com).
 
 ## Installation
 
-### From npm
+### Global install
 
 ```bash
-npm install -g tallow
+bun install -g tallow
 tallow install
-```
-
-Or with pnpm / bun:
-
-```bash
-pnpm add -g tallow && tallow install
-bun install -g tallow && tallow install
 ```
 
 Or without global install:
 
 ```bash
-npx tallow install
-pnpm dlx tallow install
 bunx tallow install
 ```
 
@@ -76,8 +67,8 @@ bunx tallow install
 ```bash
 git clone https://github.com/dungle-scrubs/tallow.git
 cd tallow
-npm install
-npm run build
+bun install
+bun run build
 node dist/install.js
 ```
 

@@ -8,15 +8,15 @@ default:
 
 # Build everything (tallow-tui fork → core)
 build:
-    npm run build
+    bun run build
 
 # Build tallow-tui fork only
 build-tui:
-    cd packages/tallow-tui && npm run build
+    cd packages/tallow-tui && bun run build
 
 # Watch mode (core only — does NOT watch tallow-tui)
 dev:
-    npm run dev
+    bun run dev
 
 # ── Code Quality ─────────────────────────────────
 
@@ -25,27 +25,27 @@ check: typecheck typecheck-ext lint
 
 # Typecheck core
 typecheck:
-    npm run typecheck
+    bun run typecheck
 
 # Typecheck extensions (separate tsconfig)
 typecheck-ext:
-    npm run typecheck:extensions
+    bun run typecheck:extensions
 
 # Lint + format check
 lint:
-    npm run lint
+    bun run lint
 
 # Auto-fix lint + format
 fix:
-    npm run lint:fix
+    bun run lint:fix
 
 # Format only
 format:
-    npm run format
+    bun run format
 
 # Format check (no write)
 format-check:
-    npm run format:check
+    bun run format:check
 
 # ── Test ─────────────────────────────────────────
 
@@ -88,15 +88,15 @@ install:
 
 # Dev server for docs site
 docs-dev:
-    cd docs && npm run dev
+    cd docs && bun run dev
 
 # Build docs site
 docs-build:
-    cd docs && npm run build
+    cd docs && bun run build
 
 # Preview docs build
 docs-preview:
-    cd docs && npm run preview
+    cd docs && bun run preview
 
 # ── Cleanup ──────────────────────────────────────
 
