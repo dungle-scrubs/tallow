@@ -37,7 +37,7 @@ program
 	.option("-c, --continue", "Continue most recent session")
 	.option("-m, --model <model>", "Model to use (provider/model-id)")
 	.option("--provider <provider>", "Provider to use (anthropic, openai, google, etc.)")
-	.option("--api-key <key>", "Runtime API key (not persisted). Requires --provider or -m")
+	// --api-key removed: leaks secrets in `ps` output. Use TALLOW_API_KEY/TALLOW_API_KEY_REF.
 	.option("--mode <mode>", "Run mode: interactive, rpc, json", "interactive")
 	.option("--thinking <level>", "Thinking level: off, minimal, low, medium, high, xhigh")
 	.option("--no-session", "Don't persist session (in-memory only)")
@@ -77,7 +77,7 @@ program
 	.option("-y, --yes", "Non-interactive: keep all settings, update templates")
 	.option("--default-provider <provider>", "Set default provider (anthropic, openai, google)")
 	.option("--default-model <model>", "Set default model ID (e.g., claude-sonnet-4)")
-	.option("--api-key <key>", "Set API key for the default provider")
+	// --api-key removed: leaks secrets in `ps` output. Use TALLOW_API_KEY/TALLOW_API_KEY_REF.
 	.option("--theme <name>", "Set default theme")
 	.option(
 		"--thinking <level>",
@@ -92,8 +92,13 @@ program.parse();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+/**
+ * Run the CLI entrypoint with parsed commander options.
+ *
+ * @param opts - Parsed top-level CLI options
+ * @returns Promise that resolves when execution completes
+ */
 async function run(opts: {
-	apiKey?: string;
 	continue?: boolean;
 	extension?: string[];
 	extensions?: boolean;
@@ -160,7 +165,7 @@ async function run(opts: {
 
 	const sessionOpts: TallowSessionOptions = {
 		additionalExtensions: opts.extension,
-		apiKey: opts.apiKey,
+		// apiKey resolved from TALLOW_API_KEY env var inside createTallowSession
 		modelId,
 		noBundledExtensions: opts.extensions === false,
 		noBundledSkills: opts.extensions === false,

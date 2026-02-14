@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
-	AuthStorage,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
 	createAgentSession,
@@ -16,6 +15,7 @@ import {
 	type Skill,
 } from "@mariozechner/pi-coding-agent";
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
+import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
@@ -169,17 +169,30 @@ export async function createTallowSession(
 
 	// ── Auth & Models ────────────────────────────────────────────────────────
 
-	const authStorage = new AuthStorage(join(TALLOW_HOME, "auth.json"));
+	const authPath = join(TALLOW_HOME, "auth.json");
+	const authStorage = new SecureAuthStorage(authPath);
+	if (authStorage.migration.migratedProviders.length > 0) {
+		console.error(
+			`\x1b[33m🔐 Migrated ${authStorage.migration.migratedProviders.length} auth credential(s) to secure references: ${authStorage.migration.migratedProviders.join(", ")}\x1b[0m`
+		);
+	}
 	const modelRegistry = new ModelRegistry(authStorage, join(TALLOW_HOME, "models.json"));
 
 	// ── Runtime API key (not persisted) ──────────────────────────────────────
+	// Accepts programmatic SDK `apiKey` option or env overrides:
+	// TALLOW_API_KEY (raw) or TALLOW_API_KEY_REF (reference).
+	// The CLI --api-key flag was removed to prevent secret leaks in process args.
 
-	if (options.apiKey) {
+	const runtimeApiKey = options.apiKey ?? resolveRuntimeApiKeyFromEnv();
+	if (runtimeApiKey) {
 		const keyProvider = options.provider ?? options.model?.provider;
 		if (!keyProvider) {
-			throw new Error("--api-key requires --provider or --model to be specified");
+			throw new Error(
+				"API key provided (via options, TALLOW_API_KEY, or TALLOW_API_KEY_REF) but no provider specified. " +
+					"Set --provider or --model."
+			);
 		}
-		authStorage.setRuntimeApiKey(keyProvider, options.apiKey);
+		authStorage.setRuntimeApiKey(keyProvider, runtimeApiKey);
 	}
 
 	// ── Settings ─────────────────────────────────────────────────────────────

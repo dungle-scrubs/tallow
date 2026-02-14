@@ -43,6 +43,14 @@ For CI, scripts, or quick rebuilds, pass `--yes` (or `-y`):
 node dist/install.js --yes
 ```
 
+For headless auth bootstrapping, provide credentials via env vars
+(not CLI args):
+
+```bash
+TALLOW_API_KEY=sk-ant-... node dist/install.js --yes --default-provider anthropic
+TALLOW_API_KEY_REF=op://Services/Anthropic/api-key node dist/install.js --yes --default-provider anthropic
+```
+
 This rebuilds from source, reinstalls the global binary, and
 keeps all existing settings untouched. It requires an existing
 `~/.tallow/` directory — run the interactive installer at least
@@ -85,7 +93,7 @@ configuration lives in `.tallow/` within your project directory.
 | Path | Purpose |
 |------|---------|
 | `~/.tallow/settings.json` | Global settings (theme, disabled extensions, packages) |
-| `~/.tallow/auth.json` | API keys for model providers |
+| `~/.tallow/auth.json` | Provider auth references (not raw keys — see [SECURITY.md](https://github.com/dungle-scrubs/tallow/blob/main/SECURITY.md)) |
 | `~/.tallow/sessions/` | Conversation history |
 | `~/.tallow/extensions/` | Custom user extensions |
 | `~/.tallow/agents/` | Custom user agents |
@@ -116,6 +124,9 @@ tallow --mode rpc                 RPC mode (for external integrations)
 tallow --home                     Print the tallow home directory
 tallow install                    Run the interactive installer
 ```
+
+`--api-key` is intentionally unsupported to avoid leaking secrets in
+process arguments. Use `TALLOW_API_KEY` or `TALLOW_API_KEY_REF`.
 
 ### Session targeting (headless / CI)
 
