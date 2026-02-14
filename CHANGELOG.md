@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0](https://github.com/dungle-scrubs/tallow/compare/v0.4.0...v0.5.0) (2026-02-14)
 
 ### Added
 
@@ -18,38 +18,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `missingAgentBehavior`
 - **subagent-tool:** `resolveProjectRoot()` anchors project agent discovery to
   git root (falls back to cwd), replacing the previous ancestor-walk behavior
+- **tool-display:** `wrap` option on `renderLines` — expanded tool output now
+  soft-wraps long lines instead of truncating
+- **wezterm-pane-control:** add WezTerm pane management tool (split, close, focus,
+  zoom, resize, send/read text, spawn tabs)
+- **tallow-tui:** alternate screen terminal support
+- **teams:** add dashboard workspace with live task/teammate/message view,
+  `/team-dashboard` command, `Ctrl+X` toggle, and keyboard navigation controls
+- **shell-policy:** centralized shell execution policy with audit trail, trust
+  levels, and allowlist enforcement
+- **shell:** enforce high-risk confirmation for interactive bash tool calls
+- **interop:** typed cross-extension event contracts (`interop.v1.*`) with
+  schema-versioned payload validation
+- **auth:** secure credential storage with environment variable references,
+  replacing `--api-key` CLI flag
+- **ci:** docs-drift checker in CI pipeline
+- **tests:** 160+ new tests across high-risk extensions (shell-policy, interop,
+  tasks, teams, architecture guards)
 
 ### Changed
 
 - **subagent-tool:** project-local agents now run without confirmation prompts;
   `confirmProjectAgents` parameter deprecated (kept for compatibility, ignored)
-
-### Added
-
-- **teams:** add dashboard workspace with live task/teammate/message view,
-  `/team-dashboard` command, `Ctrl+X` toggle, and keyboard navigation controls
-- **tests:** add interop integration coverage for cross-extension state requests,
-  typed snapshot delivery, and schema-version rejection behavior
-- **tests:** add architecture guard coverage for tasks/teams-tool file-size
-  thresholds and module boundary coupling rules
-
-### Changed
-
 - **extensions:** replace cross-extension `globalThis` state coupling with typed
-  `pi.events` contracts (`interop.v1.*`) and schema-versioned payload validation
+  `pi.events` contracts and schema-versioned payload validation
 - **tasks:** migrate widget/agent-bar consumers to typed interop snapshots with
-  load-order-safe state requests and a temporary legacy bridge adapter
-- **shell-policy:** fix confirmation handling for high-risk explicit commands,
-  treating interrupted/canceled dialogs as denied while allowing confirmed
-  commands and reducing quoted-string false positives in risk matching
-- **teams:** refine dashboard visuals with per-team personality markers, subdued divider colors,
-  5-line output previews, model labels in the left tree, and live per-agent token meters
-  (`↑` input, `↓` output)
-- **tasks/teams-tool:** split oversized `index.ts` modules into thin composition roots with
-  extracted domain modules (`state`, `parsing`, `agents`, `ui`, `commands`, `dispatch`,
-  `sessions`, `tools`, `dashboard`) to reduce coupling and improve testability
-- **teams:** drop `Ctrl+Y` dashboard toggle to avoid conflict with editor yank
-- **docs:** sync keyboard shortcut reference for teams dashboard toggles and controls in extension docs
+  load-order-safe state requests
+- **tasks/teams-tool:** split oversized `index.ts` modules into thin composition
+  roots with extracted domain modules (`state`, `parsing`, `agents`, `ui`,
+  `commands`, `dispatch`, `sessions`, `tools`, `dashboard`)
+- **shell-interpolation:** require explicit opt-in by default
+- **teams:** refine dashboard visuals with per-team personality markers, model
+  labels in the left tree, and live per-agent token meters
+- **chore:** make bun the canonical package manager (CI and contributor commands)
+
+### Fixed
+
+- **tallow-tui:** truncation ellipsis (`…`) now inherits ANSI styling of the
+  truncated line instead of resetting to default background
+- **shell-policy:** harden confirmation handling for high-risk explicit commands;
+  interrupted/canceled dialogs correctly treated as denied
+- **ci:** stabilize workflows — build tallow-tui before typecheck/tests, make
+  nested guard tests deterministic in headless environments
 
 ## [0.4.0](https://github.com/dungle-scrubs/tallow/compare/v0.3.0...v0.4.0) (2026-02-13)
 
