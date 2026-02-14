@@ -1,5 +1,5 @@
 {
-	"name": "@tallow/tui",
+	"name": "@mariozechner/pi-tui",
 	"version": "0.52.9",
 	"private": true,
 	"description": "Tallow's TUI fork — customizable loader, rounded borders, which-key overlay",
