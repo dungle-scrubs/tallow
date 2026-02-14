@@ -7,6 +7,23 @@ Expands `` !`command` `` patterns in your input by running the shell
 command and replacing the pattern with its stdout. Compatible with
 Claude Code's backtick interpolation syntax.
 
+:::caution
+Shell interpolation is **disabled by default**. Enable it explicitly
+before use — see [Enabling](#enabling) below.
+:::
+
+## Enabling
+
+Shell interpolation must be opted into. Choose one:
+
+| Method | Scope |
+|--------|-------|
+| `TALLOW_ENABLE_SHELL_INTERPOLATION=1` (or `TALLOW_SHELL_INTERPOLATION=1`) | Process/session |
+| `"shellInterpolation": true` in `.tallow/settings.json` or `~/.tallow/settings.json` | Persistent |
+
+When disabled, `` !`command` `` patterns pass through to the agent
+as literal text.
+
 ## Usage
 
 Type shell commands inline using `` !`command` `` syntax:
@@ -35,6 +52,12 @@ is replaced with an error marker instead of throwing:
 [error: command failed: nonexistent-command]
 ```
 
+If policy blocks the command, the pattern becomes a denial marker:
+
+```
+[denied: Implicit command is not allowlisted]
+```
+
 ## Limits
 
 | Setting | Value |
@@ -50,6 +73,24 @@ Output from commands is **not re-scanned** for additional
 `` !`...` `` patterns. This prevents injection attacks where
 command output contains shell interpolation syntax.
 
+### Policy behavior
+
+Implicit interpolation commands are restricted to an allowlist and
+blocked when they contain dangerous shell operators or denylisted
+patterns.
+
+`bash` and `bg_bash` remain available for explicit user-intent shell
+execution. High-risk explicit commands require confirmation in
+interactive sessions.
+
+In non-interactive environments (CI/scripts), set
+`TALLOW_ALLOW_UNSAFE_SHELL=1` to bypass explicit high-risk confirmation.
+
+### Audit trail
+
+Policy decisions and execution outcomes are recorded in the shared
+in-memory shell audit trail (source, cwd, outcome, timing, exit code).
+
 ## Programmatic use
 
 Other extensions can import the transform directly:
@@ -57,8 +98,11 @@ Other extensions can import the transform directly:
 ```ts
 import { expandShellCommands } from "../shell-interpolation/index.js";
 
-const expanded = expandShellCommands(text, cwd);
+const expanded = expandShellCommands(text, cwd, {
+  source: "context-fork",
+  enforcePolicy: true,
+});
 ```
 
-The `subagent-tool` extension uses this to expand patterns in
-task prompts before spawning subagents.
+Set `enforcePolicy: true` for runtime command expansion. Use the default
+(`false`) only for trusted, test-only transforms.

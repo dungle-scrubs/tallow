@@ -20,6 +20,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
+import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
 import {
 	formatTruncationIndicator,
 	getToolDisplayConfig,
@@ -81,6 +82,19 @@ function hasAnsiEscape(line: string): boolean {
 export function styleBashLine(line: string, dim: (value: string) => string): string {
 	const clean = stripNonDisplayOsc(line);
 	return hasAnsiEscape(clean) ? clean : dim(clean);
+}
+
+/**
+ * Extract exit code from bash error content.
+ *
+ * @param content - Tool result content array
+ * @returns Exit code when present, otherwise null
+ */
+function getExitCodeFromContent(content: Array<{ type: string; text?: string }>): number | null {
+	const textPart = content.find((part) => part.type === "text")?.text ?? "";
+	const match = textPart.match(/Command exited with code (\d+)/);
+	if (!match) return null;
+	return Number(match[1]);
 }
 
 export default function bashLive(pi: ExtensionAPI): void {
@@ -193,5 +207,36 @@ export default function bashLive(pi: ExtensionAPI): void {
 			lines.push(theme.fg(statusColor, summary) + fullPathSuffix);
 			return renderLines(lines);
 		},
+	});
+
+	// Enforce shell policy for bash tool calls — denies denylist hits outright
+	// and prompts for confirmation on high-risk commands in interactive mode.
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName !== "bash") return;
+
+		const command = (event.input as { command?: string }).command;
+		if (!command) return;
+
+		return enforceExplicitPolicy(command, "bash", ctx.cwd, ctx.hasUI, (msg) =>
+			ctx.ui.confirm("Shell Policy", msg)
+		);
+	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.toolName !== "bash") return;
+		const command = (event.input as { command?: string }).command?.trim();
+		if (!command) return;
+
+		recordAudit({
+			timestamp: Date.now(),
+			command,
+			source: "bash",
+			trustLevel: "explicit",
+			cwd: ctx.cwd,
+			outcome: event.isError ? "failed" : "executed",
+			exitCode: event.isError
+				? getExitCodeFromContent(event.content as Array<{ type: string; text?: string }>)
+				: 0,
+		});
 	});
 }
