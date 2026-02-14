@@ -8,9 +8,9 @@
  * - PR status (if GitHub CLI available)
  */
 
-import { execSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getIcon } from "../_icons/index.js";
+import { runCommandSync, runGitCommandSync } from "../_shared/shell-policy.js";
 
 // Catppuccin Macchiato colors
 const C_TEAL = "\x1b[38;2;139;213;202m"; // teal #8bd5ca
@@ -41,22 +41,14 @@ let lastCwd = "";
 let cachedState: GitState | null = null;
 
 /**
- * Executes a git command in the specified directory.
- * @param cmd - The git command to run (without 'git' prefix)
+ * Executes a git command in the specified directory via arg-array spawn.
+ *
+ * @param args - Git subcommand and arguments as an array
  * @param cwd - The working directory to run the command in
  * @returns The trimmed stdout output, or null if the command failed
  */
-function runGit(cmd: string, cwd: string): string | null {
-	try {
-		return execSync(`git ${cmd}`, {
-			cwd,
-			encoding: "utf-8",
-			timeout: 5000,
-			stdio: ["pipe", "pipe", "pipe"],
-		}).trim();
-	} catch {
-		return null;
-	}
+function runGit(args: string[], cwd: string): string | null {
+	return runGitCommandSync(args, cwd, 5000);
 }
 
 /**
@@ -67,7 +59,7 @@ function runGit(cmd: string, cwd: string): string | null {
  */
 function getGitState(cwd: string): GitState | null {
 	// Single command: branch, ahead/behind, and porcelain status
-	const raw = runGit("status --porcelain=v2 --branch", cwd);
+	const raw = runGit(["status", "--porcelain=v2", "--branch"], cwd);
 	if (raw === null) return null;
 
 	let branch: string | null = null;
@@ -79,7 +71,7 @@ function getGitState(cwd: string): GitState | null {
 		if (line.startsWith("# branch.head ")) {
 			branch = line.slice("# branch.head ".length);
 			if (branch === "(detached)") {
-				const sha = runGit("rev-parse --short HEAD", cwd);
+				const sha = runGit(["rev-parse", "--short", "HEAD"], cwd);
 				branch = sha ? `(${sha})` : branch;
 			}
 		} else if (line.startsWith("# branch.ab ")) {
@@ -100,14 +92,20 @@ function getGitState(cwd: string): GitState | null {
 	let prNumber: number | null = null;
 
 	try {
-		const prJson = execSync(`gh pr view --json state,number,isDraft 2>/dev/null || echo "{}"`, {
+		const prResult = runCommandSync({
+			command: "gh",
+			args: ["pr", "view", "--json", "state,number,isDraft"],
 			cwd,
-			encoding: "utf-8",
-			timeout: 5000,
-		}).trim();
+			source: "git-helper",
+			timeoutMs: 5000,
+		});
 
-		if (prJson && prJson !== "{}") {
-			const pr = JSON.parse(prJson);
+		if (prResult.ok && prResult.stdout) {
+			const pr = JSON.parse(prResult.stdout) as {
+				number?: number;
+				isDraft?: boolean;
+				state?: string;
+			};
 			if (pr.number) {
 				prNumber = pr.number;
 				if (pr.isDraft) {
@@ -118,7 +116,7 @@ function getGitState(cwd: string): GitState | null {
 			}
 		}
 	} catch {
-		// gh CLI not available or not in a GitHub repo
+		// gh CLI not available, parse failure, or not in a GitHub repo
 	}
 
 	return { branch, dirty, ahead, behind, prState, prNumber };

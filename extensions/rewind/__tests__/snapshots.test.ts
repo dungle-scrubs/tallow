@@ -1,19 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { execSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runGitCommandSync } from "../../_shared/shell-policy.js";
 import { SnapshotManager } from "../snapshots.js";
 
 /**
- * Helper to run a git command in a directory.
+ * Helper to run a git command in a directory via arg-array spawn.
  *
- * @param cmd - Git command (without 'git' prefix)
+ * @param args - Git subcommand and arguments as an array
  * @param cwd - Working directory
  * @returns Trimmed stdout
+ * @throws {Error} If the git command exits non-zero
  */
-function git(cmd: string, cwd: string): string {
-	return execSync(`git ${cmd}`, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+function git(args: string[], cwd: string): string {
+	const result = runGitCommandSync(args, cwd, 10_000);
+	if (result === null) throw new Error(`git ${args.join(" ")} failed`);
+	return result;
 }
 
 /**
@@ -23,13 +26,13 @@ function git(cmd: string, cwd: string): string {
  */
 function createTempRepo(): string {
 	const dir = mkdtempSync(join(tmpdir(), "rewind-test-"));
-	git("init", dir);
-	git("config user.email test@test.com", dir);
-	git("config user.name Test", dir);
+	git(["init"], dir);
+	git(["config", "user.email", "test@test.com"], dir);
+	git(["config", "user.name", "Test"], dir);
 	// Create initial commit so HEAD exists
 	writeFileSync(join(dir, ".gitkeep"), "");
-	git("add -A", dir);
-	git("commit -m init", dir);
+	git(["add", "-A"], dir);
+	git(["commit", "-m", "init"], dir);
 	return dir;
 }
 
@@ -64,7 +67,7 @@ describe("SnapshotManager", () => {
 		expect(ref).toBe("refs/tallow/rewind/test-session/turn-1");
 
 		// Verify ref exists in git
-		const refOutput = git("show-ref refs/tallow/rewind/test-session/turn-1", tmpDir);
+		const refOutput = git(["show-ref", "refs/tallow/rewind/test-session/turn-1"], tmpDir);
 		expect(refOutput).toBeTruthy();
 	});
 
@@ -78,7 +81,7 @@ describe("SnapshotManager", () => {
 		writeFileSync(join(tmpDir, "a.txt"), "changed");
 		mgr.createSnapshot(1);
 
-		const status = git("status --porcelain", tmpDir);
+		const status = git(["status", "--porcelain"], tmpDir);
 		// a.txt should show as untracked (??) not staged
 		const lines = status.split("\n").filter(Boolean);
 		for (const line of lines) {
@@ -92,7 +95,8 @@ describe("SnapshotManager", () => {
 	it("should restore a snapshot", () => {
 		// Initial state: a.txt = "hello"
 		writeFileSync(join(tmpDir, "a.txt"), "hello");
-		git("add a.txt && git commit -m 'add a'", tmpDir);
+		git(["add", "a.txt"], tmpDir);
+		git(["commit", "-m", "add a"], tmpDir);
 
 		// Modify and snapshot at turn 1
 		writeFileSync(join(tmpDir, "a.txt"), "state-at-turn-1");
@@ -155,7 +159,7 @@ describe("SnapshotManager", () => {
 
 		mgr.cleanup();
 
-		const refs = git("for-each-ref refs/tallow/rewind/test-session/", tmpDir);
+		const refs = git(["for-each-ref", "refs/tallow/rewind/test-session/"], tmpDir);
 		expect(refs.trim()).toBe("");
 	});
 
@@ -171,11 +175,11 @@ describe("SnapshotManager", () => {
 		mgr.cleanup();
 
 		// Other session's refs should still exist
-		const refs = git("for-each-ref refs/tallow/rewind/other-session/", tmpDir);
+		const refs = git(["for-each-ref", "refs/tallow/rewind/other-session/"], tmpDir);
 		expect(refs.trim()).not.toBe("");
 
 		// Our refs should be gone
-		const ourRefs = git("for-each-ref refs/tallow/rewind/test-session/", tmpDir);
+		const ourRefs = git(["for-each-ref", "refs/tallow/rewind/test-session/"], tmpDir);
 		expect(ourRefs.trim()).toBe("");
 
 		otherMgr.cleanup();

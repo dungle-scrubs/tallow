@@ -6,7 +6,6 @@
  * `tallow://diff/<path>` scheme. A WezTerm `open-uri` handler can
  * intercept this to open lazygit filtered to the edited file.
  */
-import { execSync } from "node:child_process";
 import * as path from "node:path";
 import {
 	createEditTool,
@@ -17,39 +16,33 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { fileLink, hyperlink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
+import { commandExistsOnPath, runGitCommandSync } from "../_shared/shell-policy.js";
 import { renderLines } from "../tool-display/index.js";
 
 /**
  * Check whether an executable exists on PATH.
  *
+ * Delegates to the centralized spawn helper (no shell).
+ *
  * @param name - Executable name to look up
- * @returns True if `which <name>` succeeds
+ * @returns True if `which` resolves the name
  */
 export function isOnPath(name: string): boolean {
-	try {
-		execSync(`which ${name}`, { stdio: "ignore" });
-		return true;
-	} catch {
-		return false;
-	}
+	return commandExistsOnPath(name, process.cwd());
 }
 
 /**
  * Check whether a file path is inside a git working tree.
  *
+ * Uses arg-array spawn via the centralized helper (no shell).
+ *
  * @param filePath - Absolute path to the file
  * @returns True if the file's directory is inside a git repo
  */
 export function isInGitRepo(filePath: string): boolean {
-	try {
-		execSync("git rev-parse --is-inside-work-tree", {
-			cwd: path.dirname(filePath),
-			stdio: "ignore",
-		});
-		return true;
-	} catch {
-		return false;
-	}
+	return (
+		runGitCommandSync(["rev-parse", "--is-inside-work-tree"], path.dirname(filePath)) === "true"
+	);
 }
 
 /**
