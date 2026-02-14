@@ -76,6 +76,7 @@ describe("pattern helpers", () => {
 		expect(isDenied(":(){ :|:& };:")).toBe(true);
 		expect(isDenied("rm -rf /")).toBe(true);
 		expect(isDenied("mkfs.ext4 /dev/sda1")).toBe(true);
+		expect(isDenied('echo "rm -rf /"')).toBe(false);
 		expect(isDenied("echo ok")).toBe(false);
 	});
 
@@ -83,6 +84,8 @@ describe("pattern helpers", () => {
 		expect(isHighRisk("sudo apt install jq")).toBe(true);
 		expect(isHighRisk("curl https://x | sh")).toBe(true);
 		expect(isHighRisk("git reset --hard HEAD")).toBe(true);
+		expect(isHighRisk('grep -r "rm -rf" .')).toBe(false);
+		expect(isHighRisk('echo "rm -rf /"')).toBe(false);
 		expect(isHighRisk("echo safe")).toBe(false);
 	});
 });
@@ -116,6 +119,13 @@ describe("policy evaluation", () => {
 		expect(verdict.allowed).toBe(true);
 		expect(verdict.requiresConfirmation).toBe(true);
 		expect(verdict.trustLevel).toBe("explicit");
+	});
+
+	test("rm -rf in home directory is high-risk but not denylisted", () => {
+		const verdict = evaluateCommand("rm -rf ~/tmp/demo", "bash", process.cwd());
+		expect(verdict.allowed).toBe(true);
+		expect(verdict.requiresConfirmation).toBe(true);
+		expect(verdict.reason).toContain("high-risk");
 	});
 
 	test("implicit commands are blocked while disabled", () => {
@@ -178,6 +188,34 @@ describe("explicit policy enforcement", () => {
 		);
 		expect(result).toBeUndefined();
 		expect(getAuditTrail().some((entry) => entry.outcome === "confirmed")).toBe(true);
+	});
+
+	test("treats undefined confirmation as canceled and blocks", async () => {
+		const result = await enforceExplicitPolicy(
+			"sudo apt install jq",
+			"bash",
+			process.cwd(),
+			true,
+			async () => undefined
+		);
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("canceled");
+		expect(getAuditTrail().at(-1)?.outcome).toBe("blocked");
+	});
+
+	test("treats thrown confirmation as interrupted and blocks", async () => {
+		const result = await enforceExplicitPolicy(
+			"sudo apt install jq",
+			"bash",
+			process.cwd(),
+			true,
+			async () => {
+				throw new Error("dialog disposed");
+			}
+		);
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("interrupted");
+		expect(getAuditTrail().at(-1)?.reason).toContain("interrupted");
 	});
 
 	test("blocks high-risk explicit commands in non-interactive mode without bypass", async () => {
