@@ -38,6 +38,15 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Key, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import {
+	INTEROP_EVENT_NAMES,
+	type InteropBackgroundTaskView,
+	type InteropSubagentView,
+	type InteropTeamView,
+	onInteropEvent,
+	requestInteropState,
+	startLegacyInteropBridge,
+} from "../_shared/interop-events.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -90,44 +99,11 @@ export interface Task {
 	completedAt?: number;
 }
 
-// ── View Types (read from globalThis) ────────────────────────────────────────
+// ── Interop View Types (typed cross-extension contracts) ─────────────────────
 
-/** Shape of background task entries read from G.__piBackgroundTasks */
-interface BgTaskView {
-	id: string;
-	command: string;
-	status: string;
-	startTime: number;
-}
-
-/** Shape of subagent entries read from globalThis.__piRunning/BackgroundSubagents */
-interface SubagentView {
-	id: string;
-	agent: string;
-	task: string;
-	status?: string;
-	startTime: number;
-}
-
-/** Shape of team views read from G.__piActiveTeams */
-interface TeamWidgetView {
-	name: string;
-	tasks: Array<{
-		id: string;
-		title: string;
-		status: string;
-		assignee: string | null;
-		blockedBy: string[];
-	}>;
-	teammates: Array<{
-		completedTaskCount?: number;
-		currentTask?: string;
-		model: string;
-		name: string;
-		role: string;
-		status: string;
-	}>;
-}
+type BgTaskView = InteropBackgroundTaskView;
+type SubagentView = InteropSubagentView;
+type TeamWidgetView = InteropTeamView;
 
 // ── Agent Activity Tracking ───────────────────────────────────────────────────
 
@@ -735,6 +711,15 @@ export function shouldClearOnAgentEnd(tasks: readonly Task[]): boolean {
 	return tasks.some((t) => t.status === "in_progress");
 }
 
+/** Interval driving spinner animation and periodic widget refresh. */
+let tasksAnimationInterval: ReturnType<typeof setInterval> | undefined;
+/** Cleanup for typed interop event subscriptions. */
+let interopEventsCleanup: (() => void) | undefined;
+/** Cleanup for legacy globalThis compatibility bridge polling. */
+let legacyInteropBridgeCleanup: (() => void) | undefined;
+/** Cleanup for subagent activity listeners. */
+let subagentEventsCleanup: (() => void) | undefined;
+
 /**
  * Registers task management tools, commands, and widget.
  * @param pi - Extension API for registering tools, commands, and event handlers
@@ -759,6 +744,20 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 	// Spinner frames for animation
 	const SPINNER_FRAMES = getSpinner() ?? ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 	let spinnerFrame = 0;
+	let foregroundSubagents: SubagentView[] = [];
+	let backgroundSubagents: SubagentView[] = [];
+	let backgroundTasks: BgTaskView[] = [];
+	let activeTeams: TeamWidgetView[] = [];
+	let teamDashboardActive = false;
+
+	if (tasksAnimationInterval) clearInterval(tasksAnimationInterval);
+	tasksAnimationInterval = undefined;
+	interopEventsCleanup?.();
+	interopEventsCleanup = undefined;
+	legacyInteropBridgeCleanup?.();
+	legacyInteropBridgeCleanup = undefined;
+	subagentEventsCleanup?.();
+	subagentEventsCleanup = undefined;
 
 	/**
 	 * Render task list lines (left column in side-by-side mode)
@@ -785,15 +784,11 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 			// With owner = check if that subagent or team teammate is still running.
 			const hasActiveAgent = task.owner
 				? [...agentIdentities.values()].some((id) => id.displayName === task.owner) ||
-					[...(G.__piRunningSubagents?.values() ?? [])].some(
-						(s: unknown) => (s as SubagentView).agent === task.owner
-					) ||
-					[...(G.__piBackgroundSubagents?.values() ?? [])]
-						.filter((s: unknown) => (s as SubagentView).status === "running")
-						.some((s: unknown) => (s as SubagentView).agent === task.owner) ||
-					[...(G.__piActiveTeams?.values() ?? [])]
-						.flatMap((t: unknown) => (t as TeamWidgetView).teammates)
-						.some((m) => m.name === task.owner && m.status === "working")
+					foregroundSubagents.some((s) => s.agent === task.owner && s.status === "running") ||
+					backgroundSubagents.some((s) => s.agent === task.owner && s.status === "running") ||
+					activeTeams
+						.flatMap((team) => team.teammates)
+						.some((teammate) => teammate.name === task.owner && teammate.status === "working")
 				: true;
 
 			switch (task.status) {
@@ -939,13 +934,11 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 	/**
 	 * Render background bash task lines
 	 */
-	function renderBgBashLines(ctx: ExtensionContext, maxCmdLen: number): string[] {
-		const bgTasksMap = G.__piBackgroundTasks;
-		if (!bgTasksMap) return [];
-
-		const running = ([...bgTasksMap.values()] as unknown as BgTaskView[]).filter(
-			(t) => t.status === "running"
-		);
+	function renderBgBashLines(
+		ctx: ExtensionContext,
+		maxCmdLen: number,
+		running: BgTaskView[]
+	): string[] {
 		if (running.length === 0) return [];
 
 		const lines: string[] = [];
@@ -1108,28 +1101,16 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 	function updateAgentBar(ctx: ExtensionContext): void {
 		if (isSubagent) return;
 
-		const fgSubagentsMap = G.__piRunningSubagents;
-		const bgSubagentsMap = G.__piBackgroundSubagents;
-		const teamsMapBar = G.__piActiveTeams;
-
-		const fgRunning: SubagentView[] = fgSubagentsMap
-			? ([...fgSubagentsMap.values()] as unknown as SubagentView[])
-			: [];
-		const bgRunning = bgSubagentsMap
-			? ([...bgSubagentsMap.values()] as unknown as SubagentView[]).filter(
-					(s) => s.status === "running"
-				)
-			: [];
+		const fgRunning = foregroundSubagents.filter((subagent) => subagent.status === "running");
+		const bgRunning = backgroundSubagents.filter((subagent) => subagent.status === "running");
 		const allAgents = [...fgRunning, ...bgRunning];
 
 		// Collect team teammate names
 		const teamMates: Array<{ name: string; status: string }> = [];
-		if (teamsMapBar) {
-			for (const tv of (teamsMapBar as Map<string, TeamWidgetView>).values()) {
-				for (const m of tv.teammates) {
-					if (m.status === "working" || m.status === "idle") {
-						teamMates.push(m);
-					}
+		for (const team of activeTeams) {
+			for (const teammate of team.teammates) {
+				if (teammate.status === "working" || teammate.status === "idle") {
+					teamMates.push(teammate);
 				}
 			}
 		}
@@ -1177,9 +1158,6 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 			}
 		}
 
-		const teamDashboardActive = Boolean(
-			(globalThis as Record<string, unknown>).__piTeamDashboardActive
-		);
 		if (teamDashboardActive) {
 			if (lastWidgetContent !== "") {
 				ctx.ui.setWidget("1-tasks", undefined);
@@ -1188,29 +1166,12 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		// Check for foreground (sync) and background subagents
-		const fgSubagentsMap = G.__piRunningSubagents;
-		const bgSubagentsMap = G.__piBackgroundSubagents;
-		const bgTasksMap = G.__piBackgroundTasks;
-		const teamsMap = G.__piActiveTeams;
-
-		const fgRunning: SubagentView[] = fgSubagentsMap
-			? ([...fgSubagentsMap.values()] as unknown as SubagentView[])
-			: [];
-		const bgRunning = bgSubagentsMap
-			? ([...bgSubagentsMap.values()] as unknown as SubagentView[]).filter(
-					(s) => s.status === "running"
-				)
-			: [];
-		const bgTasks = bgTasksMap
-			? ([...bgTasksMap.values()] as unknown as BgTaskView[]).filter((t) => t.status === "running")
-			: [];
-		const activeTeams: TeamWidgetView[] = teamsMap
-			? ([...teamsMap.values()] as unknown as TeamWidgetView[])
-			: [];
+		const fgRunning = foregroundSubagents.filter((subagent) => subagent.status === "running");
+		const bgRunning = backgroundSubagents.filter((subagent) => subagent.status === "running");
+		const runningBgTasks = backgroundTasks.filter((task) => task.status === "running");
 
 		const hasSubagents = fgRunning.length > 0 || bgRunning.length > 0;
-		const hasBgTasks = bgTasks.length > 0;
+		const hasBgTasks = runningBgTasks.length > 0;
 		const hasTeams = activeTeams.length > 0;
 		const hasRightColumn = hasSubagents || hasBgTasks || hasTeams;
 		const hasTasks = state.tasks.length > 0;
@@ -1229,7 +1190,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 		const taskStates = state.tasks.map((t) => `${t.id}:${t.status}`).join(",");
 		const fgIds = fgRunning.map((s) => s.id).join(",");
 		const bgIds = bgRunning.map((s) => s.id).join(",");
-		const bgTaskIds = bgTasks.map((t) => t.id).join(",");
+		const bgTaskIds = runningBgTasks.map((t) => t.id).join(",");
 		const teamKey = activeTeams
 			.map(
 				(t) =>
@@ -1283,7 +1244,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 					}
 					if (hasBgTasks) {
 						if (rightLines.length > 0) rightLines.push(""); // Spacer
-						rightLines.push(...renderBgBashLines(ctx, maxCmdLen));
+						rightLines.push(...renderBgBashLines(ctx, maxCmdLen, runningBgTasks));
 					}
 
 					return mergeSideBySide(taskLines, rightLines, columnWidth, separator, width);
@@ -1314,7 +1275,7 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 
 				if (hasBgTasks) {
 					if (lines.length > 0) lines.push(""); // Spacer
-					lines.push(...renderBgBashLines(ctx, maxCmdLen));
+					lines.push(...renderBgBashLines(ctx, maxCmdLen, runningBgTasks));
 				}
 
 				// Safety net: truncate all lines to terminal width
@@ -2036,17 +1997,12 @@ EXAMPLES:
 					// No owner = main agent is working on it — no warning needed.
 					let agentWarning = "";
 					if (taskToUpdate.status === "in_progress" && taskToUpdate.owner) {
-						const fgMap = G.__piRunningSubagents;
-						const bgMap = G.__piBackgroundSubagents;
 						const runningNames = new Set<string>();
-						if (fgMap)
-							for (const s of fgMap.values())
-								runningNames.add((s as unknown as SubagentView).agent);
-						if (bgMap) {
-							for (const s of bgMap.values()) {
-								const sv = s as unknown as SubagentView;
-								if (sv.status === "running") runningNames.add(sv.agent);
-							}
+						for (const subagent of foregroundSubagents) {
+							if (subagent.status === "running") runningNames.add(subagent.agent);
+						}
+						for (const subagent of backgroundSubagents) {
+							if (subagent.status === "running") runningNames.add(subagent.agent);
 						}
 						if (!runningNames.has(taskToUpdate.owner)) {
 							agentWarning = `\n⚠️ Task is in_progress with owner "${taskToUpdate.owner}" but that agent is not running.`;
@@ -2433,15 +2389,9 @@ EXAMPLES:
 		// no subagents are running, AND tasks are old enough to be considered
 		// abandoned. Cancel/abort is handled by the agent_end handler above.
 		if (state.tasks.length > 0 && turnsSinceLastTaskTool >= STALE_TURN_THRESHOLD) {
-			const fgMap = G.__piRunningSubagents;
-			const bgMap = G.__piBackgroundSubagents;
 			const hasRunningAgents =
-				(fgMap ? fgMap.size > 0 : false) ||
-				(bgMap
-					? [...bgMap.values()].some(
-							(s: unknown) => (s as { status?: string }).status === "running"
-						)
-					: false);
+				foregroundSubagents.some((subagent) => subagent.status === "running") ||
+				backgroundSubagents.some((subagent) => subagent.status === "running");
 
 			if (!hasRunningAgents) {
 				const hasActiveTasks = state.tasks.some(
@@ -2513,17 +2463,19 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		persistState();
 	});
 
-	// Typed global map references set by other extensions.
-	// biome-ignore lint/suspicious/noExplicitAny: cross-extension globals have no shared type declarations
-	const G = globalThis as any;
-	if (!isSubagent && G.__piTasksInterval) {
-		clearInterval(G.__piTasksInterval as ReturnType<typeof setInterval>);
-	}
 	let lastBgCount = 0;
 	let lastBgTaskCount = 0;
 
 	// Restore state on session start
 	pi.on("session_start", async (_event, ctx) => {
+		foregroundSubagents = [];
+		backgroundSubagents = [];
+		backgroundTasks = [];
+		activeTeams = [];
+		teamDashboardActive = false;
+		lastBgCount = 0;
+		lastBgTaskCount = 0;
+
 		// Restore meta state (visibility, nextId) from session entries
 		const entries = ctx.sessionManager.getEntries();
 		const stateEntry = entries
@@ -2586,41 +2538,64 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		// Clean up team directories older than 7 days
 		cleanupStaleTeams(teamName);
 
-		updateWidget(ctx);
-
-		// Register callback for team view changes (called by teams-tool on state mutations/shutdown)
 		if (!isSubagent) {
-			(globalThis as Record<string, unknown>).__piOnTeamViewChange = () => {
+			interopEventsCleanup?.();
+			const unsubSubagents = onInteropEvent(
+				pi.events,
+				INTEROP_EVENT_NAMES.subagentsSnapshot,
+				(payload) => {
+					backgroundSubagents = payload.background;
+					foregroundSubagents = payload.foreground;
+					updateWidget(ctx);
+					updateAgentBar(ctx);
+				}
+			);
+			const unsubBackgroundTasks = onInteropEvent(
+				pi.events,
+				INTEROP_EVENT_NAMES.backgroundTasksSnapshot,
+				(payload) => {
+					backgroundTasks = payload.tasks;
+					updateWidget(ctx);
+					updateAgentBar(ctx);
+				}
+			);
+			const unsubTeams = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.teamsSnapshot, (payload) => {
+				activeTeams = payload.teams;
 				updateWidget(ctx);
 				updateAgentBar(ctx);
+			});
+			const unsubDashboardState = onInteropEvent(
+				pi.events,
+				INTEROP_EVENT_NAMES.teamDashboardState,
+				(payload) => {
+					teamDashboardActive = payload.active;
+					updateWidget(ctx);
+				}
+			);
+			interopEventsCleanup = () => {
+				unsubSubagents();
+				unsubBackgroundTasks();
+				unsubTeams();
+				unsubDashboardState();
 			};
-		}
 
-		// Start interval to animate subagents and background tasks (main process only)
-		if (!isSubagent) {
-			if (G.__piTasksInterval) clearInterval(G.__piTasksInterval);
-			G.__piTasksInterval = setInterval(() => {
-				const fgSubagents = G.__piRunningSubagents;
-				const bgSubagents = G.__piBackgroundSubagents;
-				const bgTasks = G.__piBackgroundTasks;
+			legacyInteropBridgeCleanup?.();
+			legacyInteropBridgeCleanup = startLegacyInteropBridge(pi.events);
+			requestInteropState(pi.events, "tasks");
 
-				const fgRunning = fgSubagents ? fgSubagents.size : 0;
-				const bgRunning = bgSubagents
-					? ([...bgSubagents.values()] as unknown as SubagentView[]).filter(
-							(s) => s.status === "running"
-						).length
-					: 0;
-				const bgTaskRunning = bgTasks
-					? ([...bgTasks.values()] as unknown as BgTaskView[]).filter((t) => t.status === "running")
-							.length
-					: 0;
-				const hasActiveTask = state.tasks.some((t) => t.status === "in_progress");
-				const hasWorkingTeammates = G.__piActiveTeams
-					? [...(G.__piActiveTeams as Map<string, TeamWidgetView>).values()].some((t) =>
-							t.teammates.some((m) => m.status === "working")
-						)
-					: false;
-
+			if (tasksAnimationInterval) clearInterval(tasksAnimationInterval);
+			tasksAnimationInterval = setInterval(() => {
+				const fgRunning = foregroundSubagents.filter(
+					(subagent) => subagent.status === "running"
+				).length;
+				const bgRunning = backgroundSubagents.filter(
+					(subagent) => subagent.status === "running"
+				).length;
+				const bgTaskRunning = backgroundTasks.filter((task) => task.status === "running").length;
+				const hasActiveTask = state.tasks.some((task) => task.status === "in_progress");
+				const hasWorkingTeammates = activeTeams.some((team) =>
+					team.teammates.some((teammate) => teammate.status === "working")
+				);
 				const hasRunning =
 					fgRunning > 0 ||
 					bgRunning > 0 ||
@@ -2628,7 +2603,6 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 					hasActiveTask ||
 					hasWorkingTeammates;
 
-				// Update on every tick when background items running (for animation), or when count changes
 				if (hasRunning || bgRunning !== lastBgCount || bgTaskRunning !== lastBgTaskCount) {
 					spinnerFrame++;
 					lastBgCount = bgRunning;
@@ -2636,13 +2610,9 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 					updateWidget(ctx);
 					updateAgentBar(ctx);
 				}
-			}, 200); // Faster interval for smoother animation
-			// Clean up previous event listeners on reload
-			if (G.__tasksEventCleanup) {
-				(G.__tasksEventCleanup as () => void)();
-			}
+			}, 200);
 
-			// Named listeners for subagent events (removable on reload)
+			subagentEventsCleanup?.();
 			const onSubagentStart = (raw: unknown) => {
 				const data = raw as Record<string, unknown>;
 				const agentId = String(data.agent_id ?? "");
@@ -2697,18 +2667,30 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 			const unsub2 = pi.events.on("subagent_tool_call", onSubagentToolCall);
 			const unsub3 = pi.events.on("subagent_tool_result", onSubagentToolResult);
 			const unsub4 = pi.events.on("subagent_stop", onSubagentStop);
-
-			G.__tasksEventCleanup = () => {
+			subagentEventsCleanup = () => {
 				unsub1();
 				unsub2();
 				unsub3();
 				unsub4();
 			};
-		} // end !isSubagent interval guard
+		}
+
+		updateWidget(ctx);
+		updateAgentBar(ctx);
 	});
 
 	// Cleanup on session end
 	pi.on("session_shutdown", async () => {
+		if (tasksAnimationInterval) {
+			clearInterval(tasksAnimationInterval);
+			tasksAnimationInterval = undefined;
+		}
+		interopEventsCleanup?.();
+		interopEventsCleanup = undefined;
+		subagentEventsCleanup?.();
+		subagentEventsCleanup = undefined;
+		legacyInteropBridgeCleanup?.();
+		legacyInteropBridgeCleanup = undefined;
 		store.close();
 		persistState();
 	});
