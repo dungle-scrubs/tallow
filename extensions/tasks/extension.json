@@ -4,7 +4,14 @@
 	"description": "Task management with status widget — tracks tasks, background jobs, and subagents",
 	"category": "tool",
 	"tags": ["tasks", "widget", "status"],
-	"files": ["index.ts"],
+	"files": [
+		"index.ts",
+		"agents/index.ts",
+		"commands/register-tasks-extension.ts",
+		"parsing/index.ts",
+		"state/index.ts",
+		"ui/index.ts"
+	],
 	"relationships": [
 		{
 			"name": "background-task-tool",
