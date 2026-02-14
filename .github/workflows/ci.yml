@@ -17,51 +17,69 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  build:
+  lockfile-guardrail:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
+      - name: Reject non-Bun lockfiles
+        run: |
+          bad="$(git ls-files | grep -E '(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn.lock)$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Non-Bun lockfiles tracked in git:"
+            echo "$bad"
+            exit 1
+          fi
 
-      - run: npm ci
-
-      - name: Build tallow-tui fork
-        run: cd packages/tallow-tui && npm run build
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Typecheck extensions
-        run: npm run typecheck:extensions
-
-      - name: Lint
-        run: npx biome ci .
-
-      - name: Build
-        run: npm run build
-
-  test:
+  build:
+    needs: lockfile-guardrail
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: "1.3.9"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
+
+      - name: Build tallow-tui fork
+        run: cd packages/tallow-tui && bun run build
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Typecheck extensions
+        run: bun run typecheck:extensions
+
+      - name: Lint
+        run: bunx biome ci .
 
       - name: Build
-        run: npm run build
+        run: bun run build
+
+  test:
+    needs: lockfile-guardrail
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.9"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
 
       - name: Unit tests
         run: bun test
