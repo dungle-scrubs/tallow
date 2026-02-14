@@ -82,12 +82,63 @@ Agents are loaded from multiple locations with a priority system:
 2. **Package agents** — from settings.json packages
 3. **~/.claude/agents/** — user-level, Claude Code compatibility
 4. **~/.tallow/agents/** — user-level, tallow
-5. **Project .claude/agents/** — nearest ancestor with .claude/agents/
-6. **Project .tallow/agents/** — nearest ancestor with .tallow/agents/
+5. **Project .claude/agents/** — project root, Claude Code compatibility
+6. **Project .tallow/agents/** — project root, tallow
+
+Project root is determined by `git rev-parse --show-toplevel`, falling back
+to the current working directory when not in a git repo. This replaces the
+previous ancestor-walk behavior.
 
 Priority: last wins per name. Within a scope, `.tallow/` takes precedence over
 `.claude/`. This means a project `.tallow/agents/researcher.md` overrides both
 `.claude/agents/researcher.md` in the same directory and `~/.tallow/agents/researcher.md`.
+
+### Model inheritance
+
+Subagents inherit the parent session's model by default. Precedence:
+
+1. **Per-call** `model` parameter (highest)
+2. **Agent frontmatter** `model` field
+3. **Parent session model** (inherited automatically)
+
+This means you don't need to specify a model in most cases — agents
+use whatever model you're running in the main session.
+
+### Missing agent recovery
+
+When a requested agent name doesn't match any discovered agent, the tool
+recovers gracefully instead of erroring:
+
+1. **Exact match** — found agent with matching name
+2. **Best match** — fuzzy match (prefix, suffix, contains) above a
+   confidence threshold
+3. **Ephemeral** — creates a temporary agent with built-in defaults
+
+The result metadata shows the resolution source (`user`, `project`,
+`ephemeral`) for transparency.
+
+### Defaults configuration
+
+Create a `_defaults.md` file in any agent directory to set fallback
+values for all agents:
+
+```markdown
+---
+maxTurns: 25
+tools: read, bash, edit, write, grep, find, ls
+missingAgentBehavior: match-or-ephemeral
+---
+```
+
+Supported in:
+- `~/.tallow/agents/_defaults.md` (user-level)
+- `~/.claude/agents/_defaults.md` (user-level)
+- `<project>/.tallow/agents/_defaults.md` (project-level)
+- `<project>/.claude/agents/_defaults.md` (project-level)
+
+Precedence: project defaults override user defaults. Defaults only
+apply when neither the per-call parameters nor the agent frontmatter
+specify a value.
 
 ### Agent frontmatter fields
 

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **subagent-tool:** model inheritance — subagents inherit the parent session model
+  by default (per-call > agent frontmatter > parent model)
+- **subagent-tool:** missing-agent recovery — unknown agent names resolve via
+  fuzzy best-match or ephemeral fallback instead of hard errors
+- **subagent-tool:** `_defaults.md` frontmatter files in agent directories for
+  configurable fallback `tools`, `maxTurns`, `mcpServers`, and
+  `missingAgentBehavior`
+- **subagent-tool:** `resolveProjectRoot()` anchors project agent discovery to
+  git root (falls back to cwd), replacing the previous ancestor-walk behavior
+
+### Changed
+
+- **subagent-tool:** project-local agents now run without confirmation prompts;
+  `confirmProjectAgents` parameter deprecated (kept for compatibility, ignored)
+
+### Added
+
 - **teams:** add dashboard workspace with live task/teammate/message view,
   `/team-dashboard` command, `Ctrl+X` toggle, and keyboard navigation controls
 - **tests:** add interop integration coverage for cross-extension state requests,
