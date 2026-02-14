@@ -4,7 +4,19 @@
 	"description": "Multi-agent teams with shared task boards and direct inter-agent messaging",
 	"category": "tool",
 	"tags": ["agents", "teams", "coordination", "multi-agent"],
-	"files": ["dashboard.ts", "index.ts", "store.ts"],
+	"files": [
+		"dashboard.ts",
+		"dashboard/feed.ts",
+		"dashboard/state.ts",
+		"dispatch/auto-dispatch.ts",
+		"index.ts",
+		"sessions/spawn.ts",
+		"state/team-view.ts",
+		"state/types.ts",
+		"store.ts",
+		"tools/register-extension.ts",
+		"tools/teammate-tools.ts"
+	],
 	"relationships": [],
 	"npmDependencies": {}
 }
