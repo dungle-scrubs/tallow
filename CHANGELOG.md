@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/team-dashboard` command, `Ctrl+X` toggle, and keyboard navigation controls
 - **tests:** add interop integration coverage for cross-extension state requests,
   typed snapshot delivery, and schema-version rejection behavior
+- **tests:** add architecture guard coverage for tasks/teams-tool file-size
+  thresholds and module boundary coupling rules
 
 ### Changed
 
@@ -26,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **teams:** refine dashboard visuals with per-team personality markers, subdued divider colors,
   5-line output previews, model labels in the left tree, and live per-agent token meters
   (`↑` input, `↓` output)
+- **tasks/teams-tool:** split oversized `index.ts` modules into thin composition roots with
+  extracted domain modules (`state`, `parsing`, `agents`, `ui`, `commands`, `dispatch`,
+  `sessions`, `tools`, `dashboard`) to reduce coupling and improve testability
 - **teams:** drop `Ctrl+Y` dashboard toggle to avoid conflict with editor yank
 - **docs:** sync keyboard shortcut reference for teams dashboard toggles and controls in extension docs
 
