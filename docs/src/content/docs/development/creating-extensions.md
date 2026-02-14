@@ -94,10 +94,10 @@ After creating or modifying an extension:
 
 ```bash
 # Typecheck extensions
-npm run typecheck:extensions
+bun run typecheck:extensions
 
 # Build the project
-npm run build
+bun run build
 
 # Test by running tallow
 tallow
@@ -109,7 +109,7 @@ Extensions are typechecked against the pi API. The project includes a dedicated 
 
 ```bash
 # Run extension typecheck manually
-npm run typecheck:extensions
+bun run typecheck:extensions
 ```
 
 ### Key type rules

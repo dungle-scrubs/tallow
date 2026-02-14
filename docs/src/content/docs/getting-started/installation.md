@@ -5,7 +5,7 @@ description: How to install and set up tallow.
 
 ## Requirements
 
-- [Node.js](https://nodejs.org) >= 22
+- [Bun](https://bun.sh) >= 1.1
 
 ## Quick install
 
@@ -14,8 +14,8 @@ Clone the repository and run the interactive installer:
 ```bash
 git clone https://github.com/dungle-scrubs/tallow.git
 cd tallow
-npm install
-npm run build
+bun install
+bun run build
 node dist/install.js
 ```
 
@@ -28,7 +28,7 @@ The installer walks you through:
    enabled or disabled as a unit.
 3. **Themes** — choose which of the 34 built-in themes to
    include and pick a default.
-4. **Global binary** — optionally run `npm link` so the
+4. **Global binary** — optionally run `bun link` so the
    `tallow` command is available everywhere.
 
 When finished the installer creates `~/.tallow/` with your
