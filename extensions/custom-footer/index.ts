@@ -16,9 +16,9 @@
  *   @main @alice · 2 teammates               ─ Session Name
  */
 
-import { execSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { runGitCommandSync } from "../_shared/shell-policy.js";
 
 /** Cached git repository state for the footer display. */
 interface GitState {
@@ -36,20 +36,13 @@ let lastGitCheck = 0;
 const GIT_CACHE_TTL = 5000; // 5 seconds
 
 /**
- * Runs a git command and returns output or null on error.
- * @param cmd - Git command to run (without 'git' prefix)
+ * Runs a git command via arg-array spawn and returns output or null on error.
+ *
+ * @param args - Git subcommand and arguments as an array
  * @returns Trimmed stdout output, or null if command failed
  */
-function runGit(cmd: string): string | null {
-	try {
-		return execSync(`git ${cmd}`, {
-			encoding: "utf-8",
-			timeout: 2000,
-			stdio: ["pipe", "pipe", "pipe"],
-		}).trim();
-	} catch {
-		return null;
-	}
+function runGit(args: string[]): string | null {
+	return runGitCommandSync(args, process.cwd(), 2000);
 }
 
 /**
@@ -75,15 +68,15 @@ function getGitState(forceRefresh = false): GitState | null {
 	cachedCwd = cwd;
 	lastGitCheck = now;
 
-	const gitDir = runGit("rev-parse --git-dir");
+	const gitDir = runGit(["rev-parse", "--git-dir"]);
 	if (!gitDir) {
 		cachedGitState = null;
 		return null;
 	}
 
-	let branch = runGit("branch --show-current");
+	let branch = runGit(["branch", "--show-current"]);
 	if (!branch) {
-		branch = runGit("rev-parse --short HEAD");
+		branch = runGit(["rev-parse", "--short", "HEAD"]);
 		if (branch) branch = `(${branch})`;
 	}
 	if (!branch) {
@@ -91,14 +84,14 @@ function getGitState(forceRefresh = false): GitState | null {
 		return null;
 	}
 
-	const status = runGit("status --porcelain");
+	const status = runGit(["status", "--porcelain"]);
 	const dirty = status !== null && status.length > 0;
 
 	let ahead = 0;
 	let behind = 0;
-	const upstream = runGit("rev-parse --abbrev-ref @{upstream}");
+	const upstream = runGit(["rev-parse", "--abbrev-ref", "@{upstream}"]);
 	if (upstream) {
-		const aheadBehind = runGit("rev-list --left-right --count HEAD...@{upstream}");
+		const aheadBehind = runGit(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
 		if (aheadBehind) {
 			const [a, b] = aheadBehind.split(/\s+/).map(Number);
 			ahead = a || 0;
