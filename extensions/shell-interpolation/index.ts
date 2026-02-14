@@ -1,67 +1,114 @@
 /**
  * Shell Interpolation Extension
  *
- * Expands !`command` patterns in user input by executing shell commands
- * and replacing the pattern with stdout. Compatible with Claude Code's
- * backtick interpolation syntax in prompt templates.
+ * Expands !`command` patterns in user input by running shell commands
+ * and replacing patterns with stdout.
  *
- * The core transform is exported as a named function so other extensions
- * (e.g. subagent-tool) can import and call it directly on arbitrary strings.
+ * Runtime behavior is policy-gated:
+ * - Disabled by default (opt-in required)
+ * - Implicit command allowlist/denylist checks
+ * - Timeout/cwd/audit enforcement through centralized shell policy helpers
  */
 
-import { execSync } from "node:child_process";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import {
+	enforceImplicitPolicy,
+	isShellInterpolationEnabled,
+	runShellCommandSync,
+} from "../_shared/shell-policy.js";
 
-/** Matches !`command` patterns. Global flag for multiple occurrences. */
+/** Matches !`command` patterns. Global flag supports multiple occurrences. */
 const PATTERN = /!`([^`]+)`/g;
 
-/** Shell command execution timeout in milliseconds. */
+/** Shell interpolation execution timeout in milliseconds. */
 const TIMEOUT_MS = 5000;
 
-/** Maximum stdout buffer size (1 MB). Prevents OOM from unbounded output. */
+/** Maximum stdout/stderr buffer size for interpolation commands (1 MB). */
 const MAX_BUFFER = 1024 * 1024;
 
+/** Sources allowed to trigger shell interpolation execution. */
+export type InterpolationSource = "shell-interpolation" | "context-fork";
+
 /**
- * Expand !`command` patterns in text by executing shell commands
- * and replacing each pattern with the command's stdout.
+ * Options for shell interpolation expansion.
+ */
+export interface ExpandShellCommandOptions {
+	/** Source used for policy/audit metadata. */
+	readonly source?: InterpolationSource;
+	/**
+	 * When true, apply implicit shell policy checks before execution.
+	 * Default false for programmatic utility usage.
+	 */
+	readonly enforcePolicy?: boolean;
+}
+
+/**
+ * Expand !`command` patterns in text by running shell commands and replacing
+ * each pattern with stdout.
  *
- * Non-recursive: output is never re-scanned for additional patterns,
- * preventing injection attacks from command output containing !`...`.
+ * Non-recursive by design: command output is not re-scanned for !`...`
+ * patterns, preventing chained interpolation injection.
  *
  * @param text - Input text potentially containing !`command` patterns
- * @param cwd - Working directory for command execution
- * @returns Text with all patterns replaced by command output (or error markers)
+ * @param cwd - Working directory used for command execution
+ * @param options - Optional source and policy enforcement controls
+ * @returns Text with interpolations replaced by command output or denial/error markers
  */
-export function expandShellCommands(text: string, cwd: string): string {
+export function expandShellCommands(
+	text: string,
+	cwd: string,
+	options: ExpandShellCommandOptions = {}
+): string {
 	if (!PATTERN.test(text)) return text;
 	PATTERN.lastIndex = 0;
 
+	const source = options.source ?? "shell-interpolation";
+	const enforcePolicy = options.enforcePolicy === true;
+
 	return text.replace(PATTERN, (_match, cmd: string) => {
 		const trimmed = cmd.trim();
-		try {
-			const output = execSync(trimmed, {
-				cwd,
-				encoding: "utf-8",
-				timeout: TIMEOUT_MS,
-				stdio: ["pipe", "pipe", "pipe"],
-				maxBuffer: MAX_BUFFER,
-			});
-			return output.trimEnd();
-		} catch {
-			return `[error: command failed: ${trimmed}]`;
+		if (!trimmed) return "[denied: command is empty]";
+
+		if (enforcePolicy) {
+			const policy = enforceImplicitPolicy(trimmed, source, cwd);
+			if (!policy.allowed) {
+				return `[denied: ${policy.reason ?? "blocked by policy"}]`;
+			}
 		}
+
+		const result = runShellCommandSync({
+			command: trimmed,
+			cwd,
+			source,
+			timeoutMs: TIMEOUT_MS,
+			maxBuffer: MAX_BUFFER,
+			enforcePolicy: false,
+		});
+		if (result.ok) return result.stdout.trimEnd();
+		if (result.blocked) return `[denied: ${result.reason ?? "blocked by policy"}]`;
+		return `[error: command failed: ${trimmed}]`;
 	});
 }
 
 /**
- * Extension factory. Registers an input handler that expands
- * !`command` patterns before the prompt reaches the agent.
+ * Register input transformation that performs shell interpolation before
+ * prompts reach the model.
  *
- * @param pi - Extension API provided by the runtime
+ * Disabled by default. Enable explicitly via env/settings policy gate.
+ *
+ * @param pi - Extension API
+ * @returns void
  */
-export default function (pi: ExtensionAPI) {
-	pi.on("input", async (event) => {
-		const result = expandShellCommands(event.text, process.cwd());
+export default function (pi: ExtensionAPI): void {
+	pi.on("input", async (event, ctx) => {
+		if (!isShellInterpolationEnabled(ctx.cwd)) {
+			return { action: "continue" as const };
+		}
+
+		const result = expandShellCommands(event.text, ctx.cwd, {
+			source: "shell-interpolation",
+			enforcePolicy: true,
+		});
 		if (result === event.text) {
 			return { action: "continue" as const };
 		}
