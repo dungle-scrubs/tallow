@@ -43,6 +43,12 @@ import { Key, Loader, Text, type TUI } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
 import {
+	emitInteropEvent,
+	INTEROP_EVENT_NAMES,
+	type InteropTeamView,
+	onInteropEvent,
+} from "../_shared/interop-events.js";
+import {
 	resolveDashboardCommand,
 	TeamDashboardActivityStore,
 	TeamDashboardEditor,
@@ -110,28 +116,20 @@ export interface Teammate {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Global team view (read by tasks extension for widget rendering)
+// Team view snapshots (published over typed interop events)
 // ════════════════════════════════════════════════════════════════
 
 /** Serializable view of a team for cross-extension widget rendering. */
-export interface TeamView {
-	name: string;
-	tasks: Array<{
-		id: string;
-		title: string;
-		status: string;
-		assignee: string | null;
-		blockedBy: string[];
-	}>;
-	teammates: Array<{
-		completedTaskCount: number;
-		currentTask?: string;
-		model: string;
-		name: string;
-		role: string;
-		status: string;
-	}>;
-}
+export type TeamView = InteropTeamView;
+
+/** Shared interop event bus reference for module-level publishers. */
+let interopEvents: ExtensionAPI["events"] | undefined;
+/** Cleanup for state-request interop subscription across extension reloads. */
+let interopStateRequestCleanup: (() => void) | undefined;
+/** Dashboard render callback owned by the active TeamDashboardEditor instance. */
+let dashboardRenderCallback: (() => void) | undefined;
+/** Cross-extension flag for whether Team Dashboard mode is active. */
+let dashboardActiveState = false;
 
 /**
  * Build a serializable snapshot of a team for widget rendering.
@@ -142,11 +140,11 @@ export function buildTeamView(team: Team<Teammate>): TeamView {
 	return {
 		name: team.name,
 		tasks: team.tasks.map((t) => ({
-			id: t.id,
-			title: t.title,
-			status: t.status,
 			assignee: t.assignee,
 			blockedBy: t.blockedBy,
+			id: t.id,
+			status: t.status,
+			title: t.title,
 		})),
 		teammates: Array.from(team.teammates.values()).map((m) => ({
 			completedTaskCount: getTaskCountByAssigneeStatus(team, m.name, "completed"),
@@ -159,7 +157,7 @@ export function buildTeamView(team: Team<Teammate>): TeamView {
 	};
 }
 
-/** Global map of active team views, read by tasks extension. */
+/** Global map of active team views. */
 const activeTeamViews = new Map<string, TeamView>();
 /** Rolling activity store for dashboard card data. */
 const dashboardActivity = new TeamDashboardActivityStore();
@@ -171,8 +169,28 @@ const DASHBOARD_FEED_MAX_ITEMS = 32;
 const DASHBOARD_FEED_SUMMARY_CHARS = 96;
 /** Feed messages that are too noisy to render in the sidebar activity stream. */
 const DASHBOARD_FEED_SUPPRESSED_PATTERNS = [/^Running tool:/i, /^Completed response\.?$/i] as const;
-(globalThis as Record<string, unknown>).__piActiveTeams = activeTeamViews;
-(globalThis as Record<string, unknown>).__piTeamDashboardActive = false;
+
+/**
+ * Publish latest team snapshots for typed cross-extension consumers.
+ * @returns void
+ */
+function publishTeamSnapshots(): void {
+	if (!interopEvents) return;
+	emitInteropEvent(interopEvents, INTEROP_EVENT_NAMES.teamsSnapshot, {
+		teams: [...activeTeamViews.values()],
+	});
+}
+
+/**
+ * Publish current dashboard visibility state for cross-extension consumers.
+ * @returns void
+ */
+function publishDashboardState(): void {
+	if (!interopEvents) return;
+	emitInteropEvent(interopEvents, INTEROP_EVENT_NAMES.teamDashboardState, {
+		active: dashboardActiveState,
+	});
+}
 
 /**
  * Refresh the global team view snapshot for a given team.
@@ -195,7 +213,7 @@ function refreshTeamView(team: Team<Teammate>): void {
 
 /**
  * Remove a team from the global view (on shutdown).
- * Notifies the tasks extension to refresh widget and agent bar.
+ * Notifies consumers to refresh widget and agent bar.
  * @param teamName - Team name to remove
  */
 function removeTeamView(teamName: string): void {
@@ -207,20 +225,17 @@ function removeTeamView(teamName: string): void {
 }
 
 /**
- * Notify the tasks extension that team view state has changed.
- * Calls the global callback registered by the tasks extension (if any).
+ * Notify cross-extension consumers that team snapshots changed.
  */
 function notifyTeamViewChanged(): void {
-	const callback = (globalThis as Record<string, unknown>).__piOnTeamViewChange;
-	if (typeof callback === "function") callback();
+	publishTeamSnapshots();
 }
 
 /**
  * Notify the team dashboard editor that render data changed.
  */
 function notifyDashboardChanged(): void {
-	const callback = (globalThis as Record<string, unknown>).__piOnTeamDashboardChange;
-	if (typeof callback === "function") callback();
+	dashboardRenderCallback?.();
 }
 
 /**
@@ -1002,12 +1017,18 @@ export function getLastOutput(session: AgentSession): string {
 // ════════════════════════════════════════════════════════════════
 
 export default function (pi: ExtensionAPI) {
+	interopEvents = pi.events;
 	let cwd = process.cwd();
 	let dashboardCancelInFlight = false;
 	let dashboardEnabled = false;
-	let dashboardRender: (() => void) | undefined;
 	let dashboardTicker: ReturnType<typeof setInterval> | undefined;
 	let dashboardTui: TUI | undefined;
+
+	interopStateRequestCleanup?.();
+	interopStateRequestCleanup = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.stateRequest, () => {
+		publishTeamSnapshots();
+		publishDashboardState();
+	});
 
 	/**
 	 * Enter alternate-screen viewport for dashboard mode.
@@ -1057,9 +1078,9 @@ export default function (pi: ExtensionAPI) {
 	 * @returns void
 	 */
 	function setDashboardFlag(enabled: boolean): void {
-		(globalThis as Record<string, unknown>).__piTeamDashboardActive = enabled;
-		const callback = (globalThis as Record<string, unknown>).__piOnTeamViewChange;
-		if (typeof callback === "function") callback();
+		dashboardActiveState = enabled;
+		publishDashboardState();
+		notifyTeamViewChanged();
 	}
 
 	/**
@@ -1172,10 +1193,7 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify("Team dashboard disabled.", "info");
 				},
 			});
-			dashboardRender = () => editor.refresh();
-			(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = () => {
-				dashboardRender?.();
-			};
+			dashboardRenderCallback = () => editor.refresh();
 			return editor;
 		});
 		notifyDashboardChanged();
@@ -1191,8 +1209,7 @@ export default function (pi: ExtensionAPI) {
 		dashboardCancelInFlight = false;
 		dashboardEnabled = false;
 		stopDashboardTicker();
-		dashboardRender = undefined;
-		(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = undefined;
+		dashboardRenderCallback = undefined;
 		setDashboardFlag(false);
 		leaveDashboardViewport();
 		ctx.ui.setEditorComponent(undefined);
@@ -1220,11 +1237,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		cwd = ctx.cwd;
-		if (ctx.hasUI) {
-			(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = () => {
-				dashboardRender?.();
-			};
-		}
+		publishTeamSnapshots();
+		publishDashboardState();
 	});
 
 	pi.on("turn_start", async (_event, ctx) => {
@@ -1251,10 +1265,12 @@ export default function (pi: ExtensionAPI) {
 		dashboardCancelInFlight = false;
 		dashboardEnabled = false;
 		stopDashboardTicker();
-		dashboardRender = undefined;
-		(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = undefined;
+		dashboardRenderCallback = undefined;
 		setDashboardFlag(false);
 		leaveDashboardViewport();
+		publishTeamSnapshots();
+		interopStateRequestCleanup?.();
+		interopStateRequestCleanup = undefined;
 	});
 
 	// Clean up finished teams on agent turn end.

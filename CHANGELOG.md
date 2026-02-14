@@ -11,9 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **teams:** add dashboard workspace with live task/teammate/message view,
   `/team-dashboard` command, `Ctrl+X` toggle, and keyboard navigation controls
+- **tests:** add interop integration coverage for cross-extension state requests,
+  typed snapshot delivery, and schema-version rejection behavior
 
 ### Changed
 
+- **extensions:** replace cross-extension `globalThis` state coupling with typed
+  `pi.events` contracts (`interop.v1.*`) and schema-versioned payload validation
+- **tasks:** migrate widget/agent-bar consumers to typed interop snapshots with
+  load-order-safe state requests and a temporary legacy bridge adapter
 - **teams:** refine dashboard visuals with per-team personality markers, subdued divider colors,
   5-line output previews, model labels in the left tree, and live per-agent token meters
   (`↑` input, `↓` output)
