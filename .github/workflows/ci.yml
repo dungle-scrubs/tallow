@@ -83,3 +83,6 @@ jobs:
 
       - name: Unit tests
         run: bun test
+
+      - name: Docs drift check
+        run: node tests/docs-drift.mjs
