@@ -1,4 +1,4 @@
-# @tallow/tui
+# @mariozechner/pi-tui (Tallow fork)
 
 Tallow's fork of `@mariozechner/pi-tui` (v0.52.9). Adds customizable
 loader, border styles, and input middleware — changes that require
