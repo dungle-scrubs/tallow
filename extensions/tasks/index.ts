@@ -120,11 +120,12 @@ interface TeamWidgetView {
 		blockedBy: string[];
 	}>;
 	teammates: Array<{
+		completedTaskCount?: number;
+		currentTask?: string;
+		model: string;
 		name: string;
 		role: string;
-		model: string;
 		status: string;
-		currentTask?: string;
 	}>;
 }
 
@@ -1018,18 +1019,27 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 				const color = agentColor(mate.name);
 				const colorCode = colorToAnsi(color);
 
+				const isFinished =
+					allDone &&
+					mate.status === "idle" &&
+					!mate.currentTask &&
+					Math.max(0, Math.floor(mate.completedTaskCount ?? 0)) > 0;
 				const statusIcon =
 					mate.status === "working"
 						? `\x1b[38;5;${colorCode}m${spinner}\x1b[0m`
-						: mate.status === "idle"
-							? ctx.ui.theme.fg("muted", getIcon("blocked"))
-							: ctx.ui.theme.fg("muted", "⏹");
+						: isFinished
+							? ctx.ui.theme.fg("success", getIcon("success"))
+							: mate.status === "idle"
+								? ctx.ui.theme.fg("muted", getIcon("blocked"))
+								: ctx.ui.theme.fg("muted", "⏹");
 
 				const taskSuffix = mate.currentTask
 					? ` ${ctx.ui.theme.fg("dim", "→")} ${ctx.ui.theme.fg("dim", mate.currentTask.length > maxLen ? `${mate.currentTask.slice(0, maxLen - 3)}...` : mate.currentTask)}`
-					: mate.status === "idle"
-						? ctx.ui.theme.fg("dim", " (idle)")
-						: "";
+					: isFinished
+						? ctx.ui.theme.fg("success", " (done)")
+						: mate.status === "idle"
+							? ctx.ui.theme.fg("dim", " (idle)")
+							: "";
 
 				lines.push(
 					`${ctx.ui.theme.fg("muted", treeChar)} ${statusIcon} \x1b[1;38;5;${colorCode}m@${mate.name}\x1b[0m${taskSuffix}`
@@ -1154,6 +1164,30 @@ export default function tasksExtension(pi: ExtensionAPI): void {
 	function updateWidget(ctx: ExtensionContext): void {
 		// Subagents have no UI — skip all widget rendering
 		if (isSubagent) return;
+
+		// If every task is completed and the 2s completion window has passed,
+		// clear the list. This covers extension reloads where the original
+		// setTimeout callback was lost before it could run.
+		if (state.tasks.length > 0 && state.tasks.every((task) => task.status === "completed")) {
+			const latestCompletedAt = Math.max(
+				...state.tasks.map((task) => task.completedAt ?? task.createdAt)
+			);
+			if (Date.now() - latestCompletedAt >= 2000) {
+				clearTasks();
+			}
+		}
+
+		const teamDashboardActive = Boolean(
+			(globalThis as Record<string, unknown>).__piTeamDashboardActive
+		);
+		if (teamDashboardActive) {
+			if (lastWidgetContent !== "") {
+				ctx.ui.setWidget("1-tasks", undefined);
+				lastWidgetContent = "";
+			}
+			return;
+		}
+
 		// Check for foreground (sync) and background subagents
 		const fgSubagentsMap = G.__piRunningSubagents;
 		const bgSubagentsMap = G.__piBackgroundSubagents;
@@ -2539,9 +2573,12 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 
 		// Clear orphaned tasks on startup: at session_start no agents are running,
 		// so any in_progress tasks are leftovers from a dead session.
+		// Also clear if all tasks are already completed — the 2s auto-clear timer
+		// from a previous turn may have been killed by an extension reload.
 		if (state.tasks.length > 0) {
 			const orphaned = state.tasks.filter((t) => t.status === "in_progress");
-			if (orphaned.length > 0) {
+			const allCompleted = state.tasks.every((t) => t.status === "completed");
+			if (orphaned.length > 0 || allCompleted) {
 				clearTasks();
 			}
 		}

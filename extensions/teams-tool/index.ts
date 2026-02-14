@@ -13,8 +13,15 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
+import type { Usage } from "@mariozechner/pi-ai";
 import { getModels, getProviders, StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ResourceLoader, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type {
+	AgentSessionEvent,
+	ExtensionAPI,
+	ExtensionContext,
+	ResourceLoader,
+	ToolDefinition,
+} from "@mariozechner/pi-coding-agent";
 import {
 	type AgentSession,
 	AuthStorage,
@@ -32,10 +39,18 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { Key, Loader, Text, type TUI } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-
 import { getIcon } from "../_icons/index.js";
+import {
+	resolveDashboardCommand,
+	TeamDashboardActivityStore,
+	TeamDashboardEditor,
+	type TeamDashboardFeedItem,
+	type TeamDashboardSnapshot,
+	type TeamDashboardTeam,
+	type TeamDashboardTeammate,
+} from "./dashboard.js";
 import {
 	addTaskToBoard,
 	addTeamMessage,
@@ -109,11 +124,12 @@ export interface TeamView {
 		blockedBy: string[];
 	}>;
 	teammates: Array<{
+		completedTaskCount: number;
+		currentTask?: string;
+		model: string;
 		name: string;
 		role: string;
-		model: string;
 		status: string;
-		currentTask?: string;
 	}>;
 }
 
@@ -133,18 +149,30 @@ export function buildTeamView(team: Team<Teammate>): TeamView {
 			blockedBy: t.blockedBy,
 		})),
 		teammates: Array.from(team.teammates.values()).map((m) => ({
+			completedTaskCount: getTaskCountByAssigneeStatus(team, m.name, "completed"),
+			currentTask: getCurrentTaskTitle(team, m.name) ?? undefined,
+			model: m.model,
 			name: m.name,
 			role: m.role,
-			model: m.model,
 			status: m.status,
-			currentTask: team.tasks.find((t) => t.assignee === m.name && t.status === "claimed")?.title,
 		})),
 	};
 }
 
 /** Global map of active team views, read by tasks extension. */
 const activeTeamViews = new Map<string, TeamView>();
+/** Rolling activity store for dashboard card data. */
+const dashboardActivity = new TeamDashboardActivityStore();
+/** Rolling event feed displayed in the dashboard sidebar, keyed by team name. */
+const dashboardFeedByTeam = new Map<string, TeamDashboardFeedItem[]>();
+/** Maximum message events retained in the dashboard feed. */
+const DASHBOARD_FEED_MAX_ITEMS = 32;
+/** Maximum visible chars per feed event message summary. */
+const DASHBOARD_FEED_SUMMARY_CHARS = 96;
+/** Feed messages that are too noisy to render in the sidebar activity stream. */
+const DASHBOARD_FEED_SUPPRESSED_PATTERNS = [/^Running tool:/i, /^Completed response\.?$/i] as const;
 (globalThis as Record<string, unknown>).__piActiveTeams = activeTeamViews;
+(globalThis as Record<string, unknown>).__piTeamDashboardActive = false;
 
 /**
  * Refresh the global team view snapshot for a given team.
@@ -162,6 +190,7 @@ function refreshTeamView(team: Team<Teammate>): void {
 		activeTeamViews.set(team.name, buildTeamView(team));
 	}
 	notifyTeamViewChanged();
+	notifyDashboardChanged();
 }
 
 /**
@@ -171,7 +200,10 @@ function refreshTeamView(team: Team<Teammate>): void {
  */
 function removeTeamView(teamName: string): void {
 	activeTeamViews.delete(teamName);
+	dashboardActivity.clearTeam(teamName);
+	clearDashboardFeedEvents(teamName);
 	notifyTeamViewChanged();
+	notifyDashboardChanged();
 }
 
 /**
@@ -181,6 +213,74 @@ function removeTeamView(teamName: string): void {
 function notifyTeamViewChanged(): void {
 	const callback = (globalThis as Record<string, unknown>).__piOnTeamViewChange;
 	if (typeof callback === "function") callback();
+}
+
+/**
+ * Notify the team dashboard editor that render data changed.
+ */
+function notifyDashboardChanged(): void {
+	const callback = (globalThis as Record<string, unknown>).__piOnTeamDashboardChange;
+	if (typeof callback === "function") callback();
+}
+
+/**
+ * Check whether a feed message is low-signal dashboard noise.
+ * @param content - Candidate feed event text
+ * @returns True when the event should be suppressed
+ */
+function shouldSuppressDashboardFeedEvent(content: string): boolean {
+	const normalized = content.trim();
+	if (normalized.length === 0) return true;
+	return DASHBOARD_FEED_SUPPRESSED_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * Append an event line to a team's dashboard feed.
+ * @param teamName - Team that owns the feed stream
+ * @param from - Event actor label
+ * @param to - Event target label
+ * @param content - Event text payload
+ * @returns void
+ */
+function appendDashboardFeedEvent(
+	teamName: string,
+	from: string,
+	to: string,
+	content: string
+): void {
+	if (shouldSuppressDashboardFeedEvent(content)) return;
+	const event: TeamDashboardFeedItem = {
+		content: summarizeFeedMessage(content),
+		from,
+		timestamp: Date.now(),
+		to,
+	};
+	const current = dashboardFeedByTeam.get(teamName) ?? [];
+	const next = [...current, event];
+	if (next.length > DASHBOARD_FEED_MAX_ITEMS) {
+		next.splice(0, next.length - DASHBOARD_FEED_MAX_ITEMS);
+	}
+	dashboardFeedByTeam.set(teamName, next);
+	notifyDashboardChanged();
+}
+
+/**
+ * Read the current dashboard feed event stream for a team.
+ * @param teamName - Team that owns the feed stream
+ * @returns Feed events in chronological order
+ */
+function getDashboardFeedEvents(teamName: string): TeamDashboardFeedItem[] {
+	const feed = dashboardFeedByTeam.get(teamName) ?? [];
+	return [...feed];
+}
+
+/**
+ * Remove all dashboard feed events for a team.
+ * @param teamName - Team that owns the feed stream
+ * @returns void
+ */
+function clearDashboardFeedEvents(teamName: string): void {
+	dashboardFeedByTeam.delete(teamName);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -208,6 +308,231 @@ export function findModel(modelName: string) {
 /** Type-safe accessor: at runtime, teammates always have a session. */
 function getRuntimeTeam(name: string): Team<Teammate> | undefined {
 	return getTeam(name) as Team<Teammate> | undefined;
+}
+
+/**
+ * Count tasks assigned to one teammate in a target lifecycle status.
+ * @param team - Team containing task board
+ * @param teammateName - Teammate name
+ * @param status - Task status to count
+ * @returns Number of matching tasks
+ */
+function getTaskCountByAssigneeStatus(
+	team: Team<Teammate>,
+	teammateName: string,
+	status: TeamTask["status"]
+): number {
+	return team.tasks.filter((task) => task.assignee === teammateName && task.status === status)
+		.length;
+}
+
+/**
+ * Read the currently claimed task title for a teammate.
+ * @param team - Team containing task board
+ * @param teammateName - Teammate name
+ * @returns Current claimed task title, or null
+ */
+function getCurrentTaskTitle(team: Team<Teammate>, teammateName: string): string | null {
+	return (
+		team.tasks.find((task) => task.assignee === teammateName && task.status === "claimed")?.title ??
+		null
+	);
+}
+
+/**
+ * Count unread inbox messages for a teammate.
+ * @param team - Team containing message log
+ * @param teammateName - Teammate name
+ * @returns Number of unread messages addressed to teammate or broadcast
+ */
+function getUnreadInboxCount(team: Team<Teammate>, teammateName: string): number {
+	return team.messages.filter(
+		(message) =>
+			(message.to === teammateName || message.to === "all") && !message.readBy.has(teammateName)
+	).length;
+}
+
+/**
+ * Build recent direct/broadcast chat links for left-sidebar visualization.
+ * @param team - Team containing message log
+ * @returns Up to three most recent distinct message links
+ */
+function getRecentMessageLinks(team: Team<Teammate>): string[] {
+	const links = team.messages
+		.slice()
+		.reverse()
+		.map((message) => {
+			const target = message.to === "all" ? "all" : `@${message.to}`;
+			return `${message.from}→${target}`;
+		});
+	const unique: string[] = [];
+	for (const link of links) {
+		if (unique.includes(link)) continue;
+		unique.push(link);
+		if (unique.length >= 3) break;
+	}
+	return unique;
+}
+
+/**
+ * Summarize a message into a single feed-friendly line.
+ * @param content - Raw message content
+ * @returns Trimmed one-line summary with markdown noise removed
+ */
+function summarizeFeedMessage(content: string): string {
+	const firstLine =
+		content
+			.replace(/\r/g, "")
+			.split("\n")
+			.map((line) => line.trim())
+			.find((line) => line.length > 0) ?? "";
+	const normalized = firstLine
+		.replace(/^[-*]\s+/, "")
+		.replace(/[`*_#>]+/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (normalized.length === 0) return "(empty message)";
+	if (normalized.length <= DASHBOARD_FEED_SUMMARY_CHARS) return normalized;
+	return `${normalized.slice(0, DASHBOARD_FEED_SUMMARY_CHARS - 1)}…`;
+}
+
+/**
+ * Build a compact message feed for sidebar rendering.
+ * @param team - Team containing message log
+ * @returns Recent feed entries in chronological order
+ */
+function getRecentFeed(team: Team<Teammate>): TeamDashboardFeedItem[] {
+	const feedEvents = getDashboardFeedEvents(team.name);
+	if (feedEvents.length > 0) return feedEvents;
+	return team.messages.slice(-DASHBOARD_FEED_MAX_ITEMS).map((message) => ({
+		content: summarizeFeedMessage(message.content),
+		from: message.from,
+		timestamp: message.timestamp,
+		to: message.to,
+	}));
+}
+
+/**
+ * Build the dashboard snapshot from live teams + cached activity buffers.
+ * @returns Render-ready dashboard snapshot
+ */
+function buildDashboardSnapshot(): TeamDashboardSnapshot {
+	const teams = Array.from(getTeams().values())
+		.map((rawTeam) => rawTeam as Team<Teammate>)
+		.map(
+			(team): TeamDashboardTeam => ({
+				feed: getRecentFeed(team),
+				isComplete:
+					team.tasks.length > 0 && team.tasks.every((task) => task.status === "completed"),
+				name: team.name,
+				recentMessageLinks: getRecentMessageLinks(team),
+				teammates: Array.from(team.teammates.values())
+					.map((mate): TeamDashboardTeammate => {
+						const activity = dashboardActivity.get(team.name, mate.name);
+						return {
+							completedTaskCount: getTaskCountByAssigneeStatus(team, mate.name, "completed"),
+							currentTask: getCurrentTaskTitle(team, mate.name),
+							lastTool: activity.lastTool,
+							liveInputTokens: activity.liveInputTokens,
+							liveOutputTokens: activity.liveOutputTokens,
+							model: mate.model,
+							name: mate.name,
+							output: activity.output,
+							role: mate.role,
+							status: mate.status,
+							totalInputTokens: activity.totalInputTokens,
+							totalOutputTokens: activity.totalOutputTokens,
+							unreadInboxCount: getUnreadInboxCount(team, mate.name),
+							updatedAt: activity.updatedAt,
+						};
+					})
+					.sort((a, b) => a.name.localeCompare(b.name)),
+			})
+		)
+		.sort((a, b) => a.name.localeCompare(b.name));
+	return { teams };
+}
+
+/**
+ * Extract assistant text content from a session event, if present.
+ * @param event - Agent session lifecycle event
+ * @returns Assistant text payload, or empty string
+ */
+function getAssistantTextFromEvent(event: AgentSessionEvent): string {
+	if (event.type !== "message_end" || event.message.role !== "assistant") return "";
+	const textParts: string[] = [];
+	for (const part of event.message.content) {
+		if (part.type === "text") textParts.push(part.text);
+	}
+	return textParts.join("\n").trim();
+}
+
+/**
+ * Extract assistant token usage from a streaming or completed message event.
+ * @param event - Agent session lifecycle event
+ * @returns Input/output token counts, or undefined when unavailable
+ */
+function getAssistantUsageFromEvent(
+	event: AgentSessionEvent
+): { input: number; output: number } | undefined {
+	if (
+		(event.type !== "message_update" && event.type !== "message_end") ||
+		event.message.role !== "assistant"
+	) {
+		return undefined;
+	}
+	const usage = event.message.usage as Usage | undefined;
+	if (!usage) return undefined;
+	return {
+		input: Math.max(0, Math.floor(usage.input ?? 0)),
+		output: Math.max(0, Math.floor(usage.output ?? 0)),
+	};
+}
+
+/**
+ * Attach dashboard activity tracking to a teammate session.
+ * @param teamName - Team name for activity keying
+ * @param teammateName - Teammate name for activity keying
+ * @param session - Teammate session
+ */
+function bindDashboardSessionTracking(
+	teamName: string,
+	teammateName: string,
+	session: AgentSession
+): () => void {
+	return session.subscribe((event) => {
+		if (event.type === "tool_execution_start") {
+			dashboardActivity.setLastTool(teamName, teammateName, event.toolName);
+			notifyDashboardChanged();
+			return;
+		}
+		if (event.type === "tool_execution_end") {
+			dashboardActivity.touch(teamName, teammateName);
+			notifyDashboardChanged();
+			return;
+		}
+
+		const usage = getAssistantUsageFromEvent(event);
+		if (event.type === "message_update" && usage) {
+			dashboardActivity.setLiveUsage(teamName, teammateName, usage.input, usage.output);
+			notifyDashboardChanged();
+			return;
+		}
+
+		if (event.type === "message_end") {
+			if (usage) {
+				dashboardActivity.commitUsage(teamName, teammateName, usage.input, usage.output);
+			} else {
+				dashboardActivity.clearLiveUsage(teamName, teammateName);
+			}
+			const text = getAssistantTextFromEvent(event);
+			if (text.length > 0) {
+				dashboardActivity.appendOutput(teamName, teammateName, `${text}\n`);
+				appendDashboardFeedEvent(teamName, teammateName, "all", text);
+			}
+			notifyDashboardChanged();
+		}
+	});
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -328,6 +653,7 @@ export function createTeammateTools(
 				task.status = "claimed";
 				task.assignee = myName;
 				refreshTeamView(team as Team<Teammate>);
+				appendDashboardFeedEvent(team.name, myName, "all", `Claimed #${task.id}: ${task.title}`);
 				return {
 					content: [{ type: "text" as const, text: `Claimed #${task.id}: ${task.title}` }],
 					details: {},
@@ -347,6 +673,7 @@ export function createTeammateTools(
 
 				// Auto-dispatch: completing a task may unblock others
 				autoDispatch(team as Team<Teammate>, piEvents);
+				appendDashboardFeedEvent(team.name, myName, "all", `Completed #${task.id}: ${task.title}`);
 
 				return {
 					content: [{ type: "text" as const, text: `Completed #${task.id}: ${task.title}` }],
@@ -358,6 +685,7 @@ export function createTeammateTools(
 				task.status = "failed";
 				task.result = params.result || "(failed)";
 				refreshTeamView(team as Team<Teammate>);
+				appendDashboardFeedEvent(team.name, myName, "all", `Failed #${task.id}: ${task.title}`);
 				return {
 					content: [{ type: "text" as const, text: `Failed #${task.id}: ${task.title}` }],
 					details: {},
@@ -384,6 +712,7 @@ export function createTeammateTools(
 		// biome-ignore lint/suspicious/noExplicitAny: ToolDefinition params inferred from TypeBox schema
 		execute: async (_toolCallId: string, params: any) => {
 			addTeamMessage(team, myName, params.to, params.content);
+			appendDashboardFeedEvent(team.name, myName, params.to, params.content);
 
 			// Auto-wake idle recipients
 			if (params.to === "all") {
@@ -395,6 +724,7 @@ export function createTeammateTools(
 			} else {
 				const recipient = team.teammates.get(params.to);
 				if (!recipient) {
+					refreshTeamView(team as Team<Teammate>);
 					return {
 						content: [
 							{
@@ -410,6 +740,7 @@ export function createTeammateTools(
 				}
 			}
 
+			refreshTeamView(team as Team<Teammate>);
 			return {
 				content: [{ type: "text" as const, text: `Message sent to ${params.to}` }],
 				details: {},
@@ -503,35 +834,58 @@ export function wakeTeammate(
 	if (mate.status === "shutdown" || mate.status === "error") return;
 
 	if (mate.session.isStreaming) {
+		if (teamName) {
+			dashboardActivity.touch(teamName, mate.name);
+			appendDashboardFeedEvent(teamName, "system", mate.name, `Queued follow-up for @${mate.name}`);
+		}
+		notifyDashboardChanged();
 		mate.session.followUp(message).catch(() => {});
-	} else {
-		mate.status = "working";
-		mate.session
-			.prompt(message)
-			.then(() => {
-				if (mate.status === "working") {
-					mate.status = "idle";
-					piEvents?.emit("teammate_idle", {
-						team: teamName || "",
-						teammate: mate.name,
-						role: mate.role,
-					});
-
-					// Auto-dispatch: teammate just went idle, check for ready tasks
-					const team = getRuntimeTeam(teamName || "");
-					if (team) {
-						refreshTeamView(team);
-						autoDispatch(team, piEvents);
-					}
-				}
-			})
-			.catch((err) => {
-				mate.status = "error";
-				mate.error = String(err);
-				const team = getRuntimeTeam(teamName || "");
-				if (team) refreshTeamView(team);
-			});
+		return;
 	}
+
+	mate.status = "working";
+	if (teamName) {
+		dashboardActivity.touch(teamName, mate.name);
+		appendDashboardFeedEvent(teamName, mate.name, "all", "Started work.");
+	}
+	const runtimeTeam = getRuntimeTeam(teamName || "");
+	if (runtimeTeam) refreshTeamView(runtimeTeam);
+
+	mate.session
+		.prompt(message)
+		.then(() => {
+			if (mate.status === "working") {
+				mate.status = "idle";
+				if (teamName) {
+					dashboardActivity.touch(teamName, mate.name);
+					appendDashboardFeedEvent(teamName, mate.name, "all", "Went idle.");
+				}
+				notifyDashboardChanged();
+				piEvents?.emit("teammate_idle", {
+					team: teamName || "",
+					teammate: mate.name,
+					role: mate.role,
+				});
+
+				// Auto-dispatch: teammate just went idle, check for ready tasks
+				const team = getRuntimeTeam(teamName || "");
+				if (team) {
+					refreshTeamView(team);
+					autoDispatch(team, piEvents);
+				}
+			}
+		})
+		.catch((err) => {
+			mate.status = "error";
+			mate.error = String(err);
+			if (teamName) {
+				dashboardActivity.touch(teamName, mate.name);
+				appendDashboardFeedEvent(teamName, mate.name, "all", `Errored: ${String(err)}`);
+			}
+			notifyDashboardChanged();
+			const team = getRuntimeTeam(teamName || "");
+			if (team) refreshTeamView(team);
+		});
 }
 
 /**
@@ -618,7 +972,10 @@ export async function spawnTeammateSession(
 	});
 
 	const mate: Teammate = { name, role, model: modelName, session, status: "idle" };
+	mate.unsubscribe = bindDashboardSessionTracking(team.name, name, session);
+	dashboardActivity.touch(team.name, name);
 	team.teammates.set(name, mate);
+	notifyDashboardChanged();
 	return mate;
 }
 
@@ -646,9 +1003,233 @@ export function getLastOutput(session: AgentSession): string {
 
 export default function (pi: ExtensionAPI) {
 	let cwd = process.cwd();
+	let dashboardCancelInFlight = false;
+	let dashboardEnabled = false;
+	let dashboardRender: (() => void) | undefined;
+	let dashboardTicker: ReturnType<typeof setInterval> | undefined;
+	let dashboardTui: TUI | undefined;
+
+	/**
+	 * Enter alternate-screen viewport for dashboard mode.
+	 * @param tui - Active TUI instance
+	 * @returns void
+	 */
+	function enterDashboardViewport(tui: TUI): void {
+		dashboardTui = tui;
+		const terminal = dashboardTui.terminal as {
+			enterAlternateScreen?: () => void;
+			write: (data: string) => void;
+		};
+		if (typeof terminal.enterAlternateScreen === "function") {
+			terminal.enterAlternateScreen();
+		} else {
+			terminal.write("\x1b[?1049h");
+		}
+		// Enable xterm mouse tracking + SGR extended mouse coordinates.
+		terminal.write("\x1b[?1000h\x1b[?1006h");
+		dashboardTui.requestRender(true);
+	}
+
+	/**
+	 * Leave alternate-screen viewport and restore normal editor rendering.
+	 * @returns void
+	 */
+	function leaveDashboardViewport(): void {
+		if (!dashboardTui) return;
+		const terminal = dashboardTui.terminal as {
+			leaveAlternateScreen?: () => void;
+			write: (data: string) => void;
+		};
+		// Disable mouse tracking before restoring normal viewport.
+		terminal.write("\x1b[?1000l\x1b[?1006l");
+		if (typeof terminal.leaveAlternateScreen === "function") {
+			terminal.leaveAlternateScreen();
+		} else {
+			terminal.write("\x1b[?1049l");
+		}
+		dashboardTui.requestRender(true);
+		dashboardTui = undefined;
+	}
+
+	/**
+	 * Publish dashboard-active state for cross-extension UI coordination.
+	 * @param enabled - Whether dashboard workspace is currently active
+	 * @returns void
+	 */
+	function setDashboardFlag(enabled: boolean): void {
+		(globalThis as Record<string, unknown>).__piTeamDashboardActive = enabled;
+		const callback = (globalThis as Record<string, unknown>).__piOnTeamViewChange;
+		if (typeof callback === "function") callback();
+	}
+
+	/**
+	 * Start periodic dashboard refresh ticks for animated glyphs and live telemetry.
+	 * @returns void
+	 */
+	function startDashboardTicker(): void {
+		if (dashboardTicker) return;
+		dashboardTicker = setInterval(() => {
+			if (!dashboardEnabled) return;
+			notifyDashboardChanged();
+		}, 250);
+	}
+
+	/**
+	 * Stop periodic dashboard refresh ticks.
+	 * @returns void
+	 */
+	function stopDashboardTicker(): void {
+		if (!dashboardTicker) return;
+		clearInterval(dashboardTicker);
+		dashboardTicker = undefined;
+	}
+
+	/**
+	 * Abort all teammates that are currently streaming work.
+	 * @returns Number of teammates that received an abort request
+	 */
+	async function abortRunningTeammates(): Promise<number> {
+		const running: Array<{ teammate: Teammate; team: Team<Teammate> }> = [];
+		for (const [, team] of getTeams() as Map<string, Team<Teammate>>) {
+			for (const [, teammate] of team.teammates) {
+				if (teammate.status !== "working" && !teammate.session.isStreaming) continue;
+				running.push({ teammate, team });
+			}
+		}
+		if (running.length === 0) return 0;
+
+		await Promise.all(
+			running.map(async ({ teammate }) => {
+				try {
+					await teammate.session.abort();
+				} catch {
+					// Best-effort abort.
+				}
+			})
+		);
+
+		const touchedTeams = new Set<Team<Teammate>>();
+		for (const { teammate, team } of running) {
+			if (teammate.status === "working") teammate.status = "idle";
+			dashboardActivity.touch(team.name, teammate.name);
+			appendDashboardFeedEvent(team.name, "orchestrator", teammate.name, "Cancelled run.");
+			touchedTeams.add(team);
+		}
+		for (const team of touchedTeams) refreshTeamView(team);
+		notifyDashboardChanged();
+		return running.length;
+	}
+
+	/**
+	 * Handle Esc inside dashboard: cancel active work first, then close dashboard.
+	 * @param ctx - Extension context
+	 * @returns void
+	 */
+	function handleDashboardEscape(ctx: ExtensionContext): void {
+		if (dashboardCancelInFlight) return;
+		void (async () => {
+			dashboardCancelInFlight = true;
+			try {
+				const cancelled = await abortRunningTeammates();
+				if (cancelled > 0) {
+					ctx.ui.notify(
+						`Cancelled ${cancelled} running teammate${cancelled === 1 ? "" : "s"}. Press Esc again to close dashboard.`,
+						"warning"
+					);
+					return;
+				}
+				if (!dashboardEnabled) return;
+				disableDashboard(ctx, false);
+				ctx.ui.notify("Team dashboard disabled.", "info");
+			} finally {
+				dashboardCancelInFlight = false;
+			}
+		})();
+	}
+
+	/**
+	 * Enable dashboard mode by swapping in the dashboard editor component.
+	 * @param ctx - Extension context
+	 * @returns void
+	 */
+	function enableDashboard(ctx: ExtensionContext): void {
+		dashboardEnabled = true;
+		setDashboardFlag(true);
+		startDashboardTicker();
+		ctx.ui.setWorkingMessage(Loader.HIDE);
+		ctx.ui.setStatus("team-dashboard", "Team dashboard active");
+		ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+			enterDashboardViewport(tui);
+			const editor = new TeamDashboardEditor(tui, theme, keybindings, {
+				getSnapshot: buildDashboardSnapshot,
+				onEscape: () => {
+					if (!dashboardEnabled) return;
+					handleDashboardEscape(ctx);
+				},
+				onExit: () => {
+					if (!dashboardEnabled) return;
+					disableDashboard(ctx, false);
+					ctx.ui.notify("Team dashboard disabled.", "info");
+				},
+			});
+			dashboardRender = () => editor.refresh();
+			(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = () => {
+				dashboardRender?.();
+			};
+			return editor;
+		});
+		notifyDashboardChanged();
+	}
+
+	/**
+	 * Disable dashboard mode and restore the default editor component.
+	 * @param ctx - Extension context
+	 * @param notify - Whether to notify the user about the state transition
+	 * @returns void
+	 */
+	function disableDashboard(ctx: ExtensionContext, notify = true): void {
+		dashboardCancelInFlight = false;
+		dashboardEnabled = false;
+		stopDashboardTicker();
+		dashboardRender = undefined;
+		(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = undefined;
+		setDashboardFlag(false);
+		leaveDashboardViewport();
+		ctx.ui.setEditorComponent(undefined);
+		ctx.ui.setWorkingMessage();
+		ctx.ui.setStatus("team-dashboard", undefined);
+		if (notify) ctx.ui.notify("Team dashboard disabled.", "info");
+	}
+
+	/**
+	 * Transition dashboard mode to the requested enabled state.
+	 * @param ctx - Extension context
+	 * @param enabled - Requested dashboard enabled state
+	 * @param notify - Whether to notify the user
+	 * @returns void
+	 */
+	function setDashboardEnabledState(ctx: ExtensionContext, enabled: boolean, notify = true): void {
+		if (!ctx.hasUI) return;
+		if (enabled) {
+			if (!dashboardEnabled) enableDashboard(ctx);
+			if (notify) ctx.ui.notify("Team dashboard enabled.", "info");
+			return;
+		}
+		if (dashboardEnabled) disableDashboard(ctx, notify);
+	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		cwd = ctx.cwd;
+		if (ctx.hasUI) {
+			(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = () => {
+				dashboardRender?.();
+			};
+		}
+	});
+
+	pi.on("turn_start", async (_event, ctx) => {
+		if (!dashboardEnabled || !ctx.hasUI) return;
+		ctx.ui.setWorkingMessage(Loader.HIDE);
 	});
 
 	// Archive all teams on session shutdown (preserves tasks for future recovery)
@@ -657,6 +1238,7 @@ export default function (pi: ExtensionAPI) {
 			for (const [, mate] of team.teammates) {
 				try {
 					if (mate.session.isStreaming) await mate.session.abort();
+					mate.unsubscribe?.();
 					mate.session.dispose();
 				} catch (err) {
 					console.error(`Failed to clean up teammate ${mate.name}: ${err}`);
@@ -666,18 +1248,30 @@ export default function (pi: ExtensionAPI) {
 			removeTeamView(name);
 			archiveTeam(name);
 		}
+		dashboardCancelInFlight = false;
+		dashboardEnabled = false;
+		stopDashboardTicker();
+		dashboardRender = undefined;
+		(globalThis as Record<string, unknown>).__piOnTeamDashboardChange = undefined;
+		setDashboardFlag(false);
+		leaveDashboardViewport();
 	});
 
-	// Kill all team agents on Esc interrupt and archive for recovery.
-	// Teams are cognitive work tied to the conversation — when the user
-	// interrupts, agent work stops but tasks are preserved so the model
-	// can resume via team_resume on the next turn.
+	// Clean up finished teams on agent turn end.
+	// Teams with active background work survive across turns — they keep
+	// running while the user reads the response or types a new message.
+	// Only teams where all teammates have finished are archived.
+	// Full cleanup (including active teams) happens on session_shutdown.
 	pi.on("agent_end", async () => {
 		for (const [name, team] of getTeams() as Map<string, Team<Teammate>>) {
+			const hasActiveWork = [...team.teammates.values()].some((m) => m.status === "working");
+			if (hasActiveWork) continue;
+
+			// All teammates finished — clean up and archive
 			for (const [, mate] of team.teammates) {
-				if (mate.status === "working" || mate.status === "idle") {
+				if (mate.status === "idle") {
 					try {
-						if (mate.session.isStreaming) await mate.session.abort();
+						mate.unsubscribe?.();
 						mate.session.dispose();
 					} catch {
 						// Best-effort cleanup
@@ -688,6 +1282,30 @@ export default function (pi: ExtensionAPI) {
 			removeTeamView(name);
 			archiveTeam(name);
 		}
+	});
+
+	pi.registerCommand("team-dashboard", {
+		description: "Toggle the Team Dashboard workspace (/team-dashboard [on|off|status])",
+		handler: async (args, ctx) => {
+			if (!ctx.hasUI) return;
+			const resolution = resolveDashboardCommand(dashboardEnabled, args);
+			if (resolution.isError) {
+				ctx.ui.notify(resolution.message, "error");
+				return;
+			}
+			if (resolution.action !== "status") {
+				setDashboardEnabledState(ctx, resolution.nextEnabled, false);
+			}
+			ctx.ui.notify(resolution.message, "info");
+		},
+	});
+
+	pi.registerShortcut(Key.ctrl("x"), {
+		description: "Toggle Team Dashboard workspace",
+		handler: async (ctx) => {
+			if (!ctx.hasUI) return;
+			setDashboardEnabledState(ctx, !dashboardEnabled);
+		},
 	});
 
 	// ─── team_create ────────────────────────────────────────────
@@ -708,6 +1326,8 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 			createTeamStore(params.name);
+			appendDashboardFeedEvent(params.name, "orchestrator", "all", `Team "${params.name}" created`);
+			notifyDashboardChanged();
 			return {
 				content: [
 					{
@@ -769,6 +1389,13 @@ export default function (pi: ExtensionAPI) {
 			const lines = added.map(
 				(t) =>
 					`#${t.id}: ${t.title}${t.blockedBy.length > 0 ? ` (blocked by: ${t.blockedBy.join(", ")})` : ""}`
+			);
+			refreshTeamView(team);
+			appendDashboardFeedEvent(
+				team.name,
+				"orchestrator",
+				"all",
+				`Added ${added.length} task${added.length === 1 ? "" : "s"}`
 			);
 			return {
 				content: [{ type: "text", text: `Added ${added.length} task(s):\n${lines.join("\n")}` }],
@@ -842,6 +1469,12 @@ export default function (pi: ExtensionAPI) {
 					pi.events
 				);
 				refreshTeamView(team);
+				appendDashboardFeedEvent(
+					team.name,
+					"orchestrator",
+					"all",
+					`Spawned @${params.name} (${mate.model})`
+				);
 				return {
 					content: [
 						{
@@ -934,6 +1567,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			addTeamMessage(team, "orchestrator", params.to, params.message);
+			appendDashboardFeedEvent(team.name, "orchestrator", params.to, params.message);
 
 			const prompt = `Message from orchestrator: ${params.message}`;
 
@@ -962,13 +1596,19 @@ export default function (pi: ExtensionAPI) {
 
 					if (mate.session.isStreaming) {
 						// Already working — queue as followUp, then wait for idle
+						dashboardActivity.touch(team.name, mate.name);
+						notifyDashboardChanged();
 						await mate.session.followUp(prompt);
 						await Promise.race([mate.session.agent.waitForIdle(), abortPromise]);
 					} else {
 						mate.status = "working";
+						dashboardActivity.touch(team.name, mate.name);
+						refreshTeamView(team);
 						await Promise.race([mate.session.prompt(prompt), abortPromise]);
 					}
 					mate.status = "idle";
+					dashboardActivity.touch(team.name, mate.name);
+					refreshTeamView(team);
 
 					const output = getLastOutput(mate.session);
 					return {
@@ -989,6 +1629,8 @@ export default function (pi: ExtensionAPI) {
 					}
 					mate.status = "error";
 					mate.error = String(err);
+					dashboardActivity.touch(team.name, mate.name);
+					refreshTeamView(team);
 					return {
 						content: [{ type: "text", text: `Teammate "${params.to}" errored: ${err.message}` }],
 						details: {},
@@ -1075,6 +1717,7 @@ export default function (pi: ExtensionAPI) {
 			for (const [, mate] of team.teammates) {
 				try {
 					if (mate.session.isStreaming) await mate.session.abort();
+					mate.unsubscribe?.();
 					mate.session.dispose();
 					mate.status = "shutdown";
 					count++;
@@ -1186,6 +1829,7 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 
+			notifyDashboardChanged();
 			return {
 				content: [
 					{

@@ -32,6 +32,23 @@ function addMockTeammate(
 	return mate;
 }
 
+/**
+ * Find one teammate in a view and fail the test immediately when missing.
+ * @param view - Serializable team snapshot from buildTeamView
+ * @param name - Teammate name to locate
+ * @returns Matching teammate snapshot
+ * @throws {Error} When the teammate is missing from the snapshot
+ */
+function requireTeammate(
+	view: ReturnType<typeof buildTeamView>,
+	name: string
+): ReturnType<typeof buildTeamView>["teammates"][number] {
+	const teammate = view.teammates.find((member) => member.name === name);
+	expect(teammate).toBeDefined();
+	if (!teammate) throw new Error(`Expected teammate "${name}" in team view`);
+	return teammate;
+}
+
 // ════════════════════════════════════════════════════════════════
 // buildTeamView
 // ════════════════════════════════════════════════════════════════
@@ -87,13 +104,15 @@ describe("buildTeamView", () => {
 
 		const view = buildTeamView(team);
 
-		const alice = view.teammates.find((m) => m.name === "alice")!;
+		const alice = requireTeammate(view, "alice");
 		expect(alice.status).toBe("working");
 		expect(alice.currentTask).toBe("Count files");
+		expect(alice.completedTaskCount).toBe(0);
 
-		const bob = view.teammates.find((m) => m.name === "bob")!;
+		const bob = requireTeammate(view, "bob");
 		expect(bob.status).toBe("idle");
 		expect(bob.currentTask).toBeUndefined();
+		expect(bob.completedTaskCount).toBe(0);
 	});
 
 	it("handles empty team", () => {
@@ -113,7 +132,8 @@ describe("buildTeamView", () => {
 		addMockTeammate(team, "alice", "idle");
 
 		const view = buildTeamView(team);
-		const alice = view.teammates.find((m) => m.name === "alice")!;
+		const alice = requireTeammate(view, "alice");
 		expect(alice.currentTask).toBeUndefined(); // completed, not claimed
+		expect(alice.completedTaskCount).toBe(1);
 	});
 });
