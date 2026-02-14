@@ -72,6 +72,7 @@ const SECTIONS: Section[] = [
 		shortcuts: [
 			{ key: "Ctrl+Shift+B", description: "Background tasks" },
 			{ key: "Ctrl+Shift+T", description: "Toggle tasks" },
+			{ key: "Ctrl+X", description: "Team dashboard" },
 			{ key: "Ctrl+?", description: "This cheatsheet" },
 		],
 	},
