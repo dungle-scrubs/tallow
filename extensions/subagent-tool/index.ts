@@ -29,6 +29,12 @@ import {
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import {
+	emitInteropEvent,
+	INTEROP_EVENT_NAMES,
+	type InteropSubagentView,
+	onInteropEvent,
+} from "../_shared/interop-events.js";
 import { expandFileReferences } from "../file-reference/index.js";
 
 // === Agent Discovery (inlined from agents.ts) ===
@@ -339,16 +345,51 @@ interface BackgroundSubagent {
 }
 
 const backgroundSubagents = new Map<string, BackgroundSubagent>();
+let interopStateRequestCleanup: (() => void) | undefined;
 
-// Export to global for tasks extension to read
-globalThis.__piBackgroundSubagents = backgroundSubagents as unknown as GlobalMap;
-globalThis.__piRunningSubagents = runningSubagents as unknown as GlobalMap;
+/**
+ * Build the current typed subagent snapshot for cross-extension consumers.
+ *
+ * @returns Snapshot payload with foreground and background subagents
+ */
+function buildSubagentSnapshot(): {
+	background: InteropSubagentView[];
+	foreground: InteropSubagentView[];
+} {
+	const background: InteropSubagentView[] = [...backgroundSubagents.values()].map((subagent) => ({
+		agent: subagent.agent,
+		id: subagent.id,
+		startTime: subagent.startTime,
+		status: subagent.status,
+		task: subagent.task,
+	}));
+	const foreground: InteropSubagentView[] = [...runningSubagents.values()].map((subagent) => ({
+		agent: subagent.agent,
+		id: subagent.id,
+		startTime: subagent.startTime,
+		status: "running",
+		task: subagent.task,
+	}));
+	return { background, foreground };
+}
+
+/**
+ * Publish subagent snapshot updates for typed cross-extension state sync.
+ *
+ * @param piEvents - Shared event bus instance
+ * @returns void
+ */
+function publishSubagentSnapshot(piEvents?: ExtensionAPI["events"]): void {
+	if (!piEvents) return;
+	const snapshot = buildSubagentSnapshot();
+	emitInteropEvent(piEvents, INTEROP_EVENT_NAMES.subagentsSnapshot, snapshot);
+}
+
 const _backgroundRequested = false;
 
-// Background subagents are rendered by tasks extension via shared global
-// This function is now a no-op - tasks extension reads __piBackgroundSubagents
+// Background subagents are rendered by tasks extension via typed interop events.
 /**
- * No-op placeholder - background widget is now rendered by tasks extension.
+ * No-op placeholder - background widget is rendered by the tasks extension.
  */
 function updateBackgroundWidget(): void {
 	// No-op - tasks extension handles rendering
@@ -429,41 +470,59 @@ function startWidgetUpdates(): void {
 /**
  * Clears foreground subagent tracking without affecting background subagents.
  */
-function clearForegroundSubagents(): void {
+function clearForegroundSubagents(piEvents?: ExtensionAPI["events"]): void {
 	// Only clears the foreground subagent tracking (for parallel inline display)
 	// Does NOT touch background subagents or their widget
 	runningSubagents.clear();
+	publishSubagentSnapshot(piEvents);
 }
 
 /**
  * Clears foreground subagents while preserving background subagent tracking.
+ *
+ * @param piEvents - Shared event bus for state publication
+ * @returns void
  */
-function clearAllSubagents(): void {
+function clearAllSubagents(piEvents?: ExtensionAPI["events"]): void {
 	runningSubagents.clear();
+	publishSubagentSnapshot(piEvents);
 	// Don't clear background subagents - they persist across tool calls
 	// Only clear widget if NO background subagents are running
 	// Background subagents rendered by tasks extension, no separate widget needed
 }
 
 /**
- * Register a new foreground subagent and start widget updates.
+ * Register a foreground subagent for cross-extension activity rendering.
+ *
+ * @param id - Subagent tracking ID
  * @param agent - Agent name
  * @param task - Task description
- * @returns Generated tracking ID
+ * @param startTime - Start timestamp in ms
+ * @param piEvents - Shared event bus for snapshot updates
+ * @returns void
  */
-function _registerSubagent(agent: string, task: string): string {
-	const id = generateId();
-	runningSubagents.set(id, { id, agent, task, startTime: Date.now() });
+function registerForegroundSubagent(
+	id: string,
+	agent: string,
+	task: string,
+	startTime: number,
+	piEvents?: ExtensionAPI["events"]
+): void {
+	runningSubagents.set(id, { id, agent, task, startTime });
+	publishSubagentSnapshot(piEvents);
 	startWidgetUpdates();
-	return id;
 }
 
 /**
- * Mark a foreground subagent as complete and update the widget.
+ * Remove a foreground subagent and publish updated state.
+ *
  * @param id - Subagent tracking ID
+ * @param piEvents - Shared event bus for snapshot updates
+ * @returns void
  */
-function _completeSubagent(id: string): void {
+function completeForegroundSubagent(id: string, piEvents?: ExtensionAPI["events"]): void {
 	runningSubagents.delete(id);
+	publishSubagentSnapshot(piEvents);
 	updateWidget();
 }
 
@@ -827,6 +886,7 @@ async function spawnBackgroundSubagent(
 	};
 
 	backgroundSubagents.set(id, bgSubagent);
+	publishSubagentSnapshot(piEvents);
 
 	// Collect output
 	let buffer = "";
@@ -906,6 +966,7 @@ async function spawnBackgroundSubagent(
 		}
 		result.exitCode = code ?? 0;
 		bgSubagent.status = code === 0 ? "completed" : "failed";
+		publishSubagentSnapshot(piEvents);
 
 		// Emit subagent_stop event
 		piEvents?.emit("subagent_stop", {
@@ -999,6 +1060,8 @@ async function runSingleAgent(
 			step,
 		};
 	}
+
+	registerForegroundSubagent(taskId, agentName, task, Date.now(), piEvents);
 
 	// Emit subagent_start event
 	piEvents?.emit("subagent_start", {
@@ -1209,6 +1272,7 @@ async function runSingleAgent(
 
 		return currentResult;
 	} finally {
+		completeForegroundSubagent(taskId, piEvents);
 		if (tmpPromptPath)
 			try {
 				fs.unlinkSync(tmpPromptPath);
@@ -1346,10 +1410,16 @@ export default function (pi: ExtensionAPI) {
 		G.__piSubagentWidgetInterval = null;
 	}
 
+	interopStateRequestCleanup?.();
+	interopStateRequestCleanup = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.stateRequest, () => {
+		publishSubagentSnapshot(pi.events);
+	});
+
 	// Also clear on session start
 	pi.on("session_start", async (_event, ctx) => {
 		uiContext = ctx;
-		clearAllSubagents();
+		clearAllSubagents(pi.events);
+		publishSubagentSnapshot(pi.events);
 		// Background subagents are now rendered by tasks extension
 	});
 
@@ -1358,17 +1428,20 @@ export default function (pi: ExtensionAPI) {
 	// they want all agent work to stop. Background bash tasks (dev servers,
 	// builds) are infrastructure and intentionally survive interrupts.
 	pi.on("agent_end", async () => {
+		let mutated = false;
 		for (const [_id, bg] of backgroundSubagents) {
 			if (bg.status === "running" && bg.process && !bg.process.killed) {
 				bg.process.kill("SIGTERM");
 				bg.status = "failed";
 				bg.result.exitCode = 1;
 				bg.result.stopReason = "interrupted";
+				mutated = true;
 				setTimeout(() => {
 					if (!bg.process.killed) bg.process.kill("SIGKILL");
 				}, 3000);
 			}
 		}
+		if (mutated) publishSubagentSnapshot(pi.events);
 	});
 
 	// No custom shortcut - use subagent_status tool to check background subagents
@@ -1655,7 +1728,7 @@ WHEN NOT TO USE SUBAGENTS:
 
 				// Clear any stale foreground subagent entries from previous runs
 				// (preserves background subagents)
-				clearForegroundSubagents();
+				clearForegroundSubagents(pi.events);
 
 				// Track all results for streaming updates
 				const allResults: SingleResult[] = new Array(tasks.length);

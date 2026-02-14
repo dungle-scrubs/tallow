@@ -29,6 +29,12 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import {
+	emitInteropEvent,
+	INTEROP_EVENT_NAMES,
+	type InteropBackgroundTaskView,
+	onInteropEvent,
+} from "../_shared/interop-events.js";
 
 // ANSI escape codes for Catppuccin Macchiato colors (medium-dark variant)
 // Crust bg: #181926, Mauve: #c6a0f6, Text: #cad3f5
@@ -75,10 +81,36 @@ let tuiRef: TUI | null = null;
 // Persistent Loader instances per streaming task (avoids leaking intervals)
 const activeLoaders = new Map<string, InstanceType<typeof Loader>>();
 
-// Global task registry (exposed via globalThis for tasks extension to read)
+// In-memory task registry (published via typed interop events)
 const tasks = new Map<string, BackgroundTask>();
-globalThis.__piBackgroundTasks = tasks as unknown as GlobalMap;
 let taskCounter = 0;
+let interopStateRequestCleanup: (() => void) | undefined;
+
+/**
+ * Build a serializable background task snapshot for cross-extension consumers.
+ *
+ * @returns Array of task views in insertion order
+ */
+function buildBackgroundTaskSnapshot(): InteropBackgroundTaskView[] {
+	return [...tasks.values()].map((task) => ({
+		command: task.command,
+		id: task.id,
+		startTime: task.startTime,
+		status: task.status,
+	}));
+}
+
+/**
+ * Publish the current background task snapshot over the interop event bus.
+ *
+ * @param events - Shared extension event bus
+ * @returns void
+ */
+function publishBackgroundTaskSnapshot(events: ExtensionAPI["events"]): void {
+	emitInteropEvent(events, INTEROP_EVENT_NAMES.backgroundTasksSnapshot, {
+		tasks: buildBackgroundTaskSnapshot(),
+	});
+}
 
 /**
  * Generates a unique task ID combining counter and timestamp.
@@ -156,6 +188,22 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		// Status bar only - widget is rendered by tasks extension
 		ctx.ui.setStatus("bg-tasks", `${FG_PURPLE}⚙ ${running.length} bg${RESET_ALL}`);
 	}
+
+	/**
+	 * Sync background-task state to both local UI and cross-extension event consumers.
+	 *
+	 * @param ctx - Extension context for widget updates
+	 * @returns void
+	 */
+	function syncTaskState(ctx: ExtensionContext): void {
+		updateWidget(ctx);
+		publishBackgroundTaskSnapshot(pi.events);
+	}
+
+	interopStateRequestCleanup?.();
+	interopStateRequestCleanup = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.stateRequest, () => {
+		publishBackgroundTaskSnapshot(pi.events);
+	});
 
 	// Tool: Run bash in background
 	pi.registerTool({
@@ -239,6 +287,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						task.process.kill("SIGTERM");
 						task.status = "killed";
 						task.output.push(`\n[Killed: timeout after ${params.timeout}s]\n`);
+						syncTaskState(ctx);
 					}
 				}, params.timeout * 1000);
 			}
@@ -251,17 +300,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.exitCode = code;
 					task.status = code === 0 ? "completed" : "failed";
 					task.process = null;
-					updateWidget(ctx);
+					syncTaskState(ctx);
 				});
 				child.on("error", (err) => {
 					task.endTime = Date.now();
 					task.status = "failed";
 					task.output.push(`\nError: ${err.message}\n`);
 					task.process = null;
-					updateWidget(ctx);
+					syncTaskState(ctx);
 				});
 				child.unref();
-				updateWidget(ctx);
+				syncTaskState(ctx);
 
 				return {
 					details: { taskId, command: params.command, fireAndForget: true },
@@ -275,7 +324,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			}
 
 			// Streaming mode: wait for process to complete
-			updateWidget(ctx);
+			syncTaskState(ctx);
 
 			const result = await new Promise<{
 				exitCode: number | null;
@@ -286,7 +335,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.exitCode = code;
 					task.status = code === 0 ? "completed" : "failed";
 					task.process = null;
-					updateWidget(ctx);
+					syncTaskState(ctx);
 					resolve({ exitCode: code });
 				});
 				child.on("error", (err) => {
@@ -294,7 +343,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.status = "failed";
 					task.output.push(`\nError: ${err.message}\n`);
 					task.process = null;
-					updateWidget(ctx);
+					syncTaskState(ctx);
 					resolve({ exitCode: null, error: err.message });
 				});
 
@@ -305,7 +354,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						task.status = "killed";
 						task.endTime = Date.now();
 						task.output.push("\n[Killed: aborted by user]\n");
-						updateWidget(ctx);
+						syncTaskState(ctx);
 						resolve({ exitCode: null, error: "Aborted" });
 					}
 				});
@@ -692,7 +741,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			task.endTime = Date.now();
 			task.output.push("\n[Killed by user]\n");
 
-			updateWidget(ctx);
+			syncTaskState(ctx);
 
 			return {
 				details: { taskId: params.taskId, killed: true },
@@ -740,7 +789,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				task.process.kill("SIGTERM");
 				task.status = "killed";
 				task.endTime = Date.now();
-				updateWidget(ctx);
+				syncTaskState(ctx);
 				ctx.ui.notify(`Killed task ${rest}`, "info");
 				return;
 			}
@@ -750,7 +799,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				for (const [id] of completed) {
 					tasks.delete(id);
 				}
-				updateWidget(ctx);
+				syncTaskState(ctx);
 				ctx.ui.notify(`Cleared ${completed.length} completed tasks`, "info");
 				return;
 			}
@@ -801,7 +850,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						refreshInterval = null;
 					}
 					// Restore the widget when closing the viewer
-					updateWidget(ctx);
+					syncTaskState(ctx);
 				}
 
 				function handleInput(data: string) {
@@ -840,6 +889,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 								task.process.kill("SIGTERM");
 								task.status = "killed";
 								task.endTime = Date.now();
+								publishBackgroundTaskSnapshot(pi.events);
 								refresh();
 							}
 							return true;
@@ -883,6 +933,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 								task.process.kill("SIGTERM");
 								task.status = "killed";
 								task.endTime = Date.now();
+								publishBackgroundTaskSnapshot(pi.events);
 								refresh();
 							}
 							return true;
@@ -1036,7 +1087,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				};
 			});
 
-			updateWidget(ctx);
+			syncTaskState(ctx);
 		},
 	});
 
@@ -1049,6 +1100,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			}
 		}
 		tasks.clear();
+		publishBackgroundTaskSnapshot(pi.events);
+		interopStateRequestCleanup?.();
+		interopStateRequestCleanup = undefined;
 	});
 
 	// Capture TUI reference and update status on session start
@@ -1062,7 +1116,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		ctx.ui.setWidget("bg-tasks-tui-capture", undefined);
 
 		ctx.ui.setStatus("bg-tasks", undefined);
-		updateWidget(ctx);
+		syncTaskState(ctx);
 	});
 
 	// Register Ctrl+Shift+B shortcut for background tasks
