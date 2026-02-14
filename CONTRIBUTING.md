@@ -5,8 +5,8 @@
 ```bash
 git clone https://github.com/dungle-scrubs/tallow.git
 cd tallow
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ## Making changes
@@ -16,11 +16,11 @@ npm run build
 3. Make your changes
 4. Run checks:
    ```bash
-   npm run typecheck
-   npm run typecheck:extensions
-   npm run lint
-   npm test
-   npm run build
+   bun run typecheck
+   bun run typecheck:extensions
+   bun run lint
+   bun test
+   bun run build
    ```
 5. Commit using [conventional commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, etc.)
 6. Push and open a Pull Request
@@ -39,7 +39,7 @@ tests/            E2E tests
 
 ## Code style
 
-- **Biome** handles linting and formatting — run `npm run lint:fix` to auto-fix
+- **Biome** handles linting and formatting — run `bun run lint:fix` to auto-fix
 - Indent with tabs, line width 100
 - Semicolons, double quotes, ES5 trailing commas
 - All functions require JSDoc comments explaining *why*, not *what*
