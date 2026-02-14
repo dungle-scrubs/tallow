@@ -7,6 +7,9 @@
 		"configDir": ".tallow"
 	},
 	"type": "module",
+	"workspaces": [
+		"packages/tallow-tui"
+	],
 	"bin": {
 		"tallow": "./dist/cli.js",
 		"tallow-install": "./dist/install.js"
@@ -69,7 +72,7 @@
 		"@biomejs/biome": "^2.3.14",
 		"@mariozechner/pi-agent-core": "0.52.9",
 		"@mariozechner/pi-ai": "0.52.9",
-		"@mariozechner/pi-tui": "file:packages/tallow-tui",
+		"@mariozechner/pi-tui": "workspace:*",
 		"@types/node": "^25.2.2",
 		"husky": "^9.1.7",
 		"lint-staged": "^16.2.7",
@@ -88,8 +91,8 @@
 		"url": "https://github.com/dungle-scrubs/tallow/issues"
 	},
 	"overrides": {
-		"@mariozechner/pi-tui": "file:packages/tallow-tui",
-		"@mariozechner/pi-coding-agent>@mariozechner/pi-tui": "file:packages/tallow-tui"
+		"@mariozechner/pi-tui": "workspace:*",
+		"@mariozechner/pi-coding-agent>@mariozechner/pi-tui": "workspace:*"
 	},
 	"author": "Kevin Frilot",
 	"license": "MIT",
