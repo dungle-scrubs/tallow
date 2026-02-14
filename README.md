@@ -102,8 +102,11 @@ tallow -e ./my-extension
 # List saved sessions (shows auto-generated names)
 tallow --list
 
-# Specify provider and API key (headless startup)
-tallow --provider anthropic --api-key sk-ant-...
+# Runtime auth via environment (not persisted)
+TALLOW_API_KEY=sk-ant-... tallow --provider anthropic
+
+# Runtime auth via reference (resolved at runtime)
+TALLOW_API_KEY_REF=op://Services/Anthropic/api-key tallow --provider anthropic
 
 # Run in RPC or JSON mode
 tallow --mode rpc
@@ -114,6 +117,9 @@ tallow --no-extensions
 # Print tallow home directory
 tallow --home
 ```
+
+`--api-key` was removed to avoid leaking secrets in process arguments.
+Use `TALLOW_API_KEY` or `TALLOW_API_KEY_REF` instead.
 
 ### Shell interpolation
 
@@ -183,9 +189,9 @@ const tallow = await createTallowSession({
   thinkingLevel: "high",
   session: { type: "memory" },        // Don't persist
   noBundledExtensions: true,           // Start clean
-  additionalExtensions: ["./my-ext"],  // Add your own
-  systemPrompt: "You are a test bot.", // Override system prompt
-  apiKey: "sk-ant-...",               // Runtime key (not persisted)
+  additionalExtensions: ["./my-ext"],   // Add your own
+  systemPrompt: "You are a test bot.",  // Override system prompt
+  apiKey: process.env.ANTHROPIC_API_KEY, // Runtime only, not persisted
 });
 ```
 
@@ -196,7 +202,7 @@ Tallow stores its configuration in `~/.tallow/`:
 | Path | Purpose |
 |------|---------|
 | `~/.tallow/settings.json` | Global settings |
-| `~/.tallow/auth.json` | API key storage |
+| `~/.tallow/auth.json` | Provider auth references (see [SECURITY.md](SECURITY.md)) |
 | `~/.tallow/models.json` | Model configuration |
 | `~/.tallow/keybindings.json` | Keybinding overrides |
 | `~/.tallow/agents/` | Agent profiles (installed from templates, yours to edit) |

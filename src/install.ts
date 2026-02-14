@@ -11,12 +11,12 @@
  *   --yes, -y                Non-interactive: rebuild + reinstall, keep all settings.
  *   --default-provider <p>   Set default provider (anthropic, openai, google, etc.)
  *   --default-model <m>      Set default model ID (e.g., claude-sonnet-4)
- *   --api-key <key>          Set API key for the default provider
  *   --theme <name>           Set default theme
  *   --thinking <level>       Set default thinking level (off, minimal, low, medium, high, xhigh)
  *
  * Headless setup for automated systems:
- *   tallow install -y --default-provider anthropic --api-key sk-xxx
+ *   TALLOW_API_KEY=... tallow install -y --default-provider anthropic
+ *   TALLOW_API_KEY_REF=op://Vault/Item/field tallow install -y --default-provider anthropic
  *
  * Walks the user through selecting which bundled components to install,
  * builds the project, links the binary globally, and sets up ~/.tallow/.
@@ -34,6 +34,7 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
+import { persistProviderApiKey } from "./auth-hardening.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ const TEMPLATES_DIR = join(PACKAGE_DIR, "templates");
 
 interface InstallFlags {
 	readonly apiKey?: string;
+	readonly apiKeyRef?: string;
 	readonly defaultModel?: string;
 	readonly defaultProvider?: string;
 	readonly theme?: string;
@@ -143,14 +145,19 @@ function writeSettings(settings: Record<string, unknown>): void {
 /**
  * Parse headless install flags from process.argv.
  *
+ * API key input is read from env vars to avoid leaking secrets in process
+ * argument lists (`ps`, shell history):
+ * - TALLOW_API_KEY for raw values (stored via keychain)
+ * - TALLOW_API_KEY_REF for op:// or command/env references
+ *
  * @returns Parsed flags for headless configuration
+ * @throws {Error} When both TALLOW_API_KEY and TALLOW_API_KEY_REF are set
  */
 function parseInstallFlags(): InstallFlags {
 	const args = process.argv;
 	const flags: Record<string, string | undefined> = {};
 
 	const flagMap: Record<string, keyof InstallFlags> = {
-		"--api-key": "apiKey",
 		"--default-model": "defaultModel",
 		"--default-provider": "defaultProvider",
 		"--theme": "theme",
@@ -164,32 +171,14 @@ function parseInstallFlags(): InstallFlags {
 		}
 	}
 
-	return flags as InstallFlags;
-}
+	flags.apiKey = process.env.TALLOW_API_KEY || undefined;
+	flags.apiKeyRef = process.env.TALLOW_API_KEY_REF || undefined;
 
-/**
- * Read auth.json credentials.
- *
- * @returns Parsed auth data
- */
-function readAuth(): Record<string, unknown> {
-	if (existsSync(AUTH_PATH)) {
-		try {
-			return JSON.parse(readFileSync(AUTH_PATH, "utf-8")) as Record<string, unknown>;
-		} catch {
-			return {};
-		}
+	if (flags.apiKey && flags.apiKeyRef) {
+		throw new Error("Set either TALLOW_API_KEY or TALLOW_API_KEY_REF, not both.");
 	}
-	return {};
-}
 
-/**
- * Write auth.json credentials.
- *
- * @param auth - Auth data to persist
- */
-function writeAuth(auth: Record<string, unknown>): void {
-	writeFileSync(AUTH_PATH, `${JSON.stringify(auth, null, 2)}\n`);
+	return flags as InstallFlags;
 }
 
 /**
@@ -206,6 +195,7 @@ function applyInstallFlags(flags: InstallFlags): readonly string[] {
 		!flags.defaultProvider &&
 		!flags.defaultModel &&
 		!flags.apiKey &&
+		!flags.apiKeyRef &&
 		!flags.theme &&
 		!flags.thinking
 	) {
@@ -237,18 +227,22 @@ function applyInstallFlags(flags: InstallFlags): readonly string[] {
 
 	writeSettings(settings);
 
-	if (flags.apiKey) {
+	const apiKeyInput = flags.apiKeyRef ?? flags.apiKey;
+	if (apiKeyInput) {
 		const provider = flags.defaultProvider ?? (settings.defaultProvider as string | undefined);
 		if (!provider) {
 			console.error(
-				"--api-key requires --default-provider to be set (or already configured in settings)"
+				"TALLOW_API_KEY/TALLOW_API_KEY_REF requires --default-provider to be set (or already configured in settings)"
 			);
 			process.exit(1);
 		}
-		const auth = readAuth();
-		auth[provider] = { type: "api_key", key: flags.apiKey };
-		writeAuth(auth);
-		summary.push(`API key:          set for ${provider}`);
+
+		const persistedMode = persistProviderApiKey(AUTH_PATH, provider, apiKeyInput);
+		summary.push(
+			persistedMode === "keychain"
+				? `API key:          stored in keychain for ${provider}`
+				: `API key:          stored as reference for ${provider}`
+		);
 	}
 
 	return summary;
@@ -441,6 +435,7 @@ async function runNonInteractive(): Promise<void> {
 		flags.defaultProvider ||
 		flags.defaultModel ||
 		flags.apiKey ||
+		flags.apiKeyRef ||
 		flags.theme ||
 		flags.thinking
 	);
@@ -448,7 +443,7 @@ async function runNonInteractive(): Promise<void> {
 
 	if (!existing && !hasFlags) {
 		console.error(
-			"No existing installation found at ~/.tallow/. Run without -y for first-time setup,\nor pass --default-provider and --api-key for headless setup."
+			"No existing installation found at ~/.tallow/. Run without -y for first-time setup,\nor pass --default-provider with TALLOW_API_KEY or TALLOW_API_KEY_REF for headless setup."
 		);
 		process.exit(1);
 	}
@@ -466,7 +461,7 @@ async function runNonInteractive(): Promise<void> {
 		console.log(`✓ Added ${templates.copied} new template files`);
 	}
 
-	// Apply headless flags (provider, model, api-key, theme, thinking)
+	// Apply headless flags (provider, model, env-provided key/ref, theme, thinking)
 	const configSummary = applyInstallFlags(flags);
 	if (configSummary.length > 0) {
 		console.log("");
