@@ -160,6 +160,22 @@ describe("truncateToWidth", () => {
 		const result = truncateToWidth(linked, 10, "…");
 		expect(visibleWidth(result)).toBeLessThanOrEqual(10);
 	});
+
+	it("preserves ANSI styling through ellipsis", () => {
+		const red = "\x1b[31m";
+		const reset = "\x1b[0m";
+		const styled = `${red}${"a".repeat(20)}${reset}`;
+		const result = truncateToWidth(styled, 10, "…");
+		// Ellipsis should appear BEFORE reset so it inherits the line's styling
+		expect(result).toContain("…\x1b[0m");
+		expect(result).not.toContain("\x1b[0m…");
+	});
+
+	it("places reset after ellipsis for unstyled text too", () => {
+		const result = truncateToWidth("a".repeat(20), 10, "…");
+		// Even for unstyled text, the reset-after-ellipsis order is correct
+		expect(result).toContain("…\x1b[0m");
+	});
 });
 
 // ── wrapTextWithAnsi ─────────────────────────────────────────────────────────

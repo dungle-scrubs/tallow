@@ -768,8 +768,9 @@ export function truncateToWidth(
 		currentWidth += graphemeWidth;
 	}
 
-	// Add reset code before ellipsis to prevent styling leaking into it
-	const truncated = `${result}\x1b[0m${ellipsis}`;
+	// Reset AFTER ellipsis so it inherits the line's current ANSI state
+	// (e.g. red/green foreground on diff lines) but doesn't leak into subsequent content
+	const truncated = `${result}${ellipsis}\x1b[0m`;
 	if (pad) {
 		const truncatedWidth = visibleWidth(truncated);
 		return truncated + " ".repeat(Math.max(0, maxWidth - truncatedWidth));
