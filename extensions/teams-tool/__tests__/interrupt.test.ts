@@ -41,20 +41,24 @@ function mockTeammate(
 // agent_end interrupt behavior (simulated)
 // ════════════════════════════════════════════════════════════════
 
-describe("agent_end interrupt (simulated)", () => {
+describe("agent_end cleanup (simulated)", () => {
 	afterEach(() => getTeams().clear());
 
 	/**
 	 * Simulate the agent_end handler from index.ts.
-	 * We test the logic directly since we can't trigger pi.on("agent_end")
-	 * without a full extension runtime.
+	 * Teams with active background work survive; only fully-finished
+	 * teams are cleaned up and archived.
 	 */
-	async function simulateAgentEnd() {
-		for (const [, team] of getTeams() as Map<string, Team<Teammate>>) {
+	async function simulateAgentEnd(): Promise<string[]> {
+		const archived: string[] = [];
+		for (const [name, team] of getTeams() as Map<string, Team<Teammate>>) {
+			const hasActiveWork = [...team.teammates.values()].some((m) => m.status === "working");
+			if (hasActiveWork) continue;
+
 			for (const [, mate] of team.teammates) {
-				if (mate.status === "working" || mate.status === "idle") {
+				if (mate.status === "idle") {
 					try {
-						if (mate.session.isStreaming) await mate.session.abort();
+						mate.unsubscribe?.();
 						mate.session.dispose();
 					} catch {
 						// Best-effort cleanup
@@ -62,30 +66,33 @@ describe("agent_end interrupt (simulated)", () => {
 					mate.status = "shutdown";
 				}
 			}
+			archived.push(name);
 		}
+		return archived;
 	}
 
-	it("shuts down working teammates", async () => {
+	it("preserves teams with working teammates", async () => {
 		const team = freshTeam();
 		const { mate, calls } = mockTeammate("alice", "working", true);
 		team.teammates.set("alice", mate);
 
-		await simulateAgentEnd();
+		const archived = await simulateAgentEnd();
 
-		expect(mate.status).toBe("shutdown");
-		expect(calls).toContain("abort");
-		expect(calls).toContain("dispose");
+		expect(mate.status).toBe("working"); // not killed
+		expect(calls).toEqual([]); // no abort or dispose
+		expect(archived).toEqual([]); // team not archived
 	});
 
-	it("shuts down idle teammates", async () => {
+	it("archives team when all teammates are idle", async () => {
 		const team = freshTeam();
 		const { mate, calls } = mockTeammate("alice", "idle");
 		team.teammates.set("alice", mate);
 
-		await simulateAgentEnd();
+		const archived = await simulateAgentEnd();
 
 		expect(mate.status).toBe("shutdown");
 		expect(calls).toContain("dispose");
+		expect(archived).toEqual(["test-team"]);
 	});
 
 	it("skips already-shutdown teammates", async () => {
@@ -93,10 +100,11 @@ describe("agent_end interrupt (simulated)", () => {
 		const { mate, calls } = mockTeammate("alice", "shutdown");
 		team.teammates.set("alice", mate);
 
-		await simulateAgentEnd();
+		const archived = await simulateAgentEnd();
 
 		expect(mate.status).toBe("shutdown");
 		expect(calls).toEqual([]); // no abort or dispose called
+		expect(archived).toEqual(["test-team"]); // all done → archive
 	});
 
 	it("skips error teammates", async () => {
@@ -104,48 +112,50 @@ describe("agent_end interrupt (simulated)", () => {
 		const { mate, calls } = mockTeammate("alice", "error");
 		team.teammates.set("alice", mate);
 
-		await simulateAgentEnd();
+		const archived = await simulateAgentEnd();
 
 		expect(mate.status).toBe("error");
 		expect(calls).toEqual([]);
+		expect(archived).toEqual(["test-team"]); // all done → archive
 	});
 
-	it("handles multiple teams and teammates", async () => {
+	it("preserves team when any teammate is still working", async () => {
 		const team1 = createTeamStore("team1") as Team<Teammate>;
 		const team2 = createTeamStore("team2") as Team<Teammate>;
 
-		const { mate: a1, calls: c1 } = mockTeammate("alice", "working", true);
+		const { mate: a1 } = mockTeammate("alice", "working", true);
 		const { mate: b1, calls: c2 } = mockTeammate("bob", "idle");
-		const { mate: a2, calls: c3 } = mockTeammate("carol", "working");
+		const { mate: a2 } = mockTeammate("carol", "shutdown");
 
 		team1.teammates.set("alice", a1);
 		team1.teammates.set("bob", b1);
 		team2.teammates.set("carol", a2);
 
-		await simulateAgentEnd();
+		const archived = await simulateAgentEnd();
 
-		expect(a1.status).toBe("shutdown");
-		expect(b1.status).toBe("shutdown");
-		expect(a2.status).toBe("shutdown");
-		expect(c1).toContain("abort"); // was streaming
-		expect(c2).not.toContain("abort"); // not streaming
-		expect(c3).not.toContain("abort"); // not streaming
+		// team1 has alice working → preserved
+		expect(a1.status).toBe("working");
+		expect(b1.status).toBe("idle"); // not cleaned up (team preserved)
+		expect(c2).toEqual([]); // bob not disposed
+		expect(archived).not.toContain("team1");
+
+		// team2 has no active work → archived
+		expect(archived).toContain("team2");
 	});
 
-	it("only aborts streaming teammates", async () => {
+	it("does not abort or dispose working teammates", async () => {
 		const team = freshTeam();
 		const { mate: streaming, calls: sc } = mockTeammate("alice", "working", true);
 		const { mate: notStreaming, calls: nsc } = mockTeammate("bob", "working", false);
 		team.teammates.set("alice", streaming);
 		team.teammates.set("bob", notStreaming);
 
-		await simulateAgentEnd();
+		const archived = await simulateAgentEnd();
 
-		expect(sc).toContain("abort");
-		expect(nsc).not.toContain("abort");
-		// Both should be disposed
-		expect(sc).toContain("dispose");
-		expect(nsc).toContain("dispose");
+		// Both working → team preserved, nothing cleaned up
+		expect(sc).toEqual([]);
+		expect(nsc).toEqual([]);
+		expect(archived).toEqual([]);
 	});
 });
 
