@@ -1,0 +1,412 @@
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { platform } from "node:os";
+import { dirname } from "node:path";
+import {
+	type ApiKeyCredential,
+	type AuthCredential,
+	AuthStorage,
+} from "@mariozechner/pi-coding-agent";
+
+const AUTH_FILE_MODE = 0o600;
+const AUTH_DIRECTORY_MODE = 0o700;
+const KEYCHAIN_ACCOUNT = "tallow";
+const KEYCHAIN_SERVICE_PREFIX = "tallow.api-key";
+const ENV_REFERENCE_PATTERN = /^[A-Z][A-Z0-9]*_[A-Z0-9_]*$/;
+
+/** Result of the plaintext migration run. */
+export interface MigrationResult {
+	/** Providers migrated from plaintext/op:// to secure references. */
+	readonly migratedProviders: readonly string[];
+}
+
+/** Storage outcome for persisted provider credentials. */
+export type PersistedKeyMode = "keychain" | "reference";
+
+/**
+ * Dependency boundary for storing raw API keys outside auth.json.
+ */
+export interface ApiKeySecretStore {
+	/**
+	 * Store a raw API key and return a safe reference string for auth.json.
+	 *
+	 * @param provider - Provider ID
+	 * @param apiKey - Raw provider API key
+	 * @returns Reference string to persist in auth.json
+	 */
+	store(provider: string, apiKey: string): string;
+}
+
+export interface SecureAuthStorageOptions {
+	readonly secretStore?: ApiKeySecretStore;
+}
+
+/**
+ * AuthStorage wrapper that guarantees api_key credentials are persisted as
+ * references only (keychain/opchain/env/shell), never as raw values.
+ */
+export class SecureAuthStorage extends AuthStorage {
+	readonly migration: MigrationResult;
+
+	private readonly authPathValue: string;
+	private readonly secretStore: ApiKeySecretStore;
+
+	/**
+	 * Create a secure auth storage instance and run one-time migration.
+	 *
+	 * @param authPath - Absolute auth.json path
+	 * @param options - Optional testing dependencies
+	 */
+	constructor(authPath: string, options: SecureAuthStorageOptions = {}) {
+		super(authPath);
+		this.authPathValue = authPath;
+		this.secretStore = options.secretStore ?? createApiKeySecretStore();
+
+		assertSecureAuthFilePermissions(authPath);
+		this.migration = migratePlaintextApiKeys(authPath, this.secretStore);
+		if (this.migration.migratedProviders.length > 0) {
+			super.reload();
+		}
+	}
+
+	/**
+	 * Persist a provider credential.
+	 * API keys are converted to secure references before writing to disk.
+	 *
+	 * @param provider - Provider ID
+	 * @param credential - Credential payload
+	 */
+	override set(provider: string, credential: AuthCredential): void {
+		if (credential.type !== "api_key") {
+			super.set(provider, credential);
+			assertSecureAuthFilePermissions(this.authPathValue);
+			return;
+		}
+
+		const secureCredential: ApiKeyCredential = {
+			type: "api_key",
+			key: normalizeApiKeyValue(provider, credential.key, this.secretStore),
+		};
+
+		super.set(provider, secureCredential);
+		assertSecureAuthFilePermissions(this.authPathValue);
+	}
+}
+
+/**
+ * Fail when auth.json permissions are insecure.
+ *
+ * @param authPath - Absolute auth.json path
+ * @returns void
+ * @throws {Error} When mode is not 0600 on non-Windows platforms
+ */
+export function assertSecureAuthFilePermissions(authPath: string): void {
+	if (platform() === "win32") return;
+	if (!existsSync(authPath)) return;
+
+	const mode = statSync(authPath).mode & 0o777;
+	if (mode !== AUTH_FILE_MODE) {
+		throw new Error(
+			`Insecure auth file permissions for ${authPath}: expected 0600, got 0${mode.toString(8)}.`
+		);
+	}
+}
+
+/**
+ * Persist a provider API key input (raw key or reference) into auth.json.
+ *
+ * @param authPath - Absolute auth.json path
+ * @param provider - Provider ID
+ * @param apiKeyInput - Raw key or secure reference string
+ * @param secretStore - Optional storage backend for raw keys
+ * @returns How the key was persisted (keychain or reference)
+ */
+export function persistProviderApiKey(
+	authPath: string,
+	provider: string,
+	apiKeyInput: string,
+	secretStore: ApiKeySecretStore = createApiKeySecretStore()
+): PersistedKeyMode {
+	const data = readAuthData(authPath);
+	const normalizedKey = normalizeApiKeyValue(provider, apiKeyInput, secretStore);
+	data[provider] = { type: "api_key", key: normalizedKey };
+	writeAuthData(authPath, data);
+	return isKeychainCommandReference(normalizedKey) ? "keychain" : "reference";
+}
+
+/**
+ * One-time migration from plaintext keys to secure references.
+ *
+ * @param authPath - Absolute auth.json path
+ * @param secretStore - Optional storage backend for raw keys
+ * @returns Providers whose key entries changed
+ */
+export function migratePlaintextApiKeys(
+	authPath: string,
+	secretStore: ApiKeySecretStore = createApiKeySecretStore()
+): MigrationResult {
+	if (!existsSync(authPath)) {
+		return { migratedProviders: [] };
+	}
+
+	const data = readAuthData(authPath);
+	const migratedProviders: string[] = [];
+	let changed = false;
+
+	for (const [provider, credential] of Object.entries(data)) {
+		if (!credential || credential.type !== "api_key") continue;
+		if (typeof credential.key !== "string") continue;
+
+		const normalizedKey = normalizeApiKeyValue(provider, credential.key, secretStore);
+		if (normalizedKey === credential.key) continue;
+
+		data[provider] = { type: "api_key", key: normalizedKey };
+		migratedProviders.push(provider);
+		changed = true;
+	}
+
+	if (changed) {
+		writeAuthData(authPath, data);
+	}
+
+	return { migratedProviders };
+}
+
+/**
+ * Resolve runtime API key overrides from environment variables.
+ *
+ * Supported inputs:
+ * - TALLOW_API_KEY (raw key)
+ * - TALLOW_API_KEY_REF (op:// ref, !command ref, or ENV_VAR_NAME)
+ *
+ * @returns Resolved runtime API key if present
+ * @throws {Error} When both TALLOW_API_KEY and TALLOW_API_KEY_REF are set
+ */
+export function resolveRuntimeApiKeyFromEnv(): string | undefined {
+	const runtimeKey = process.env.TALLOW_API_KEY;
+	const runtimeRef = process.env.TALLOW_API_KEY_REF;
+
+	if (runtimeKey && runtimeRef) {
+		throw new Error("Set either TALLOW_API_KEY or TALLOW_API_KEY_REF, not both.");
+	}
+	if (runtimeKey) return runtimeKey;
+	if (!runtimeRef) return undefined;
+	return resolveReferenceValue(runtimeRef);
+}
+
+/**
+ * Create an API key secret store for the current platform.
+ *
+ * @returns Platform-specific secret store
+ */
+function createApiKeySecretStore(): ApiKeySecretStore {
+	if (platform() === "darwin") {
+		return new MacOsKeychainStore();
+	}
+	return new UnsupportedSecretStore();
+}
+
+/**
+ * Normalize any API key input into a safe persisted reference.
+ *
+ * @param provider - Provider ID
+ * @param value - Raw key or reference
+ * @param secretStore - Backend for raw key storage
+ * @returns Safe value to persist in auth.json
+ */
+function normalizeApiKeyValue(
+	provider: string,
+	value: string,
+	secretStore: ApiKeySecretStore
+): string {
+	const trimmedValue = value.trim();
+	if (!trimmedValue) {
+		throw new Error(`Empty API key value for provider "${provider}".`);
+	}
+
+	if (trimmedValue.startsWith("!")) return trimmedValue;
+	if (trimmedValue.startsWith("op://")) return toOpchainCommandReference(trimmedValue);
+	if (ENV_REFERENCE_PATTERN.test(trimmedValue)) return trimmedValue;
+
+	return secretStore.store(provider, trimmedValue);
+}
+
+/**
+ * Read auth.json as provider → credential map.
+ *
+ * @param authPath - Absolute auth.json path
+ * @returns Parsed auth data or empty object
+ */
+function readAuthData(authPath: string): Record<string, AuthCredential> {
+	if (!existsSync(authPath)) return {};
+	try {
+		const parsed = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, AuthCredential>;
+		if (parsed && typeof parsed === "object") {
+			return parsed;
+		}
+		return {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Write auth.json with enforced permissions.
+ *
+ * @param authPath - Absolute auth.json path
+ * @param data - Credential map to persist
+ * @returns void
+ */
+function writeAuthData(authPath: string, data: Record<string, AuthCredential>): void {
+	const dir = dirname(authPath);
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true, mode: AUTH_DIRECTORY_MODE });
+	}
+	writeFileSync(authPath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+	chmodSync(authPath, AUTH_FILE_MODE);
+}
+
+/**
+ * Resolve a reference string to its key value.
+ *
+ * @param reference - Reference value from TALLOW_API_KEY_REF
+ * @returns Resolved key value
+ */
+function resolveReferenceValue(reference: string): string {
+	if (reference.startsWith("op://")) {
+		return runOpchainRead(reference);
+	}
+	if (reference.startsWith("!")) {
+		return runShellCommand(reference.slice(1));
+	}
+	if (ENV_REFERENCE_PATTERN.test(reference)) {
+		const envValue = process.env[reference];
+		if (!envValue) {
+			throw new Error(`Environment variable reference is not set: ${reference}`);
+		}
+		return envValue;
+	}
+	return reference;
+}
+
+/**
+ * Execute an arbitrary shell command reference.
+ *
+ * @param command - Shell command without leading `!`
+ * @returns Trimmed stdout
+ */
+function runShellCommand(command: string): string {
+	const output = execFileSync("sh", ["-c", command], {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	const value = output.trim();
+	if (!value) {
+		throw new Error("Runtime API key reference command returned an empty value.");
+	}
+	return value;
+}
+
+/**
+ * Resolve an op:// reference via opchain.
+ *
+ * @param reference - 1Password reference
+ * @returns Resolved secret value
+ */
+function runOpchainRead(reference: string): string {
+	const output = execFileSync("opchain", ["--read", "op", "read", reference], {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	const value = output.trim();
+	if (!value) {
+		throw new Error(`opchain returned an empty value for ${reference}.`);
+	}
+	return value;
+}
+
+/**
+ * Convert an op:// reference to a shell command reference.
+ *
+ * @param reference - 1Password reference
+ * @returns Shell command reference for resolveConfigValue()
+ */
+function toOpchainCommandReference(reference: string): string {
+	return `!opchain --read op read ${quoteForShell(reference)}`;
+}
+
+/**
+ * Quote a value for safe single-quoted shell usage.
+ *
+ * @param value - Raw string
+ * @returns Shell-safe single-quoted string
+ */
+function quoteForShell(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Check whether a command reference points to keychain retrieval.
+ *
+ * @param value - Persisted key reference value
+ * @returns true when value is a security find-generic-password command ref
+ */
+function isKeychainCommandReference(value: string): boolean {
+	return value.startsWith("!security find-generic-password ");
+}
+
+/**
+ * macOS keychain-backed secret store.
+ */
+class MacOsKeychainStore implements ApiKeySecretStore {
+	/**
+	 * Store a key in macOS keychain and return a command ref.
+	 *
+	 * @param provider - Provider ID
+	 * @param apiKey - Raw API key
+	 * @returns Command ref that resolves keychain value
+	 */
+	store(provider: string, apiKey: string): string {
+		const service = `${KEYCHAIN_SERVICE_PREFIX}.${provider}`;
+		execFileSync(
+			"security",
+			["add-generic-password", "-U", "-a", KEYCHAIN_ACCOUNT, "-s", service, "-w", apiKey],
+			{ stdio: "ignore" }
+		);
+
+		const readBack = execFileSync(
+			"security",
+			["find-generic-password", "-w", "-a", KEYCHAIN_ACCOUNT, "-s", service],
+			{ encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }
+		).trim();
+
+		if (readBack !== apiKey) {
+			throw new Error(`Keychain verification failed for provider "${provider}".`);
+		}
+
+		return [
+			"!security find-generic-password -w",
+			`-a ${quoteForShell(KEYCHAIN_ACCOUNT)}`,
+			`-s ${quoteForShell(service)}`,
+		].join(" ");
+	}
+}
+
+/**
+ * Secret store used on platforms without built-in keychain integration.
+ */
+class UnsupportedSecretStore implements ApiKeySecretStore {
+	/**
+	 * Reject raw key persistence when no keychain backend is available.
+	 *
+	 * @param provider - Provider ID
+	 * @param _apiKey - Raw API key
+	 * @throws {Error} Always throws
+	 */
+	store(provider: string, _apiKey: string): string {
+		throw new Error(
+			`Raw API key persistence is disabled for provider "${provider}" on ${platform()}. ` +
+				"Use an op:// reference, a !command reference, or an ENV_VAR_NAME in auth.json."
+		);
+	}
+}
