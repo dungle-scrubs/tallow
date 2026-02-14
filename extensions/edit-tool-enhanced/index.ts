@@ -110,7 +110,7 @@ export default function editLive(pi: ExtensionAPI): void {
 			};
 		},
 
-		renderResult(result, { isPartial }, theme) {
+		renderResult(result, { isPartial, expanded }, theme) {
 			const details = result.details as (EditToolDetails & EditLiveDetails) | undefined;
 			const textContent = result.content.find((c: { type: string }) => c.type === "text") as
 				| { text: string }
@@ -127,9 +127,9 @@ export default function editLive(pi: ExtensionAPI): void {
 
 			if (!details?.[EDIT_MARKER]) {
 				if (details?.diff) {
-					return renderLines(renderDiff(details.diff).split("\n"));
+					return renderLines(renderDiff(details.diff).split("\n"), { wrap: expanded });
 				}
-				return renderLines((textContent?.text ?? "").split("\n"));
+				return renderLines((textContent?.text ?? "").split("\n"), { wrap: expanded });
 			}
 
 			const finalFilename = details._filename ?? "file";
@@ -141,7 +141,7 @@ export default function editLive(pi: ExtensionAPI): void {
 
 			if (details._diff) {
 				const diffLines = renderDiff(details._diff).split("\n");
-				return renderLines([...diffLines, "", footer]);
+				return renderLines([...diffLines, "", footer], { wrap: expanded });
 			}
 
 			return renderLines([footer]);

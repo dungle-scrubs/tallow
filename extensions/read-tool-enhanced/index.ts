@@ -465,7 +465,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 			// Skill file: collapsed by default, show full on expand
 			if (details?._isSkill) {
 				if (expanded && details?._fullText) {
-					return renderLines(details._fullText.split("\n"));
+					return renderLines(details._fullText.split("\n"), { wrap: true });
 				}
 				return renderLines([]);
 			}
@@ -482,7 +482,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 
 				if (expanded && details?._fullText) {
 					const contentLines = details._fullText.split("\n").map((l) => theme.fg("dim", l));
-					return renderLines([...contentLines, footer]);
+					return renderLines([...contentLines, footer], { wrap: true });
 				}
 				return renderLines([footer]);
 			}
@@ -502,10 +502,10 @@ export default function readSummary(pi: ExtensionAPI): void {
 					: fileLink(summary);
 			const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
 
-			// Expanded: full content, then summary footer at bottom
+			// Expanded: full content with wrapping, then summary footer at bottom
 			if (expanded && details?._fullText) {
 				const contentLines = details._fullText.split("\n").map((l) => theme.fg("dim", l));
-				return renderLines([...contentLines, footer]);
+				return renderLines([...contentLines, footer], { wrap: true });
 			}
 
 			// Collapsed: summary footer only

@@ -181,14 +181,14 @@ export default function bashLive(pi: ExtensionAPI): void {
 				? theme.fg("dim", ` → ${details.fullOutputPath}`)
 				: "";
 
-			// Expanded: show all output, footer last
+			// Expanded: show all output with wrapping, footer last
 			if (expanded) {
 				const lines: string[] = [];
 				for (const line of text.split("\n")) {
 					lines.push(styleBashLine(line, (value) => theme.fg("dim", value)));
 				}
 				lines.push(theme.fg(statusColor, summary) + fullPathSuffix);
-				return renderLines(lines);
+				return renderLines(lines, { wrap: true });
 			}
 
 			// Collapsed: show tail-truncated output, footer last
