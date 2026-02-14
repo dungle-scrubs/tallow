@@ -1,4 +1,4 @@
-import type { KeybindingsManager } from "@mariozechner/pi-coding-agent";
+import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
 import { CustomEditor } from "@mariozechner/pi-coding-agent";
 import {
 	BorderedBox,
@@ -98,6 +98,7 @@ export interface TeamDashboardEditorOptions {
 	readonly getSnapshot: () => TeamDashboardSnapshot;
 	readonly onEscape?: () => void;
 	readonly onExit: () => void;
+	readonly theme: Theme;
 }
 
 /** Per-teammate activity for tool + output previews. */
@@ -514,6 +515,7 @@ export class TeamDashboardActivityStore {
  */
 export class TeamDashboardEditor extends CustomEditor {
 	private readonly options: TeamDashboardEditorOptions;
+	private readonly colorTheme: Theme;
 	private selectedNodeIndex = 0;
 	private selectedTeamIndex = 0;
 	private cardScrollOffset = 0;
@@ -524,18 +526,19 @@ export class TeamDashboardEditor extends CustomEditor {
 
 	/**
 	 * @param tui - Active TUI instance
-	 * @param theme - Editor theme from interactive mode
+	 * @param editorTheme - Editor theme from interactive mode
 	 * @param keybindings - Keybindings manager
-	 * @param options - Snapshot provider and exit callback
+	 * @param options - Snapshot provider, exit callback, and full theme
 	 */
 	constructor(
 		tui: TUI,
-		theme: EditorTheme,
+		editorTheme: EditorTheme,
 		keybindings: KeybindingsManager,
 		options: TeamDashboardEditorOptions
 	) {
-		super(tui, theme, keybindings, { paddingX: 0 });
+		super(tui, editorTheme, keybindings, { paddingX: 0 });
 		this.options = options;
+		this.colorTheme = options.theme;
 		this.disableSubmit = true;
 	}
 
@@ -680,7 +683,8 @@ export class TeamDashboardEditor extends CustomEditor {
 			rightLines,
 			split.leftWidth,
 			split.rightWidth,
-			bodyHeight
+			bodyHeight,
+			this.colorTheme
 		);
 
 		const footer = this.renderFooter(width);
@@ -743,7 +747,8 @@ export class TeamDashboardEditor extends CustomEditor {
 		width: number,
 		height: number
 	): string[] {
-		const treeLines: string[] = [colorSubdued("Teams")];
+		const t = this.colorTheme;
+		const treeLines: string[] = [t.fg("muted", "Teams")];
 		const selectedNode = nodes[this.selectedNodeIndex];
 		let selectedTreeLine = 0;
 
@@ -751,7 +756,7 @@ export class TeamDashboardEditor extends CustomEditor {
 			const team = snapshot.teams[teamIndex];
 			if (!team) continue;
 			const teamSelected = selectedNode?.kind === "team" && selectedNode.teamIndex === teamIndex;
-			const teamLine = `${team.name} ${colorSubdued(`(${team.teammates.length})`)}`;
+			const teamLine = `${team.name} ${t.fg("muted", `(${team.teammates.length})`)}`;
 			treeLines.push(colorByTeam(teamLine, team.name, teamSelected));
 			if (teamSelected) selectedTreeLine = treeLines.length - 1;
 
@@ -763,18 +768,20 @@ export class TeamDashboardEditor extends CustomEditor {
 					selectedNode.teamIndex === teamIndex &&
 					selectedNode.teammateIndex === teammateIndex;
 				const inbox =
-					teammate.unreadInboxCount > 0 ? ` ${colorYellow(`✉${teammate.unreadInboxCount}`)}` : "";
-				const referee = isRefereeRole(teammate.role) ? ` ${colorYellow("⚖")}` : "";
+					teammate.unreadInboxCount > 0
+						? ` ${t.fg("warning", `✉${teammate.unreadInboxCount}`)}`
+						: "";
+				const referee = isRefereeRole(teammate.role) ? ` ${t.fg("warning", "⚖")}` : "";
 				const memberName = colorMemberText(`@${teammate.name}`, teammate.name, teammateSelected);
 				const activityGlyph = pickActiveGlyph(teammate.name, teammate.status, this.spinnerFrames);
 				const displayStatus = getDisplayStatus(teammate, team.isComplete);
 				const teammateLine =
-					`  ${activityGlyph} ${memberName} ${formatStatusBadge(displayStatus)}` +
+					`  ${activityGlyph} ${memberName} ${formatStatusBadge(displayStatus, t)}` +
 					`${inbox}${referee}`;
 				treeLines.push(teammateLine);
 				if (teammateSelected) selectedTreeLine = treeLines.length - 1;
 
-				treeLines.push(colorSubdued(`    └─ ${shortModelId(teammate.model)}`));
+				treeLines.push(t.fg("muted", `    └─ ${shortModelId(teammate.model)}`));
 			}
 		}
 
@@ -788,7 +795,7 @@ export class TeamDashboardEditor extends CustomEditor {
 		const selectedTeam =
 			snapshot.teams[clampSelectionIndex(this.selectedTeamIndex, snapshot.teams.length)];
 		const feedLines = this.renderSidebarFeed(selectedTeam, width);
-		const separator = colorDivider("─".repeat(Math.max(3, width - 1)));
+		const separator = t.fg("borderMuted", "─".repeat(Math.max(3, width - 1)));
 		const visibleFeed = fitFeedLines(feedLines, Math.max(0, feedHeight - 1));
 		const feedBlock = padLines([separator, ...visibleFeed], feedHeight);
 		return [...visibleTree, ...feedBlock].slice(0, height);
@@ -801,13 +808,14 @@ export class TeamDashboardEditor extends CustomEditor {
 	 * @returns Feed lines
 	 */
 	private renderSidebarFeed(team: TeamDashboardTeam | undefined, width: number): string[] {
-		const lines: string[] = [colorSubdued("Feed")];
+		const t = this.colorTheme;
+		const lines: string[] = [t.fg("muted", "Feed")];
 		if (!team) {
-			lines.push(colorSubdued("(no active team)"));
+			lines.push(t.fg("muted", "(no active team)"));
 			return lines;
 		}
 		if (team.feed.length === 0) {
-			lines.push(colorSubdued("(no feed events yet)"));
+			lines.push(t.fg("muted", "(no feed events yet)"));
 			return lines;
 		}
 
@@ -815,17 +823,17 @@ export class TeamDashboardEditor extends CustomEditor {
 		const contentIndentWidth = visibleWidth(contentIndent);
 		const safeWidth = Math.max(1, width);
 		for (const entry of team.feed) {
-			const timestamp = colorDim(formatFeedTimestamp(entry.timestamp));
+			const timestamp = t.fg("dim", formatFeedTimestamp(entry.timestamp));
 			const toLabel = entry.to === "all" ? "all" : `@${entry.to}`;
 			const from = colorMemberText(`@${entry.from}`, entry.from, false);
-			const heading = `${colorSubdued("•")} ${timestamp} ${from}${colorSubdued(` → ${toLabel}`)}`;
+			const heading = `${t.fg("muted", "•")} ${timestamp} ${from}${t.fg("muted", ` → ${toLabel}`)}`;
 			lines.push(truncateToWidth(heading, safeWidth, ""));
 
 			const contentWidth = Math.max(6, safeWidth - contentIndentWidth);
 			const wrappedContent = wrapPlainText(entry.content, contentWidth);
 			for (const line of wrappedContent) {
 				lines.push(
-					truncateToWidth(`${colorSubdued(contentIndent)}${colorSubdued(line)}`, safeWidth, "")
+					truncateToWidth(`${t.fg("muted", contentIndent)}${t.fg("muted", line)}`, safeWidth, "")
 				);
 			}
 		}
@@ -846,6 +854,7 @@ export class TeamDashboardEditor extends CustomEditor {
 		height: number,
 		selectedTeammateName?: string
 	): string[] {
+		const t = this.colorTheme;
 		const team = snapshot.teams[clampSelectionIndex(this.selectedTeamIndex, snapshot.teams.length)];
 		if (!team) {
 			this.maxScrollOffset = 0;
@@ -853,8 +862,8 @@ export class TeamDashboardEditor extends CustomEditor {
 			return padLines(
 				[
 					"Team dashboard",
-					colorDim("No active teams."),
-					colorDim("Create a team with team_create and spawn teammates with team_spawn."),
+					t.fg("dim", "No active teams."),
+					t.fg("dim", "Create a team with team_create and spawn teammates with team_spawn."),
 				],
 				height
 			);
@@ -879,7 +888,7 @@ export class TeamDashboardEditor extends CustomEditor {
 			this.maxScrollOffset > 0 ? ` ${this.cardScrollOffset}/${this.maxScrollOffset}` : "";
 
 		const headingLine = truncateToWidth(
-			`${colorByTeam(heading, team.name, true)}${colorDim(scrollLabel)}`,
+			`${colorByTeam(heading, team.name, true)}${t.fg("dim", scrollLabel)}`,
 			Math.max(1, width),
 			""
 		);
@@ -901,7 +910,7 @@ export class TeamDashboardEditor extends CustomEditor {
 		if (width <= 0) return [];
 		if (team.teammates.length === 0) {
 			const empty = new BorderedBox(["No teammates yet."], {
-				borderColorFn: (str) => this.borderColor(str),
+				borderColorFn: (str) => this.colorTheme.fg("borderMuted", str),
 				title: "empty",
 			});
 			return empty.render(width);
@@ -955,30 +964,31 @@ export class TeamDashboardEditor extends CustomEditor {
 		width: number,
 		selected: boolean
 	): string[] {
+		const t = this.colorTheme;
 		const outputLines = summarizeOutput(teammate.output, DASHBOARD_OUTPUT_PREVIEW_LINES);
 		const inboxLabel =
 			teammate.unreadInboxCount > 0
-				? `${colorYellow("✉")} ${teammate.unreadInboxCount} unread`
-				: colorSubdued("inbox clear");
+				? `${t.fg("warning", "✉")} ${teammate.unreadInboxCount} unread`
+				: t.fg("muted", "inbox clear");
 		const displayStatus = getDisplayStatus(teammate, teamIsComplete);
 		const body = [
-			formatLabeledValue("status", formatStatusLabel(displayStatus)),
-			formatLabeledValue("role", teammate.role),
-			formatLabeledValue("model", teammate.model),
-			formatLabeledValue("task", teammate.currentTask ?? "—"),
-			formatLabeledValue("tool", teammate.lastTool ?? "—"),
-			formatLabeledValue("inbox", inboxLabel),
-			formatLabeledValue("tokens", formatTokenMeters(teammate)),
-			formatLabeledValue("updated", formatRelativeTimestamp(teammate.updatedAt)),
+			formatLabeledValue("status", formatStatusLabel(displayStatus, t), t),
+			formatLabeledValue("role", teammate.role, t),
+			formatLabeledValue("model", teammate.model, t),
+			formatLabeledValue("task", teammate.currentTask ?? "—", t),
+			formatLabeledValue("tool", teammate.lastTool ?? "—", t),
+			formatLabeledValue("inbox", inboxLabel, t),
+			formatLabeledValue("tokens", formatTokenMeters(teammate, t), t),
+			formatLabeledValue("updated", formatRelativeTimestamp(teammate.updatedAt), t),
 			"",
-			colorSubdued("output"),
-			...outputLines.map((line) => `  ${colorSubdued(line)}`),
+			t.fg("muted", "output"),
+			...outputLines.map((line) => `  ${t.fg("muted", line)}`),
 		];
 
 		const box = new BorderedBox(body, {
 			borderColorFn: selected
 				? (str) => colorMemberText(str, teammate.name, true)
-				: (str) => colorDivider(str),
+				: (str) => t.fg("borderMuted", str),
 			title: `@${teammate.name}`,
 			titleColorFn: (str) => colorMemberText(str, teammate.name, selected),
 		});
@@ -993,7 +1003,10 @@ export class TeamDashboardEditor extends CustomEditor {
 	private renderFooter(width: number): string {
 		const hints =
 			"Esc cancel/close · ↑/↓ j/k select · Tab/Shift+Tab team · PgUp/PgDn Ctrl+U/Ctrl+D scroll · mouse wheel scroll";
-		return padToWidth(truncateToWidth(colorDim(hints), Math.max(1, width), ""), Math.max(1, width));
+		return padToWidth(
+			truncateToWidth(this.colorTheme.fg("dim", hints), Math.max(1, width), ""),
+			Math.max(1, width)
+		);
 	}
 
 	/**
@@ -1055,40 +1068,42 @@ function getDisplayStatus(
 /**
  * Format a teammate status label with color.
  * @param status - Teammate lifecycle status
+ * @param theme - Active theme for color tokens
  * @returns Styled status label
  */
-function formatStatusLabel(status: TeamDashboardDisplayStatus): string {
+function formatStatusLabel(status: TeamDashboardDisplayStatus, theme: Theme): string {
 	switch (status) {
 		case "working":
-			return colorYellow("working");
+			return theme.fg("warning", "working");
 		case "idle":
-			return colorGreen("idle");
+			return theme.fg("success", "idle");
 		case "finished":
-			return colorGreen(`${getIcon("success")} finished`);
+			return theme.fg("success", `${getIcon("success")} finished`);
 		case "error":
-			return colorRed("error");
+			return theme.fg("error", "error");
 		case "shutdown":
-			return colorDim("shutdown");
+			return theme.fg("dim", "shutdown");
 	}
 }
 
 /**
  * Format a compact status badge for the left tree pane.
  * @param status - Teammate lifecycle status
+ * @param theme - Active theme for color tokens
  * @returns Styled compact badge
  */
-function formatStatusBadge(status: TeamDashboardDisplayStatus): string {
+function formatStatusBadge(status: TeamDashboardDisplayStatus, theme: Theme): string {
 	switch (status) {
 		case "working":
-			return colorYellow("●");
+			return theme.fg("warning", "●");
 		case "idle":
-			return colorGreen("○");
+			return theme.fg("success", "○");
 		case "finished":
-			return colorGreen(getIcon("success"));
+			return theme.fg("success", getIcon("success"));
 		case "error":
-			return colorRed("×");
+			return theme.fg("error", "×");
 		case "shutdown":
-			return colorDim("■");
+			return theme.fg("dim", "■");
 	}
 }
 
@@ -1159,29 +1174,31 @@ function colorByTeam(text: string, teamName: string, highlighted = false): strin
  * Render a label/value line with subdued label styling.
  * @param label - Left-side label text
  * @param value - Right-side value text
+ * @param theme - Active theme for color tokens
  * @returns Styled label/value line
  */
-function formatLabeledValue(label: string, value: string): string {
-	return `${colorSubdued(`${label}:`)} ${value}`;
+function formatLabeledValue(label: string, value: string, theme: Theme): string {
+	return `${theme.fg("muted", `${label}:`)} ${value}`;
 }
 
 /**
  * Render cumulative and live token meters with up/down arrows.
  * @param teammate - Teammate payload with token fields
+ * @param theme - Active theme for color tokens
  * @returns Styled token meter string
  */
-function formatTokenMeters(teammate: TeamDashboardTeammate): string {
+function formatTokenMeters(teammate: TeamDashboardTeammate, theme: Theme): string {
 	const inputTotal = formatCompactTokens(teammate.totalInputTokens);
 	const outputTotal = formatCompactTokens(teammate.totalOutputTokens);
 	const inputLive =
 		teammate.liveInputTokens > 0
-			? colorDim(` (+${formatCompactTokens(teammate.liveInputTokens)})`)
+			? theme.fg("dim", ` (+${formatCompactTokens(teammate.liveInputTokens)})`)
 			: "";
 	const outputLive =
 		teammate.liveOutputTokens > 0
-			? colorDim(` (+${formatCompactTokens(teammate.liveOutputTokens)})`)
+			? theme.fg("dim", ` (+${formatCompactTokens(teammate.liveOutputTokens)})`)
 			: "";
-	return `${colorBlue("↑")}${inputTotal}${inputLive} ${colorMagenta("↓")}${outputTotal}${outputLive}`;
+	return `${theme.fg("accent", "↑")}${inputTotal}${inputLive} ${theme.fg("muted", "↓")}${outputTotal}${outputLive}`;
 }
 
 /**
@@ -1319,6 +1336,7 @@ function fitLinesAroundSelection(
  * @param leftWidth - Left pane width
  * @param rightWidth - Right pane width
  * @param height - Output body height
+ * @param theme - Active theme for border colors
  * @returns Combined row lines
  */
 function mergeColumns(
@@ -1326,14 +1344,15 @@ function mergeColumns(
 	rightLines: readonly string[],
 	leftWidth: number,
 	rightWidth: number,
-	height: number
+	height: number,
+	theme: Theme
 ): string[] {
 	const rows = Math.max(0, height);
 	const result: string[] = [];
 	for (let row = 0; row < rows; row++) {
 		const left = padToWidth(leftLines[row] ?? "", leftWidth);
 		const right = padToWidth(rightLines[row] ?? "", rightWidth);
-		const separator = rightWidth > 0 ? colorDivider("│") : "";
+		const separator = rightWidth > 0 ? theme.fg("borderMuted", "│") : "";
 		result.push(left + separator + right);
 	}
 	return result;
@@ -1421,76 +1440,4 @@ function summarizeOutput(output: string, maxLines: number): string[] {
 		if (first) tail[0] = `… ${first}`;
 	}
 	return tail;
-}
-
-/**
- * Apply subdued gray ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorSubdued(text: string): string {
-	return `\x1b[38;5;245m${text}\x1b[39m`;
-}
-
-/**
- * Apply dim ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorDim(text: string): string {
-	return `\x1b[2m${text}\x1b[22m`;
-}
-
-/**
- * Apply green ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorGreen(text: string): string {
-	return `\x1b[32m${text}\x1b[39m`;
-}
-
-/**
- * Apply yellow ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorYellow(text: string): string {
-	return `\x1b[33m${text}\x1b[39m`;
-}
-
-/**
- * Apply red ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorRed(text: string): string {
-	return `\x1b[31m${text}\x1b[39m`;
-}
-
-/**
- * Apply blue ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorBlue(text: string): string {
-	return `\x1b[34m${text}\x1b[39m`;
-}
-
-/**
- * Apply magenta ANSI style.
- * @param text - Input text
- * @returns Styled text
- */
-function colorMagenta(text: string): string {
-	return `\x1b[35m${text}\x1b[39m`;
-}
-
-/**
- * Apply a darker subdued divider color.
- * @param text - Divider text
- * @returns Styled divider
- */
-function colorDivider(text: string): string {
-	return `\x1b[38;5;238m${text}\x1b[39m`;
 }

@@ -228,10 +228,11 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 		startDashboardTicker();
 		ctx.ui.setWorkingMessage(Loader.HIDE);
 		ctx.ui.setStatus("team-dashboard", "Team dashboard active");
-		ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+		ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 			enterDashboardViewport(tui);
-			const editor = new TeamDashboardEditor(tui, theme, keybindings, {
+			const editor = new TeamDashboardEditor(tui, editorTheme, keybindings, {
 				getSnapshot: buildDashboardSnapshot,
+				theme: ctx.ui.theme,
 				onEscape: () => {
 					if (!dashboardEnabled) return;
 					handleDashboardEscape(ctx);
