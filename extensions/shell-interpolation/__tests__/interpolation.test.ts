@@ -1,10 +1,41 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { clearAuditTrail, getAuditTrail } from "../../_shared/shell-policy.js";
 import { expandFileReferences } from "../../file-reference/index.js";
 import { expandShellCommands } from "../index.js";
 
 const CWD = process.cwd();
+const ORIG_ENABLE = process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
+const ORIG_LEGACY_ENABLE = process.env.TALLOW_SHELL_INTERPOLATION;
 
-describe("expandShellCommands", () => {
+/**
+ * Restore shell interpolation env flags after each test.
+ *
+ * @returns void
+ */
+function restoreEnv(): void {
+	if (ORIG_ENABLE === undefined) {
+		delete process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
+	} else {
+		process.env.TALLOW_ENABLE_SHELL_INTERPOLATION = ORIG_ENABLE;
+	}
+
+	if (ORIG_LEGACY_ENABLE === undefined) {
+		delete process.env.TALLOW_SHELL_INTERPOLATION;
+	} else {
+		process.env.TALLOW_SHELL_INTERPOLATION = ORIG_LEGACY_ENABLE;
+	}
+}
+
+beforeEach(() => {
+	clearAuditTrail();
+	restoreEnv();
+});
+
+afterEach(() => {
+	restoreEnv();
+});
+
+describe("expandShellCommands (utility mode)", () => {
 	test("expands single command", () => {
 		const result = expandShellCommands("Hello !`echo world`", CWD);
 		expect(result).toBe("Hello world");
@@ -21,12 +52,11 @@ describe("expandShellCommands", () => {
 	});
 
 	test("replaces failed commands with error marker", () => {
-		const result = expandShellCommands("!`__nonexistent_cmd_9999__`", CWD);
-		expect(result).toBe("[error: command failed: __nonexistent_cmd_9999__]");
+		const result = expandShellCommands("!`cat __missing_file__`", CWD);
+		expect(result).toBe("[error: command failed: cat __missing_file__]");
 	});
 
 	test("trims trailing newlines from output", () => {
-		// echo adds a trailing newline; trimEnd() should strip it
 		const result = expandShellCommands("!`echo hello`", CWD);
 		expect(result).toBe("hello");
 		expect(result.endsWith("\n")).toBe(false);
@@ -43,9 +73,6 @@ describe("expandShellCommands", () => {
 	});
 
 	test("is non-recursive (output not re-scanned)", () => {
-		// printf outputs a string containing the !`...` pattern.
-		// Octal \140 = backtick (portable across POSIX shells used in CI).
-		// The output must NOT be re-expanded — prevents injection.
 		const result = expandShellCommands("!`printf '!\\140echo injected\\140'`", CWD);
 		expect(result).toBe("!`echo injected`");
 	});
@@ -67,12 +94,64 @@ describe("expandShellCommands", () => {
 	});
 });
 
+describe("expandShellCommands (policy mode)", () => {
+	test("denies commands when interpolation is disabled", () => {
+		delete process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
+		const result = expandShellCommands("!`echo blocked`", CWD, {
+			source: "shell-interpolation",
+			enforcePolicy: true,
+		});
+		expect(result).toContain("[denied:");
+		expect(result).toContain("disabled");
+	});
+
+	test("allows safe allowlisted commands when enabled", () => {
+		process.env.TALLOW_ENABLE_SHELL_INTERPOLATION = "1";
+		const result = expandShellCommands("!`echo allowed`", CWD, {
+			source: "shell-interpolation",
+			enforcePolicy: true,
+		});
+		expect(result).toBe("allowed");
+	});
+
+	test("blocks implicit commands with forbidden shell operators", () => {
+		process.env.TALLOW_ENABLE_SHELL_INTERPOLATION = "1";
+		const result = expandShellCommands("!`echo hi && echo there`", CWD, {
+			source: "shell-interpolation",
+			enforcePolicy: true,
+		});
+		expect(result).toContain("[denied:");
+		expect(result).toContain("forbidden shell operators");
+	});
+
+	test("blocks implicit commands outside allowlist", () => {
+		process.env.TALLOW_ENABLE_SHELL_INTERPOLATION = "1";
+		const result = expandShellCommands('!`node -e "console.log(1)"`', CWD, {
+			source: "shell-interpolation",
+			enforcePolicy: true,
+		});
+		expect(result).toContain("[denied:");
+		expect(result).toContain("not allowlisted");
+	});
+
+	test("records policy and execution events in audit trail", () => {
+		process.env.TALLOW_ENABLE_SHELL_INTERPOLATION = "1";
+		expandShellCommands("!`echo audited`", CWD, {
+			source: "shell-interpolation",
+			enforcePolicy: true,
+		});
+		const trail = getAuditTrail();
+		expect(trail.length).toBeGreaterThanOrEqual(2);
+		expect(trail.some((entry) => entry.source === "shell-interpolation")).toBe(true);
+		expect(trail.some((entry) => entry.outcome === "allowed")).toBe(true);
+		expect(trail.some((entry) => entry.outcome === "executed")).toBe(true);
+	});
+});
+
 // ── Security invariant: subagent pipeline ───────────────────
 
 describe("subagent content pipeline (expandFileReferences only)", () => {
 	test("does NOT expand shell commands", async () => {
-		// Subagent tasks now only go through expandFileReferences.
-		// If an agent-generated string contains !`cmd`, it must pass through verbatim.
 		const agentTask = "Install deps with !`rm -rf /` and continue";
 		const result = await expandFileReferences(agentTask, CWD);
 
@@ -80,7 +159,6 @@ describe("subagent content pipeline (expandFileReferences only)", () => {
 	});
 
 	test("still expands @file references", async () => {
-		// expandFileReferences should still work — it's read-only and safe
 		const result = await expandFileReferences("Check @package.json for deps", CWD);
 
 		expect(result).toContain('"name"');

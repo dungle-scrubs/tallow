@@ -23,6 +23,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { isShellInterpolationEnabled } from "../_shared/shell-policy.js";
 import { expandShellCommands } from "../shell-interpolation/index.js";
 import type { FrontmatterIndex } from "./frontmatter-index.js";
 import { buildFrontmatterIndex } from "./frontmatter-index.js";
@@ -374,10 +375,14 @@ export default function (pi: ExtensionAPI): void {
 			content = substituteArguments(content, args);
 		}
 
-		// Expand shell commands at the template boundary — user-authored content
-		// is safe to expand here; by the time an agent sees this text, !`cmd`
-		// patterns are already resolved and can't be injected.
-		content = expandShellCommands(content, ctx.cwd);
+		// Expand shell commands at the template boundary only when explicitly enabled.
+		// Commands still run through implicit policy checks (allowlist/denylist + audit).
+		if (isShellInterpolationEnabled(ctx.cwd)) {
+			content = expandShellCommands(content, ctx.cwd, {
+				source: "context-fork",
+				enforcePolicy: true,
+			});
+		}
 
 		// Resolve agent config
 		let agentConfig: AgentConfig | undefined;

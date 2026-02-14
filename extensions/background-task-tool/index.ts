@@ -29,6 +29,7 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
 
 // ANSI escape codes for Catppuccin Macchiato colors (medium-dark variant)
 // Crust bg: #181926, Mauve: #c6a0f6, Text: #cad3f5
@@ -1087,6 +1088,38 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(`Running Background Tasks:\n${lines.join("\n")}`, "info");
 			}
 		},
+	});
+
+	// Enforce shell policy for bg_bash tool calls — denies denylist hits outright
+	// and prompts for confirmation on high-risk commands in interactive mode.
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName !== "bg_bash") return;
+
+		const command = (event.input as Record<string, unknown>).command as string | undefined;
+		if (!command) return;
+
+		return enforceExplicitPolicy(command, "bg_bash", ctx.cwd, ctx.hasUI, (msg) =>
+			ctx.ui.confirm("Shell Policy", msg)
+		);
+	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.toolName !== "bg_bash") return;
+		const command = (event.input as Record<string, unknown>).command;
+		if (typeof command !== "string" || command.trim().length === 0) return;
+
+		const details = (
+			event as unknown as { details?: { exitCode?: number | null; status?: string } }
+		).details;
+		recordAudit({
+			timestamp: Date.now(),
+			command: command.trim(),
+			source: "bg_bash",
+			trustLevel: "explicit",
+			cwd: ctx.cwd,
+			outcome: event.isError || details?.status === "failed" ? "failed" : "executed",
+			exitCode: details?.exitCode ?? null,
+		});
 	});
 
 	// Intercept bash commands with & backgrounding and block them

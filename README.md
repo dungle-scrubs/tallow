@@ -125,8 +125,16 @@ Expand shell commands inline with `` !`command` `` syntax:
 !`git branch --show-current`
 ```
 
-The command runs and its stdout replaces the pattern before reaching the
-agent. 5-second timeout, 1 MB max output, non-recursive.
+**Disabled by default.** Enable explicitly with either:
+
+- `TALLOW_ENABLE_SHELL_INTERPOLATION=1` (or `TALLOW_SHELL_INTERPOLATION=1`)
+- `"shellInterpolation": true` in `.tallow/settings.json` or `~/.tallow/settings.json`
+
+When enabled, only allowlisted implicit commands run. The command output
+replaces the pattern before reaching the agent. 5-second timeout, 1 MB
+max output, non-recursive. High-risk explicit shell commands require
+confirmation (`TALLOW_ALLOW_UNSAFE_SHELL=1` bypasses confirmation in
+non-interactive environments).
 
 ### Slash commands
 

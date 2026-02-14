@@ -15,3 +15,13 @@ output at any time.
 When command output already contains ANSI colors (for example,
 `git diff --color`), bash-live preserves those lines instead of
 re-wrapping them, preventing style-reset leakage across rows.
+
+## Shell policy
+
+Commands flagged as high-risk (destructive operations, elevated
+privileges, writes to system paths) prompt for user confirmation
+before execution. Set `TALLOW_ALLOW_UNSAFE_SHELL=1` to bypass
+prompts in non-interactive environments.
+
+All commands are recorded in the
+[shell audit trail](/extensions/shell-interpolation/#audit-trail).

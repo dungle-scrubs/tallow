@@ -11,9 +11,9 @@
  * and don't pollute the user's stash list.
  */
 
-import { execSync } from "node:child_process";
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { runGitCommandSync } from "../_shared/shell-policy.js";
 
 /** Result of restoring a snapshot. */
 export interface RestoreResult {
@@ -40,7 +40,6 @@ export interface SnapshotInfo {
  */
 export class SnapshotManager {
 	private readonly cwd: string;
-	private readonly sessionId: string;
 	private readonly refPrefix: string;
 
 	/**
@@ -51,7 +50,6 @@ export class SnapshotManager {
 	 */
 	constructor(cwd: string, sessionId: string) {
 		this.cwd = cwd;
-		this.sessionId = sessionId;
 		this.refPrefix = `refs/tallow/rewind/${sessionId}`;
 	}
 
@@ -61,7 +59,7 @@ export class SnapshotManager {
 	 * @returns True if inside a git repo
 	 */
 	isGitRepo(): boolean {
-		return this.git("rev-parse --is-inside-work-tree") === "true";
+		return this.git(["rev-parse", "--is-inside-work-tree"]) === "true";
 	}
 
 	/**
@@ -76,21 +74,21 @@ export class SnapshotManager {
 	 */
 	createSnapshot(turnIndex: number): string | null {
 		// Stage everything so stash create captures untracked files too
-		this.git("add -A");
+		this.git(["add", "-A"]);
 
-		const sha = this.git("stash create");
+		const sha = this.git(["stash", "create"]);
 		if (!sha) {
 			// Nothing to stash — working tree matches HEAD
 			// Unstage what we just staged
-			this.git("reset HEAD --quiet");
+			this.git(["reset", "HEAD", "--quiet"]);
 			return null;
 		}
 
 		// Unstage — we don't want to leave the index dirty
-		this.git("reset HEAD --quiet");
+		this.git(["reset", "HEAD", "--quiet"]);
 
 		const ref = `${this.refPrefix}/turn-${turnIndex}`;
-		this.git(`update-ref ${ref} ${sha}`);
+		this.git(["update-ref", ref, sha]);
 
 		return ref;
 	}
@@ -124,7 +122,7 @@ export class SnapshotManager {
 		// Use git checkout from the stash ref — this handles tracked file contents
 		if (snapshotFiles.length > 0) {
 			// Checkout the working tree state from the stash commit
-			this.git(`checkout ${ref} -- .`);
+			this.git(["checkout", ref, "--", "."]);
 		}
 
 		// Delete files that were created after the snapshot.
@@ -138,7 +136,7 @@ export class SnapshotManager {
 		}
 
 		// Clean the index so we don't leave staged changes
-		this.git("reset HEAD --quiet");
+		this.git(["reset", "HEAD", "--quiet"]);
 
 		return {
 			restored: snapshotFiles,
@@ -153,7 +151,7 @@ export class SnapshotManager {
 	 * @returns Array of snapshot info, ordered by turn index
 	 */
 	listSnapshots(): SnapshotInfo[] {
-		const raw = this.git(`for-each-ref --format="%(refname)" ${this.refPrefix}/`);
+		const raw = this.git(["for-each-ref", "--format=%(refname)", `${this.refPrefix}/`]);
 		if (!raw) return [];
 
 		return raw
@@ -163,7 +161,7 @@ export class SnapshotManager {
 			.map((ref) => {
 				const match = ref.match(/turn-(\d+)$/);
 				if (!match) return null;
-				const sha = this.git(`rev-parse ${ref}`);
+				const sha = this.git(["rev-parse", ref]);
 				if (!sha) return null;
 				return {
 					turnIndex: Number(match[1]),
@@ -181,7 +179,7 @@ export class SnapshotManager {
 	cleanup(): void {
 		const snapshots = this.listSnapshots();
 		for (const snap of snapshots) {
-			this.git(`update-ref -d ${snap.ref}`);
+			this.git(["update-ref", "-d", snap.ref]);
 		}
 	}
 
@@ -194,13 +192,13 @@ export class SnapshotManager {
 	private getSnapshotFiles(ref: string): string[] {
 		// The stash commit's tree contains the working tree state.
 		// Also check the 3rd parent (untracked files) if it exists.
-		const tracked = this.git(`ls-tree -r --name-only ${ref}`);
+		const tracked = this.git(["ls-tree", "-r", "--name-only", ref]);
 		const files = new Set(tracked ? tracked.split("\n").filter(Boolean) : []);
 
 		// Check for untracked files parent (3rd parent of stash commit)
-		const untrackedParent = this.git(`rev-parse --verify ${ref}^3 2>/dev/null`);
+		const untrackedParent = this.git(["rev-parse", "--verify", `${ref}^3`]);
 		if (untrackedParent) {
-			const untracked = this.git(`ls-tree -r --name-only ${untrackedParent}`);
+			const untracked = this.git(["ls-tree", "-r", "--name-only", untrackedParent]);
 			if (untracked) {
 				for (const f of untracked.split("\n").filter(Boolean)) {
 					files.add(f);
@@ -218,11 +216,11 @@ export class SnapshotManager {
 	 */
 	private getCurrentFiles(): string[] {
 		// Tracked files
-		const tracked = this.git("ls-files");
+		const tracked = this.git(["ls-files"]);
 		const files = new Set(tracked ? tracked.split("\n").filter(Boolean) : []);
 
 		// Untracked files (excluding ignored)
-		const untracked = this.git("ls-files --others --exclude-standard");
+		const untracked = this.git(["ls-files", "--others", "--exclude-standard"]);
 		if (untracked) {
 			for (const f of untracked.split("\n").filter(Boolean)) {
 				files.add(f);
@@ -233,21 +231,12 @@ export class SnapshotManager {
 	}
 
 	/**
-	 * Executes a git command and returns trimmed stdout.
+	 * Executes a git command via arg-array spawn and returns trimmed stdout.
 	 *
-	 * @param cmd - Git command (without 'git' prefix)
+	 * @param args - Git subcommand and arguments as an array
 	 * @returns Trimmed output, or null on failure
 	 */
-	private git(cmd: string): string | null {
-		try {
-			return execSync(`git ${cmd}`, {
-				cwd: this.cwd,
-				encoding: "utf-8",
-				timeout: 10_000,
-				stdio: ["pipe", "pipe", "pipe"],
-			}).trim();
-		} catch {
-			return null;
-		}
+	private git(args: string[]): string | null {
+		return runGitCommandSync(args, this.cwd, 10_000);
 	}
 }
