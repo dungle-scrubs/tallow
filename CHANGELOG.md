@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pi.events` contracts (`interop.v1.*`) and schema-versioned payload validation
 - **tasks:** migrate widget/agent-bar consumers to typed interop snapshots with
   load-order-safe state requests and a temporary legacy bridge adapter
+- **shell-policy:** fix confirmation handling for high-risk explicit commands,
+  treating interrupted/canceled dialogs as denied while allowing confirmed
+  commands and reducing quoted-string false positives in risk matching
 - **teams:** refine dashboard visuals with per-team personality markers, subdued divider colors,
   5-line output previews, model labels in the left tree, and live per-agent token meters
   (`↑` input, `↓` output)
