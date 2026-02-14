@@ -78,7 +78,7 @@ export class Loader extends Text {
 	}
 
 	render(width: number): string[] {
-		if (this.hidden) return [""];
+		if (this.hidden) return [];
 		return ["", ...super.render(width)];
 	}
 

@@ -42,6 +42,10 @@ export interface Terminal {
 	clearFromCursor(): void; // Clear from cursor to end of screen
 	clearScreen(): void; // Clear entire screen and move cursor to (0,0)
 
+	// Screen buffer mode
+	enterAlternateScreen(): void; // Switch to alternate screen buffer (no scrollback)
+	leaveAlternateScreen(): void; // Restore normal screen buffer and scrollback
+
 	// Title operations
 	setTitle(title: string): void; // Set terminal window title
 }
@@ -57,6 +61,7 @@ export class ProcessTerminal implements Terminal {
 	private stdinBuffer?: StdinBuffer;
 	private stdinDataHandler?: (data: string) => void;
 	private writeLogPath = process.env.PI_TUI_WRITE_LOG || "";
+	private alternateScreenActive = false;
 
 	get kittyProtocolActive(): boolean {
 		return this._kittyProtocolActive;
@@ -65,6 +70,7 @@ export class ProcessTerminal implements Terminal {
 	start(onInput: (data: string) => void, onResize: () => void): void {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
+		this.alternateScreenActive = false;
 
 		// Save previous state and enable raw mode
 		this.wasRaw = process.stdin.isRaw || false;
@@ -193,6 +199,11 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	stop(): void {
+		// Always restore normal screen buffer before exiting.
+		if (this.alternateScreenActive) {
+			this.leaveAlternateScreen();
+		}
+
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
@@ -279,6 +290,26 @@ export class ProcessTerminal implements Terminal {
 
 	clearScreen(): void {
 		process.stdout.write("\x1b[2J\x1b[H"); // Clear screen and move to home (1,1)
+	}
+
+	/**
+	 * Switch to alternate screen buffer and clear it.
+	 * @returns void
+	 */
+	enterAlternateScreen(): void {
+		if (this.alternateScreenActive) return;
+		process.stdout.write("\x1b[?1049h");
+		this.alternateScreenActive = true;
+	}
+
+	/**
+	 * Restore normal screen buffer and previous scrollback.
+	 * @returns void
+	 */
+	leaveAlternateScreen(): void {
+		if (!this.alternateScreenActive) return;
+		process.stdout.write("\x1b[?1049l");
+		this.alternateScreenActive = false;
 	}
 
 	setTitle(title: string): void {
