@@ -9,25 +9,10 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text, truncateToWidth } from "@mariozechner/pi-tui";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
-
-/** Minimal TUI component — raw render function for explicit line order. */
-interface RenderComponent {
-	render(width: number): string[];
-	invalidate(): void;
-}
-
-/** Build a raw render component from individually-styled lines. */
-function renderLines(lines: string[]): RenderComponent {
-	return {
-		render(width: number): string[] {
-			return lines.map((line) => truncateToWidth(line, width, "…"));
-		},
-		invalidate() {},
-	};
-}
+import { renderLines } from "../tool-display/index.js";
 
 const DEFAULT_MAX_BYTES = 100_000;
 const FIRECRAWL_API_URL = "https://api.firecrawl.dev/v1/scrape";
