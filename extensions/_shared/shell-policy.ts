@@ -106,25 +106,31 @@ const SOURCE_TRUST: Readonly<Record<ShellSource, ShellTrustLevel>> = {
 	"git-helper": "internal",
 };
 
+/** Prefix that identifies command boundaries for policy regex checks. */
+const COMMAND_SEGMENT_PREFIX = String.raw`(?:^|(?:&&|\|\||[;|&])\s*|\n\s*)`;
+
 /** Commands that are always denied regardless of trust level. */
 const ALWAYS_BLOCK_PATTERNS: readonly RegExp[] = [
-	/:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, // fork bomb
-	/\brm\s+-\w*r\w*\s+\/(?:\*|\s|$)/, // rm -rf / and rm -rf /*
-	/\bmkfs(\.\w+)?\b/i,
-	/\bdd\b[^\n]*\bof\s*=\s*\/dev\/(sd|hd|nvme|loop|disk)\w*/i,
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}:\\(\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:`, "i"), // fork bomb
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}rm\\s+-\\w*r\\w*\\s+/(?:\\*|\\s|$)`, "i"), // rm -rf / and rm -rf /*
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}mkfs(?:\\.\\w+)?\\b`, "i"),
+	new RegExp(
+		`${COMMAND_SEGMENT_PREFIX}dd\\b[^\\n]*\\bof\\s*=\\s*/dev/(?:sd|hd|nvme|loop|disk)\\w*`,
+		"i"
+	),
 ];
 
 /** High-risk patterns: explicit sources require confirmation. */
 const HIGH_RISK_PATTERNS: readonly RegExp[] = [
-	/\brm\s+-\w*r\w*/i,
-	/\bsudo\b/i,
-	/\bcurl\b[^\n|]*\|\s*(ba)?sh\b/i,
-	/\bwget\b[^\n|]*\|\s*(ba)?sh\b/i,
-	/\bchmod\s+-R\s+777\b/i,
-	/\bchown\s+-R\s+root\b/i,
-	/\bgit\s+reset\s+--hard\b/i,
-	/\bgit\s+clean\s+-f[dDxX]*\b/i,
-	/\bdd\s+if\s*=/i,
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}rm\\s+-\\w*r\\w*`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}sudo\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}curl\\b[^\\n|]*\\|\\s*(?:ba)?sh\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}wget\\b[^\\n|]*\\|\\s*(?:ba)?sh\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}chmod\\s+-R\\s+777\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}chown\\s+-R\\s+root\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}git\\s+reset\\s+--hard\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}git\\s+clean\\s+-f[dDxX]*\\b`, "i"),
+	new RegExp(`${COMMAND_SEGMENT_PREFIX}dd\\s+if\\s*=`, "i"),
 ];
 
 /** Implicit command allowlist (intentionally narrow). */
@@ -207,13 +213,59 @@ export function getTrustLevel(source: ShellSource): ShellTrustLevel {
 }
 
 /**
+ * Strip quoted argument content so policy regexes evaluate command structure only.
+ *
+ * This prevents false positives like `grep -r "rm -rf" .` where dangerous text
+ * appears as inert data, not an executable command segment.
+ *
+ * @param command - Raw command text
+ * @returns Command text with quoted content replaced by spaces
+ */
+function stripQuotedContent(command: string): string {
+	let activeQuote: "'" | '"' | "`" | undefined;
+	let escaped = false;
+	let output = "";
+
+	for (const char of command) {
+		if (activeQuote) {
+			if (activeQuote !== "'" && char === "\\" && !escaped) {
+				escaped = true;
+				output += " ";
+				continue;
+			}
+			if (char === activeQuote && !escaped) {
+				activeQuote = undefined;
+				output += " ";
+				continue;
+			}
+			escaped = false;
+			output += " ";
+			continue;
+		}
+
+		if (char === "'" || char === '"' || char === "`") {
+			activeQuote = char;
+			output += " ";
+			continue;
+		}
+
+		output += char;
+	}
+
+	return output;
+}
+
+/**
  * Check whether a command matches unconditional denylist patterns.
  *
  * @param command - Command text to evaluate
  * @returns True when command is always blocked
  */
 export function isDenied(command: string): boolean {
-	return ALWAYS_BLOCK_PATTERNS.some((pattern) => pattern.test(command));
+	const normalized = command.trim();
+	if (!normalized) return false;
+	const policyInput = stripQuotedContent(normalized);
+	return ALWAYS_BLOCK_PATTERNS.some((pattern) => pattern.test(policyInput));
 }
 
 /**
@@ -223,7 +275,10 @@ export function isDenied(command: string): boolean {
  * @returns True when command requires explicit confirmation for explicit sources
  */
 export function isHighRisk(command: string): boolean {
-	return HIGH_RISK_PATTERNS.some((pattern) => pattern.test(command));
+	const normalized = command.trim();
+	if (!normalized) return false;
+	const policyInput = stripQuotedContent(normalized);
+	return HIGH_RISK_PATTERNS.some((pattern) => pattern.test(policyInput));
 }
 
 /**
@@ -438,7 +493,7 @@ export async function enforceExplicitPolicy(
 	source: "bash" | "bg_bash",
 	cwd: string,
 	interactive: boolean,
-	confirmFn: (message: string) => Promise<boolean>
+	confirmFn: (message: string) => Promise<boolean | undefined>
 ): Promise<{ block: true; reason: string } | undefined> {
 	const verdict = evaluateCommand(command, source, cwd);
 	if (!verdict.allowed) {
@@ -496,10 +551,16 @@ export async function enforceExplicitPolicy(
 		return undefined;
 	}
 
-	const confirmed = await confirmFn(
-		`High-risk shell command detected:\n\n${verdict.normalizedCommand}\n\nRun this command?`
-	);
-	if (!confirmed) {
+	let confirmed: boolean | undefined;
+	try {
+		confirmed = await confirmFn(
+			`High-risk shell command detected:\n\n${verdict.normalizedCommand}\n\nRun this command?`
+		);
+	} catch (error) {
+		const reason =
+			error instanceof Error
+				? `Confirmation interrupted: ${error.message}`
+				: "Confirmation interrupted";
 		recordAudit({
 			timestamp: Date.now(),
 			command: verdict.normalizedCommand,
@@ -507,9 +568,24 @@ export async function enforceExplicitPolicy(
 			trustLevel: verdict.trustLevel,
 			cwd,
 			outcome: "blocked",
-			reason: "User denied high-risk command",
+			reason,
 		});
-		return { block: true, reason: "User denied high-risk command" };
+		return { block: true, reason };
+	}
+
+	if (confirmed !== true) {
+		const reason =
+			confirmed === false ? "User denied high-risk command" : "Confirmation was canceled";
+		recordAudit({
+			timestamp: Date.now(),
+			command: verdict.normalizedCommand,
+			source,
+			trustLevel: verdict.trustLevel,
+			cwd,
+			outcome: "blocked",
+			reason,
+		});
+		return { block: true, reason };
 	}
 
 	recordAudit({
