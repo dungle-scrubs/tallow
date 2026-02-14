@@ -1,6 +1,6 @@
 ---
 title: teams-tool
-description: "Multi-agent teams with shared task boards and direct inter-agent messaging"
+description: "Multi-agent teams with a live dashboard, shared tasks, and direct inter-agent messaging"
 ---
 
 import Gallery from '../../../components/Gallery.astro';
@@ -8,6 +8,39 @@ import Gallery from '../../../components/Gallery.astro';
 Spawn persistent teammate sessions that share an in-memory task
 board and can message each other directly — no hub-and-spoke
 bottleneck through the orchestrator.
+
+## Dashboard workspace
+
+The teams dashboard gives you a live workspace for active teams:
+a left tree for team/member navigation plus teammate status cards
+with current task, model, last tool, live token meters (↑ input,
+↓ output), and a rolling 5-line output preview. Updates stream as team state
+changes, and teammates keep running while the dashboard is open.
+
+### Toggle
+
+| Input | Action |
+|-------|--------|
+| `/team-dashboard` | Toggle dashboard on/off |
+| `/team-dashboard on` | Enable dashboard |
+| `/team-dashboard off` | Disable dashboard |
+| `/team-dashboard status` | Show dashboard status |
+| <kbd>Ctrl+X</kbd> | Toggle dashboard on/off |
+
+### Controls
+
+| Key | Action |
+|-----|--------|
+| <kbd>↑</kbd> / <kbd>↓</kbd> or <kbd>j</kbd> / <kbd>k</kbd> | Move selection in the left tree |
+| <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> | Cycle teams |
+| <kbd>PgUp</kbd> / <kbd>PgDn</kbd> | Scroll teammate cards by page |
+| <kbd>Ctrl+U</kbd> / <kbd>Ctrl+D</kbd> | Scroll teammate cards by half page |
+| Mouse wheel / trackpad scroll | Scroll teammate cards |
+| <kbd>Esc</kbd> | Close dashboard and return to chat |
+
+> **V1 note:** The dashboard is currently in-process only.
+> It reflects the current tallow runtime and does not preserve
+> UI focus/selection state across restarts.
 
 ## Tools
 

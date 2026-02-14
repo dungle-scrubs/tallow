@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **teams:** add dashboard workspace with live task/teammate/message view,
+  `/team-dashboard` command, `Ctrl+X` toggle, and keyboard navigation controls
+
+### Changed
+
+- **teams:** refine dashboard visuals with per-team personality markers, subdued divider colors,
+  5-line output previews, model labels in the left tree, and live per-agent token meters
+  (`↑` input, `↓` output)
+- **teams:** drop `Ctrl+Y` dashboard toggle to avoid conflict with editor yank
+- **docs:** sync keyboard shortcut reference for teams dashboard toggles and controls in extension docs
+
 ## [0.4.0](https://github.com/dungle-scrubs/tallow/compare/v0.3.0...v0.4.0) (2026-02-13)
 
 
