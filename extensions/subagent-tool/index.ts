@@ -12,7 +12,7 @@
  * Uses JSON mode to capture structured output from subagents.
  */
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -42,6 +42,29 @@ import { expandFileReferences } from "../file-reference/index.js";
 /** Scope for agent discovery */
 type AgentScope = "user" | "project" | "both";
 
+/**
+ * Resolve the project root directory using git, falling back to cwd.
+ *
+ * Uses `git rev-parse --show-toplevel` to find the repository root.
+ * If git is unavailable or the directory isn't in a repo, returns cwd.
+ *
+ * @param cwd - Current working directory
+ * @returns Absolute path to the project root
+ */
+export function resolveProjectRoot(cwd: string): string {
+	try {
+		const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+			cwd,
+			encoding: "utf-8",
+			timeout: 3000,
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return root || cwd;
+	} catch {
+		return cwd;
+	}
+}
+
 /** Configuration for a discovered agent */
 interface AgentConfig {
 	name: string;
@@ -59,10 +82,29 @@ interface AgentConfig {
 	filePath: string;
 }
 
+/**
+ * Configurable defaults for subagent execution.
+ *
+ * Loaded from `_defaults.md` files in agent directories.
+ * Applied when neither the per-call params nor agent frontmatter
+ * specify a value.
+ */
+interface AgentDefaults {
+	tools?: string[];
+	disallowedTools?: string[];
+	maxTurns?: number;
+	mcpServers?: string[];
+	/** How to handle missing agent names. Default: "match-or-ephemeral" */
+	missingAgentBehavior?: "match-or-ephemeral" | "error";
+	/** Agent name to use as fallback when no match found */
+	fallbackAgent?: string;
+}
+
 /** Result of agent discovery */
 interface AgentDiscoveryResult {
 	agents: AgentConfig[];
 	projectAgentsDir: string | null;
+	defaults: AgentDefaults;
 }
 
 /**
@@ -197,30 +239,26 @@ function isDirectory(p: string): boolean {
 }
 
 /**
- * Finds the nearest project agents directories by traversing up from cwd.
- * Checks both .tallow/agents and .claude/agents at each level.
+ * Finds project agent directories at the project root.
+ *
+ * Anchored to the git root (or cwd fallback) — no ancestor walk.
+ * Checks both .tallow/agents and .claude/agents.
  * Returns 0-2 paths; .claude/ first so .tallow/ wins via last-wins in the map.
  *
- * @param cwd - Starting directory
- * @returns Array of project agent directory paths found at the nearest level
+ * @param cwd - Current working directory (used to resolve project root)
+ * @returns Array of project agent directory paths at the project root
  */
-function findNearestProjectAgentsDirs(cwd: string): string[] {
-	let currentDir = cwd;
-	while (true) {
-		const tallowDir = path.join(currentDir, ".tallow", "agents");
-		const claudeDir = path.join(currentDir, ".claude", "agents");
-		const hasTallow = isDirectory(tallowDir);
-		const hasClaude = isDirectory(claudeDir);
-		if (hasTallow || hasClaude) {
-			const dirs: string[] = [];
-			if (hasClaude) dirs.push(claudeDir);
-			if (hasTallow) dirs.push(tallowDir);
-			return dirs;
-		}
-		const parentDir = path.dirname(currentDir);
-		if (parentDir === currentDir) return [];
-		currentDir = parentDir;
-	}
+function findProjectAgentsDirs(cwd: string): string[] {
+	const root = resolveProjectRoot(cwd);
+	const tallowDir = path.join(root, ".tallow", "agents");
+	const claudeDir = path.join(root, ".claude", "agents");
+	const hasTallow = isDirectory(tallowDir);
+	const hasClaude = isDirectory(claudeDir);
+	if (!hasTallow && !hasClaude) return [];
+	const dirs: string[] = [];
+	if (hasClaude) dirs.push(claudeDir);
+	if (hasTallow) dirs.push(tallowDir);
+	return dirs;
 }
 
 /**
@@ -232,11 +270,90 @@ function findNearestProjectAgentsDirs(cwd: string): string[] {
  * @param scope - Which agent sources to include (user, project, or both)
  * @returns Discovery result with agents and project directory path
  */
+/**
+ * Load defaults from a `_defaults.md` file in an agent directory.
+ *
+ * Only parses YAML frontmatter — the body is ignored.
+ * Returns undefined if the file doesn't exist or can't be parsed.
+ *
+ * @param dir - Agent directory path
+ * @returns Parsed defaults, or undefined
+ */
+function loadDefaultsFromDir(dir: string): AgentDefaults | undefined {
+	const filePath = path.join(dir, "_defaults.md");
+	if (!fs.existsSync(filePath)) return undefined;
+
+	let content: string;
+	try {
+		content = fs.readFileSync(filePath, "utf-8");
+	} catch {
+		return undefined;
+	}
+
+	const { frontmatter } = parseFrontmatter<Record<string, unknown>>(content);
+	if (!frontmatter || Object.keys(frontmatter).length === 0) return undefined;
+
+	const defaults: AgentDefaults = {};
+
+	if (typeof frontmatter.tools === "string") {
+		defaults.tools = (frontmatter.tools as string)
+			.split(",")
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
+	if (typeof frontmatter.disallowedTools === "string") {
+		defaults.disallowedTools = (frontmatter.disallowedTools as string)
+			.split(",")
+			.map((t) => t.trim())
+			.filter(Boolean);
+	}
+	if (frontmatter.maxTurns != null) {
+		const n = Number(frontmatter.maxTurns);
+		if (n > 0) defaults.maxTurns = n;
+	}
+	if (typeof frontmatter.mcpServers === "string") {
+		defaults.mcpServers = (frontmatter.mcpServers as string)
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+	}
+	if (frontmatter.missingAgentBehavior === "error") {
+		defaults.missingAgentBehavior = "error";
+	}
+	if (typeof frontmatter.fallbackAgent === "string" && frontmatter.fallbackAgent.trim()) {
+		defaults.fallbackAgent = frontmatter.fallbackAgent.trim();
+	}
+
+	return Object.keys(defaults).length > 0 ? defaults : undefined;
+}
+
+/**
+ * Merge multiple defaults sources according to precedence.
+ *
+ * Later sources override earlier ones for scalar values.
+ * Array values (tools, mcpServers) use the last non-undefined source.
+ *
+ * @param sources - Defaults sources in precedence order (last wins)
+ * @returns Merged defaults
+ */
+function mergeDefaults(...sources: (AgentDefaults | undefined)[]): AgentDefaults {
+	const merged: AgentDefaults = {};
+	for (const src of sources) {
+		if (!src) continue;
+		if (src.tools) merged.tools = src.tools;
+		if (src.disallowedTools) merged.disallowedTools = src.disallowedTools;
+		if (src.maxTurns != null) merged.maxTurns = src.maxTurns;
+		if (src.mcpServers) merged.mcpServers = src.mcpServers;
+		if (src.missingAgentBehavior) merged.missingAgentBehavior = src.missingAgentBehavior;
+		if (src.fallbackAgent) merged.fallbackAgent = src.fallbackAgent;
+	}
+	return merged;
+}
+
 function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 	const userTallowDir = path.join(os.homedir(), ".tallow", "agents");
 	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
-	const projectDirs = findNearestProjectAgentsDirs(cwd);
-	// Use the last dir (.tallow/ preferred) for confirmation dialog
+	const projectDirs = findProjectAgentsDirs(cwd);
 	const projectAgentsDir = projectDirs.at(-1) ?? null;
 
 	// Load in priority order: .claude/ first so .tallow/ wins via last-wins
@@ -263,7 +380,16 @@ function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 		for (const agent of projectAgents) agentMap.set(agent.name, agent);
 	}
 
-	return { agents: Array.from(agentMap.values()), projectAgentsDir };
+	// Load defaults: user _defaults.md < project _defaults.md (last wins)
+	const userDefaults =
+		scope !== "project"
+			? mergeDefaults(loadDefaultsFromDir(userClaudeDir), loadDefaultsFromDir(userTallowDir))
+			: undefined;
+	const projectDefaults =
+		scope !== "user" ? mergeDefaults(...projectDirs.map(loadDefaultsFromDir)) : undefined;
+	const defaults = mergeDefaults(userDefaults, projectDefaults);
+
+	return { agents: Array.from(agentMap.values()), projectAgentsDir, defaults };
 }
 
 const MAX_PARALLEL_TASKS = 8;
@@ -290,6 +416,94 @@ function computeEffectiveTools(
 	const base = tools ?? PI_BUILTIN_TOOLS;
 	const deny = new Set(disallowedTools);
 	return base.filter((t) => !deny.has(t));
+}
+
+/** Result of agent resolution — always produces an agent config. */
+interface ResolvedAgent {
+	agent: AgentConfig;
+	/** How the agent was resolved */
+	resolution: "exact" | "match" | "ephemeral";
+	/** Original requested name (for transparency in output) */
+	requestedName: string;
+}
+
+/**
+ * Score how well an agent name matches a requested name.
+ *
+ * Uses a simple heuristic: exact match = Infinity, prefix/suffix/contains
+ * get decreasing scores. Returns 0 for no meaningful match.
+ *
+ * @param agentName - Discovered agent's name
+ * @param requestedName - Name the caller asked for
+ * @returns Match score (higher = better, 0 = no match)
+ */
+function scoreAgentMatch(agentName: string, requestedName: string): number {
+	const a = agentName.toLowerCase();
+	const r = requestedName.toLowerCase();
+	if (a === r) return Infinity;
+	// Prefix match (e.g. "work" → "worker")
+	if (a.startsWith(r)) return 100 + r.length;
+	if (r.startsWith(a)) return 90 + a.length;
+	// Contains match
+	if (a.includes(r)) return 50 + r.length;
+	if (r.includes(a)) return 40 + a.length;
+	return 0;
+}
+
+/** Minimum score threshold for best-match to be accepted over ephemeral. */
+const MATCH_THRESHOLD = 40;
+
+/**
+ * Resolve an agent name to a runnable configuration.
+ *
+ * Precedence:
+ * 1. Exact name match among discovered agents
+ * 2. Best fuzzy match above confidence threshold
+ * 3. Ephemeral agent with built-in defaults
+ *
+ * @param agentName - Requested agent name
+ * @param agents - Discovered agent configurations
+ * @param defaults - Optional defaults to apply to ephemeral agents
+ * @returns Resolved agent configuration with resolution metadata
+ */
+function resolveAgentForExecution(
+	agentName: string,
+	agents: AgentConfig[],
+	defaults?: AgentDefaults
+): ResolvedAgent {
+	// 1. Exact match
+	const exact = agents.find((a) => a.name === agentName);
+	if (exact) return { agent: exact, resolution: "exact", requestedName: agentName };
+
+	// 2. Best fuzzy match
+	let bestScore = 0;
+	let bestAgent: AgentConfig | undefined;
+	for (const a of agents) {
+		const score = scoreAgentMatch(a.name, agentName);
+		if (score > bestScore) {
+			bestScore = score;
+			bestAgent = a;
+		}
+	}
+	if (bestAgent && bestScore >= MATCH_THRESHOLD) {
+		return { agent: bestAgent, resolution: "match", requestedName: agentName };
+	}
+
+	// 3. Ephemeral agent with sane defaults
+	const ephemeral: AgentConfig = {
+		name: agentName,
+		description: `Ephemeral agent for task delegation`,
+		tools: defaults?.tools,
+		disallowedTools: defaults?.disallowedTools,
+		maxTurns: defaults?.maxTurns,
+		mcpServers: defaults?.mcpServers,
+		systemPrompt:
+			`You are ${agentName}, a specialized subagent. ` +
+			"Complete the delegated task thoroughly and return your results.",
+		source: "user",
+		filePath: "",
+	};
+	return { agent: ephemeral, resolution: "ephemeral", requestedName: agentName };
 }
 
 /**
@@ -663,7 +877,7 @@ interface UsageStats {
 /** Result from a single subagent execution. */
 interface SingleResult {
 	agent: string;
-	agentSource: "user" | "project" | "unknown";
+	agentSource: "user" | "project" | "ephemeral" | "unknown";
 	task: string;
 	exitCode: number;
 	messages: Message[];
@@ -789,11 +1003,15 @@ async function spawnBackgroundSubagent(
 	cwd: string | undefined,
 	piEvents?: ExtensionAPI["events"],
 	session?: string,
-	modelOverride?: string
+	modelOverride?: string,
+	parentModelId?: string,
+	defaults?: AgentDefaults
 ): Promise<string | null> {
-	const baseAgent = agents.find((a) => a.name === agentName);
-	const agent = baseAgent && modelOverride ? { ...baseAgent, model: modelOverride } : baseAgent;
-	if (!agent) return null;
+	const resolved = resolveAgentForExecution(agentName, agents, defaults);
+	// Model precedence: per-call override > agent frontmatter > parent session model
+	const effectiveModel = modelOverride ?? resolved.agent.model ?? parentModelId;
+	const agent = { ...resolved.agent, model: effectiveModel };
+	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const effectiveCwd = cwd ?? defaultCwd;
 
 	const args: string[] = session
@@ -856,7 +1074,7 @@ async function spawnBackgroundSubagent(
 	} satisfies SubagentStartEvent);
 	const result: SingleResult = {
 		agent: agentName,
-		agentSource: agent.source,
+		agentSource,
 		task,
 		exitCode: -1,
 		messages: [],
@@ -1033,33 +1251,17 @@ async function runSingleAgent(
 	makeDetails: (results: SingleResult[]) => SubagentDetails,
 	piEvents?: ExtensionAPI["events"],
 	session?: string,
-	modelOverride?: string
+	modelOverride?: string,
+	parentModelId?: string,
+	defaults?: AgentDefaults
 ): Promise<SingleResult> {
-	const baseAgent = agents.find((a) => a.name === agentName);
-	const agent = baseAgent && modelOverride ? { ...baseAgent, model: modelOverride } : baseAgent;
+	const resolved = resolveAgentForExecution(agentName, agents, defaults);
+	// Model precedence: per-call override > agent frontmatter > parent session model
+	const effectiveModel = modelOverride ?? resolved.agent.model ?? parentModelId;
+	const agent = { ...resolved.agent, model: effectiveModel };
+	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const taskId = `fg_${generateId()}`;
 	const effectiveCwd = cwd ?? defaultCwd;
-
-	if (!agent) {
-		return {
-			agent: agentName,
-			agentSource: "unknown",
-			task,
-			exitCode: 1,
-			messages: [],
-			stderr: `Unknown agent: ${agentName}`,
-			usage: {
-				input: 0,
-				output: 0,
-				cacheRead: 0,
-				cacheWrite: 0,
-				cost: 0,
-				contextTokens: 0,
-				turns: 0,
-			},
-			step,
-		};
-	}
 
 	registerForegroundSubagent(taskId, agentName, task, Date.now(), piEvents);
 
@@ -1088,7 +1290,7 @@ async function runSingleAgent(
 
 	const currentResult: SingleResult = {
 		agent: agentName,
-		agentSource: agent.source,
+		agentSource,
 		task,
 		exitCode: -1, // -1 = still running, will be set to actual exit code when done
 		messages: [],
@@ -1326,7 +1528,9 @@ const SubagentParams = Type.Object({
 	agentScope: Type.Optional(AgentScopeSchema),
 	confirmProjectAgents: Type.Optional(
 		Type.Boolean({
-			description: "Prompt before running project-local agents. Default: true.",
+			description:
+				"Deprecated — project-local agents now run without confirmation. " +
+				"Kept for backward compatibility; ignored at runtime.",
 			default: true,
 		})
 	),
@@ -1449,7 +1653,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
-		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To enable project-local agents in .tallow/agents, set agentScope: "both" (or "project").
+		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To include project-local agents, set agentScope: "both". Subagents inherit the parent model unless overridden. Missing agent names recover gracefully via best-match or ephemeral fallback.
 
 WHEN TO USE PARALLEL:
 - Tasks are independent (don't depend on each other)
@@ -1473,6 +1677,9 @@ WHEN NOT TO USE SUBAGENTS:
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			uiContext = ctx;
+
+			// Resolve parent model once for inheritance
+			const parentModelId = ctx.model?.id;
 
 			// Enforce agent type restrictions from parent agent
 			const allowedTypes = process.env.PI_ALLOWED_AGENT_TYPES?.split(",").filter(Boolean);
@@ -1503,7 +1710,7 @@ WHEN NOT TO USE SUBAGENTS:
 			const agentScope: AgentScope = params.agentScope ?? "user";
 			const discovery = discoverAgents(ctx.cwd, agentScope);
 			const agents = discovery.agents;
-			const confirmProjectAgents = params.confirmProjectAgents ?? true;
+			const defaults = discovery.defaults;
 
 			// Coerce tasks/centipede: LLMs sometimes pass arrays as JSON strings,
 			// which causes .length to return character count instead of element count.
@@ -1539,37 +1746,6 @@ WHEN NOT TO USE SUBAGENTS:
 					],
 					details: makeDetails("single")([]),
 				};
-			}
-
-			if (
-				(agentScope === "project" || agentScope === "both") &&
-				confirmProjectAgents &&
-				ctx.hasUI
-			) {
-				const requestedAgentNames = new Set<string>();
-				if (centipede) for (const step of centipede) requestedAgentNames.add(step.agent);
-				if (tasks) for (const t of tasks) requestedAgentNames.add(t.agent);
-				if (params.agent) requestedAgentNames.add(params.agent);
-
-				const projectAgentsRequested = Array.from(requestedAgentNames)
-					.map((name) => agents.find((a) => a.name === name))
-					.filter((a): a is AgentConfig => a?.source === "project");
-
-				if (projectAgentsRequested.length > 0) {
-					const names = projectAgentsRequested.map((a) => a.name).join(", ");
-					const dir = discovery.projectAgentsDir ?? "(unknown)";
-					const ok = await ctx.ui.confirm(
-						"Run project-local agents?",
-						`Agents: ${names}\nSource: ${dir}\n\nProject agents are repo-controlled. Only continue for trusted repositories.`
-					);
-					if (!ok)
-						return {
-							content: [{ type: "text", text: "Canceled: project-local agents not approved." }],
-							details: makeDetails(hasCentipede ? "centipede" : hasTasks ? "parallel" : "single")(
-								[]
-							),
-						};
-				}
 			}
 
 			if (centipede && centipede.length > 0) {
@@ -1641,7 +1817,9 @@ WHEN NOT TO USE SUBAGENTS:
 							mkCentipedeDetails,
 							pi.events,
 							undefined,
-							step.model
+							step.model,
+							parentModelId,
+							defaults
 						);
 						results.push(result);
 						latestPartialResult = undefined;
@@ -1711,7 +1889,9 @@ WHEN NOT TO USE SUBAGENTS:
 							t.cwd,
 							pi.events,
 							undefined,
-							(t as { model?: string }).model
+							(t as { model?: string }).model,
+							parentModelId,
+							defaults
 						);
 						if (id) taskIds.push(id);
 					}
@@ -1806,7 +1986,9 @@ WHEN NOT TO USE SUBAGENTS:
 							makeDetails("parallel"),
 							pi.events,
 							undefined,
-							(t as { model?: string }).model
+							(t as { model?: string }).model,
+							parentModelId,
+							defaults
 						);
 						allResults[index] = result;
 						return result;
@@ -1849,7 +2031,9 @@ WHEN NOT TO USE SUBAGENTS:
 						params.cwd,
 						pi.events,
 						params.session,
-						params.model
+						params.model,
+						parentModelId,
+						defaults
 					);
 					if (id) {
 						return {
@@ -1909,7 +2093,9 @@ WHEN NOT TO USE SUBAGENTS:
 					makeDetails("single"),
 					pi.events,
 					params.session,
-					params.model
+					params.model,
+					parentModelId,
+					defaults
 				);
 
 				if (singleSpinnerInterval) {
