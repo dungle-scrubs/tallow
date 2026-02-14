@@ -11,7 +11,7 @@
  * Other extensions import the named exports.
  */
 import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth } from "@mariozechner/pi-tui";
+import { truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 
 /**
  * Minimal TUI component interface for explicit line-order control.
@@ -39,15 +39,29 @@ export function sanitizeTabs(text: string): string {
 	return text.replace(/\t/g, "   ");
 }
 
+/** Options for {@link renderLines}. */
+export interface RenderLinesOptions {
+	/** When true, wrap long lines instead of truncating. Default: false. */
+	wrap?: boolean;
+}
+
 /**
  * Build a render component from pre-styled lines.
- * Each line is truncated to the available width at render time.
- * Tabs are replaced with spaces to prevent background rendering artifacts.
+ *
+ * By default each line is truncated to the available width at render time.
+ * When `wrap` is true, long lines are soft-wrapped (ANSI-aware) instead.
+ * Tabs are always replaced with spaces to prevent background rendering artifacts.
+ *
  * @param lines - Individually-styled lines in display order (footer last)
+ * @param options - Optional rendering behavior overrides
+ * @returns A render component that produces width-fitted lines
  */
-export function renderLines(lines: string[]): RenderComponent {
+export function renderLines(lines: string[], options?: RenderLinesOptions): RenderComponent {
 	return {
 		render(width: number): string[] {
+			if (options?.wrap) {
+				return lines.flatMap((line) => wrapTextWithAnsi(sanitizeTabs(line), width));
+			}
 			return lines.map((line) => truncateToWidth(sanitizeTabs(line), width, "…"));
 		},
 		invalidate() {},

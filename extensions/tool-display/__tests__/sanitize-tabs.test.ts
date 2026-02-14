@@ -33,4 +33,25 @@ describe("renderLines", () => {
 		const lines = component.render(80);
 		expect(lines[0]).toBe("   code();");
 	});
+
+	it("truncates lines by default", () => {
+		const component = renderLines(["a".repeat(100)]);
+		const lines = component.render(50);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("…");
+	});
+
+	it("wraps lines when wrap option is true", () => {
+		const component = renderLines(["a".repeat(100)], { wrap: true });
+		const lines = component.render(50);
+		expect(lines.length).toBeGreaterThan(1);
+		expect(lines.join("")).not.toContain("…");
+	});
+
+	it("behaves identically with no options as without options arg", () => {
+		const line = "a".repeat(100);
+		const withoutOpts = renderLines([line]).render(50);
+		const withEmptyOpts = renderLines([line], {}).render(50);
+		expect(withoutOpts).toEqual(withEmptyOpts);
+	});
 });
