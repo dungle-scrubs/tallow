@@ -36,6 +36,21 @@ declare global {
 				close(): void;
 		  }
 		| undefined;
+
+	// shell-policy shared module (audit trail persists across extension reloads)
+	var __piShellAuditTrail:
+		| Array<{
+				readonly timestamp: number;
+				readonly command: string;
+				readonly source: string;
+				readonly trustLevel: "explicit" | "implicit" | "internal";
+				readonly cwd: string;
+				readonly outcome: "allowed" | "blocked" | "confirmed" | "bypassed" | "executed" | "failed";
+				readonly reason?: string;
+				readonly exitCode?: number | null;
+				readonly durationMs?: number;
+		  }>
+		| undefined;
 }
 
 export {};
