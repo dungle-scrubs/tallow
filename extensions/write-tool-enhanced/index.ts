@@ -50,7 +50,7 @@ export default function writePreview(pi: ExtensionAPI): void {
 			};
 		},
 
-		renderResult(result, { isPartial }, theme) {
+		renderResult(result, { isPartial, expanded }, theme) {
 			const details = result.details as WritePreviewDetails | undefined;
 
 			if (isPartial) {
@@ -74,7 +74,7 @@ export default function writePreview(pi: ExtensionAPI): void {
 			const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
 			const body = details._content ?? "";
 			const contentLines = body.split("\n").map((line) => theme.fg("dim", line));
-			return renderLines([...contentLines, "", footer]);
+			return renderLines([...contentLines, "", footer], { wrap: expanded });
 		},
 	});
 }
