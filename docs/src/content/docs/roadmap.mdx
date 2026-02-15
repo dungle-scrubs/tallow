@@ -132,7 +132,7 @@ project level.
   <div class="roadmap-header">
     <h3>Complexity Tiers</h3>
     <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
-    <span class="roadmap-badge" data-status="planned">Planned</span>
+    <span class="roadmap-badge" data-status="mostly-shipped">Mostly shipped</span>
   </div>
   <div class="roadmap-description">
 
@@ -140,15 +140,23 @@ Basic model resolution already shipped via the [context-fork](/extensions/contex
 extension — `model: sonnet` resolves to the right Anthropic model ID. What's
 next: intent-based tiers that work across providers.
 
-Define `complexity: light`, `medium`, or `heavy` in agent/command frontmatter.
-Users map their available models to tiers in settings. A `scout` agent that says
-"use something fast and cheap" works the same whether you're on Anthropic, OpenAI,
-or Google — the tier resolves to the right model for your setup.
+**Shipped: routing keywords and auto-routing.** Agent frontmatter now supports
+`model: auto-cheap`, `auto-balanced`, and `auto-premium` — intent-based routing
+that picks the best model from available providers based on cost preference. The
+task classifier determines type (code/vision/text) and complexity (1-5), then the
+model matrix ranks candidates. Per-call hints (`costPreference`, `taskType`,
+`complexity`) let the parent LLM override routing for individual invocations.
+
+The bundled `explore` agent uses `auto-cheap` for economical codebase discovery.
+See [subagent-tool, routing keywords](/extensions/subagent-tool/#routing-keywords).
+
+**Remaining:** user-facing tier mapping in settings (let users define which of
+their models map to `light`/`medium`/`heavy` tiers independently of the matrix).
 
   </div>
   <div class="roadmap-meta">
     <span class="roadmap-meta-item"><strong>Config:</strong> settings.json or models.json</span>
-    <span class="roadmap-meta-item"><strong>Shipped:</strong> Static model aliases (sonnet, haiku, opus) via context-fork</span>
+    <span class="roadmap-meta-item"><strong>Shipped:</strong> Routing keywords (auto-cheap/premium), task classifier, model matrix, per-call hints, bundled explore agent</span>
   </div>
 </div>
 

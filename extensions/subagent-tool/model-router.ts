@@ -197,6 +197,34 @@ export function selectModels(
 	return candidates.map((c) => c.resolved);
 }
 
+// ─── Routing Keywords ────────────────────────────────────────────────────────
+
+/**
+ * Maps routing keyword strings from agent frontmatter to cost preferences.
+ *
+ * When an agent's `model` field is set to one of these keywords instead of
+ * an actual model name, the routing engine skips fuzzy model resolution and
+ * instead forces auto-routing with the corresponding cost preference.
+ *
+ * Examples: `model: auto-cheap` → eco routing, `model: auto-premium` → premium routing.
+ */
+const ROUTING_KEYWORDS: ReadonlyMap<string, CostPreference> = new Map([
+	["auto-cheap", "eco"],
+	["auto-eco", "eco"],
+	["auto-balanced", "balanced"],
+	["auto-premium", "premium"],
+]);
+
+/**
+ * Parse a model string as a routing keyword.
+ *
+ * @param model - Model string from agent frontmatter
+ * @returns Cost preference if the string is a routing keyword, undefined otherwise
+ */
+export function parseRoutingKeyword(model: string): CostPreference | undefined {
+	return ROUTING_KEYWORDS.get(model.toLowerCase().trim());
+}
+
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
 /**
@@ -255,10 +283,19 @@ export async function routeModel(
 		};
 	}
 
-	// 2. Agent frontmatter model — warn but fall through (don't block the agent)
+	// 2. Agent frontmatter model — resolve as routing keyword, fuzzy match, or fall through
+	let routingKeywordCostPref: CostPreference | undefined;
 	if (agentModel) {
-		const resolved = resolveModelFuzzy(agentModel);
-		if (resolved) return { ok: true, model: resolved, fallbacks: [], reason: "agent-frontmatter" };
+		const keyword = parseRoutingKeyword(agentModel);
+		if (keyword) {
+			// Routing keyword (e.g. "auto-cheap") — skip fuzzy resolution,
+			// force auto-routing with the keyword's cost preference
+			routingKeywordCostPref = keyword;
+		} else {
+			const resolved = resolveModelFuzzy(agentModel);
+			if (resolved)
+				return { ok: true, model: resolved, fallbacks: [], reason: "agent-frontmatter" };
+		}
 	}
 
 	const config = loadRoutingConfig();
@@ -266,13 +303,15 @@ export async function routeModel(
 		? resolveFallback(parentModelId)
 		: { provider: "unknown", id: "unknown", displayName: "unknown" };
 
-	// 3. Routing disabled → inherit parent model
-	if (!config.enabled) {
+	// 3. Routing disabled → inherit parent model (unless routing keyword forces auto-routing)
+	if (!config.enabled && !routingKeywordCostPref) {
 		return { ok: true, model: fallback, fallbacks: [], reason: "fallback" };
 	}
 
 	// 4. Auto-route: classify (or use hints), then select ranked candidates
-	const effectiveCostPref = hints?.costPreference ?? config.costPreference;
+	// Priority: per-call hints > routing keyword > global config
+	const effectiveCostPref =
+		hints?.costPreference ?? routingKeywordCostPref ?? config.costPreference;
 
 	// Build classification — use hints to skip/override classifier where provided
 	let classification: ClassificationResult;

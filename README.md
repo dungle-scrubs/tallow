@@ -23,7 +23,7 @@
   <img src="assets/screenshot.jpg" alt="Tallow multi-agent team coordinating a docs audit" />
 </p>
 
-45 extensions, 34 themes, 8 slash commands, and 8 specialized agents.
+45 extensions, 34 themes, 8 slash commands, and 9 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
 ## Features
@@ -31,7 +31,7 @@ Install only what you need — the interactive installer lets you pick.
 - **45 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
 - **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
 - **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
-- **8 specialized agents** — architect, debug, planner, refactor, reviewer, scout, worker, tallow-expert
+- **9 specialized agents** — architect, debug, explore, planner, refactor, reviewer, scout, worker, tallow-expert
 - **Multi-agent teams** — coordinate multiple agents with task boards, messaging, and archive/resume
 - **Session naming** — auto-generated descriptive names for each session, shown in footer and `--list`
 - **Context fork** — run skills and commands in isolated subprocesses via `context: fork` frontmatter

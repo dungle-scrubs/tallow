@@ -104,6 +104,38 @@ Subagents inherit the parent session's model by default. Precedence:
 This means you don't need to specify a model in most cases — agents
 use whatever model you're running in the main session.
 
+### Routing keywords
+
+Instead of specifying a concrete model in agent frontmatter, you can
+use a **routing keyword** to express cost intent. The routing engine
+picks the best model from your available providers automatically.
+
+| Keyword | Effect |
+|---------|--------|
+| `auto-cheap` | Cheapest model that meets the task's complexity |
+| `auto-eco` | Alias for `auto-cheap` |
+| `auto-balanced` | Best fit for task complexity, then cheapest |
+| `auto-premium` | Most capable model available |
+
+```yaml
+---
+name: explore
+model: auto-cheap
+---
+```
+
+Routing keywords integrate with the existing model routing system:
+
+- **Per-call hints override keywords.** If the parent LLM passes
+  `costPreference: "premium"`, it wins over `auto-cheap` in frontmatter.
+- **Explicit model overrides everything.** `model: "haiku"` in a
+  subagent call always takes precedence.
+- **Keywords force auto-routing.** Even when routing is disabled in
+  settings, a routing keyword activates the task classifier and
+  model selection algorithm.
+
+Keywords are case-insensitive (`AUTO-CHEAP` works).
+
 ### Missing agent recovery
 
 When a requested agent name doesn't match any discovered agent, the tool
@@ -264,6 +296,55 @@ Focus on:
 
 Use the GitHub MCP server to check for existing test conventions in the repo.
 ```
+
+## Bundled agents
+
+Tallow ships with agent templates in `templates/agents/`. These are
+copied to `~/.tallow/agents/` during installation and can be
+customized or overridden.
+
+### explore
+
+Cheap, fast codebase discovery. Uses `auto-cheap` routing to pick the
+most economical model, restricted to read-only tools, and limited to
+5 tool turns.
+
+```yaml
+---
+name: explore
+description: Cheap, fast model for codebase discovery
+tools: read, grep, find, ls
+maxTurns: 5
+model: auto-cheap
+---
+```
+
+Use it for reconnaissance tasks that don't need a frontier model:
+
+```
+subagent(agent: "explore", task: "find all API route handlers in src/")
+subagent(agent: "explore", task: "what testing framework is used and where are tests?")
+subagent(agent: "explore", task: "list all database models and their relationships")
+```
+
+The explore agent has no `bash`, `write`, or `edit` access — it
+can only read, search, and list. This makes it safe for untrusted
+exploration and keeps costs low.
+
+### Other bundled agents
+
+| Agent | Purpose | Model |
+|-------|---------|-------|
+| `scout` | Deep codebase recon with bash access | inherited |
+| `architect` | System design and architecture | inherited |
+| `worker` | General task execution | inherited |
+| `reviewer` | Code review | inherited |
+| `debug` | Debugging and troubleshooting | inherited |
+| `refactor` | Code refactoring | inherited |
+| `planner` | Task planning and breakdown | inherited |
+
+All bundled agents can be overridden by placing a file with the same
+name in `~/.tallow/agents/` or your project's `.tallow/agents/`.
 
 ## Relationships with other extensions
 
