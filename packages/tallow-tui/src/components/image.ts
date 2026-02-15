@@ -130,7 +130,7 @@ export class Image implements Component {
 
 		const showBorder = this.options.border === true;
 		const borderCols = showBorder ? BORDER_OVERHEAD : 0;
-		const maxWidth = Math.min(width - 2, this.options.maxWidthCells ?? 60) - borderCols;
+		const maxWidth = Math.min(width - 2, this.options.maxWidthCells ?? width - 2) - borderCols;
 		const maxHeight = this.options.maxHeightCells ?? DEFAULT_MAX_HEIGHT_CELLS;
 
 		const caps = getCapabilities();
