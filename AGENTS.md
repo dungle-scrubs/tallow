@@ -117,6 +117,15 @@ Import paths stay the same — only the resolution target changes.
 Modified upstream files (conflict surface): `components/loader.ts`, `tui.ts`.
 Added files (zero conflict): `border-styles.ts`, `components/bordered-box.ts`.
 
+### Do NOT fork `pi-coding-agent`
+
+`@mariozechner/pi-coding-agent` is consumed as a **published npm dependency**.
+We forked `pi-tui` because TUI primitives needed direct extension — that is
+the only fork we maintain and we do not plan another. Never fork or vendor
+`pi-coding-agent`. Features that require framework changes go through
+**upstream PRs**. If an upstream PR is blocked, work around it with extension
+hooks, monkey-patches, or event listeners — not a local fork.
+
 ### Templates (`templates/`)
 
 Markdown files for agents and slash commands, copied to `~/.tallow/` on install.

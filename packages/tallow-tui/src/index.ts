@@ -28,7 +28,7 @@ export {
 	setNextImageFilePath,
 } from "./components/image.js";
 export { Input } from "./components/input.js";
-export { Loader, type LoaderOptions } from "./components/loader.js";
+export { Loader, type LoaderOptions, type MessageTransformContext } from "./components/loader.js";
 export { type DefaultTextStyle, Markdown, type MarkdownTheme } from "./components/markdown.js";
 export { type SelectItem, SelectList, type SelectListTheme } from "./components/select-list.js";
 export {
