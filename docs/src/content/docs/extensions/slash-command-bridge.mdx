@@ -1,0 +1,54 @@
+---
+title: slash-command-bridge
+description: Expose slash commands as tools the model can invoke programmatically.
+---
+
+Lets the model invoke a curated set of slash commands via the
+`run_slash_command` tool. Instead of the user manually running
+`/show-system-prompt` or `/compact`, the model can call these
+commands itself when it determines they're needed.
+
+## Available commands
+
+| Command | Description |
+|---------|-------------|
+| `show-system-prompt` | Returns the full system prompt text |
+| `context` | Returns context window token usage breakdown |
+| `compact` | Triggers session compaction to free context space |
+
+## Usage
+
+The model calls the tool automatically when appropriate:
+
+```
+run_slash_command({ command: "context" })
+→ "Context Usage: 45,000 / 200,000 tokens (22.5%)"
+
+run_slash_command({ command: "compact" })
+→ "Session compaction triggered."
+```
+
+## Design
+
+This is **Phase 1** of the slash command invocation feature. The approach
+is pragmatic: commands whose logic is available via `ExtensionContext` are
+executed directly (system prompt access, context usage, compaction).
+
+Commands requiring `ExtensionCommandContext` (session management like
+`/clear`, `/new`, `/fork`) cannot be invoked by the model yet — the
+framework doesn't expose command handler access to tools. Phase 2 will
+add an `allowModelInvocation` flag to command registration and a
+framework-level bridge.
+
+## Context injection
+
+The extension injects a hidden message before each agent turn listing
+the commands the model can invoke via the tool. This ensures the model
+knows the capability exists without polluting visible conversation.
+
+## Extension metadata
+
+| Field | Value |
+|-------|-------|
+| Category | tool |
+| Enhances | clear, context-usage, show-system-prompt |
