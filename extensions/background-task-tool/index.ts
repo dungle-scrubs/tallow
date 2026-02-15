@@ -1307,6 +1307,10 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				};
 			});
 
+			// Force a full re-render to clean up stale content from the full-screen viewer.
+			// showExtensionCustom only calls requestRender() (non-force) when restoring the editor,
+			// which leaves stale lines on screen because clearOnShrink is off by default.
+			tuiRef?.requestRender(true);
 			syncTaskState(ctx);
 		},
 	});
