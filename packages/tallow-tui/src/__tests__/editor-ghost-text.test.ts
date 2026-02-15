@@ -46,9 +46,9 @@ describe("Editor ghost text", () => {
 		const editor = new Editor(createMockTUI(), theme);
 		editor.setGhostText("complete me");
 		const lines = editor.render(80);
-		// Ghost text should appear as dim (ESC[2m) somewhere in the output
+		// Ghost text should appear as muted gray (256-color 242) in the output
 		const joined = lines.join("\n");
-		expect(joined).toContain("\x1b[2m");
+		expect(joined).toContain("\x1b[38;5;242m");
 		expect(joined).toContain("complete me");
 	});
 

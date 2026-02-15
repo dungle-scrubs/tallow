@@ -63,6 +63,14 @@ export interface EditorComponent extends Component {
 	// Ghost text / inline suggestions (optional)
 	// =========================================================================
 
+	/**
+	 * Register a change listener that fires alongside onChange.
+	 * Unlike onChange, listeners aren't overwritten by framework wiring.
+	 *
+	 * @param fn - Callback receiving the new text content
+	 */
+	addChangeListener?(fn: (text: string) => void): void;
+
 	/** Set ghost text (dim inline suggestion after cursor). Pass null to clear. */
 	setGhostText?(text: string | null): void;
 
