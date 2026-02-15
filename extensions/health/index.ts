@@ -6,7 +6,7 @@
  * tools, commands, extensions, and environment.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -18,6 +18,14 @@ import type {
 import { BorderedBox, ROUNDED, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+/** Result of a single diagnostic check. */
+interface DiagnosticCheck {
+	readonly name: string;
+	readonly status: "pass" | "warn" | "fail";
+	readonly message: string;
+	readonly suggestion?: string;
+}
 
 /** Serializable payload attached to the custom message. */
 interface HealthDetails {
@@ -40,9 +48,9 @@ interface HealthDetails {
 		readonly input: readonly string[];
 	};
 	readonly context: {
-		readonly tokens: number;
+		readonly tokens: number | null;
 		readonly contextWindow: number;
-		readonly percent: number;
+		readonly percent: number | null;
 		readonly status: "OK" | "Warning" | "Critical";
 	};
 	readonly tools: {
@@ -65,6 +73,7 @@ interface HealthDetails {
 		readonly tallowHome: string;
 		readonly packageDir: string;
 	};
+	readonly diagnostics: readonly DiagnosticCheck[];
 }
 
 // ── Version readers ──────────────────────────────────────────────────────────
@@ -91,7 +100,8 @@ function readPackageVersion(pkgPath: string): string {
  * @param percent - Usage percentage (0–100)
  * @returns Status label
  */
-function deriveContextStatus(percent: number): "OK" | "Warning" | "Critical" {
+function deriveContextStatus(percent: number | null): "OK" | "Warning" | "Critical" {
+	if (percent === null) return "OK";
 	if (percent > 80) return "Critical";
 	if (percent > 50) return "Warning";
 	return "OK";
@@ -166,7 +176,9 @@ function buildSections(d: HealthDetails): Section[] {
 		{ label: "Input", value: d.model.input.join(", "), last: true },
 	];
 
-	const usageStr = `${formatTokens(d.context.tokens)}/${formatTokens(d.context.contextWindow)} tokens (${d.context.percent.toFixed(0)}%)`;
+	const tokensStr = d.context.tokens !== null ? formatTokens(d.context.tokens) : "?";
+	const percentStr = d.context.percent !== null ? `${d.context.percent.toFixed(0)}%` : "?";
+	const usageStr = `${tokensStr}/${formatTokens(d.context.contextWindow)} tokens (${percentStr})`;
 	const contextRows = [
 		{ label: "Usage", value: usageStr, last: false },
 		{ label: "Status", value: d.context.status, last: true },
@@ -195,6 +207,12 @@ function buildSections(d: HealthDetails): Section[] {
 		{ label: "Package", value: d.environment.packageDir, last: true },
 	];
 
+	const diagnosticRows = d.diagnostics.map((check, i) => {
+		const icon = check.status === "pass" ? "✓" : check.status === "warn" ? "⚠" : "✗";
+		const value = check.suggestion ? `${check.message} → ${check.suggestion}` : check.message;
+		return { label: `${icon} ${check.name}`, value, last: i === d.diagnostics.length - 1 };
+	});
+
 	return [
 		{ title: "Session", rows: sessionRows },
 		{ title: "Model", rows: modelRows },
@@ -203,6 +221,7 @@ function buildSections(d: HealthDetails): Section[] {
 		{ title: "Commands", rows: commandsRows },
 		{ title: "Extensions", rows: extensionsRows },
 		{ title: "Environment", rows: environmentRows },
+		...(diagnosticRows.length > 0 ? [{ title: "Diagnostics", rows: diagnosticRows }] : []),
 	];
 }
 
@@ -263,11 +282,29 @@ function renderSection(
 			} else {
 				styledValue = truncated;
 			}
+		} else if (section.title === "Diagnostics") {
+			// Color diagnostic labels by their status icon
+			const truncated = truncateToWidth(row.value, Math.max(maxValueWidth, 10), "…");
+			if (row.label.startsWith("✓")) {
+				styledValue = theme.fg("success", truncated);
+			} else if (row.label.startsWith("⚠")) {
+				styledValue = theme.fg("warning", truncated);
+			} else {
+				styledValue = theme.fg("error", truncated);
+			}
 		} else {
 			styledValue = truncateToWidth(row.value, Math.max(maxValueWidth, 10), "…");
 		}
 
-		lines.push(`  ${theme.fg("dim", glyph)} ${theme.fg("muted", labelStr)} ${styledValue}`);
+		let styledLabel = theme.fg("muted", labelStr);
+		// Color diagnostic labels by status
+		if (section.title === "Diagnostics") {
+			if (row.label.startsWith("✓")) styledLabel = theme.fg("success", labelStr);
+			else if (row.label.startsWith("⚠")) styledLabel = theme.fg("warning", labelStr);
+			else styledLabel = theme.fg("error", labelStr);
+		}
+
+		lines.push(`  ${theme.fg("dim", glyph)} ${styledLabel} ${styledValue}`);
 	}
 
 	return lines;
@@ -373,6 +410,161 @@ function renderHealth(d: HealthDetails, theme: Theme, width: number): string[] {
 
 	lines.push("");
 	return lines;
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────────────
+
+/** Input data for running diagnostic checks. */
+export interface DiagnosticInput {
+	readonly model: HealthDetails["model"];
+	readonly context: HealthDetails["context"];
+	readonly tools: HealthDetails["tools"];
+	readonly environment: HealthDetails["environment"];
+	readonly tallowHome: string;
+	readonly cwd: string;
+}
+
+/**
+ * Run validation checks and return actionable diagnostics.
+ *
+ * @param input - Pre-collected health data
+ * @returns Array of diagnostic check results
+ */
+export function runDiagnostics(input: DiagnosticInput): DiagnosticCheck[] {
+	const checks: DiagnosticCheck[] = [];
+
+	// 1. Model configured
+	if (input.model.provider === "unknown" || input.model.id === "unknown") {
+		checks.push({
+			name: "Model",
+			status: "fail",
+			message: "No model configured",
+			suggestion: "Run `tallow install` or set --model provider/model-id",
+		});
+	} else {
+		checks.push({
+			name: "Model",
+			status: "pass",
+			message: `${input.model.provider}/${input.model.id}`,
+		});
+	}
+
+	// 2. Auth configured for provider
+	const authPath = join(input.tallowHome, "auth.json");
+	if (input.model.provider !== "unknown") {
+		if (existsSync(authPath)) {
+			try {
+				const auth = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, unknown>;
+				if (auth[input.model.provider]) {
+					checks.push({
+						name: "Auth",
+						status: "pass",
+						message: `${input.model.provider} credentials found`,
+					});
+				} else {
+					checks.push({
+						name: "Auth",
+						status: "warn",
+						message: `No credentials for ${input.model.provider}`,
+						suggestion: "Run `tallow install` or set TALLOW_API_KEY",
+					});
+				}
+			} catch {
+				checks.push({
+					name: "Auth",
+					status: "warn",
+					message: "auth.json is corrupt",
+					suggestion: "Delete and re-run `tallow install`",
+				});
+			}
+		} else {
+			checks.push({
+				name: "Auth",
+				status: "warn",
+				message: "No auth.json found",
+				suggestion: "Run `tallow install` or set TALLOW_API_KEY env var",
+			});
+		}
+	}
+
+	// 3. Context usage
+	if (input.context.status === "Critical") {
+		checks.push({
+			name: "Context",
+			status: "fail",
+			message: `${input.context.percent?.toFixed(0)}% used — model may lose earlier context`,
+			suggestion: "Start a new session or compact conversation",
+		});
+	} else if (input.context.status === "Warning") {
+		checks.push({
+			name: "Context",
+			status: "warn",
+			message: `${input.context.percent?.toFixed(0)}% used`,
+			suggestion: "Consider starting a new session soon",
+		});
+	} else {
+		checks.push({ name: "Context", status: "pass", message: "Within limits" });
+	}
+
+	// 4. Tools available
+	if (input.tools.activeCount === 0) {
+		checks.push({
+			name: "Tools",
+			status: "fail",
+			message: "No tools active",
+			suggestion: "Check extension loading and /plan-mode status",
+		});
+	} else {
+		checks.push({ name: "Tools", status: "pass", message: `${input.tools.activeCount} active` });
+	}
+
+	// 5. Node version (require >= 18)
+	const nodeVer = Number.parseInt(input.environment.nodeVersion.replace("v", ""), 10);
+	if (nodeVer < 18) {
+		checks.push({
+			name: "Node",
+			status: "fail",
+			message: `Node ${input.environment.nodeVersion} is too old`,
+			suggestion: "Upgrade to Node 18+ (LTS recommended)",
+		});
+	} else {
+		checks.push({ name: "Node", status: "pass", message: input.environment.nodeVersion });
+	}
+
+	// 6. Settings file exists
+	const settingsPath = join(input.tallowHome, "settings.json");
+	if (existsSync(settingsPath)) {
+		try {
+			JSON.parse(readFileSync(settingsPath, "utf-8"));
+			checks.push({ name: "Settings", status: "pass", message: "Valid JSON" });
+		} catch {
+			checks.push({
+				name: "Settings",
+				status: "fail",
+				message: "settings.json contains invalid JSON",
+				suggestion: "Fix JSON syntax or delete to reset",
+			});
+		}
+	} else {
+		checks.push({ name: "Settings", status: "pass", message: "Using defaults" });
+	}
+
+	// 7. Project context files
+	const hasAgents = existsSync(join(input.cwd, "AGENTS.md"));
+	const hasClaude = existsSync(join(input.cwd, "CLAUDE.md"));
+	if (hasAgents || hasClaude) {
+		const found = [hasAgents && "AGENTS.md", hasClaude && "CLAUDE.md"].filter(Boolean).join(", ");
+		checks.push({ name: "Project context", status: "pass", message: found });
+	} else {
+		checks.push({
+			name: "Project context",
+			status: "warn",
+			message: "No AGENTS.md or CLAUDE.md in cwd",
+			suggestion: "Create one to give the agent project-specific instructions",
+		});
+	}
+
+	return checks;
 }
 
 // ── Extension entry point ────────────────────────────────────────────────────
@@ -500,6 +692,16 @@ export default function healthExtension(pi: ExtensionAPI): void {
 			packageDir,
 		};
 
+		// ── Diagnostics ──────────────────────────────────────────────
+		const diagnostics = runDiagnostics({
+			model: modelData,
+			context: contextData,
+			tools: toolsData,
+			environment: environmentData,
+			tallowHome,
+			cwd: ctx.cwd,
+		});
+
 		const details: HealthDetails = {
 			session: sessionData,
 			model: modelData,
@@ -508,6 +710,7 @@ export default function healthExtension(pi: ExtensionAPI): void {
 			commands: commandsData,
 			extensions: extensionsData,
 			environment: environmentData,
+			diagnostics,
 		};
 
 		pi.sendMessage({

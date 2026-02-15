@@ -338,15 +338,14 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 	});
 
 	// Block destructive bash commands in plan mode
-	pi.on("tool_call", async (event) => {
+	pi.on("tool_call", async (event, ctx) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
 		const command = event.input.command as string;
 		if (!isSafeCommand(command)) {
-			return {
-				block: true,
-				reason: `Plan mode: command blocked (not allowlisted). Use /plan-mode to disable plan mode first.\nCommand: ${command}`,
-			};
+			const reason = `Plan mode: command blocked (not allowlisted). Use /plan-mode to disable plan mode first.\nCommand: ${command}`;
+			ctx.ui?.notify(`⛔ ${reason}`, "error");
+			return { block: true, reason };
 		}
 	});
 
@@ -504,10 +503,14 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
 				{ triggerTurn: true }
 			);
+		} else if (choice === "Stay in plan mode") {
+			ctx.ui.notify("Staying in plan mode. Continue refining or ask follow-up questions.", "info");
 		} else if (choice === "Refine the plan") {
 			const refinement = await ctx.ui.editor("Refine the plan:", "");
 			if (refinement?.trim()) {
 				pi.sendUserMessage(refinement.trim());
+			} else {
+				ctx.ui.notify("No refinement provided. Plan unchanged.", "info");
 			}
 		}
 	});

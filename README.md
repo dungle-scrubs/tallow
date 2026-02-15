@@ -202,6 +202,7 @@ Tallow stores its configuration in `~/.tallow/`:
 | Path | Purpose |
 |------|---------|
 | `~/.tallow/settings.json` | Global settings |
+| `~/.tallow/.env` | Environment variables loaded at startup (supports `op://` refs) |
 | `~/.tallow/auth.json` | Provider auth references (see [SECURITY.md](SECURITY.md)) |
 | `~/.tallow/models.json` | Model configuration |
 | `~/.tallow/keybindings.json` | Keybinding overrides |

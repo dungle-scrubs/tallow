@@ -36,9 +36,11 @@ if (themeData.length === 0) {
 	throw new Error("No themes found in themes directory");
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: used in Astro template below
 const defaultColors = themeData[0].colors;
 
 /** Color arrays for the client script — no names needed at runtime. */
+// biome-ignore lint/correctness/noUnusedVariables: used in Astro template below
 const clientData = themeData.map((t) => t.colors);
 ---
 

@@ -187,7 +187,40 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 		}
 	}
 
+	// --- Rules directories (.tallow/rules/, .claude/rules/) ---
+	const rulesDirs = [
+		path.join(cwd, ".tallow", "rules"),
+		path.join(cwd, ".claude", "rules"),
+		path.join(globalDir, "rules"),
+	];
+	for (const rulesDir of rulesDirs) {
+		for (const filepath of findRuleFiles(rulesDir)) {
+			const content = readFileSafe(filepath);
+			if (content) {
+				files.push({ filepath, content, source: "cwd", depth: 0 });
+			}
+		}
+	}
+
 	return files;
+}
+
+/**
+ * Find markdown/text rule files in a rules directory (non-recursive).
+ *
+ * @param dir - Rules directory to scan
+ * @returns Array of file paths (sorted alphabetically for deterministic order)
+ */
+function findRuleFiles(dir: string): string[] {
+	try {
+		return fs
+			.readdirSync(dir)
+			.filter((name) => /\.(md|txt)$/i.test(name))
+			.sort()
+			.map((name) => path.join(dir, name));
+	} catch {
+		return []; // Directory doesn't exist
+	}
 }
 
 function readFileSafe(filepath: string): string | null {
@@ -197,6 +230,127 @@ function readFileSafe(filepath: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+// ─── @import directive support ───────────────────────────────────────────────
+
+/** File extensions that are never inlined (binary or large). */
+const BINARY_EXTENSIONS = new Set([
+	".png",
+	".jpg",
+	".jpeg",
+	".gif",
+	".webp",
+	".ico",
+	".svg",
+	".woff",
+	".woff2",
+	".ttf",
+	".eot",
+	".zip",
+	".tar",
+	".gz",
+	".bz2",
+	".7z",
+	".pdf",
+	".doc",
+	".docx",
+	".xls",
+	".xlsx",
+	".exe",
+	".dll",
+	".so",
+	".dylib",
+	".mp3",
+	".mp4",
+	".wav",
+	".avi",
+	".mov",
+	".db",
+	".sqlite",
+	".sqlite3",
+]);
+
+/**
+ * Regex matching an `@import` directive on its own line.
+ * Captures the path after `@`. Supports:
+ *   - `@./relative/path.md`
+ *   - `@path/to/file.md`
+ *   - `@~/home-relative.md`
+ *   - `@/absolute/path.md`
+ */
+const IMPORT_DIRECTIVE_RE = /^@((?:~\/|\.\/|\.\.\/|\/)\S+|\S+\.\w+)$/;
+
+/** Maximum import depth to prevent infinite recursion. */
+const MAX_IMPORT_DEPTH = 10;
+
+/**
+ * Process `@path/to/file.md` import directives in context file content.
+ *
+ * Replaces directive lines with the referenced file's content, resolving
+ * relative paths from the source file's directory and `@~/` from home.
+ * Circular imports and binary files are skipped with inline comments.
+ *
+ * @param content - File content to process
+ * @param baseDir - Directory to resolve relative paths from
+ * @param seen - Set of already-visited absolute paths (circular guard)
+ * @param depth - Current recursion depth
+ * @returns Content with imports inlined
+ */
+export function resolveImports(
+	content: string,
+	baseDir: string,
+	seen: Set<string> = new Set(),
+	depth = 0
+): string {
+	if (depth > MAX_IMPORT_DEPTH) return content;
+
+	const lines = content.split("\n");
+	const result: string[] = [];
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		const match = trimmed.match(IMPORT_DIRECTIVE_RE);
+
+		if (!match) {
+			result.push(line);
+			continue;
+		}
+
+		let importPath = match[1];
+		if (importPath.startsWith("~/")) {
+			importPath = path.join(os.homedir(), importPath.slice(2));
+		} else if (!path.isAbsolute(importPath)) {
+			importPath = path.resolve(baseDir, importPath);
+		}
+
+		const resolved = path.resolve(importPath);
+
+		// Guard: circular import
+		if (seen.has(resolved)) {
+			result.push(`<!-- Circular import skipped: ${importPath} -->`);
+			continue;
+		}
+
+		// Guard: binary file
+		const ext = path.extname(resolved).toLowerCase();
+		if (BINARY_EXTENSIONS.has(ext)) {
+			result.push(`<!-- Binary file skipped: ${importPath} -->`);
+			continue;
+		}
+
+		const imported = readFileSafe(resolved);
+		if (imported === null) {
+			result.push(`<!-- Import not found: ${importPath} -->`);
+			continue;
+		}
+
+		seen.add(resolved);
+		const processed = resolveImports(imported, path.dirname(resolved), seen, depth + 1);
+		result.push(processed);
+	}
+
+	return result.join("\n");
 }
 
 function shortenPath(filepath: string): string {
@@ -222,7 +376,8 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 
 		const sections = contextFiles.map((f) => {
 			const rel = shortenPath(f.filepath);
-			return `## ${rel}\n\n${f.content}`;
+			const processed = resolveImports(f.content, path.dirname(f.filepath));
+			return `## ${rel}\n\n${processed}`;
 		});
 
 		return {

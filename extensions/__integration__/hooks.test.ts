@@ -70,6 +70,24 @@ describe("Before Agent Start Hooks", () => {
 		expect(capturedPrompt).toBe("Hello, world!");
 	});
 
+	it("injects model identity into system prompt", async () => {
+		let observedSystemPrompt = "";
+
+		const observer = (pi: ExtensionAPI): void => {
+			pi.on("context", async (_event, ctx) => {
+				observedSystemPrompt = ctx.getSystemPrompt();
+			});
+		};
+
+		runner = await createSessionRunner({
+			streamFn: createScriptedStreamFn([{ text: "ok" }]),
+			extensionFactories: [observer],
+		});
+
+		await runner.run("test");
+		expect(observedSystemPrompt).toContain("You are running as Mock Model (mock/mock-model).");
+	});
+
 	it("can modify system prompt via before_agent_start", async () => {
 		let observedSystemPrompt = "";
 

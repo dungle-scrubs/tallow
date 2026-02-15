@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
 			logger = createDebugLogger(sessionId);
 		}
 
-		logger!.log("session", "start", {
+		logger?.log("session", "start", {
 			cwd: ctx.cwd,
 			sessionId: ctx.sessionManager.getSessionId(),
 			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none",
@@ -282,10 +282,16 @@ export default function (pi: ExtensionAPI) {
 
 	// ── Error Handlers ───────────────────────────────────────────
 
-	// Capture uncaught exceptions and unhandled rejections when debug is active.
-	// These are logged then re-thrown — debug mode should not swallow errors.
+	// Detailed JSONL logging for uncaught exceptions and unhandled rejections.
+	// Core fatal handlers (src/fatal-errors.ts) display the user-facing banner
+	// and exit; these add structured diagnostic detail when debug mode is on.
+	//
+	// uncaughtExceptionMonitor fires BEFORE uncaughtException listeners,
+	// so JSONL logging completes before the core handler schedules exit.
+	// unhandledRejection listeners run synchronously in registration order —
+	// both the core handler and this one execute before process.nextTick exit.
 
-	const onUncaughtException = (err: Error) => {
+	const onUncaughtException = (err: Error, _origin: string) => {
 		logger?.log("error", "uncaught_exception", {
 			message: err.message,
 			stack: err.stack,
@@ -303,13 +309,13 @@ export default function (pi: ExtensionAPI) {
 	// Register/deregister process-level handlers based on logger lifecycle
 	pi.on("session_start", async () => {
 		if (logger) {
-			process.on("uncaughtException", onUncaughtException);
+			process.on("uncaughtExceptionMonitor", onUncaughtException);
 			process.on("unhandledRejection", onUnhandledRejection);
 		}
 	});
 
 	pi.on("session_shutdown", async () => {
-		process.removeListener("uncaughtException", onUncaughtException);
+		process.removeListener("uncaughtExceptionMonitor", onUncaughtException);
 		process.removeListener("unhandledRejection", onUnhandledRejection);
 	});
 

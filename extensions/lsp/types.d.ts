@@ -1,6 +1,9 @@
 /**
- * Type declarations for vscode-jsonrpc/node which isn't exported properly for ESM
+ * Type declarations for vscode-jsonrpc/node which isn't exported properly for ESM.
+ * These are ambient declarations for an external module — `any` is intentional
+ * because we don't control the upstream Event<T> types used by MessageReader/Writer.
  */
+// biome-ignore-all lint/suspicious/noExplicitAny: ambient module declaration for external types
 declare module "vscode-jsonrpc/node" {
 	import type { MessageReader, MessageWriter } from "vscode-languageserver-protocol";
 

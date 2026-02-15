@@ -107,7 +107,8 @@ describe("SnapshotManager", () => {
 		writeFileSync(join(tmpDir, "a.txt"), "state-at-turn-2");
 
 		// Rewind to turn 1
-		const result = mgr.restoreSnapshot(ref!);
+		expect(ref).toBeDefined();
+		const result = mgr.restoreSnapshot(ref as string);
 		const content = readFileSync(join(tmpDir, "a.txt"), "utf-8");
 		expect(content).toBe("state-at-turn-1");
 		expect(result.restored.length).toBeGreaterThan(0);
@@ -123,7 +124,8 @@ describe("SnapshotManager", () => {
 		writeFileSync(join(tmpDir, "new-file.ts"), "created after snapshot");
 
 		// Rewind to turn 1
-		mgr.restoreSnapshot(ref!);
+		expect(ref).toBeDefined();
+		mgr.restoreSnapshot(ref as string);
 		expect(existsSync(join(tmpDir, "new-file.ts"))).toBe(false);
 	});
 

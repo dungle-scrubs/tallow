@@ -17,6 +17,7 @@ import {
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+import { cleanupOrphanPids } from "./pid-manager.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 
@@ -409,8 +410,8 @@ function discoverExtensionDirs(baseDir: string): string[] {
  * Registered as a factory so it cannot be overridden or removed by users.
  */
 function rebrandSystemPrompt(pi: ExtensionAPI): void {
-	pi.on("before_agent_start", async (event) => {
-		const prompt = event.systemPrompt
+	pi.on("before_agent_start", async (event, ctx) => {
+		let prompt = event.systemPrompt
 			.replace(
 				"You are an expert coding assistant operating inside pi, a coding agent harness.",
 				"You are an expert coding assistant operating inside tallow, a coding agent harness."
@@ -419,6 +420,12 @@ function rebrandSystemPrompt(pi: ExtensionAPI): void {
 			.replace(/When working on pi topics/g, "When working on tallow topics")
 			.replace(/read pi \.md files/g, "read tallow .md files")
 			.replace(/the user asks about pi itself/g, "the user asks about tallow itself");
+
+		// Inject model identity so non-Claude models don't confabulate their identity
+		if (ctx.model) {
+			prompt += `\n\nYou are running as ${ctx.model.name} (${ctx.model.provider}/${ctx.model.id}).`;
+		}
+
 		return { systemPrompt: prompt };
 	});
 }
@@ -452,6 +459,14 @@ function ensureTallowHome(): void {
 
 	// Migrate flat session files to per-cwd subdirectories (one-time, idempotent)
 	migrateSessionsToPerCwdDirs(join(TALLOW_HOME, "sessions"));
+
+	// Kill orphaned child processes from crashed/killed previous sessions
+	const orphansKilled = cleanupOrphanPids();
+	if (orphansKilled > 0) {
+		console.error(
+			`\x1b[33m⚠ Cleaned up ${orphansKilled} orphaned background process${orphansKilled > 1 ? "es" : ""} from a previous session\x1b[0m`
+		);
+	}
 
 	ensureKeybindings();
 }

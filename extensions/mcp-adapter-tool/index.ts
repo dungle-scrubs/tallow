@@ -153,7 +153,16 @@ function sendRequest(
 				server.process = null;
 				server.ready = false;
 			}
-			reject(new Error(`Request to ${server.name} timed out after ${timeoutMs}ms`));
+			const timeoutSec = Math.round(timeoutMs / 1000);
+			const hint =
+				server.timeoutCount >= 3
+					? " Server killed after repeated failures."
+					: ` (${server.timeoutCount}/3 before auto-kill)`;
+			reject(
+				new Error(
+					`MCP server "${server.name}" unresponsive — ${method} timed out after ${timeoutSec}s.${hint}`
+				)
+			);
 		}, timeoutMs);
 
 		server.pendingRequests.set(id, {
@@ -197,7 +206,8 @@ function handleServerData(server: McpServer, chunk: string): void {
 		}
 
 		if (msg.id != null && server.pendingRequests.has(msg.id)) {
-			const pending = server.pendingRequests.get(msg.id)!;
+			const pending = server.pendingRequests.get(msg.id);
+			if (!pending) continue;
 			server.pendingRequests.delete(msg.id);
 			pending.resolve(msg);
 		}
@@ -248,11 +258,18 @@ function spawnServer(server: McpServer): void {
 async function initServer(server: McpServer): Promise<void> {
 	spawnServer(server);
 
-	const initResp = await sendRequest(server, "initialize", {
-		protocolVersion: "2024-11-05",
-		capabilities: {},
-		clientInfo: { name: "pi-code", version: "0.1.0" },
-	});
+	// Shorter timeout for initialization — if the server can't respond to
+	// the handshake in 10s it's likely broken or misconfigured.
+	const initResp = await sendRequest(
+		server,
+		"initialize",
+		{
+			protocolVersion: "2024-11-05",
+			capabilities: {},
+			clientInfo: { name: "pi-code", version: "0.1.0" },
+		},
+		10_000
+	);
 
 	if (initResp.error) {
 		throw new Error(`Failed to initialize ${server.name}: ${initResp.error.message}`);
@@ -266,7 +283,7 @@ async function initServer(server: McpServer): Promise<void> {
 		server.process.stdin.write(notification);
 	}
 
-	const toolsResp = await sendRequest(server, "tools/list", {});
+	const toolsResp = await sendRequest(server, "tools/list", {}, 10_000);
 	if (toolsResp.error) {
 		throw new Error(`Failed to list tools for ${server.name}: ${toolsResp.error.message}`);
 	}

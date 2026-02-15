@@ -23,6 +23,7 @@ import {
 	DidOpenTextDocumentNotification,
 	type DocumentSymbol,
 	DocumentSymbolRequest,
+	ExitNotification,
 	type Hover,
 	HoverRequest,
 	InitializedNotification,
@@ -32,6 +33,7 @@ import {
 	type LocationLink,
 	type ProtocolConnection,
 	ReferencesRequest,
+	ShutdownRequest,
 	type SymbolInformation,
 	type WorkspaceSymbol,
 	WorkspaceSymbolRequest,
@@ -940,16 +942,35 @@ WHEN TO USE:
 		},
 	});
 
-	// Cleanup on extension unload
+	// Cleanup on extension unload — follow the LSP shutdown protocol:
+	// 1. Send shutdown request and await response
+	// 2. Send exit notification
+	// 3. Dispose connection and kill process
+	// Wrap in a timeout so unresponsive servers don't block exit.
 	pi.on("session_shutdown", async () => {
-		for (const conn of connections.values()) {
-			try {
-				conn.connection.dispose();
-				conn.process.kill();
-			} catch {
-				// Ignore cleanup errors
-			}
-		}
+		const SHUTDOWN_TIMEOUT_MS = 3_000;
+
+		await Promise.all(
+			[...connections.values()].map(async (conn) => {
+				try {
+					await Promise.race([
+						(async () => {
+							await conn.connection.sendRequest(ShutdownRequest.type);
+							conn.connection.sendNotification(ExitNotification.type);
+						})(),
+						new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)),
+					]);
+				} catch {
+					// Server may have already exited or rejected — proceed to force-kill
+				}
+				try {
+					conn.connection.dispose();
+					conn.process.kill();
+				} catch {
+					// Ignore cleanup errors
+				}
+			})
+		);
 		connections.clear();
 	});
 }

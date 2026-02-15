@@ -16,6 +16,17 @@ import { APP_NAME, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 
 bootstrap();
 
+// Unconditional fatal error handlers — must register before any session
+// or extension setup so crashes are always visible to the user.
+import { registerFatalErrorHandlers } from "./fatal-errors.js";
+import { registerProcessCleanup } from "./process-cleanup.js";
+
+registerFatalErrorHandlers();
+
+// Signal + EIO/EPIPE handlers — fires session_shutdown on abnormal exit.
+// Session ref is populated once createTallowSession() succeeds.
+const cleanupSessionRef = registerProcessCleanup();
+
 import {
 	InteractiveMode,
 	runPrintMode,
@@ -218,6 +229,10 @@ async function run(opts: {
 		}
 		throw error;
 	}
+
+	// ── Register session for process-level cleanup ──────────────────────────
+
+	cleanupSessionRef.current = tallow.session;
 
 	// ── init-only: bind extensions (fires session_start → setup hooks), then exit ─
 

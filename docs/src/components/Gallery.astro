@@ -11,11 +11,14 @@
  * are captured.
  */
 
+// biome-ignore lint/correctness/noUnusedVariables: used in Astro template below
 interface Props {
 	images: { src: string; alt: string }[];
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: used in Astro template below
 const { images } = Astro.props;
+// biome-ignore lint/correctness/noUnusedVariables: used in Astro template below
 const galleryId = `gallery-${Math.random().toString(36).slice(2, 8)}`;
 ---
 

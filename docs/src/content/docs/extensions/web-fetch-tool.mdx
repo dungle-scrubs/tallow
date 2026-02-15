@@ -73,14 +73,30 @@ and create an API key. The free tier includes 500 credits
 Add `FIRECRAWL_API_KEY` to your environment so tallow can
 read it at runtime. Where you put it depends on your setup:
 
-**Option A: Shell profile** (simplest)
+**Option A: tallow .env** (recommended)
+
+```bash
+# ~/.tallow/.env
+FIRECRAWL_API_KEY=fc-your-key-here
+```
+
+Tallow loads `~/.tallow/.env` at startup. Values can be plain
+strings or [1Password `op://` references](https://developer.1password.com/docs/cli/secret-references/)
+if you use opchain:
+
+```bash
+# ~/.tallow/.env — 1Password reference
+FIRECRAWL_API_KEY=op://Services/firecrawl/api-key
+```
+
+**Option B: Shell profile**
 
 ```bash
 # ~/.zshrc or ~/.bashrc
 export FIRECRAWL_API_KEY="fc-your-key-here"
 ```
 
-**Option B: direnv** (per-project)
+**Option C: direnv** (per-project)
 
 ```bash
 # .envrc in your project root

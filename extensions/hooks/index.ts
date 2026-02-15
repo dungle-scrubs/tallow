@@ -288,6 +288,11 @@ async function runCommandHook(
 			resolve({ ok: true });
 			return;
 		}
+		// shell: true is required for user-authored hook commands (pipes, redirects,
+		// env expansion). Commands come from settings.json, NOT from LLM input, so
+		// this is not an injection vector. However, shell expansion applies — users
+		// should avoid untrusted interpolation in hook commands. When a permission
+		// system lands, this should require explicit shell opt-in.
 		const proc = spawn(handler.command, {
 			cwd,
 			shell: true,
@@ -677,7 +682,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// Hook into tool_call events
-	pi.on("tool_call", async (event, _ctx) => {
+	pi.on("tool_call", async (event, ctx) => {
 		const result = await runHooks("tool_call", {
 			toolName: event.toolName,
 			toolCallId: event.toolCallId,
@@ -685,7 +690,9 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		if (result.block) {
-			return { block: true, reason: result.reason || "Blocked by hook" };
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked tool_call (${event.toolName}): ${reason}`, "error");
+			return { block: true, reason };
 		}
 	});
 
@@ -709,13 +716,15 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Hook into input events
-	pi.on("input", async (event) => {
+	pi.on("input", async (event, ctx) => {
 		const result = await runHooks("input", {
 			text: event.text,
 			source: event.source,
 		});
 
 		if (result.block) {
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked input: ${reason}`, "error");
 			return { action: "handled" as const }; // Block the input
 		}
 	});
