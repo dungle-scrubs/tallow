@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -97,4 +98,48 @@ process.env.PI_SKIP_VERSION_CHECK = "1";
  */
 export function bootstrap(): void {
 	process.title = APP_NAME;
+	loadSecrets();
+}
+
+/**
+ * Load environment variables from ~/.tallow/.env.
+ *
+ * Supports plain values (`KEY=value`) and 1Password references (`KEY=op://...`).
+ * References are resolved via `opchain --read op read` if opchain is available.
+ * Skips keys already set in process.env. Silently no-ops if the file is missing.
+ */
+function loadSecrets(): void {
+	const envPath = join(TALLOW_HOME, ".env");
+	let content: string;
+	try {
+		content = readFileSync(envPath, "utf-8");
+	} catch {
+		return;
+	}
+
+	for (const line of content.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) continue;
+		const eqIdx = trimmed.indexOf("=");
+		if (eqIdx === -1) continue;
+
+		const key = trimmed.slice(0, eqIdx).trim();
+		const raw = trimmed.slice(eqIdx + 1).trim();
+		if (!key || !raw || process.env[key]) continue;
+
+		if (raw.startsWith("op://")) {
+			try {
+				const value = execFileSync("opchain", ["--read", "op", "read", raw], {
+					encoding: "utf-8",
+					timeout: 5000,
+					stdio: ["pipe", "pipe", "pipe"],
+				}).trim();
+				if (value) process.env[key] = value;
+			} catch {
+				// opchain not installed, secret not found, or timeout — skip
+			}
+		} else {
+			process.env[key] = raw;
+		}
+	}
 }

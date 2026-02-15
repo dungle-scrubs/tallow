@@ -93,6 +93,7 @@ configuration lives in `.tallow/` within your project directory.
 | Path | Purpose |
 |------|---------|
 | `~/.tallow/settings.json` | Global settings (theme, disabled extensions, packages) |
+| `~/.tallow/.env` | Environment variables loaded at startup (supports `op://` refs) |
 | `~/.tallow/auth.json` | Provider auth references (not raw keys — see [SECURITY.md](https://github.com/dungle-scrubs/tallow/blob/main/SECURITY.md)) |
 | `~/.tallow/sessions/` | Conversation history |
 | `~/.tallow/extensions/` | Custom user extensions |
