@@ -60,12 +60,16 @@ interface McpToolDef {
 	inputSchema?: Record<string, unknown>;
 }
 
-/** MCP tool call result content item. */
-interface McpContentItem {
+/** MCP tool call result content item (supports structured content types). */
+export interface McpContentItem {
 	type: string;
 	text?: string;
 	data?: string;
 	mimeType?: string;
+	/** Resource reference with URI and optional MIME type. */
+	resource?: { uri: string; mimeType?: string; text?: string };
+	/** Annotations providing semantic metadata about the content. */
+	annotations?: Record<string, unknown>;
 }
 
 /** Runtime state for a connected MCP server. */
@@ -352,23 +356,68 @@ async function callTool(
 	return result?.content ?? [];
 }
 
+/** Pi-code content item union. */
+type PiContentItem =
+	| { type: "text"; text: string }
+	| { type: "image"; data: string; mimeType: string };
+
+/**
+ * Safely stringify a value, handling circular references and deeply nested objects.
+ *
+ * @param value - Value to serialize
+ * @returns JSON string, or "[Circular]" / error fallback
+ */
+function safeStringify(value: unknown): string {
+	try {
+		return JSON.stringify(value, null, 2);
+	} catch {
+		return String(value);
+	}
+}
+
 /**
  * Maps MCP content items to pi-code tool result content.
- * @param items - MCP content items
+ *
+ * Supports:
+ * - `text` → pass-through as text
+ * - `image` → pass-through with data + mimeType
+ * - `resource` → formatted text with URI, optional MIME type, and inline text
+ * - Unknown types → serialized as JSON with type annotation
+ *
+ * Annotations are appended to text items when present.
+ *
+ * @param items - MCP content items from server response
  * @returns pi-code content array
  */
-function mapContent(
-	items: McpContentItem[]
-): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> {
+export function mapContent(items: McpContentItem[]): PiContentItem[] {
 	return items.map((item) => {
+		// Image: pass-through binary content
 		if (item.type === "image" && item.data && item.mimeType) {
-			return {
-				type: "image" as const,
-				data: item.data,
-				mimeType: item.mimeType,
-			};
+			return { type: "image" as const, data: item.data, mimeType: item.mimeType };
 		}
-		return { type: "text" as const, text: item.text ?? JSON.stringify(item) };
+
+		// Resource: format URI + optional inline text
+		if (item.type === "resource" && item.resource) {
+			const r = item.resource;
+			let text = `[Resource: ${r.uri}]`;
+			if (r.mimeType) text += ` (${r.mimeType})`;
+			if (r.text) text += `\n${r.text}`;
+			return { type: "text" as const, text };
+		}
+
+		// Text: pass-through (most common case)
+		if (item.type === "text" && item.text != null) {
+			let text = item.text;
+			if (item.annotations && Object.keys(item.annotations).length > 0) {
+				text += `\n[Annotations: ${safeStringify(item.annotations)}]`;
+			}
+			return { type: "text" as const, text };
+		}
+
+		// Unknown/structured types: serialize with type label
+		const { type, ...rest } = item;
+		const body = Object.keys(rest).length > 0 ? safeStringify(rest) : "";
+		return { type: "text" as const, text: body ? `[${type}]\n${body}` : `[${type}]` };
 	});
 }
 
