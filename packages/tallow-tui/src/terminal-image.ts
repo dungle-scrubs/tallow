@@ -358,6 +358,94 @@ export function getWebpDimensions(base64Data: string): ImageDimensions | null {
 	}
 }
 
+/** Supported image format identifiers returned by `detectImageFormat`. */
+export type ImageFormat = "png" | "jpeg" | "gif" | "webp";
+
+/**
+ * Detect image format from file header bytes (magic numbers).
+ *
+ * Checks the first few bytes of a buffer for known image signatures:
+ * - PNG: `89 50 4E 47 0D 0A 1A 0A` (8 bytes)
+ * - JPEG: `FF D8 FF` (3 bytes)
+ * - GIF: `47 49 46 38` + `37`/`39` + `61` (GIF87a / GIF89a)
+ * - WebP: `52 49 46 46 ... 57 45 42 50` (RIFF at 0-3, WEBP at 8-11)
+ *
+ * @param buffer - Raw file bytes (only first 12 bytes are inspected)
+ * @returns Detected format string, or null if not a recognized image
+ */
+export function detectImageFormat(buffer: Buffer): ImageFormat | null {
+	if (buffer.length < 3) return null;
+
+	// PNG: 89 50 4E 47 0D 0A 1A 0A
+	if (
+		buffer.length >= 8 &&
+		buffer[0] === 0x89 &&
+		buffer[1] === 0x50 &&
+		buffer[2] === 0x4e &&
+		buffer[3] === 0x47 &&
+		buffer[4] === 0x0d &&
+		buffer[5] === 0x0a &&
+		buffer[6] === 0x1a &&
+		buffer[7] === 0x0a
+	) {
+		return "png";
+	}
+
+	// JPEG: FF D8 FF
+	if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+		return "jpeg";
+	}
+
+	// GIF: 47 49 46 38 (37|39) 61
+	if (
+		buffer.length >= 6 &&
+		buffer[0] === 0x47 &&
+		buffer[1] === 0x49 &&
+		buffer[2] === 0x46 &&
+		buffer[3] === 0x38 &&
+		(buffer[4] === 0x37 || buffer[4] === 0x39) &&
+		buffer[5] === 0x61
+	) {
+		return "gif";
+	}
+
+	// WebP: RIFF....WEBP (bytes 0-3 = "RIFF", bytes 8-11 = "WEBP")
+	if (
+		buffer.length >= 12 &&
+		buffer[0] === 0x52 &&
+		buffer[1] === 0x49 &&
+		buffer[2] === 0x46 &&
+		buffer[3] === 0x46 &&
+		buffer[8] === 0x57 &&
+		buffer[9] === 0x45 &&
+		buffer[10] === 0x42 &&
+		buffer[11] === 0x50
+	) {
+		return "webp";
+	}
+
+	return null;
+}
+
+/**
+ * Map an `ImageFormat` to its standard MIME type string.
+ *
+ * @param format - Detected image format
+ * @returns MIME type (e.g., `"image/png"`)
+ */
+export function imageFormatToMime(format: ImageFormat): string {
+	switch (format) {
+		case "png":
+			return "image/png";
+		case "jpeg":
+			return "image/jpeg";
+		case "gif":
+			return "image/gif";
+		case "webp":
+			return "image/webp";
+	}
+}
+
 export function getImageDimensions(base64Data: string, mimeType: string): ImageDimensions | null {
 	if (mimeType === "image/png") {
 		return getPngDimensions(base64Data);
