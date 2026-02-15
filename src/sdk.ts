@@ -1,18 +1,27 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
+	bashTool,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
+	codingTools,
 	createAgentSession,
 	createEventBus,
 	DefaultResourceLoader,
 	type ExtensionAPI,
 	type ExtensionFactory,
+	editTool,
+	findTool,
+	grepTool,
+	lsTool,
 	ModelRegistry,
 	type PromptTemplate,
+	readOnlyTools,
+	readTool,
 	SessionManager,
 	SettingsManager,
 	type Skill,
+	writeTool,
 } from "@mariozechner/pi-coding-agent";
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
@@ -84,6 +93,81 @@ export interface TallowSessionOptions {
 
 	/** Settings overrides */
 	settings?: Record<string, unknown>;
+}
+
+// ─── Tool Flag ───────────────────────────────────────────────────────────────
+
+// AgentTool has contravariant params, so typed tools don't assign to AgentTool<TSchema>.
+// We use the opaque array type from CreateAgentSessionOptions["tools"] instead.
+type ToolArray = NonNullable<CreateAgentSessionOptions["tools"]>;
+type ToolItem = ToolArray[number];
+
+/** Map of tool name → tool object for --tools flag resolution. */
+const TOOL_MAP: Record<string, ToolItem> = {
+	read: readTool as ToolItem,
+	bash: bashTool as ToolItem,
+	edit: editTool as ToolItem,
+	write: writeTool as ToolItem,
+	grep: grepTool as ToolItem,
+	find: findTool as ToolItem,
+	ls: lsTool as ToolItem,
+};
+
+/** Preset aliases for --tools flag. */
+const TOOL_PRESETS: Record<string, readonly ToolItem[]> = {
+	readonly: readOnlyTools as unknown as ToolItem[],
+	coding: codingTools as unknown as ToolItem[],
+	none: [],
+};
+
+/** All valid tool names and aliases for error messages. */
+const VALID_TOOL_NAMES = [...Object.keys(TOOL_MAP), ...Object.keys(TOOL_PRESETS)];
+
+/**
+ * Parse a comma-separated tool names string into an array of tool objects.
+ *
+ * Accepts individual tool names (read, bash, edit, write, grep, find, ls)
+ * and preset aliases (readonly, coding, none).
+ *
+ * @param toolString - Comma-separated tool names (e.g. "read,grep,find")
+ * @returns Array of resolved tool objects
+ * @throws Error with list of valid names when an unknown tool is specified
+ */
+export function parseToolFlag(toolString: string): ToolArray {
+	const names = toolString
+		.split(",")
+		.map((n) => n.trim().toLowerCase())
+		.filter(Boolean);
+
+	if (names.length === 0) {
+		return [];
+	}
+
+	// Check for preset alias (only when single value)
+	if (names.length === 1 && names[0] in TOOL_PRESETS) {
+		return [...TOOL_PRESETS[names[0]]];
+	}
+
+	const tools: ToolItem[] = [];
+	const unknown: string[] = [];
+
+	for (const name of names) {
+		if (name in TOOL_MAP) {
+			tools.push(TOOL_MAP[name]);
+		} else if (name in TOOL_PRESETS) {
+			tools.push(...TOOL_PRESETS[name]);
+		} else {
+			unknown.push(name);
+		}
+	}
+
+	if (unknown.length > 0) {
+		throw new Error(
+			`Unknown tool(s): ${unknown.join(", ")}. Valid names: ${VALID_TOOL_NAMES.join(", ")}`
+		);
+	}
+
+	return tools;
 }
 
 export interface TallowSession {
