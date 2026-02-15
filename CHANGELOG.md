@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **progress-indicator:** terminal progress bar via OSC 9;4 during agent turns,
+  with indeterminate mode for pulsing tab/title bar indicators
+- **tallow-tui:** `setProgress(percent)` and `clearProgress()` methods on
+  Terminal interface for OSC 9;4 progress bar support with 100ms throttling
 - **context-files:** `@import` directives — parse `@path/to/file.md` in context
   files with recursive resolution, circular import detection, and depth limiting
 - **context-files:** scan `.tallow/rules/`, `.claude/rules/`, and `~/.tallow/rules/`
