@@ -38,8 +38,9 @@ docs/node_modules/
 docs/dist/
 .sidecar/
 
-# Local planning document
+# Local planning documents
 ROADMAP.md
+ROADMAP-IDEAS.md
 
 # Local keymap report
 KEYS.md
