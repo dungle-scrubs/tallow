@@ -34,7 +34,7 @@ import {
 	SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { Command, Option } from "commander";
-import { createTallowSession, type TallowSessionOptions } from "./sdk.js";
+import { createTallowSession, parseToolFlag, type TallowSessionOptions } from "./sdk.js";
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -72,6 +72,10 @@ program
 			"sessionId",
 			"resume",
 		])
+	)
+	.option(
+		"--tools <names>",
+		"Restrict available tools (comma-separated: read,bash,edit,write,grep,find,ls or presets: readonly,coding,none)"
 	)
 	.option("-e, --extension <path...>", "Additional extension paths")
 	.option("--no-extensions", "Disable all extensions (bundled + user)")
@@ -127,6 +131,7 @@ async function run(opts: {
 	session?: boolean;
 	sessionId?: string;
 	thinking?: string;
+	tools?: string;
 }): Promise<void> {
 	// Quick info commands
 	if (opts.home) {
@@ -201,6 +206,16 @@ async function run(opts: {
 	// Thinking level
 	if (opts.thinking) {
 		sessionOpts.thinkingLevel = opts.thinking as TallowSessionOptions["thinkingLevel"];
+	}
+
+	// Tool restriction
+	if (opts.tools) {
+		try {
+			sessionOpts.tools = parseToolFlag(opts.tools);
+		} catch (err) {
+			console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+			process.exit(1);
+		}
 	}
 
 	// ── Read piped stdin early (before the nested-session guard) ─────────────
