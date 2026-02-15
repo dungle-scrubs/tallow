@@ -18,7 +18,7 @@
  *   1 — drift detected
  */
 
-import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
@@ -50,12 +50,7 @@ function check(label, pass, detail) {
 function getExtensionDirs() {
 	const extDir = join(ROOT, "extensions");
 	return readdirSync(extDir, { withFileTypes: true })
-		.filter(
-			(d) =>
-				d.isDirectory() &&
-				!d.name.startsWith("__") &&
-				!d.name.startsWith("_"),
-		)
+		.filter((d) => d.isDirectory() && !d.name.startsWith("__") && !d.name.startsWith("_"))
 		.map((d) => d.name);
 }
 
@@ -137,7 +132,7 @@ const missingDocs = extensions.filter((ext) => !docsPages.has(ext));
 check(
 	`All ${extCount} extensions have docs pages`,
 	missingDocs.length === 0,
-	missingDocs.length > 0 ? `missing: ${missingDocs.join(", ")}` : undefined,
+	missingDocs.length > 0 ? `missing: ${missingDocs.join(", ")}` : undefined
 );
 
 // 3. Theme count
@@ -145,14 +140,22 @@ const themeCount = countFiles(join(ROOT, "themes"), ".json");
 const readme = readFileSync(join(ROOT, "README.md"), "utf-8");
 const themeMatch = readme.match(/(\d+)\s+themes?\b/i);
 if (themeMatch) {
-	check(`README.md theme count (${themeMatch[1]})`, Number(themeMatch[1]) === themeCount, `expected ${themeCount}`);
+	check(
+		`README.md theme count (${themeMatch[1]})`,
+		Number(themeMatch[1]) === themeCount,
+		`expected ${themeCount}`
+	);
 }
 
 // 4. Agent count
 const agentCount = countFiles(join(ROOT, "templates/agents"), ".md");
 const agentMatch = readme.match(/(\d+)\s+(?:specialized\s+)?agents?\b/i);
 if (agentMatch) {
-	check(`README.md agent count (${agentMatch[1]})`, Number(agentMatch[1]) === agentCount, `expected ${agentCount}`);
+	check(
+		`README.md agent count (${agentMatch[1]})`,
+		Number(agentMatch[1]) === agentCount,
+		`expected ${agentCount}`
+	);
 }
 
 // 5. No stale package manager references in user-facing docs
@@ -170,7 +173,7 @@ for (const relPath of docsToCheck) {
 	check(
 		`${relPath} uses bun (not npm)`,
 		npmRefs.length === 0,
-		npmRefs.length > 0 ? `found: ${npmRefs.map((m) => m[0]).join(", ")}` : undefined,
+		npmRefs.length > 0 ? `found: ${npmRefs.map((m) => m[0]).join(", ")}` : undefined
 	);
 }
 
