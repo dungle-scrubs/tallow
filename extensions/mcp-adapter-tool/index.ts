@@ -66,6 +66,10 @@ export interface McpContentItem {
 	text?: string;
 	data?: string;
 	mimeType?: string;
+	/** Resource link URI (for resource_link content type). */
+	uri?: string;
+	/** Human-readable description of the resource. */
+	description?: string;
 	/** Resource reference with URI and optional MIME type. */
 	resource?: { uri: string; mimeType?: string; text?: string };
 	/** Annotations providing semantic metadata about the content. */
@@ -416,6 +420,14 @@ export function mapContent(items: McpContentItem[]): PiContentItem[] {
 			let text = `[Resource: ${r.uri}]`;
 			if (r.mimeType) text += ` (${r.mimeType})`;
 			if (r.text) text += `\n${r.text}`;
+			return { type: "text" as const, text };
+		}
+
+		// Resource link: pointer to fetchable content without embedded data
+		if (item.type === "resource_link") {
+			const uri = item.uri ?? "unknown";
+			let text = item.mimeType ? `[Resource (${item.mimeType}): ${uri}]` : `[Resource: ${uri}]`;
+			if (item.description) text += ` — ${item.description}`;
 			return { type: "text" as const, text };
 		}
 
