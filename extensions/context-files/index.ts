@@ -187,7 +187,40 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 		}
 	}
 
+	// --- Rules directories (.tallow/rules/, .claude/rules/) ---
+	const rulesDirs = [
+		path.join(cwd, ".tallow", "rules"),
+		path.join(cwd, ".claude", "rules"),
+		path.join(globalDir, "rules"),
+	];
+	for (const rulesDir of rulesDirs) {
+		for (const filepath of findRuleFiles(rulesDir)) {
+			const content = readFileSafe(filepath);
+			if (content) {
+				files.push({ filepath, content, source: "cwd", depth: 0 });
+			}
+		}
+	}
+
 	return files;
+}
+
+/**
+ * Find markdown/text rule files in a rules directory (non-recursive).
+ *
+ * @param dir - Rules directory to scan
+ * @returns Array of file paths (sorted alphabetically for deterministic order)
+ */
+function findRuleFiles(dir: string): string[] {
+	try {
+		return fs
+			.readdirSync(dir)
+			.filter((name) => /\.(md|txt)$/i.test(name))
+			.sort()
+			.map((name) => path.join(dir, name));
+	} catch {
+		return []; // Directory doesn't exist
+	}
 }
 
 function readFileSafe(filepath: string): string | null {
