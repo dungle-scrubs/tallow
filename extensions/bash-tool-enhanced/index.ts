@@ -61,6 +61,36 @@ function readAutoBackgroundTimeout(): number {
 }
 
 /**
+ * Read the BASH_MAINTAIN_PROJECT_WORKING_DIR setting from ~/.tallow/settings.json.
+ *
+ * @returns True if bash commands should always run from the project root
+ */
+function readMaintainProjectDir(): boolean {
+	try {
+		const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+		const raw = fs.readFileSync(settingsPath, "utf-8");
+		const settings = JSON.parse(raw) as { BASH_MAINTAIN_PROJECT_WORKING_DIR?: boolean };
+		return settings.BASH_MAINTAIN_PROJECT_WORKING_DIR === true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Shell-escape a path for safe use in `cd <path> && ...` commands.
+ * Wraps in single quotes and escapes embedded single quotes.
+ *
+ * @param p - File path to escape
+ * @returns Shell-safe quoted path
+ */
+export function shellEscapePath(p: string): string {
+	return `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+/** Project root captured at session start, used by BASH_MAINTAIN_PROJECT_WORKING_DIR. */
+let projectCwd: string | null = null;
+
+/**
  * Strip non-display OSC escape sequences from bash output.
  *
  * Programs like nvim-treesitter emit OSC 1337 (iTerm2 SetUserVar) or other
@@ -161,6 +191,9 @@ export default function bashLive(pi: ExtensionAPI): void {
 	const baseBashTool = createBashTool(process.cwd());
 	const displayConfig = getToolDisplayConfig("bash");
 
+	// Capture project root for BASH_MAINTAIN_PROJECT_WORKING_DIR
+	projectCwd = process.cwd();
+
 	pi.registerTool({
 		name: "bash",
 		label: baseBashTool.label,
@@ -181,6 +214,26 @@ export default function bashLive(pi: ExtensionAPI): void {
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			// BASH_MAINTAIN_PROJECT_WORKING_DIR: force commands to run from project root
+			if (readMaintainProjectDir() && projectCwd) {
+				if (fs.existsSync(projectCwd)) {
+					params = { ...params, command: `cd ${shellEscapePath(projectCwd)} && ${params.command}` };
+				} else {
+					// Project directory deleted — disable for remaining session
+					projectCwd = null;
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: `BASH_MAINTAIN_PROJECT_WORKING_DIR: project directory no longer exists. Setting disabled for this session.`,
+							},
+						],
+						details: undefined,
+						isError: true,
+					};
+				}
+			}
+
 			const cmd = params.command ?? "";
 			const firstLine = cmd.split("\n")[0];
 			const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;

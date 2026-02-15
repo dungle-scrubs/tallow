@@ -6,10 +6,28 @@
  * - cd tool for LLM
  */
 
-import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+
+/**
+ * Check if BASH_MAINTAIN_PROJECT_WORKING_DIR is enabled in settings.
+ *
+ * @returns True if the setting is enabled
+ */
+function isMaintainProjectDirEnabled(): boolean {
+	try {
+		const raw = readFileSync(join(homedir(), ".tallow", "settings.json"), "utf-8");
+		return (
+			(JSON.parse(raw) as { BASH_MAINTAIN_PROJECT_WORKING_DIR?: boolean })
+				.BASH_MAINTAIN_PROJECT_WORKING_DIR === true
+		);
+	} catch {
+		return false;
+	}
+}
 
 /**
  * Resolves and validates a path, expanding ~ to home directory.
@@ -62,6 +80,12 @@ export default function (pi: ExtensionAPI) {
 				const resolved = resolvePath(path);
 				process.chdir(resolved);
 				ctx.ui.notify(`Changed to: ${resolved}`, "info");
+				if (isMaintainProjectDirEnabled()) {
+					ctx.ui.notify(
+						"Note: BASH_MAINTAIN_PROJECT_WORKING_DIR is enabled — bash commands will still run from the project root",
+						"warning"
+					);
+				}
 			} catch (err) {
 				ctx.ui.notify(`${err}`, "error");
 			}
@@ -86,8 +110,12 @@ export default function (pi: ExtensionAPI) {
 				const previous = process.cwd();
 				process.chdir(resolved);
 
+				const note = isMaintainProjectDirEnabled()
+					? `\nNote: BASH_MAINTAIN_PROJECT_WORKING_DIR is enabled — bash commands will still run from the project root`
+					: "";
+
 				return {
-					content: [{ type: "text", text: `Changed directory: ${previous} → ${resolved}` }],
+					content: [{ type: "text", text: `Changed directory: ${previous} → ${resolved}${note}` }],
 					details: { previous, current: resolved },
 				};
 			} catch (err) {
