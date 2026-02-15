@@ -1,0 +1,21 @@
+{
+	"name": "web-search-tool",
+	"version": "0.1.0",
+	"description": "Web search via Brave Search API with structured results and hyperlinks",
+	"category": "tool",
+	"tags": ["web", "search", "brave"],
+	"files": ["index.ts", "providers/interface.ts", "providers/brave.ts"],
+	"relationships": [
+		{
+			"name": "web-fetch-tool",
+			"kind": "enhances",
+			"reason": "Search finds URLs that web-fetch can then read in full"
+		},
+		{
+			"name": "tool-display",
+			"kind": "requires",
+			"reason": "Uses renderLines and formatToolVerb for result display"
+		}
+	],
+	"npmDependencies": {}
+}
