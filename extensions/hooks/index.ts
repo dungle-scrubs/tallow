@@ -677,7 +677,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// Hook into tool_call events
-	pi.on("tool_call", async (event, _ctx) => {
+	pi.on("tool_call", async (event, ctx) => {
 		const result = await runHooks("tool_call", {
 			toolName: event.toolName,
 			toolCallId: event.toolCallId,
@@ -685,7 +685,9 @@ export default function (pi: ExtensionAPI) {
 		});
 
 		if (result.block) {
-			return { block: true, reason: result.reason || "Blocked by hook" };
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked tool_call (${event.toolName}): ${reason}`, "error");
+			return { block: true, reason };
 		}
 	});
 
@@ -709,13 +711,15 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Hook into input events
-	pi.on("input", async (event) => {
+	pi.on("input", async (event, ctx) => {
 		const result = await runHooks("input", {
 			text: event.text,
 			source: event.source,
 		});
 
 		if (result.block) {
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked input: ${reason}`, "error");
 			return { action: "handled" as const }; // Block the input
 		}
 	});
