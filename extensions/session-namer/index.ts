@@ -27,15 +27,43 @@ Good: "Refactoring auth middleware to JWT"
 Bad: "Session about refactoring" (too vague)
 Bad: "The user asked me to refactor..." (not a name)`;
 
+/** Max character length for a valid session name. */
+const MAX_NAME_LENGTH = 60;
+
+/**
+ * Patterns that indicate the model returned a refusal or explanation
+ * rather than an actual session name.
+ */
+const REFUSAL_PATTERNS: readonly RegExp[] = [
+	/^I need/i,
+	/^I can't/i,
+	/^I cannot/i,
+	/^I'm (unable|not able)/i,
+	/^Sorry/i,
+	/^Unfortunately/i,
+	/too vague/i,
+	/more context/i,
+	/not enough/i,
+	/could you provide/i,
+	/opening exchange/i,
+];
+
 /**
  * Cleans raw LLM output into a usable session name.
  * Strips surrounding quotes, "Session:" prefixes, and trailing punctuation.
+ * Returns empty string for refusals, overly long responses, or multi-line output.
  *
  * @param raw - Raw text from the naming model
- * @returns Cleaned session name
+ * @returns Cleaned session name, or empty string if invalid
  */
 export function cleanName(raw: string): string {
 	let name = raw.trim();
+
+	// Multi-line responses are explanations, not names
+	if (name.includes("\n")) {
+		name = name.split("\n")[0].trim();
+	}
+
 	// Strip surrounding quotes
 	if (
 		(name.startsWith('"') && name.endsWith('"')) ||
@@ -47,7 +75,15 @@ export function cleanName(raw: string): string {
 	name = name.replace(/^(session|name)\s*:\s*/i, "");
 	// Strip trailing punctuation
 	name = name.replace(/[.!]+$/, "");
-	return name.trim();
+	name = name.trim();
+
+	// Reject refusals and explanations
+	if (REFUSAL_PATTERNS.some((p) => p.test(name))) return "";
+
+	// Reject overly long names — real names are short
+	if (name.length > MAX_NAME_LENGTH) return "";
+
+	return name;
 }
 
 /**
