@@ -5,7 +5,9 @@
 import { describe, expect, it } from "bun:test";
 import {
 	calculateImageLayout,
+	createImageMetadata,
 	detectImageFormat,
+	formatImageDimensions,
 	type ImageDimensions,
 	imageFormatToMime,
 } from "../terminal-image.js";
@@ -205,5 +207,62 @@ describe("imageFormatToMime", () => {
 
 	it("maps webp to image/webp", () => {
 		expect(imageFormatToMime("webp")).toBe("image/webp");
+	});
+});
+
+// ── createImageMetadata ──────────────────────────────────────────────────────
+
+describe("createImageMetadata", () => {
+	it("creates metadata with resized=false when dimensions match", () => {
+		const dims = { widthPx: 1920, heightPx: 1080 };
+		const meta = createImageMetadata(dims, dims, "png", 245000);
+		expect(meta.resized).toBe(false);
+		expect(meta.originalWidth).toBe(1920);
+		expect(meta.displayWidth).toBe(1920);
+		expect(meta.format).toBe("png");
+		expect(meta.sizeBytes).toBe(245000);
+	});
+
+	it("creates metadata with resized=true when dimensions differ", () => {
+		const original = { widthPx: 3840, heightPx: 2160 };
+		const display = { widthPx: 1920, heightPx: 1080 };
+		const meta = createImageMetadata(original, display, "jpeg");
+		expect(meta.resized).toBe(true);
+		expect(meta.originalWidth).toBe(3840);
+		expect(meta.displayWidth).toBe(1920);
+		expect(meta.sizeBytes).toBeUndefined();
+	});
+
+	it("detects resize when only width differs", () => {
+		const original = { widthPx: 1920, heightPx: 1080 };
+		const display = { widthPx: 960, heightPx: 1080 };
+		expect(createImageMetadata(original, display, null).resized).toBe(true);
+	});
+
+	it("handles null format", () => {
+		const dims = { widthPx: 100, heightPx: 100 };
+		expect(createImageMetadata(dims, dims, null).format).toBeNull();
+	});
+});
+
+// ── formatImageDimensions ────────────────────────────────────────────────────
+
+describe("formatImageDimensions", () => {
+	it("shows simple dimensions when not resized", () => {
+		const meta = createImageMetadata(
+			{ widthPx: 1920, heightPx: 1080 },
+			{ widthPx: 1920, heightPx: 1080 },
+			"png"
+		);
+		expect(formatImageDimensions(meta)).toBe("1920×1080");
+	});
+
+	it("shows original → display when resized", () => {
+		const meta = createImageMetadata(
+			{ widthPx: 3840, heightPx: 2160 },
+			{ widthPx: 800, heightPx: 450 },
+			"png"
+		);
+		expect(formatImageDimensions(meta)).toBe("3840×2160 → 800×450");
 	});
 });

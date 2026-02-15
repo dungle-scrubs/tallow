@@ -446,6 +446,68 @@ export function imageFormatToMime(format: ImageFormat): string {
 	}
 }
 
+/** Metadata about an image's original and display dimensions after processing. */
+export interface ImageMetadata {
+	/** Original pixel width before any resizing. */
+	readonly originalWidth: number;
+	/** Original pixel height before any resizing. */
+	readonly originalHeight: number;
+	/** Display pixel width after resizing (equals original if not resized). */
+	readonly displayWidth: number;
+	/** Display pixel height after resizing (equals original if not resized). */
+	readonly displayHeight: number;
+	/** Whether the image was resized from its original dimensions. */
+	readonly resized: boolean;
+	/** Detected image format (e.g., "png", "jpeg"). */
+	readonly format: ImageFormat | null;
+	/** File size in bytes, if known. */
+	readonly sizeBytes?: number;
+}
+
+/**
+ * Create an `ImageMetadata` object from original and display dimensions.
+ *
+ * Sets `resized` automatically by comparing original and display dimensions.
+ *
+ * @param original - Original pixel dimensions before resizing
+ * @param display - Display pixel dimensions after resizing
+ * @param format - Detected image format, or null if unknown
+ * @param sizeBytes - File size in bytes (optional)
+ * @returns Populated ImageMetadata
+ */
+export function createImageMetadata(
+	original: ImageDimensions,
+	display: ImageDimensions,
+	format: ImageFormat | null,
+	sizeBytes?: number
+): ImageMetadata {
+	return {
+		originalWidth: original.widthPx,
+		originalHeight: original.heightPx,
+		displayWidth: display.widthPx,
+		displayHeight: display.heightPx,
+		resized: original.widthPx !== display.widthPx || original.heightPx !== display.heightPx,
+		format,
+		sizeBytes,
+	};
+}
+
+/**
+ * Format a compact dimension string for display.
+ *
+ * - Not resized: `"1920×1080"`
+ * - Resized: `"3840×2160 → 1920×1080"`
+ *
+ * @param meta - Image metadata with dimension info
+ * @returns Formatted dimension string
+ */
+export function formatImageDimensions(meta: ImageMetadata): string {
+	if (meta.resized) {
+		return `${meta.originalWidth}×${meta.originalHeight} → ${meta.displayWidth}×${meta.displayHeight}`;
+	}
+	return `${meta.originalWidth}×${meta.originalHeight}`;
+}
+
 export function getImageDimensions(base64Data: string, mimeType: string): ImageDimensions | null {
 	if (mimeType === "image/png") {
 		return getPngDimensions(base64Data);
