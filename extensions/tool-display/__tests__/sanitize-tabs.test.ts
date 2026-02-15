@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { renderLines, sanitizeTabs } from "../index.js";
+import { formatToolVerb, renderLines, sanitizeTabs } from "../index.js";
 
 describe("sanitizeTabs", () => {
 	it("replaces tabs with three spaces", () => {
@@ -16,6 +16,36 @@ describe("sanitizeTabs", () => {
 
 	it("handles empty string", () => {
 		expect(sanitizeTabs("")).toBe("");
+	});
+});
+
+describe("formatToolVerb", () => {
+	it("returns present continuous for known tools during execution", () => {
+		expect(formatToolVerb("read", false)).toBe("Reading…");
+		expect(formatToolVerb("write", false)).toBe("Writing…");
+		expect(formatToolVerb("edit", false)).toBe("Editing…");
+		expect(formatToolVerb("bash", false)).toBe("Running…");
+		expect(formatToolVerb("ls", false)).toBe("Listing…");
+		expect(formatToolVerb("grep", false)).toBe("Searching…");
+		expect(formatToolVerb("find", false)).toBe("Finding…");
+	});
+
+	it("returns past tense for known tools when complete", () => {
+		expect(formatToolVerb("read", true)).toBe("Read");
+		expect(formatToolVerb("write", true)).toBe("Wrote");
+		expect(formatToolVerb("edit", true)).toBe("Edited");
+		expect(formatToolVerb("bash", true)).toBe("Ran");
+		expect(formatToolVerb("ls", true)).toBe("Listed");
+		expect(formatToolVerb("grep", true)).toBe("Searched");
+		expect(formatToolVerb("find", true)).toBe("Found");
+	});
+
+	it("falls back to tool name with ellipsis for unknown tools during execution", () => {
+		expect(formatToolVerb("custom_tool", false)).toBe("custom_tool…");
+	});
+
+	it("falls back to raw tool name for unknown tools when complete", () => {
+		expect(formatToolVerb("custom_tool", true)).toBe("custom_tool");
 	});
 });
 

@@ -184,5 +184,47 @@ export function formatTruncationIndicator(
 	);
 }
 
+/**
+ * Verb tense pair for tool progress rendering.
+ * Present continuous shown during execution, past tense on completion.
+ */
+interface VerbTense {
+	/** Present continuous form with ellipsis (e.g., "Reading…") */
+	present: string;
+	/** Past tense form (e.g., "Read") */
+	past: string;
+}
+
+/**
+ * Mapping of tool names to their verb tense pairs.
+ * Custom tools not in this map fall back to title-casing the tool name.
+ */
+const VERB_TENSES: ReadonlyMap<string, VerbTense> = new Map([
+	["read", { present: "Reading…", past: "Read" }],
+	["write", { present: "Writing…", past: "Wrote" }],
+	["edit", { present: "Editing…", past: "Edited" }],
+	["bash", { present: "Running…", past: "Ran" }],
+	["ls", { present: "Listing…", past: "Listed" }],
+	["grep", { present: "Searching…", past: "Searched" }],
+	["find", { present: "Finding…", past: "Found" }],
+]);
+
+/**
+ * Get the appropriate verb form for a tool based on execution state.
+ *
+ * Returns present continuous during execution ("Reading…") and
+ * past tense on completion ("Read"). Falls back to the raw tool name
+ * with "…" appended (present) or as-is (past) for unmapped tools.
+ *
+ * @param toolName - Name of the tool (e.g., "read", "bash")
+ * @param isComplete - Whether the tool has finished executing
+ * @returns Formatted verb string for display
+ */
+export function formatToolVerb(toolName: string, isComplete: boolean): string {
+	const tense = VERB_TENSES.get(toolName);
+	if (tense) return isComplete ? tense.past : tense.present;
+	return isComplete ? toolName : `${toolName}…`;
+}
+
 /** Noop — this extension is a shared library, not an active extension */
 export default function (_pi: ExtensionAPI) {}
