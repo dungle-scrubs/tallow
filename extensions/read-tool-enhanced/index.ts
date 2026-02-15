@@ -28,8 +28,12 @@ import {
 	parseFrontmatter,
 } from "@mariozechner/pi-coding-agent";
 import {
+	createImageMetadata,
 	detectImageFormat,
 	fileLink,
+	formatImageDimensions,
+	getImageDimensions,
+	type ImageMetadata,
 	imageFormatToMime,
 	Text,
 	visibleWidth,
@@ -202,6 +206,24 @@ function isSkillContent(content: string): boolean {
 	);
 }
 
+/**
+ * Parse display dimensions from the base read tool's resize note.
+ *
+ * The base tool emits text like:
+ * `[Image: original 3840x2160, displayed at 800x450. ...]`
+ *
+ * @param text - Text content from the base tool's image result
+ * @returns Parsed display dimensions, or null if not found
+ */
+function parseDisplayDimensions(
+	text: string | undefined
+): { widthPx: number; heightPx: number } | null {
+	if (!text) return null;
+	const match = text.match(/displayed at (\d+)x(\d+)/);
+	if (!match) return null;
+	return { widthPx: Number(match[1]), heightPx: Number(match[2]) };
+}
+
 /** Bytes needed to detect image format from magic numbers. */
 const FORMAT_SNIFF_BYTES = 12;
 
@@ -231,6 +253,9 @@ async function detectImageFormatFromFile(absolutePath: string): Promise<string |
 		return null;
 	}
 }
+
+/** Marker for image results in details, used by renderResult. */
+const IMAGE_MARKER = "__image_read__";
 
 /** Marker for PDF results in details, used by renderResult. */
 const PDF_MARKER = "__pdf_read__";
@@ -407,15 +432,54 @@ export default function readSummary(pi: ExtensionAPI): void {
 
 			// ── Image detection from bytes ──────────────────────
 			// Read first 12 bytes to detect image format by magic numbers.
-			// The base tool already handles images via file-type, but this
-			// provides a fast zero-dependency fallback and enables format-aware
-			// display even when file extensions are missing or incorrect.
-			const detectedFormat = await detectImageFormatFromFile(absolutePath);
-			if (detectedFormat) {
-				// Base tool's byte detection will handle the actual image reading.
-				// We pass through to it — this detection is for metadata/display.
+			// The base tool handles actual image reading via file-type; we
+			// detect early to capture structured metadata for display.
+			const detectedMime = await detectImageFormatFromFile(absolutePath);
+			if (detectedMime) {
 				const result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
-				return result;
+
+				// Extract image metadata from the base tool's result
+				const imageContent = result.content.find((c: { type: string }) => c.type === "image") as
+					| { type: "image"; data: string; mimeType: string }
+					| undefined;
+
+				let imageMeta: ImageMetadata | undefined;
+				if (imageContent) {
+					const mime = imageContent.mimeType;
+					const origDims = getImageDimensions(imageContent.data, mime);
+					const format = detectImageFormat(Buffer.from(imageContent.data.slice(0, 64), "base64"));
+
+					if (origDims) {
+						// Parse display dimensions from the base tool's resize note
+						const textContent = result.content.find((c: { type: string }) => c.type === "text") as
+							| { text: string }
+							| undefined;
+						const displayDims = parseDisplayDimensions(textContent?.text) ?? origDims;
+						const fileStat = fs.statSync(absolutePath, { throwIfNoEntry: false });
+						imageMeta = createImageMetadata(origDims, displayDims, format, fileStat?.size);
+					}
+				}
+
+				const sizeKb = imageMeta?.sizeBytes
+					? `${(imageMeta.sizeBytes / 1024).toFixed(1)}KB`
+					: undefined;
+				const dimStr = imageMeta ? formatImageDimensions(imageMeta) : undefined;
+				const fmtLabel = imageMeta?.format?.toUpperCase();
+				const parts = [fmtLabel, dimStr, sizeKb].filter(Boolean);
+				const summary = parts.length > 0 ? `${path} (${parts.join(", ")})` : `${path}`;
+
+				return {
+					content: [
+						{ type: "text" as const, text: summary },
+						...result.content.filter((c: { type: string }) => c.type === "image"),
+					],
+					details: {
+						[IMAGE_MARKER]: true,
+						_path: path,
+						_filename: path,
+						_imageMetadata: imageMeta,
+					},
+				};
 			}
 
 			// ── Standard file handling ──────────────────────────
@@ -498,8 +562,10 @@ export default function readSummary(pi: ExtensionAPI): void {
 						_isPdf?: boolean;
 						_totalPages?: number;
 						_emptyText?: boolean;
+						_imageMetadata?: ImageMetadata;
 						[SUMMARY_MARKER]?: boolean;
 						[PDF_MARKER]?: boolean;
+						[IMAGE_MARKER]?: boolean;
 				  }
 				| undefined;
 
@@ -526,8 +592,20 @@ export default function readSummary(pi: ExtensionAPI): void {
 				return renderLines([]);
 			}
 
-			// PDF file: compact summary collapsed, full text expanded
+			// Image file: show dimensions and format
 			const readVerb = formatToolVerb("read", true);
+			if (details?.[IMAGE_MARKER]) {
+				const summary = textContent?.text ?? "image";
+				const parenIdx = summary.indexOf(" (");
+				const linkedSummary =
+					parenIdx > 0
+						? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
+						: fileLink(summary);
+				const footer = theme.fg("muted", `${getIcon("success")} ${readVerb} ${linkedSummary}`);
+				return renderLines([footer]);
+			}
+
+			// PDF file: compact summary collapsed, full text expanded
 			if (details?.[PDF_MARKER]) {
 				const summary = textContent?.text ?? "PDF";
 				const parenIdx = summary.indexOf(" (");
