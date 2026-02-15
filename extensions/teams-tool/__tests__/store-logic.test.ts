@@ -20,8 +20,6 @@ import {
 	isTaskReady,
 	markRead,
 	restoreArchivedTeam,
-	type Team,
-	type TeamTask,
 } from "../store.js";
 
 beforeEach(() => {
@@ -142,9 +140,9 @@ describe("isTaskReady", () => {
 describe("getReadyTasks", () => {
 	it("returns only pending tasks with met dependencies", () => {
 		const team = createTeamStore("gr1");
-		const t1 = addTaskToBoard(team, "Ready", "", []);
-		const t2 = addTaskToBoard(team, "Blocked", "", ["1"]);
-		const t3 = addTaskToBoard(team, "Also ready", "", []);
+		const _t1 = addTaskToBoard(team, "Ready", "", []);
+		const _t2 = addTaskToBoard(team, "Blocked", "", ["1"]);
+		const _t3 = addTaskToBoard(team, "Also ready", "", []);
 
 		const ready = getReadyTasks(team);
 		expect(ready).toHaveLength(2);
@@ -181,8 +179,8 @@ describe("archiveTeam", () => {
 
 		const archived = archiveTeam("arch2");
 		expect(archived).toBeDefined();
-		expect(archived!.tasks).toHaveLength(1);
-		expect(archived!.messages).toHaveLength(1);
+		expect(archived?.tasks).toHaveLength(1);
+		expect(archived?.messages).toHaveLength(1);
 	});
 
 	it("returns undefined for nonexistent team", () => {
@@ -195,8 +193,8 @@ describe("archiveTeam", () => {
 		const archived = archiveTeam("arch3");
 		const after = Date.now();
 
-		expect(archived!.archivedAt).toBeGreaterThanOrEqual(before);
-		expect(archived!.archivedAt).toBeLessThanOrEqual(after);
+		expect(archived?.archivedAt).toBeGreaterThanOrEqual(before);
+		expect(archived?.archivedAt).toBeLessThanOrEqual(after);
 	});
 });
 
@@ -219,7 +217,8 @@ describe("restoreArchivedTeam", () => {
 		archiveTeam("rest2");
 		restoreArchivedTeam("rest2");
 
-		const restored = getTeam("rest2")!;
+		const restored = getTeam("rest2");
+		expect(restored).toBeDefined();
 		// Store layer preserves task state — tool layer resets claimed to pending
 		expect(restored.tasks[0].status).toBe("claimed");
 		expect(restored.tasks[0].assignee).toBe("alice");
@@ -338,7 +337,8 @@ describe("formatArchivedTeamStatus", () => {
 	it("includes team name and archived timestamp", () => {
 		const team = createTeamStore("afmt1");
 		addTaskToBoard(team, "Task", "", []);
-		const archived = archiveTeam("afmt1")!;
+		const archived = archiveTeam("afmt1");
+		if (!archived) throw new Error("Expected archived team");
 
 		const text = formatArchivedTeamStatus(archived);
 		expect(text).toContain("afmt1");

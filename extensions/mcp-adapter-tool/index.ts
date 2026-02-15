@@ -197,7 +197,8 @@ function handleServerData(server: McpServer, chunk: string): void {
 		}
 
 		if (msg.id != null && server.pendingRequests.has(msg.id)) {
-			const pending = server.pendingRequests.get(msg.id)!;
+			const pending = server.pendingRequests.get(msg.id);
+			if (!pending) continue;
 			server.pendingRequests.delete(msg.id);
 			pending.resolve(msg);
 		}

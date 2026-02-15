@@ -5,7 +5,7 @@
  * Run `bun test --update-snapshots` to regenerate after intentional changes.
  */
 import { describe, expect, it } from "bun:test";
-import { renderSnapshot, stripAnsi } from "../../../../test-utils/virtual-terminal.js";
+import { renderSnapshot } from "../../../../test-utils/virtual-terminal.js";
 import { BorderedBox } from "../components/bordered-box.js";
 import { Markdown, type MarkdownTheme } from "../components/markdown.js";
 import { Text } from "../components/text.js";

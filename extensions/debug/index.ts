@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
 			logger = createDebugLogger(sessionId);
 		}
 
-		logger!.log("session", "start", {
+		logger?.log("session", "start", {
 			cwd: ctx.cwd,
 			sessionId: ctx.sessionManager.getSessionId(),
 			model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "none",

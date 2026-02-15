@@ -36,6 +36,13 @@ function mockTeammate(
 	return { mate, prompts };
 }
 
+/** Find a tool by name, throwing if not found (test helper). */
+function findTool(tools: ReturnType<typeof createTeammateTools>, name: string) {
+	const tool = tools.find((t) => t.name === name);
+	if (!tool) throw new Error(`Tool "${name}" not found`);
+	return tool;
+}
+
 function mockEvents() {
 	const emitted: Array<{ event: string; data: unknown }> = [];
 	return {
@@ -62,8 +69,12 @@ describe("peer-to-peer teammate messaging", () => {
 		team.teammates.set("bob", bob);
 
 		const events = mockEvents();
-		const aliceTools = createTeammateTools(team, "alice", events as any);
-		const messageTool = aliceTools.find((t) => t.name === "team_message")!;
+		const aliceTools = createTeammateTools(
+			team,
+			"alice",
+			events as unknown as Parameters<typeof createTeammateTools>[2]
+		);
+		const messageTool = findTool(aliceTools, "team_message");
 
 		// Alice sends a message to bob
 		const result = await messageTool.execute("call-1", { to: "bob", content: "I found 42 files" });
@@ -96,7 +107,7 @@ describe("peer-to-peer teammate messaging", () => {
 		addTeamMessage(team, "alice", "bob", "Check task #3");
 
 		const bobTools = createTeammateTools(team, "bob");
-		const inboxTool = bobTools.find((t) => t.name === "team_inbox")!;
+		const inboxTool = findTool(bobTools, "team_inbox");
 
 		const result = await inboxTool.execute("call-2", {});
 		expect(result.content[0].text).toContain("1 message(s)");
@@ -117,7 +128,7 @@ describe("peer-to-peer teammate messaging", () => {
 		team.teammates.set("carol", carol);
 
 		const aliceTools = createTeammateTools(team, "alice");
-		const messageTool = aliceTools.find((t) => t.name === "team_message")!;
+		const messageTool = findTool(aliceTools, "team_message");
 
 		await messageTool.execute("call-4", { to: "all", content: "Step 1 done" });
 
@@ -143,7 +154,7 @@ describe("peer-to-peer teammate messaging", () => {
 		team.teammates.set("bob", bob);
 
 		const aliceTools = createTeammateTools(team, "alice");
-		const messageTool = aliceTools.find((t) => t.name === "team_message")!;
+		const messageTool = findTool(aliceTools, "team_message");
 
 		await messageTool.execute("call-5", { to: "bob", content: "update for you" });
 
@@ -161,7 +172,7 @@ describe("peer-to-peer teammate messaging", () => {
 		team.teammates.set("alice", alice);
 
 		const aliceTools = createTeammateTools(team, "alice");
-		const messageTool = aliceTools.find((t) => t.name === "team_message")!;
+		const messageTool = findTool(aliceTools, "team_message");
 
 		const result = await messageTool.execute("call-6", { to: "ghost", content: "hello?" });
 		expect(result.content[0].text).toContain("not found");
@@ -180,8 +191,8 @@ describe("peer-to-peer teammate messaging", () => {
 
 		const aliceTools = createTeammateTools(team, "alice");
 		const bobTools = createTeammateTools(team, "bob");
-		const aliceMsg = aliceTools.find((t) => t.name === "team_message")!;
-		const bobMsg = bobTools.find((t) => t.name === "team_message")!;
+		const aliceMsg = findTool(aliceTools, "team_message");
+		const bobMsg = findTool(bobTools, "team_message");
 
 		// Alice → Bob
 		await aliceMsg.execute("c1", { to: "bob", content: "Found 42 files" });
@@ -219,7 +230,7 @@ describe("teammate task board operations", () => {
 		addTaskToBoard(team, "Count files", "Count .ts files", []);
 
 		const aliceTools = createTeammateTools(team, "alice");
-		const tasksTool = aliceTools.find((t) => t.name === "team_tasks")!;
+		const tasksTool = findTool(aliceTools, "team_tasks");
 
 		// List
 		const listResult = await tasksTool.execute("c1", { action: "list" });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -48,7 +48,8 @@ function spawnSleeper(): { pid: number; cleanup: () => void } {
 		stdio: "ignore",
 	});
 	child.unref();
-	const pid = child.pid!;
+	if (!child.pid) throw new Error("Failed to spawn sleep process");
+	const pid = child.pid;
 	return {
 		pid,
 		cleanup: () => {
