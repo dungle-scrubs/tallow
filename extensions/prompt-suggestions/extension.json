@@ -1,0 +1,10 @@
+{
+	"name": "prompt-suggestions",
+	"version": "0.1.0",
+	"description": "Context-aware prompt suggestions shown as ghost text in the editor input",
+	"category": "ui",
+	"tags": ["suggestions", "ghost-text", "autocomplete"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
