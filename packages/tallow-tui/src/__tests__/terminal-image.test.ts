@@ -51,12 +51,12 @@ describe("calculateImageLayout", () => {
 	});
 
 	describe("maxHeightCells clamping", () => {
-		it("clamps portrait images to maxHeightCells", () => {
+		it("clamps portrait images to maxHeightCells but keeps full width", () => {
 			const dims: ImageDimensions = { widthPx: 1000, heightPx: 2000 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.rows).toBe(25);
-			// Columns reduced to preserve aspect ratio
-			expect(layout.columns).toBeLessThan(60);
+			// Width stays at natural cols (ceil(1000/9) = 112 > 60, so capped at 60)
+			expect(layout.columns).toBe(60);
 		});
 
 		it("does not clamp landscape images below maxHeightCells", () => {
@@ -67,23 +67,20 @@ describe("calculateImageLayout", () => {
 			expect(layout.columns).toBe(60);
 		});
 
-		it("clamps a tall portrait and back-calculates columns", () => {
+		it("clamps tall portrait rows but preserves full width", () => {
 			const dims: ImageDimensions = { widthPx: 500, heightPx: 3000 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.rows).toBe(25);
-			// Back-calculated: 25×18=450px tall, scale=450/3000=0.15
-			// 500×0.15/9 = floor(8.33) = 8
-			expect(layout.columns).toBe(8);
+			// Width stays at natural cols: ceil(500/9) = 56
+			expect(layout.columns).toBe(56);
 		});
 
-		it("preserves aspect ratio when clamping height", () => {
+		it("keeps full width when clamping height on square images", () => {
 			const dims: ImageDimensions = { widthPx: 1024, heightPx: 1024 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.rows).toBe(25);
-			// Aspect ratio ~2:1 in cells (since cell height = 2× cell width)
-			// 25 rows × 18px = 450px, scale = 450/1024 ≈ 0.439
-			// cols = floor(1024 × 0.439 / 9) = 50
-			expect(layout.columns).toBe(50);
+			// Width stays at 60 (natural = ceil(1024/9) = 114 > 60)
+			expect(layout.columns).toBe(60);
 		});
 
 		it("does nothing when maxHeightCells is undefined", () => {
@@ -93,7 +90,7 @@ describe("calculateImageLayout", () => {
 			expect(layout.rows).toBeGreaterThan(100);
 		});
 
-		it("columns never exceed maxWidthCells after back-calculation", () => {
+		it("columns never exceed maxWidthCells", () => {
 			const dims: ImageDimensions = { widthPx: 4000, heightPx: 4001 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.columns).toBeLessThanOrEqual(60);

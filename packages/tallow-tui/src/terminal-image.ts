@@ -214,7 +214,7 @@ export function calculateImageLayout(
 ): ImageLayout {
 	// Clamp to natural width — prevents upscaling small images
 	const naturalCols = Math.ceil(imageDimensions.widthPx / cellDims.widthPx);
-	let columns = Math.min(maxWidthCells, naturalCols);
+	const columns = Math.min(maxWidthCells, naturalCols);
 
 	// Calculate rows from effective column width
 	const targetWidthPx = columns * cellDims.widthPx;
@@ -223,13 +223,11 @@ export function calculateImageLayout(
 	let rows = Math.ceil(scaledHeightPx / cellDims.heightPx);
 	rows = Math.max(1, rows);
 
-	// Clamp to max height and back-calculate columns to preserve aspect ratio
+	// Clamp text-layer rows to max height but keep full width.
+	// The terminal renders at the specified column width; tall images are
+	// clipped at the bottom rather than horizontally compressed.
 	if (maxHeightCells && rows > maxHeightCells) {
 		rows = maxHeightCells;
-		const targetHeightPx = rows * cellDims.heightPx;
-		const heightScale = targetHeightPx / imageDimensions.heightPx;
-		columns = Math.floor((imageDimensions.widthPx * heightScale) / cellDims.widthPx);
-		columns = Math.max(1, Math.min(columns, maxWidthCells));
 	}
 
 	return { rows, columns };
