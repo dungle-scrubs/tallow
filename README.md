@@ -23,12 +23,12 @@
   <img src="assets/screenshot.jpg" alt="Tallow multi-agent team coordinating a docs audit" />
 </p>
 
-46 extensions, 34 themes, 8 slash commands, and 9 specialized agents.
+47 extensions, 34 themes, 8 slash commands, and 9 specialized agents.
 Install only what you need — the interactive installer lets you pick.
 
 ## Features
 
-- **46 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
+- **47 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, context usage, and more
 - **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
 - **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
 - **9 specialized agents** — architect, debug, explore, planner, refactor, reviewer, scout, worker, tallow-expert

@@ -6,7 +6,7 @@ description: Why tallow exists and what it does.
 ## What is tallow?
 
 tallow is an opinionated coding agent built on pi. It bundles
-46 extensions, 8 agent profiles, 34 themes, and a skill system
+47 extensions, 8 agent profiles, 34 themes, and a skill system
 into a single install. No manual extension management —
 everything ships together, ready to use.
 
@@ -83,7 +83,7 @@ Skills have frontmatter metadata including `name`,
 
 ## What makes it different
 
-- **Batteries included** — 46 extensions loaded automatically.
+- **Batteries included** — 47 extensions loaded automatically.
   No separate install step.
 - **Extensible from the ground up** — features are extensions,
   not hard-coded. Don't like how bash output renders? Replace

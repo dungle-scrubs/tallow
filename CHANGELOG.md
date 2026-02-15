@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **prompt-suggestions:** ghost text suggestions in the editor — curated idle
+  templates when input is empty (Enter to accept), plus LLM-powered inline
+  autocomplete as you type (Tab to accept). Uses Groq Llama 3.1 8B by default
+  ($0.05/M tokens). Configurable model, debounce, and per-session cost cap
+- **tallow-tui:** `setGhostText()` / `getGhostText()` on Editor component for
+  inline suggestion rendering; added to `EditorComponent` interface
 - **core:** `--tools` CLI flag to restrict available tools per session — supports
   individual names (`read,bash,edit`), presets (`readonly`, `coding`, `none`),
   and validates with clear error messages

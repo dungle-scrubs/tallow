@@ -1,0 +1,71 @@
+---
+title: prompt-suggestions
+description: Context-aware prompt suggestions shown as ghost text in the editor.
+---
+
+Shows prompt suggestions as dim ghost text directly in the editor
+input. When the editor is empty, a full suggested prompt appears —
+hit Enter to accept and submit, or start typing to dismiss it.
+
+## Ghost text interaction
+
+| Key | Behavior |
+|-----|----------|
+| **Enter** (empty input) | Accept ghost text and submit |
+| **Tab** | Accept ghost text into buffer (without submitting) |
+| **Escape** | Dismiss ghost text |
+| Any character | Dismiss ghost text, type normally |
+
+## Idle suggestions
+
+When the editor is empty and the agent is idle, a random suggestion
+from a curated template list appears as ghost text. Templates include
+common tasks like "Explain the project structure", "Run the tests and
+fix any failures", and "Review the recent changes for issues".
+
+Ghost text is suppressed while the agent is processing a turn and
+reappears after the turn ends.
+
+## Inline autocomplete
+
+When you start typing (4+ characters), the extension calls a fast,
+cheap model to suggest a completion. The suggestion appears as ghost
+text after your cursor — hit Tab to accept.
+
+The default model is **Groq Llama 3.1 8B** (`$0.05/$0.08` per million
+tokens). At ~50 tokens per suggestion, 100 suggestions cost ~$0.004.
+
+- Debounces at 600ms after you stop typing
+- Cancels in-flight requests on new keystrokes (AbortController)
+- Skips slash commands (handled by built-in autocomplete)
+- Capped at 200 calls per session as a cost guardrail
+
+## Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `prompt-suggestions.enabled` | `true` | Enable/disable the extension entirely |
+| `prompt-suggestions.autocomplete` | `true` | Enable/disable LLM autocomplete (idle suggestions still work) |
+| `prompt-suggestions.model` | `groq/llama-3.1-8b-instant` | Model for autocomplete (provider/model-id) |
+| `prompt-suggestions.debounceMs` | `600` | Debounce delay before calling the model |
+
+Add settings to `~/.tallow/settings.json`:
+
+```json
+{
+  "prompt-suggestions.enabled": true,
+  "prompt-suggestions.autocomplete": true,
+  "prompt-suggestions.model": "groq/llama-3.1-8b-instant",
+  "prompt-suggestions.debounceMs": 600
+}
+```
+
+## TUI integration
+
+The extension adds ghost text rendering to the Editor component
+(`packages/tallow-tui`). Ghost text is rendered as dim ANSI text
+(`\x1b[2m`) after the cursor position, truncated to fit the
+available content width.
+
+The `EditorComponent` interface exposes `setGhostText()` and
+`getGhostText()` for custom editor implementations.
