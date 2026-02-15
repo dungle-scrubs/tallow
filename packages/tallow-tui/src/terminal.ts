@@ -48,6 +48,11 @@ export interface Terminal {
 
 	// Title operations
 	setTitle(title: string): void; // Set terminal window title
+
+	/** Set terminal progress bar via OSC 9;4. Supported by Windows Terminal, iTerm2, ConEmu. */
+	setProgress(percent: number): void;
+	/** Clear terminal progress bar via OSC 9;4. */
+	clearProgress(): void;
 }
 
 /**
@@ -315,5 +320,31 @@ export class ProcessTerminal implements Terminal {
 	setTitle(title: string): void {
 		// OSC 0;title BEL - set terminal window title
 		process.stdout.write(`\x1b]0;${title}\x07`);
+	}
+
+	private lastProgressWrite = 0;
+
+	/**
+	 * Set terminal progress bar via OSC 9;4.
+	 * Throttled to max 1 update per 100ms (percent=100 always passes through).
+	 * Supported by Windows Terminal (tab indicator), iTerm2 (title bar), ConEmu (taskbar).
+	 * Unsupported terminals gracefully ignore these sequences.
+	 * @param percent - Progress percentage, clamped to 0-100
+	 */
+	setProgress(percent: number): void {
+		const clamped = Math.max(0, Math.min(100, Math.round(percent)));
+		const now = Date.now();
+		if (clamped !== 100 && now - this.lastProgressWrite < 100) return;
+		this.lastProgressWrite = now;
+		process.stdout.write(`\x1b]9;4;1;${clamped}\x07`);
+	}
+
+	/**
+	 * Clear terminal progress bar via OSC 9;4.
+	 * Resets the throttle timestamp so a subsequent setProgress fires immediately.
+	 */
+	clearProgress(): void {
+		this.lastProgressWrite = 0;
+		process.stdout.write("\x1b]9;4;0;0\x07");
 	}
 }
