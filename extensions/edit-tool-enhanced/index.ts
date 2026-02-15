@@ -17,7 +17,7 @@ import {
 import { fileLink, hyperlink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { commandExistsOnPath, runGitCommandSync } from "../_shared/shell-policy.js";
-import { renderLines } from "../tool-display/index.js";
+import { formatToolVerb, renderLines } from "../tool-display/index.js";
 
 /**
  * Check whether an executable exists on PATH.
@@ -86,8 +86,9 @@ export default function editLive(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
+			const verb = formatToolVerb("edit", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold("edit ")) + theme.fg("muted", fileLink(path)),
+				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", fileLink(path)),
 				0,
 				0
 			);
@@ -135,9 +136,9 @@ export default function editLive(pi: ExtensionAPI): void {
 			const finalFilename = details._filename ?? "file";
 			const diffLink = buildDiffLink(finalFilename, theme.fg.bind(theme), hasLazygit);
 
+			const verb = formatToolVerb("edit", true);
 			const footer =
-				theme.fg("muted", `${getIcon("success")} ${fileLink(finalFilename)} (edit applied)`) +
-				diffLink;
+				theme.fg("muted", `${getIcon("success")} ${verb} ${fileLink(finalFilename)}`) + diffLink;
 
 			if (details._diff) {
 				const diffLines = renderDiff(details._diff).split("\n");

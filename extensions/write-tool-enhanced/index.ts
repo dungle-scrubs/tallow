@@ -4,7 +4,7 @@
 import { createWriteTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { fileLink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
-import { renderLines } from "../tool-display/index.js";
+import { formatToolVerb, renderLines } from "../tool-display/index.js";
 
 const PREVIEW_MARKER = "__write_preview__";
 
@@ -25,8 +25,9 @@ export default function writePreview(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
+			const verb = formatToolVerb("write", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold("write ")) + theme.fg("muted", fileLink(path)),
+				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", fileLink(path)),
 				0,
 				0
 			);
@@ -71,7 +72,8 @@ export default function writePreview(pi: ExtensionAPI): void {
 				parenIdx > 0
 					? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
 					: fileLink(summary);
-			const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
+			const verb = formatToolVerb("write", true);
+			const footer = theme.fg("muted", `${getIcon("success")} ${verb} ${linkedSummary}`);
 			const body = details._content ?? "";
 			const contentLines = body.split("\n").map((line) => theme.fg("dim", line));
 			return renderLines([...contentLines, "", footer], { wrap: expanded });
