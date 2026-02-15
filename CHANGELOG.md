@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **subagent-tool:** `auto-cheap`/`auto-premium` routing keywords for agent
+  frontmatter — set `model: auto-cheap` to force eco routing without picking a
+  specific model, integrates with existing cost preference and per-call hints
+- **agents:** bundled `explore` agent for cheap codebase discovery — uses
+  `auto-cheap` routing, read-only tools (read/grep/find/ls), and a 5-turn
+  budget for economical exploration tasks
+- **bash-tool-enhanced:** auto-background long-running commands after
+  configurable timeout (default 30s) — promotes to background-task-tool
+  with seamless output handoff and task_kill support
 - **subagent-tool:** live token usage display during subagent execution —
   per-agent counters update in real-time for single, parallel, and centipede
   modes with 500ms throttled updates
