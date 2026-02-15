@@ -573,7 +573,7 @@ nav.sidebar [aria-current="page"]:focus {
 }
 
 .theme-swatch:hover {
-	flex: 2.5;
+	flex: 4;
 }
 
 .theme-swatch-label {
@@ -582,10 +582,12 @@ nav.sidebar [aria-current="page"]:focus {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	padding-inline: 0.75rem;
 	font-size: 0.6rem;
 	font-weight: 600;
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
+	white-space: nowrap;
 	color: transparent;
 	transition: color 200ms;
 }
