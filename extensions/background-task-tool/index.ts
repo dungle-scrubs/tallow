@@ -77,6 +77,15 @@ interface BackgroundTask {
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB max buffered output per task
 const MAX_TASKS = 20; // Max concurrent/recent tasks
 
+/** Reference to pi events bus, set when the extension initializes. */
+let piEventsRef: ExtensionAPI["events"] | null = null;
+
+/**
+ * Abort controllers for promoted tasks (bash → background handoff).
+ * Regular bg_bash tasks use ChildProcess.kill(); promoted tasks use AbortController.
+ */
+const promotedAbortControllers = new Map<string, AbortController>();
+
 // TUI reference captured at session_start for Loader in renderResult
 let tuiRef: TUI | null = null;
 
@@ -138,6 +147,73 @@ function cleanupOldTasks(): void {
 		const entry = completed.shift();
 		if (entry) tasks.delete(entry[0]);
 	}
+}
+
+// ── Promoted Task API ────────────────────────────────────────────────────────
+
+/** Handle for updating a task that was promoted from bash to background. */
+export interface PromotedTaskHandle {
+	/** The background task ID. */
+	readonly id: string;
+	/** Replace the task's entire output buffer (bash streams full text, not deltas). */
+	replaceOutput(text: string): void;
+	/** Mark the task as completed with the given exit code. */
+	complete(exitCode: number | null): void;
+}
+
+/**
+ * Promote a running bash command to a tracked background task.
+ *
+ * Called by bash-tool-enhanced when a command exceeds the auto-background
+ * timeout. Creates a BackgroundTask entry in the shared registry so that
+ * task_status, task_output, and task_kill all work on it.
+ *
+ * @param opts.command - The shell command string
+ * @param opts.cwd - Working directory where the command was started
+ * @param opts.startTime - Timestamp (ms) when the command originally started
+ * @param opts.initialOutput - Output captured before promotion
+ * @param opts.abortController - Controller to abort the underlying bash execution
+ * @returns Handle for streaming updates and marking completion
+ */
+export function promoteToBackground(opts: {
+	command: string;
+	cwd: string;
+	startTime: number;
+	initialOutput: string;
+	abortController: AbortController;
+}): PromotedTaskHandle {
+	const taskId = generateTaskId();
+	const task: BackgroundTask = {
+		id: taskId,
+		command: opts.command,
+		cwd: opts.cwd,
+		startTime: opts.startTime,
+		output: opts.initialOutput ? [opts.initialOutput] : [],
+		outputBytes: opts.initialOutput?.length ?? 0,
+		process: null,
+		status: "running",
+	};
+
+	promotedAbortControllers.set(taskId, opts.abortController);
+	tasks.set(taskId, task);
+	cleanupOldTasks();
+
+	if (piEventsRef) publishBackgroundTaskSnapshot(piEventsRef);
+
+	return {
+		id: taskId,
+		replaceOutput(text: string) {
+			task.output = [text];
+			task.outputBytes = text.length;
+		},
+		complete(exitCode: number | null) {
+			task.endTime = Date.now();
+			task.exitCode = exitCode;
+			task.status = exitCode === 0 ? "completed" : "failed";
+			promotedAbortControllers.delete(taskId);
+			if (piEventsRef) publishBackgroundTaskSnapshot(piEventsRef);
+		},
+	};
 }
 
 /**
@@ -248,6 +324,8 @@ export function detectsHangPattern(command: string): string | null {
  * @param pi - Extension API for registering tools and commands
  */
 export default function backgroundTasksExtension(pi: ExtensionAPI): void {
+	piEventsRef = pi.events;
+
 	/**
 	 * Updates the status bar indicator for running background tasks.
 	 * @param ctx - Extension context for UI access
@@ -829,7 +907,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				};
 			}
 
-			if (task.status !== "running" || !task.process) {
+			if (task.status !== "running") {
 				return {
 					details: { error: true },
 					content: [
@@ -841,8 +919,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				};
 			}
 
-			if (task.process.pid != null) unregisterPid(task.process.pid);
-			task.process.kill("SIGTERM");
+			// Kill via ChildProcess (regular bg_bash) or AbortController (promoted from bash)
+			if (task.process) {
+				if (task.process.pid != null) unregisterPid(task.process.pid);
+				task.process.kill("SIGTERM");
+			} else {
+				const abort = promotedAbortControllers.get(params.taskId);
+				if (abort) {
+					abort.abort();
+					promotedAbortControllers.delete(params.taskId);
+				}
+			}
 			task.status = "killed";
 			task.endTime = Date.now();
 			task.output.push("\n[Killed by user]\n");
@@ -888,12 +975,20 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Task not found: ${rest}`, "error");
 					return;
 				}
-				if (task.status !== "running" || !task.process) {
+				if (task.status !== "running") {
 					ctx.ui.notify(`Task ${rest} is not running`, "error");
 					return;
 				}
-				if (task.process.pid != null) unregisterPid(task.process.pid);
-				task.process.kill("SIGTERM");
+				if (task.process) {
+					if (task.process.pid != null) unregisterPid(task.process.pid);
+					task.process.kill("SIGTERM");
+				} else {
+					const abort = promotedAbortControllers.get(rest);
+					if (abort) {
+						abort.abort();
+						promotedAbortControllers.delete(rest);
+					}
+				}
 				task.status = "killed";
 				task.endTime = Date.now();
 				syncTaskState(ctx);
@@ -992,9 +1087,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						// Kill with 'k' or 'x'
 						if ((data === "k" || data === "x") && taskList.length > 0) {
 							const task = taskList[selectedIndex];
-							if (task.status === "running" && task.process) {
-								if (task.process.pid != null) unregisterPid(task.process.pid);
-								task.process.kill("SIGTERM");
+							if (task.status === "running") {
+								if (task.process) {
+									if (task.process.pid != null) unregisterPid(task.process.pid);
+									task.process.kill("SIGTERM");
+								} else {
+									const abort = promotedAbortControllers.get(task.id);
+									if (abort) {
+										abort.abort();
+										promotedAbortControllers.delete(task.id);
+									}
+								}
 								task.status = "killed";
 								task.endTime = Date.now();
 								publishBackgroundTaskSnapshot(pi.events);
@@ -1037,9 +1140,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						// Kill with 'k' or 'x'
 						if ((data === "k" || data === "x") && selectedTaskId) {
 							const task = tasks.get(selectedTaskId);
-							if (task && task.status === "running" && task.process) {
-								if (task.process.pid != null) unregisterPid(task.process.pid);
-								task.process.kill("SIGTERM");
+							if (task && task.status === "running") {
+								if (task.process) {
+									if (task.process.pid != null) unregisterPid(task.process.pid);
+									task.process.kill("SIGTERM");
+								} else {
+									const abort = promotedAbortControllers.get(selectedTaskId);
+									if (abort) {
+										abort.abort();
+										promotedAbortControllers.delete(selectedTaskId);
+									}
+								}
 								task.status = "killed";
 								task.endTime = Date.now();
 								publishBackgroundTaskSnapshot(pi.events);
@@ -1204,12 +1315,18 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", async () => {
 		// Kill all running tasks and unregister PIDs
 		for (const task of tasks.values()) {
-			if (task.status === "running" && task.process) {
-				if (task.process.pid != null) unregisterPid(task.process.pid);
-				task.process.kill("SIGTERM");
+			if (task.status === "running") {
+				if (task.process) {
+					if (task.process.pid != null) unregisterPid(task.process.pid);
+					task.process.kill("SIGTERM");
+				} else {
+					const abort = promotedAbortControllers.get(task.id);
+					if (abort) abort.abort();
+				}
 			}
 		}
 		tasks.clear();
+		promotedAbortControllers.clear();
 		publishBackgroundTaskSnapshot(pi.events);
 		interopStateRequestCleanup?.();
 		interopStateRequestCleanup = undefined;

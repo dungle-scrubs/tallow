@@ -10,6 +10,11 @@
 			"name": "tool-display",
 			"kind": "requires",
 			"reason": "Shared truncation config and utilities"
+		},
+		{
+			"name": "background-task-tool",
+			"kind": "requires",
+			"reason": "Auto-background promotes long-running commands via promoteToBackground()"
 		}
 	],
 	"npmDependencies": {}
