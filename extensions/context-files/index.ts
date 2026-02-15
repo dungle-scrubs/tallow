@@ -42,7 +42,7 @@ const SKIP_DIRS = new Set([
 interface ContextFile {
 	readonly filepath: string;
 	readonly content: string;
-	readonly source: "global" | "ancestor" | "cwd" | "subdirectory";
+	readonly source: "global" | "ancestor" | "cwd" | "subdirectory" | "additional";
 	readonly depth: number;
 }
 
@@ -358,8 +358,88 @@ function shortenPath(filepath: string): string {
 	return filepath.startsWith(home) ? filepath.replace(home, "~") : filepath;
 }
 
+/**
+ * Resolve a user-provided directory path, expanding `~` and resolving relative paths.
+ *
+ * @param input - Raw path string from user input
+ * @returns Resolved absolute path
+ */
+function resolveDirPath(input: string): string {
+	if (input.startsWith("~/")) {
+		return path.resolve(os.homedir(), input.slice(2));
+	}
+	return path.resolve(input);
+}
+
+/**
+ * Discover context files from an additional directory using the same
+ * subdirectory walk rules as the primary cwd scan.
+ *
+ * @param dir - Absolute path to the additional directory
+ * @returns Context files found in the directory and its subdirectories
+ */
+function collectFromAdditionalDir(dir: string): ContextFile[] {
+	const files: ContextFile[] = [];
+
+	// Direct context files in the directory root
+	for (const filepath of findContextFiles(dir)) {
+		const content = readFileSafe(filepath);
+		if (content) {
+			files.push({
+				filepath,
+				content,
+				source: "additional",
+				depth: filepath.split(path.sep).length,
+			});
+		}
+	}
+
+	// Subdirectory walk (same rules as cwd subdirectories)
+	for (const filepath of findSubdirContextFiles(dir)) {
+		const content = readFileSafe(filepath);
+		if (content) {
+			files.push({
+				filepath,
+				content,
+				source: "additional",
+				depth: filepath.split(path.sep).length,
+			});
+		}
+	}
+
+	return files;
+}
+
 export default function contextFilesExtension(pi: ExtensionAPI) {
-	let contextFiles: readonly ContextFile[] = [];
+	let contextFiles: ContextFile[] = [];
+	const additionalDirs: Set<string> = new Set();
+
+	/**
+	 * Re-scan all additional directories and merge results into contextFiles.
+	 * Preserves original cwd-based files and appends additional dir files
+	 * sorted alphabetically by directory path for deterministic order.
+	 *
+	 * @param cwdFiles - Context files from the primary cwd scan
+	 * @returns Merged array with additional directory files appended
+	 */
+	function mergeAdditionalDirFiles(cwdFiles: ContextFile[]): ContextFile[] {
+		if (additionalDirs.size === 0) return cwdFiles;
+
+		const additionalFiles: ContextFile[] = [];
+		const seen = new Set(cwdFiles.map((f) => path.resolve(f.filepath)));
+
+		for (const dir of [...additionalDirs].sort()) {
+			for (const file of collectFromAdditionalDir(dir)) {
+				const resolved = path.resolve(file.filepath);
+				if (!seen.has(resolved)) {
+					seen.add(resolved);
+					additionalFiles.push(file);
+				}
+			}
+		}
+
+		return [...cwdFiles, ...additionalFiles];
+	}
 
 	pi.on("session_start", async (_event, ctx) => {
 		contextFiles = collectMissingFiles(ctx.cwd);
@@ -383,5 +463,84 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n# Additional Project Context\n\n${sections.join("\n\n---\n\n")}`,
 		};
+	});
+
+	pi.registerCommand("add-dir", {
+		description: "Add an additional directory for context file discovery",
+		handler: async (args, ctx) => {
+			const input = args.trim();
+
+			// No args → list current additional directories
+			if (!input) {
+				if (additionalDirs.size === 0) {
+					ctx.ui.notify("No additional directories registered.", "info");
+					return;
+				}
+
+				const lines = [...additionalDirs].sort().map((dir) => {
+					const files = collectFromAdditionalDir(dir);
+					const count = files.length;
+					const label = count === 1 ? "file" : "files";
+					return `  ${shortenPath(dir)} (${count} ${label})`;
+				});
+				ctx.ui.notify(`Additional directories:\n${lines.join("\n")}`, "info");
+				return;
+			}
+
+			const resolved = resolveDirPath(input);
+
+			// Validate: exists and is a directory
+			if (!fs.existsSync(resolved)) {
+				ctx.ui.notify(`Directory not found: ${shortenPath(resolved)}`, "error");
+				return;
+			}
+			if (!fs.statSync(resolved).isDirectory()) {
+				ctx.ui.notify(`Not a directory: ${shortenPath(resolved)}`, "error");
+				return;
+			}
+
+			// Deduplicate
+			if (additionalDirs.has(resolved)) {
+				ctx.ui.notify(`Already added: ${shortenPath(resolved)}`, "warning");
+				return;
+			}
+
+			additionalDirs.add(resolved);
+
+			// Re-scan: rebuild contextFiles with the new additional dir included
+			const cwdBaseFiles = collectMissingFiles(ctx.cwd);
+			const newFiles = collectFromAdditionalDir(resolved);
+			contextFiles = mergeAdditionalDirFiles(cwdBaseFiles);
+
+			if (newFiles.length > 0) {
+				const label = newFiles.length === 1 ? "file" : "files";
+				const paths = newFiles.map((f) => shortenPath(f.filepath)).join(", ");
+				ctx.ui.notify(
+					`context-files: +${newFiles.length} ${label} from ${shortenPath(resolved)}: ${paths}`,
+					"info"
+				);
+			} else {
+				ctx.ui.notify(`Added ${shortenPath(resolved)} (no context files found)`, "info");
+			}
+		},
+	});
+
+	pi.registerCommand("clear-dirs", {
+		description: "Remove all additional context directories",
+		handler: async (_args, ctx) => {
+			if (additionalDirs.size === 0) {
+				ctx.ui.notify("No additional directories to clear.", "info");
+				return;
+			}
+
+			const count = additionalDirs.size;
+			additionalDirs.clear();
+
+			// Rebuild contextFiles without additional dirs
+			contextFiles = collectMissingFiles(ctx.cwd);
+
+			const label = count === 1 ? "directory" : "directories";
+			ctx.ui.notify(`Cleared ${count} additional ${label}.`, "info");
+		},
 	});
 }
