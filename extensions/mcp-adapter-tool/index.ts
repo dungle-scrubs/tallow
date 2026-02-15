@@ -78,6 +78,8 @@ interface McpServer {
 	config: McpServerConfig;
 	process: ChildProcess | null;
 	tools: McpToolDef[];
+	/** Server-provided usage instructions, injected into the system prompt. */
+	instructions?: string;
 	ready: boolean;
 	failed: boolean;
 	hasRestarted: boolean;
@@ -285,6 +287,18 @@ async function initServer(server: McpServer): Promise<void> {
 			method: "notifications/initialized",
 		})}\n`;
 		server.process.stdin.write(notification);
+	}
+
+	// Capture server-provided instructions from the initialize response
+	const initResult = initResp.result as
+		| {
+				instructions?: string;
+				serverInfo?: { instructions?: string };
+		  }
+		| undefined;
+	const instructions = initResult?.instructions ?? initResult?.serverInfo?.instructions;
+	if (instructions?.trim()) {
+		server.instructions = instructions.trim();
 	}
 
 	const toolsResp = await sendRequest(server, "tools/list", {}, 10_000);
@@ -555,6 +569,14 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 
 		for (const server of connectedServers) {
 			lines.push(`## ${server.name} (${server.tools.length} tools)`);
+
+			// Inject server-provided instructions before tool listings
+			if (server.instructions) {
+				lines.push("");
+				lines.push(server.instructions);
+				lines.push("");
+			}
+
 			for (const tool of server.tools) {
 				const desc = tool.description ? ` - ${tool.description.split(".")[0]}` : "";
 				lines.push(`- mcp__${server.name}__${tool.name}${desc}`);
