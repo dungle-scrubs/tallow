@@ -39,6 +39,43 @@ describe("cleanName", () => {
 		expect(cleanName("")).toBe("");
 		expect(cleanName("  ")).toBe("");
 	});
+
+	it("should reject refusal responses starting with 'I need'", () => {
+		expect(
+			cleanName(
+				'I need a more substantial opening exchange to name this session. "test it out" is too vague.'
+			)
+		).toBe("");
+	});
+
+	it("should reject refusal responses with 'too vague'", () => {
+		expect(cleanName("The input is too vague to generate a name")).toBe("");
+	});
+
+	it("should reject refusal responses asking for more context", () => {
+		expect(cleanName("Could you provide more context about the task?")).toBe("");
+	});
+
+	it("should reject responses starting with 'Sorry'", () => {
+		expect(cleanName("Sorry, I can't name this session")).toBe("");
+	});
+
+	it("should reject overly long names (>60 chars)", () => {
+		expect(cleanName("x".repeat(61))).toBe("");
+	});
+
+	it("should accept names at exactly the max length", () => {
+		const name = "x".repeat(60);
+		expect(cleanName(name)).toBe(name);
+	});
+
+	it("should take only the first line of multi-line responses", () => {
+		expect(cleanName("Good name\nThis is an explanation")).toBe("Good name");
+	});
+
+	it("should reject if first line of multi-line is itself a refusal", () => {
+		expect(cleanName("I need more context\nPlease try again")).toBe("");
+	});
 });
 
 describe("buildNamingPrompt", () => {
