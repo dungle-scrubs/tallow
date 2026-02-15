@@ -84,6 +84,11 @@ tallow
 # Single-shot prompt
 tallow -p "Fix the failing tests"
 
+# Pipe input from stdin
+echo "Explain this error" | tallow
+cat README.md | tallow -p "Summarize this"
+git diff | tallow -p "Review these changes"
+
 # Continue most recent session
 tallow --continue
 
@@ -120,6 +125,26 @@ tallow --home
 
 `--api-key` was removed to avoid leaking secrets in process arguments.
 Use `TALLOW_API_KEY` or `TALLOW_API_KEY_REF` instead.
+
+### Piped input
+
+Pipe file contents or command output directly into Tallow:
+
+```bash
+# Stdin becomes the prompt
+echo "What is 2+2?" | tallow
+
+# Stdin as context + explicit prompt
+cat src/main.ts | tallow -p "Find bugs in this code"
+
+# Pipe command output
+git log --oneline -20 | tallow -p "Summarize recent changes"
+```
+
+When stdin is piped, Tallow automatically enters print mode (single-shot).
+If both stdin and `-p` are provided, stdin is prepended as context before the
+prompt. Piped input is capped at 10 MB. JSON mode (`--mode json`) also
+accepts piped stdin.
 
 ### Shell interpolation
 
