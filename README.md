@@ -116,6 +116,11 @@ TALLOW_API_KEY_REF=op://Services/Anthropic/api-key tallow --provider anthropic
 # Run in RPC or JSON mode
 tallow --mode rpc
 
+# Restrict available tools
+tallow --tools read,grep,find      # Only read, grep, find
+tallow --tools readonly            # Preset: read, grep, find, ls
+tallow --tools none                # Chat only, no tools
+
 # Disable all extensions
 tallow --no-extensions
 
