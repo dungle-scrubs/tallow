@@ -131,21 +131,31 @@ describe("context", () => {
 // ── Command execution: compact ───────────────────────────────────────────────
 
 describe("compact", () => {
-	test("calls ctx.compact() and returns confirmation", async () => {
-		let compacted = false;
+	test("calls ctx.compact() with onComplete and onError callbacks", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
 		const ctx = buildContext({
-			compact: () => {
-				compacted = true;
+			compact: (options) => {
+				compactOptions = options;
 			},
 		});
 
+		await executeTool({ command: "compact" }, ctx);
+
+		expect(compactOptions).toBeDefined();
+		expect(typeof compactOptions?.onComplete).toBe("function");
+		expect(typeof compactOptions?.onError).toBe("function");
+	});
+
+	test("returns initiation message mentioning agent interruption", async () => {
+		const ctx = buildContext({ compact: () => {} });
+
 		const result = await executeTool({ command: "compact" }, ctx);
 
-		expect(compacted).toBe(true);
 		expect(result.isError).toBeUndefined();
 		const text = result.content[0];
 		if (text?.type === "text") {
-			expect(text.text).toContain("compaction triggered");
+			expect(text.text).toContain("interrupted");
+			expect(text.text).toContain("compaction initiated");
 		}
 	});
 
