@@ -29,6 +29,7 @@ import {
 import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitInteropEvent,
 	INTEROP_EVENT_NAMES,
@@ -1222,6 +1223,29 @@ async function spawnBackgroundSubagent(
 			}
 
 		updateWidget();
+
+		// Post inline result for background subagent completion
+		if (piRef && isInlineResultsEnabled()) {
+			const duration = formatDuration(Date.now() - bgSubagent.startTime);
+			const finalOutput = getFinalOutput(result.messages);
+			const preview = extractPreview(finalOutput, 3, 80);
+
+			piRef.sendMessage({
+				customType: "subagent-complete",
+				content: `Agent ${agentName} ${bgSubagent.status} (${duration})`,
+				display: true,
+				details: {
+					agentId: id,
+					agentName,
+					task,
+					exitCode: code ?? 0,
+					duration,
+					preview,
+					status: bgSubagent.status as "completed" | "failed",
+					timestamp: Date.now(),
+				} satisfies SubagentCompleteDetails,
+			});
+		}
 	});
 
 	// Start widget updates immediately after spawning
@@ -1745,11 +1769,57 @@ export interface SubagentToolResultEvent {
 	is_error: boolean;
 }
 
+/** Details for inline subagent-complete messages. */
+interface SubagentCompleteDetails {
+	readonly agentId: string;
+	readonly agentName: string;
+	readonly task: string;
+	readonly exitCode: number;
+	readonly duration: string;
+	readonly preview: string[];
+	readonly status: "completed" | "failed";
+	readonly timestamp: number;
+}
+
+/** Reference to pi extension API, for sendMessage from async completion handlers. */
+let piRef: ExtensionAPI | null = null;
+
 export default function (pi: ExtensionAPI) {
 	// Skip in subagent workers - they don't need to spawn subagents
 	if (process.env.PI_IS_SUBAGENT === "1") {
 		return;
 	}
+
+	piRef = pi;
+
+	// Register inline result renderer for background subagent completions
+	pi.registerMessageRenderer<SubagentCompleteDetails>(
+		"subagent-complete",
+		(message, _options, theme) => {
+			const d = message.details;
+			if (!d) return undefined;
+
+			const icon =
+				d.status === "completed"
+					? theme.fg("success", getIcon("success"))
+					: theme.fg("error", getIcon("error"));
+			const label = d.status === "completed" ? "completed" : "failed";
+
+			let text = `${icon} ${theme.fg("muted", "🤖 Agent")} ${theme.fg("accent", d.agentName)} ${theme.fg("muted", label)} ${theme.fg("dim", `(${d.duration})`)}`;
+
+			if (d.preview.length > 0) {
+				for (const line of d.preview) {
+					text += `\n  ${theme.fg("dim", line)}`;
+				}
+			} else {
+				text += `\n  ${theme.fg("dim", "(no output)")}`;
+			}
+
+			text += `\n  ${theme.fg("muted", "Expand tool result to view full conversation")}`;
+
+			return new Text(text, 0, 0);
+		}
+	);
 
 	// Clear any stale widget state on load/reload
 	runningSubagents.clear();
