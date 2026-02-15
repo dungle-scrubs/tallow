@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **bash-tool-enhanced:** `BASH_MAINTAIN_PROJECT_WORKING_DIR` setting — resets
+  bash execution to the project root before each command, preventing directory
+  drift from `cd` tool calls
+- **cd-tool:** warning when `BASH_MAINTAIN_PROJECT_WORKING_DIR` is enabled,
+  noting that bash commands still run from the project root
 - **mcp-adapter-tool:** server instructions support — captures `instructions`
   from MCP initialize responses and injects them into the system prompt before
   tool listings, giving servers a way to declare usage guidance
