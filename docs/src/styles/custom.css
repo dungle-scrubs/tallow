@@ -573,7 +573,7 @@ nav.sidebar [aria-current="page"]:focus {
 }
 
 .theme-swatch:hover {
-	flex: 4;
+	flex: 6;
 }
 
 .theme-swatch-label {
@@ -582,7 +582,7 @@ nav.sidebar [aria-current="page"]:focus {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	padding-inline: 0.75rem;
+	padding-inline: 1rem;
 	font-size: 0.6rem;
 	font-weight: 600;
 	letter-spacing: 0.04em;
@@ -603,12 +603,9 @@ nav.sidebar [aria-current="page"]:focus {
 
 .extension-list {
 	display: flex;
-	flex-wrap: nowrap;
+	flex-wrap: wrap;
 	gap: 0.5rem;
 	margin-block: 1rem;
-	padding-inline: 0.5rem;
-	overflow-x: auto;
-	overflow-y: hidden;
 }
 
 .extension-tag {
