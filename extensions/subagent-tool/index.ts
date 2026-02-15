@@ -1398,13 +1398,24 @@ async function runSingleAgent(
 		step,
 	};
 
-	const emitUpdate = () => {
-		if (onUpdate) {
-			onUpdate({
-				content: [{ type: "text", text: getFinalOutput(currentResult.messages) || "(running...)" }],
-				details: makeDetails([currentResult]),
-			});
-		}
+	/** Timestamp of the last emitted update, used for throttling. */
+	let lastEmitTime = 0;
+	const EMIT_THROTTLE_MS = 500;
+
+	/**
+	 * Emit a partial-result update to the parent tool framework.
+	 * Throttled to max ~2 updates/sec to avoid TUI flicker during rapid tool calls.
+	 * @param force - Bypass throttle (e.g., for first update or significant state changes)
+	 */
+	const emitUpdate = (force?: boolean) => {
+		if (!onUpdate) return;
+		const now = Date.now();
+		if (!force && now - lastEmitTime < EMIT_THROTTLE_MS) return;
+		lastEmitTime = now;
+		onUpdate({
+			content: [{ type: "text", text: getFinalOutput(currentResult.messages) || "(running...)" }],
+			details: makeDetails([currentResult]),
+		});
 	};
 
 	try {
@@ -2451,7 +2462,7 @@ WHEN NOT TO USE SUBAGENTS:
 					if (displayItems.length > COLLAPSED_ITEM_COUNT)
 						text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				}
-				if (!isRunning) {
+				{
 					const usageStr = formatUsageStats(r.usage, r.model);
 					if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
 				}
@@ -2583,6 +2594,8 @@ WHEN NOT TO USE SUBAGENTS:
 						const displayItems = getDisplayItems(r.messages);
 						if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
 						else text += `\n${renderDisplayItems(displayItems, 5)}`;
+						const stepUsage = formatUsageStats(r.usage, r.model);
+						if (stepUsage) text += `\n${theme.fg("dim", stepUsage)}`;
 					}
 				}
 				const usageStr = formatUsageStats(aggregateUsage(details.results));
@@ -2687,7 +2700,11 @@ WHEN NOT TO USE SUBAGENTS:
 						const contChar = isLast ? "   " : `${theme.fg("muted", "│")}  `;
 						text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}${modelTag}`;
 						text += `\n${contChar}${theme.fg("dim", taskPreview)}`;
+						const agentUsage = formatUsageStats(r.usage);
+						if (agentUsage) text += `\n${contChar}${theme.fg("dim", agentUsage)}`;
 					}
+					const liveTotal = formatUsageStats(aggregateUsage(details.results));
+					if (liveTotal) text += `\n${theme.fg("dim", `Total: ${liveTotal}`)}`;
 					return new Text(text, 0, 0);
 				}
 
