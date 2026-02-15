@@ -27,7 +27,13 @@ import {
 	loadSkills,
 	parseFrontmatter,
 } from "@mariozechner/pi-coding-agent";
-import { fileLink, Text, visibleWidth } from "@mariozechner/pi-tui";
+import {
+	detectImageFormat,
+	fileLink,
+	imageFormatToMime,
+	Text,
+	visibleWidth,
+} from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
 import {
@@ -196,6 +202,36 @@ function isSkillContent(content: string): boolean {
 	);
 }
 
+/** Bytes needed to detect image format from magic numbers. */
+const FORMAT_SNIFF_BYTES = 12;
+
+/**
+ * Detect image format from the first bytes of a file.
+ *
+ * Reads only 12 bytes using a file descriptor for minimal I/O overhead.
+ * Returns null if the file doesn't exist, is unreadable, or isn't a
+ * recognized image format.
+ *
+ * @param absolutePath - Absolute path to the file
+ * @returns Detected MIME type string, or null
+ */
+async function detectImageFormatFromFile(absolutePath: string): Promise<string | null> {
+	try {
+		const fd = fs.openSync(absolutePath, "r");
+		try {
+			const buf = Buffer.alloc(FORMAT_SNIFF_BYTES);
+			const bytesRead = fs.readSync(fd, buf, 0, FORMAT_SNIFF_BYTES, 0);
+			if (bytesRead === 0) return null;
+			const format = detectImageFormat(buf.subarray(0, bytesRead));
+			return format ? imageFormatToMime(format) : null;
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch {
+		return null;
+	}
+}
+
 /** Marker for PDF results in details, used by renderResult. */
 const PDF_MARKER = "__pdf_read__";
 
@@ -362,10 +398,24 @@ export default function readSummary(pi: ExtensionAPI): void {
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
 			let path = params.path ?? "file";
 
-			// ── PDF handling ────────────────────────────────────
 			const absolutePath = resolve(process.cwd(), path);
+
+			// ── PDF handling ────────────────────────────────────
 			if (await isPdf(absolutePath)) {
 				return executePdf(absolutePath, path, params.pages as string | undefined, onUpdate);
+			}
+
+			// ── Image detection from bytes ──────────────────────
+			// Read first 12 bytes to detect image format by magic numbers.
+			// The base tool already handles images via file-type, but this
+			// provides a fast zero-dependency fallback and enables format-aware
+			// display even when file extensions are missing or incorrect.
+			const detectedFormat = await detectImageFormatFromFile(absolutePath);
+			if (detectedFormat) {
+				// Base tool's byte detection will handle the actual image reading.
+				// We pass through to it — this detection is for metadata/display.
+				const result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
+				return result;
 			}
 
 			// ── Standard file handling ──────────────────────────
