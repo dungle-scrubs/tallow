@@ -36,6 +36,8 @@ import {
 	onInteropEvent,
 } from "../_shared/interop-events.js";
 import { expandFileReferences } from "../file-reference/index.js";
+import type { RoutingHints } from "./model-router.js";
+import { routeModel } from "./model-router.js";
 
 // === Agent Discovery (inlined from agents.ts) ===
 
@@ -993,7 +995,7 @@ function writePromptToTempFile(
  * @param cwd - Optional working directory override
  * @param piEvents - Optional event emitter for subagent lifecycle events
  * @param session - Optional session file path for persistent teammates
- * @returns Background subagent ID, or null if agent not found
+ * @returns Background subagent ID, error string if model unresolvable, or null if agent not found
  */
 async function spawnBackgroundSubagent(
 	defaultCwd: string,
@@ -1005,12 +1007,21 @@ async function spawnBackgroundSubagent(
 	session?: string,
 	modelOverride?: string,
 	parentModelId?: string,
-	defaults?: AgentDefaults
+	defaults?: AgentDefaults,
+	hints?: RoutingHints
 ): Promise<string | null> {
 	const resolved = resolveAgentForExecution(agentName, agents, defaults);
-	// Model precedence: per-call override > agent frontmatter > parent session model
-	const effectiveModel = modelOverride ?? resolved.agent.model ?? parentModelId;
-	const agent = { ...resolved.agent, model: effectiveModel };
+	// Route model via fuzzy resolution + auto-routing
+	const routing = await routeModel(
+		task,
+		modelOverride,
+		resolved.agent.model,
+		parentModelId,
+		resolved.agent.description,
+		hints
+	);
+	if (!routing.ok) return routing.error;
+	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const effectiveCwd = cwd ?? defaultCwd;
 
@@ -1236,8 +1247,37 @@ type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
  * @param signal - Optional abort signal
  * @param onUpdate - Optional callback for streaming partial results
  * @param makeDetails - Factory for SubagentDetails
- * @param piEvents - Optional event emitter for lifecycle events
- * @param session - Optional session file path for persistent teammates
+/** Patterns in stderr/errorMessage that indicate a model-level failure (not a task failure). */
+const MODEL_ERROR_PATTERNS = [
+	"usage limit",
+	"rate limit",
+	"quota exceeded",
+	"authentication",
+	"unauthorized",
+	"api key",
+	"billing",
+	"capacity",
+	"overloaded",
+	"503",
+	"429",
+];
+
+/**
+ * Checks if a subagent failure looks like a model/API error rather than a task error.
+ *
+ * Model errors (quota, auth, rate limits) are retryable with a different model.
+ * Task errors (bad tool call, runtime crash) are not.
+ *
+ * @param result - The failed subagent result
+ * @returns true if the error looks model-level and retryable
+ */
+function isModelLevelError(result: SingleResult): boolean {
+	const text = `${result.stderr} ${result.errorMessage ?? ""}`.toLowerCase();
+	return MODEL_ERROR_PATTERNS.some((p) => text.includes(p));
+}
+
+/**
+ * Run a single subagent. Retries with fallback models on API/quota errors.
  */
 async function runSingleAgent(
 	defaultCwd: string,
@@ -1253,12 +1293,42 @@ async function runSingleAgent(
 	session?: string,
 	modelOverride?: string,
 	parentModelId?: string,
-	defaults?: AgentDefaults
+	defaults?: AgentDefaults,
+	hints?: RoutingHints
 ): Promise<SingleResult> {
 	const resolved = resolveAgentForExecution(agentName, agents, defaults);
-	// Model precedence: per-call override > agent frontmatter > parent session model
-	const effectiveModel = modelOverride ?? resolved.agent.model ?? parentModelId;
-	const agent = { ...resolved.agent, model: effectiveModel };
+	// Route model via fuzzy resolution + auto-routing
+	const routing = await routeModel(
+		task,
+		modelOverride,
+		resolved.agent.model,
+		parentModelId,
+		resolved.agent.description,
+		hints
+	);
+	if (!routing.ok) {
+		// Return a failed SingleResult so the caller can surface the error
+		return {
+			agent: agentName,
+			agentSource: resolved.resolution === "ephemeral" ? "ephemeral" : resolved.agent.source,
+			task,
+			exitCode: 1,
+			messages: [],
+			stderr: routing.error,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: 0,
+				contextTokens: 0,
+				turns: 0,
+			},
+			errorMessage: routing.error,
+			step,
+		};
+	}
+	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const taskId = `fg_${generateId()}`;
 	const effectiveCwd = cwd ?? defaultCwd;
@@ -1287,6 +1357,26 @@ async function runSingleAgent(
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
+
+	/** Cleanup temp prompt files (safe to call multiple times). */
+	const cleanupTempFiles = () => {
+		if (tmpPromptPath) {
+			try {
+				fs.unlinkSync(tmpPromptPath);
+			} catch {
+				/* ignore */
+			}
+			tmpPromptPath = null;
+		}
+		if (tmpPromptDir) {
+			try {
+				fs.rmdirSync(tmpPromptDir);
+			} catch {
+				/* ignore */
+			}
+			tmpPromptDir = null;
+		}
+	};
 
 	const currentResult: SingleResult = {
 		agent: agentName,
@@ -1472,21 +1562,40 @@ async function runSingleAgent(
 			background: false,
 		} satisfies SubagentStopEvent);
 
+		// Retry with fallback model on API/quota errors (not task-level failures)
+		if (
+			currentResult.exitCode !== 0 &&
+			routing.ok &&
+			routing.fallbacks.length > 0 &&
+			isModelLevelError(currentResult)
+		) {
+			completeForegroundSubagent(taskId, piEvents);
+			cleanupTempFiles();
+			// Retry with the next fallback model directly (no re-routing)
+			const nextModel = routing.fallbacks[0];
+			return runSingleAgent(
+				defaultCwd,
+				agents,
+				agentName,
+				task,
+				cwd,
+				step,
+				signal,
+				onUpdate,
+				makeDetails,
+				piEvents,
+				session,
+				nextModel.id,
+				parentModelId,
+				defaults
+				// Clear hints — the explicit model override will be used
+			);
+		}
+
 		return currentResult;
 	} finally {
 		completeForegroundSubagent(taskId, piEvents);
-		if (tmpPromptPath)
-			try {
-				fs.unlinkSync(tmpPromptPath);
-			} catch {
-				/* ignore */
-			}
-		if (tmpPromptDir)
-			try {
-				fs.rmdirSync(tmpPromptDir);
-			} catch {
-				/* ignore */
-			}
+		cleanupTempFiles();
 	}
 }
 
@@ -1553,6 +1662,30 @@ const SubagentParams = Type.Object({
 	),
 	model: Type.Optional(
 		Type.String({ description: "Model ID to use (overrides agent default). For single mode." })
+	),
+	costPreference: Type.Optional(
+		StringEnum(["eco", "balanced", "premium"] as const, {
+			description:
+				'Cost preference for auto-routing. "eco" = cheapest capable model, ' +
+				'"balanced" = best fit for task complexity, "premium" = most capable. ' +
+				"Only used when no explicit model is specified.",
+		})
+	),
+	taskType: Type.Optional(
+		StringEnum(["code", "vision", "text"] as const, {
+			description:
+				"Override the auto-detected task type. " +
+				'"code" for coding tasks, "vision" for image analysis, "text" for docs/planning.',
+		})
+	),
+	complexity: Type.Optional(
+		Type.Number({
+			description:
+				"Override the auto-detected task complexity (1-5). " +
+				"1=trivial, 2=simple, 3=moderate, 4=complex, 5=expert.",
+			minimum: 1,
+			maximum: 5,
+		})
 	),
 });
 
@@ -1653,7 +1786,15 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
-		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To include project-local agents, set agentScope: "both". Subagents inherit the parent model unless overridden. Missing agent names recover gracefully via best-match or ephemeral fallback.
+		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To include project-local agents, set agentScope: "both". Missing agent names recover gracefully via best-match or ephemeral fallback.
+
+MODEL SELECTION:
+- model: explicit model name (fuzzy matched, e.g. "opus", "haiku", "gemini flash")
+- No model specified: auto-routes based on task type and complexity
+- costPreference: "eco" (cheapest capable), "balanced" (default), "premium" (best available)
+- taskType: override auto-detected type ("code", "vision", "text")
+- complexity: override auto-detected complexity (1=trivial to 5=expert)
+- If the selected model fails (quota/auth), automatically retries with the next best candidate
 
 WHEN TO USE PARALLEL:
 - Tasks are independent (don't depend on each other)
@@ -1680,6 +1821,16 @@ WHEN NOT TO USE SUBAGENTS:
 
 			// Resolve parent model once for inheritance
 			const parentModelId = ctx.model?.id;
+
+			// Build per-call routing hints from params
+			const routingHints: RoutingHints | undefined =
+				params.costPreference || params.taskType || params.complexity
+					? {
+							costPreference: params.costPreference as RoutingHints["costPreference"],
+							taskType: params.taskType as RoutingHints["taskType"],
+							complexity: params.complexity,
+						}
+					: undefined;
 
 			// Enforce agent type restrictions from parent agent
 			const allowedTypes = process.env.PI_ALLOWED_AGENT_TYPES?.split(",").filter(Boolean);
@@ -1819,7 +1970,8 @@ WHEN NOT TO USE SUBAGENTS:
 							undefined,
 							step.model,
 							parentModelId,
-							defaults
+							defaults,
+							routingHints
 						);
 						results.push(result);
 						latestPartialResult = undefined;
@@ -1880,8 +2032,9 @@ WHEN NOT TO USE SUBAGENTS:
 				// Background mode: spawn without awaiting, return immediately
 				if (params.background) {
 					const taskIds: string[] = [];
+					const errors: string[] = [];
 					for (const t of tasks) {
-						const id = await spawnBackgroundSubagent(
+						const result = await spawnBackgroundSubagent(
 							ctx.cwd,
 							agents,
 							t.agent,
@@ -1891,18 +2044,23 @@ WHEN NOT TO USE SUBAGENTS:
 							undefined,
 							(t as { model?: string }).model,
 							parentModelId,
-							defaults
+							defaults,
+							routingHints
 						);
-						if (id) taskIds.push(id);
+						if (result?.startsWith("bg_")) taskIds.push(result);
+						else if (result) errors.push(result);
 					}
+					const parts = [];
+					if (taskIds.length > 0) {
+						parts.push(
+							`Started ${taskIds.length} background subagent(s):\n${taskIds.map((id) => `- ${id}`).join("\n")}\n\nUse subagent_status to check progress.`
+						);
+					}
+					if (errors.length > 0) parts.push(`Errors:\n${errors.join("\n")}`);
 					return {
-						content: [
-							{
-								type: "text",
-								text: `Started ${taskIds.length} background subagent(s):\n${taskIds.map((id) => `- ${id}`).join("\n")}\n\nUse subagent_status to check progress.`,
-							},
-						],
+						content: [{ type: "text", text: parts.join("\n\n") || "No subagents started." }],
 						details: makeDetails("parallel")([]),
+						isError: errors.length > 0 && taskIds.length === 0,
 					};
 				}
 
@@ -1988,7 +2146,8 @@ WHEN NOT TO USE SUBAGENTS:
 							undefined,
 							(t as { model?: string }).model,
 							parentModelId,
-							defaults
+							defaults,
+							routingHints
 						);
 						allResults[index] = result;
 						return result;
@@ -2023,7 +2182,7 @@ WHEN NOT TO USE SUBAGENTS:
 			if (params.agent && params.task) {
 				// Background mode for single agent: spawn without awaiting
 				if (params.background) {
-					const id = await spawnBackgroundSubagent(
+					const result = await spawnBackgroundSubagent(
 						ctx.cwd,
 						agents,
 						params.agent,
@@ -2033,21 +2192,22 @@ WHEN NOT TO USE SUBAGENTS:
 						params.session,
 						params.model,
 						parentModelId,
-						defaults
+						defaults,
+						routingHints
 					);
-					if (id) {
+					if (result?.startsWith("bg_")) {
 						return {
 							content: [
 								{
 									type: "text",
-									text: `Started background subagent: ${id}\n\nUse subagent_status to check progress.`,
+									text: `Started background subagent: ${result}\n\nUse subagent_status to check progress.`,
 								},
 							],
 							details: makeDetails("single")([]),
 						};
 					}
 					return {
-						content: [{ type: "text", text: "Failed to start background subagent" }],
+						content: [{ type: "text", text: result || "Failed to start background subagent" }],
 						details: makeDetails("single")([]),
 						isError: true,
 					};
@@ -2095,7 +2255,8 @@ WHEN NOT TO USE SUBAGENTS:
 					params.session,
 					params.model,
 					parentModelId,
-					defaults
+					defaults,
+					routingHints
 				);
 
 				if (singleSpinnerInterval) {
@@ -2133,13 +2294,15 @@ WHEN NOT TO USE SUBAGENTS:
 
 		renderCall(args, theme) {
 			const scope: AgentScope = args.agentScope ?? "user";
+			const modelTag = args.model ? ` ${theme.fg("dim", args.model)}` : "";
 			const centipedeArr = coerceArray(args.centipede);
 			const tasksArr = coerceArray(args.tasks);
 			if (centipedeArr && centipedeArr.length > 0) {
 				let text =
 					theme.fg("toolTitle", theme.bold("subagent ")) +
 					theme.fg("accent", `centipede (${centipedeArr.length} steps)`) +
-					theme.fg("muted", ` [${scope}]`);
+					theme.fg("muted", ` [${scope}]`) +
+					modelTag;
 				for (let i = 0; i < Math.min(centipedeArr.length, 3); i++) {
 					const step = centipedeArr[i];
 					// Clean up {previous} placeholder for display
@@ -2161,19 +2324,21 @@ WHEN NOT TO USE SUBAGENTS:
 				const text =
 					theme.fg("toolTitle", theme.bold("subagent ")) +
 					theme.fg("accent", `parallel (${tasksArr.length} tasks)`) +
-					theme.fg("muted", ` [${scope}]`);
+					theme.fg("muted", ` [${scope}]`) +
+					modelTag;
 				return new Text(text, 0, 0);
 			}
 			const agentName = args.agent || "...";
 			const preview = args.task
-				? args.task.length > 60
-					? `${args.task.slice(0, 60)}...`
+				? args.task.length > 200
+					? `${args.task.slice(0, 200)}...`
 					: args.task
 				: "...";
 			let text =
 				theme.fg("toolTitle", theme.bold("subagent ")) +
 				theme.fg("accent", agentName) +
-				theme.fg("muted", ` [${scope}]`);
+				theme.fg("muted", ` [${scope}]`) +
+				modelTag;
 			text += `\n  ${theme.fg("dim", preview)}`;
 			return new Text(text, 0, 0);
 		},

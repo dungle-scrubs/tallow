@@ -4,7 +4,6 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
-import { getProviders } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
 	AuthStorage,
@@ -15,7 +14,8 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { findModel, resolveStandardTools } from "../state/team-view.js";
+import { listAvailableModels, resolveModelFuzzy } from "../../subagent-tool/model-resolver.js";
+import { resolveStandardTools } from "../state/team-view.js";
 import type { Teammate } from "../state/types.js";
 import type { Team } from "../store.js";
 import { createTeammateTools } from "../tools/teammate-tools.js";
@@ -41,9 +41,16 @@ export async function spawnTeammateSession(
 	toolNames?: string[],
 	piEvents?: ExtensionAPI["events"]
 ): Promise<Teammate> {
-	const model = findModel(modelName);
-	if (!model)
-		throw new Error(`Model not found: ${modelName}. Tried providers: ${getProviders().join(", ")}`);
+	const resolved = resolveModelFuzzy(modelName);
+	if (!resolved) {
+		const available = listAvailableModels().slice(0, 20).join(", ");
+		throw new Error(`Model not found: "${modelName}". Available: ${available}`);
+	}
+	const { findModel } = await import("../state/team-view.js");
+	const model = findModel(resolved.id);
+	if (!model) {
+		throw new Error(`Model resolved to "${resolved.id}" but not found in registry`);
+	}
 
 	const authStorage = new AuthStorage();
 	const modelRegistry = new ModelRegistry(authStorage);
