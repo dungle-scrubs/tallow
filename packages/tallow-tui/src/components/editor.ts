@@ -217,6 +217,9 @@ export class Editor implements Component, Focusable {
 	// Ghost text (inline suggestion shown as dim text after cursor)
 	private ghostTextValue: string | null = null;
 
+	/** Additional change listeners that won't be overwritten by framework wiring. */
+	private changeListeners: ((text: string) => void)[] = [];
+
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
@@ -326,9 +329,7 @@ export class Editor implements Component, Focusable {
 		// Reset scroll - render() will adjust to show cursor
 		this.scrollOffset = 0;
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	invalidate(): void {
@@ -439,7 +440,7 @@ export class Editor implements Component, Focusable {
 						this.ghostTextValue.length > available
 							? this.ghostTextValue.slice(0, available)
 							: this.ghostTextValue;
-					displayText += `\x1b[2m${truncated}\x1b[0m`;
+					displayText += `\x1b[38;5;242m${truncated}\x1b[0m`;
 					lineVisibleWidth += truncated.length;
 				}
 			}
@@ -563,7 +564,7 @@ export class Editor implements Component, Focusable {
 					this.state.cursorLine = result.cursorLine;
 					this.setCursorCol(result.cursorCol);
 					this.cancelAutocomplete();
-					if (this.onChange) this.onChange(this.getText());
+					this.notifyChange();
 				}
 				return;
 			}
@@ -589,7 +590,7 @@ export class Editor implements Component, Focusable {
 						// Fall through to submit
 					} else {
 						this.cancelAutocomplete();
-						if (this.onChange) this.onChange(this.getText());
+						this.notifyChange();
 						return;
 					}
 				}
@@ -930,6 +931,28 @@ export class Editor implements Component, Focusable {
 	}
 
 	/**
+	 * Register a change listener that fires alongside onChange.
+	 * Unlike onChange, listeners aren't overwritten by framework wiring.
+	 *
+	 * @param fn - Callback receiving the new text content
+	 */
+	addChangeListener(fn: (text: string) => void): void {
+		this.changeListeners.push(fn);
+	}
+
+	/**
+	 * Notify onChange and all registered change listeners.
+	 * Centralises all text-change notifications.
+	 */
+	private notifyChange(): void {
+		const text = this.getText();
+		this.onChange?.(text);
+		for (const fn of this.changeListeners) {
+			fn(text);
+		}
+	}
+
+	/**
 	 * Accept ghost text into the editor buffer at the cursor position.
 	 * Clears ghost text and triggers onChange.
 	 *
@@ -941,7 +964,7 @@ export class Editor implements Component, Focusable {
 		this.ghostTextValue = null;
 		this.pushUndoSnapshot();
 		this.insertTextAtCursorInternal(text);
-		if (this.onChange) this.onChange(this.getText());
+		this.notifyChange();
 		return true;
 	}
 
@@ -1001,9 +1024,7 @@ export class Editor implements Component, Focusable {
 			this.setCursorCol((insertedLines[insertedLines.length - 1] || "").length);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	// All the editor methods from before...
@@ -1032,9 +1053,7 @@ export class Editor implements Component, Focusable {
 		this.state.lines[this.state.cursorLine] = before + char + after;
 		this.setCursorCol(this.state.cursorCol + char.length);
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 
 		// Check if we should trigger or update autocomplete
 		if (!this.autocompleteState) {
@@ -1150,9 +1169,7 @@ export class Editor implements Component, Focusable {
 		this.state.cursorLine++;
 		this.setCursorCol(0);
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	private shouldSubmitOnBackslashEnter(
@@ -1184,7 +1201,7 @@ export class Editor implements Component, Focusable {
 		this.undoStack.clear();
 		this.lastAction = null;
 
-		if (this.onChange) this.onChange("");
+		this.notifyChange();
 		if (this.onSubmit) this.onSubmit(result);
 	}
 
@@ -1224,9 +1241,7 @@ export class Editor implements Component, Focusable {
 			this.setCursorCol(previousLine.length);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 
 		// Update or re-trigger autocomplete after backspace
 		if (this.autocompleteState) {
@@ -1393,9 +1408,7 @@ export class Editor implements Component, Focusable {
 			this.setCursorCol(previousLine.length);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	private deleteToEndOfLine(): void {
@@ -1425,9 +1438,7 @@ export class Editor implements Component, Focusable {
 			this.state.lines.splice(this.state.cursorLine + 1, 1);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	private deleteWordBackwards(): void {
@@ -1470,9 +1481,7 @@ export class Editor implements Component, Focusable {
 			this.setCursorCol(deleteFrom);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	private deleteWordForward(): void {
@@ -1512,9 +1521,7 @@ export class Editor implements Component, Focusable {
 				currentLine.slice(0, this.state.cursorCol) + currentLine.slice(deleteTo);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	private handleForwardDelete(): void {
@@ -1547,9 +1554,7 @@ export class Editor implements Component, Focusable {
 			this.state.lines.splice(this.state.cursorLine + 1, 1);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 
 		// Update or re-trigger autocomplete after forward delete
 		if (this.autocompleteState) {
@@ -1830,9 +1835,7 @@ export class Editor implements Component, Focusable {
 			this.setCursorCol((lines[lines.length - 1] || "").length);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	/**
@@ -1874,9 +1877,7 @@ export class Editor implements Component, Focusable {
 			this.setCursorCol(startCol);
 		}
 
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	private pushUndoSnapshot(): void {
@@ -1890,9 +1891,7 @@ export class Editor implements Component, Focusable {
 		Object.assign(this.state, snapshot);
 		this.lastAction = null;
 		this.preferredVisualCol = null;
-		if (this.onChange) {
-			this.onChange(this.getText());
-		}
+		this.notifyChange();
 	}
 
 	/**
@@ -2090,7 +2089,7 @@ https://github.com/EsotericSoftware/spine-runtimes/actions/runs/19536643416/job/
 				this.state.lines = result.lines;
 				this.state.cursorLine = result.cursorLine;
 				this.setCursorCol(result.cursorCol);
-				if (this.onChange) this.onChange(this.getText());
+				this.notifyChange();
 				return;
 			}
 
