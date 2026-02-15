@@ -16,6 +16,12 @@ import { APP_NAME, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 
 bootstrap();
 
+// Unconditional fatal error handlers — must register before any session
+// or extension setup so crashes are always visible to the user.
+import { registerFatalErrorHandlers } from "./fatal-errors.js";
+
+registerFatalErrorHandlers();
+
 import {
 	InteractiveMode,
 	runPrintMode,

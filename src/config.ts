@@ -27,6 +27,9 @@ export const TALLOW_HOME = resolveTallowHome();
  * @returns Resolved tallow home directory path
  */
 function resolveTallowHome(): string {
+	// Env override for CI, containers, and test isolation
+	if (process.env.TALLOW_HOME) return process.env.TALLOW_HOME;
+
 	const defaultHome = join(homedir(), CONFIG_DIR);
 	const workDirsPath = join(homedir(), ".config", "tallow-work-dirs");
 	const cwd = process.cwd();
