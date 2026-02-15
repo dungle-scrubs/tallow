@@ -16,8 +16,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Editor, type EditorTheme } from "@mariozechner/pi-tui";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { type EditorTheme } from "@mariozechner/pi-tui";
 import { GENERAL_TEMPLATES, type PromptTemplate } from "./templates.js";
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -58,9 +58,17 @@ function pickIdleSuggestion(): string | null {
 
 // ─── Autocomplete model ──────────────────────────────────────────────────────
 
+/** Preferred fallback models for autocomplete, cheapest first. */
+const AUTOCOMPLETE_FALLBACKS = [
+	"groq/llama-3.1-8b-instant",
+	"anthropic/claude-haiku-4-5",
+	"anthropic/claude-3-5-haiku-latest",
+	"openai/gpt-4o-mini",
+];
+
 /**
  * Resolve the autocomplete model from the registry.
- * Tries the configured model, then falls back to any available Groq model.
+ * Tries the configured model, then preferred cheap models, then any available model.
  *
  * @param ctx - Extension context with model registry
  * @param modelSetting - Provider/model string (e.g. "groq/llama-3.1-8b-instant")
@@ -70,11 +78,44 @@ async function resolveAutocompleteModel(
 	ctx: ExtensionContext,
 	modelSetting: string
 ): Promise<{ model: Model<Api>; apiKey: string } | null> {
-	const slashIdx = modelSetting.indexOf("/");
+	// Try configured model first
+	const result = await tryResolveModel(ctx, modelSetting);
+	if (result) return result;
+
+	// Try preferred cheap fallbacks
+	for (const fallback of AUTOCOMPLETE_FALLBACKS) {
+		if (fallback === modelSetting) continue;
+		const fbResult = await tryResolveModel(ctx, fallback);
+		if (fbResult) return fbResult;
+	}
+
+	// Last resort: pick the cheapest available model by input cost
+	const available = ctx.modelRegistry.getAvailable();
+	const sorted = [...available].sort((a, b) => (a.cost?.input ?? 0) - (b.cost?.input ?? 0));
+	for (const model of sorted) {
+		const apiKey = await ctx.modelRegistry.getApiKey(model);
+		if (apiKey) return { model, apiKey };
+	}
+
+	return null;
+}
+
+/**
+ * Try to resolve a specific provider/model string.
+ *
+ * @param ctx - Extension context with model registry
+ * @param modelStr - Provider/model string (e.g. "groq/llama-3.1-8b-instant")
+ * @returns Resolved model and API key, or null if unavailable
+ */
+async function tryResolveModel(
+	ctx: ExtensionContext,
+	modelStr: string
+): Promise<{ model: Model<Api>; apiKey: string } | null> {
+	const slashIdx = modelStr.indexOf("/");
 	if (slashIdx === -1) return null;
 
-	const provider = modelSetting.slice(0, slashIdx);
-	const modelId = modelSetting.slice(slashIdx + 1);
+	const provider = modelStr.slice(0, slashIdx);
+	const modelId = modelStr.slice(slashIdx + 1);
 
 	const model = ctx.modelRegistry.find(provider, modelId);
 	if (!model) return null;
@@ -156,7 +197,7 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 	const modelSetting = readSetting("prompt-suggestions.model", DEFAULT_AUTOCOMPLETE_MODEL);
 
 	/** Reference to the editor instance for ghost text control. */
-	let editorRef: Editor | null = null;
+	let editorRef: CustomEditor | null = null;
 
 	/** Extension context, captured on session_start for model registry access. */
 	let ctxRef: ExtensionContext | null = null;
@@ -256,11 +297,33 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 		if (!ctx.hasUI) return;
 		ctxRef = ctx;
 
-		ctx.ui.setEditorComponent((tui, editorTheme: EditorTheme) => {
-			const editor = new Editor(tui, editorTheme);
+		// Register Groq as a provider if not already available and env var is set
+		if (!ctx.modelRegistry.find("groq", "llama-3.1-8b-instant") && process.env.GROQ_API_KEY) {
+			ctx.modelRegistry.registerProvider("groq", {
+				baseUrl: "https://api.groq.com/openai/v1",
+				apiKey: process.env.GROQ_API_KEY,
+				api: "openai-completions" as Api,
+				models: [
+					{
+						id: "llama-3.1-8b-instant",
+						name: "Llama 3.1 8B Instant",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0.05, output: 0.08, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 131072,
+						maxTokens: 131072,
+					},
+				],
+			});
+		}
+
+		ctx.ui.setEditorComponent((tui, editorTheme: EditorTheme, keybindings) => {
+			const editor = new CustomEditor(tui, editorTheme, keybindings);
 			editorRef = editor;
 
-			editor.onChange = (newText: string) => {
+			// Use addChangeListener so the framework can overwrite onChange
+			// without clobbering our handler.
+			editor.addChangeListener((newText: string) => {
 				// Clear pending timers on any text change
 				if (idleTimer) {
 					clearTimeout(idleTimer);
@@ -275,7 +338,7 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 					// User is typing — trigger autocomplete
 					triggerAutocomplete(newText);
 				}
-			};
+			});
 
 			// Show initial idle suggestion
 			setTimeout(showIdleSuggestion, 100);
