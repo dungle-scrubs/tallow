@@ -410,8 +410,8 @@ function discoverExtensionDirs(baseDir: string): string[] {
  * Registered as a factory so it cannot be overridden or removed by users.
  */
 function rebrandSystemPrompt(pi: ExtensionAPI): void {
-	pi.on("before_agent_start", async (event) => {
-		const prompt = event.systemPrompt
+	pi.on("before_agent_start", async (event, ctx) => {
+		let prompt = event.systemPrompt
 			.replace(
 				"You are an expert coding assistant operating inside pi, a coding agent harness.",
 				"You are an expert coding assistant operating inside tallow, a coding agent harness."
@@ -420,6 +420,12 @@ function rebrandSystemPrompt(pi: ExtensionAPI): void {
 			.replace(/When working on pi topics/g, "When working on tallow topics")
 			.replace(/read pi \.md files/g, "read tallow .md files")
 			.replace(/the user asks about pi itself/g, "the user asks about tallow itself");
+
+		// Inject model identity so non-Claude models don't confabulate their identity
+		if (ctx.model) {
+			prompt += `\n\nYou are running as ${ctx.model.name} (${ctx.model.provider}/${ctx.model.id}).`;
+		}
+
 		return { systemPrompt: prompt };
 	});
 }
