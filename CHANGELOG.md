@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **subagent-tool:** live token usage display during subagent execution —
+  per-agent counters update in real-time for single, parallel, and centipede
+  modes with 500ms throttled updates
+- **context-files:** `/add-dir` command to register additional directories for
+  context file discovery, with `/clear-dirs` to reset
 - **progress-indicator:** terminal progress bar via OSC 9;4 during agent turns,
   with indeterminate mode for pulsing tab/title bar indicators
 - **tallow-tui:** `setProgress(percent)` and `clearProgress()` methods on
