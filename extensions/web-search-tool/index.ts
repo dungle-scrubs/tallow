@@ -83,7 +83,7 @@ WHEN TO USE:
 - Researching recent technologies or announcements
 
 WHEN NOT TO USE:
-- You already have the URL (use web-fetch instead)
+- You already have the URL (use web_fetch instead)
 - The information is in the project's codebase (use grep/find)
 - Looking up well-known, stable APIs from training data`,
 		parameters: Type.Object({

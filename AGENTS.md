@@ -139,6 +139,19 @@ package-manager language. CI runs this on every PR — fix drift before merging.
 2. Create/remove the docs page: `docs/src/content/docs/extensions/<name>.mdx`
 3. Run `node tests/docs-drift.mjs` to verify
 
+## Naming Conventions
+
+### Tool names
+
+Tool names registered via `pi.registerTool({ name })` use **snake_case**:
+`web_fetch`, `web_search`, `ask_user_question`, `task_status`, `lsp_hover`.
+
+The only exceptions are tools that shadow built-in pi framework tools and must
+keep their original names: `bash`, `read`, `write`, `edit`, `cd`.
+
+Extension *directory* names use kebab-case (`web-fetch-tool`, `bash-tool-enhanced`)
+but the tool name inside is always snake_case.
+
 ## Code Style
 
 - **Biome**: tabs, 100-char line width, double quotes, semicolons, ES5 trailing commas

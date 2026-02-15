@@ -524,7 +524,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 				'1. **ALWAYS check local docs first** with `execute_tool(app: "docs", tool: "search_docs", args: { query: "..." })`',
 				'2. **If found locally**, read it with `execute_tool(app: "docs", tool: "get_doc", args: { name: "..." })`',
 				'3. **If NOT found locally**, add it with `execute_tool(app: "docs", tool: "add_doc", args: { name: "<Name>", url: "<official docs URL>" })`, then read with `get_doc`',
-				"4. **NEVER use `web-fetch` for documentation.** The docs tool scrapes, caches, and auto-refreshes. `web-fetch` wastes tokens on raw HTML and the content is lost after the session.\n",
+				"4. **NEVER use `web_fetch` for documentation.** The docs tool scrapes, caches, and auto-refreshes. `web_fetch` wastes tokens on raw HTML and the content is lost after the session.\n",
 				"This applies to ALL documentation: official docs, API references, SDK guides, configuration docs, CLI references, getting started guides, changelogs, migration guides.",
 				"This does NOT apply to: search engine results, blog posts, news articles, Stack Overflow, GitHub issues/PRs, social media, Wikipedia, general web content.\n"
 			);
