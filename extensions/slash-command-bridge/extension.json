@@ -1,0 +1,13 @@
+{
+	"name": "slash-command-bridge",
+	"version": "0.1.0",
+	"description": "Expose slash commands as tools the model can invoke",
+	"category": "tool",
+	"tags": ["commands", "automation", "tools"],
+	"files": ["index.ts"],
+	"relationships": [
+		{ "type": "enhances", "extension": "clear" },
+		{ "type": "enhances", "extension": "context-usage" },
+		{ "type": "enhances", "extension": "show-system-prompt" }
+	]
+}
