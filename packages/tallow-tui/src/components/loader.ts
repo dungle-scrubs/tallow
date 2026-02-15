@@ -15,6 +15,16 @@ export interface LoaderOptions {
 	intervalMs?: number;
 }
 
+/** Context passed to the message transform callback each tick. */
+export interface MessageTransformContext {
+	/** The current message set on this Loader (from constructor or setMessage). */
+	message: string;
+	/** Monotonic tick counter — increments each animation frame for this instance. */
+	tick: number;
+	/** True if the message has not been changed via setMessage() since construction. */
+	isInitialMessage: boolean;
+}
+
 /**
  * Loader component that updates with a spinning animation.
  *
@@ -29,7 +39,14 @@ export class Loader extends Text {
 	private intervalMs: number;
 	private currentFrame = 0;
 	private intervalId: NodeJS.Timeout | null = null;
+	private _transformIntervalId: NodeJS.Timeout | null = null;
 	private ui: TUI | null = null;
+
+	/** Per-instance tick counter for message transform animations. */
+	private _transformTick = 0;
+
+	/** Tracks whether setMessage() has been called since construction. */
+	private _messageChanged = false;
 
 	constructor(
 		ui: TUI,
@@ -55,6 +72,21 @@ export class Loader extends Text {
 	 * Global default interval — set once, applies to all new Loader instances.
 	 */
 	static defaultIntervalMs: number | undefined;
+
+	/**
+	 * Global message transform — called each tick to modify the displayed message.
+	 * Extensions use this to animate or replace the loader text (e.g., scramble reveal).
+	 * Return the string to display. The transform is applied before messageColorFn.
+	 */
+	static defaultMessageTransform?: (ctx: MessageTransformContext) => string;
+
+	/**
+	 * Interval (ms) for the message transform tick — independent of the spinner frame rate.
+	 * When set to a value faster than the spinner interval, a separate timer drives
+	 * the transform tick and re-renders, giving animations like scramble-reveal higher
+	 * frame rates without affecting the spinner animation speed.
+	 */
+	static defaultTransformIntervalMs: number | undefined;
 
 	/** Whether the loader is hidden (renders as empty space). */
 	private hidden = false;
@@ -84,16 +116,36 @@ export class Loader extends Text {
 
 	start() {
 		this.updateDisplay();
+
+		const transformMs = Loader.defaultTransformIntervalMs;
+		const hasFastTransform =
+			Loader.defaultMessageTransform != null &&
+			transformMs != null &&
+			transformMs < this.intervalMs;
+
 		this.intervalId = setInterval(() => {
 			this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+			this._transformTick++;
 			this.updateDisplay();
 		}, this.intervalMs);
+
+		// Separate faster interval for message transform re-renders only.
+		// Does NOT advance _transformTick — just re-rolls random visuals (e.g. scramble chars).
+		if (hasFastTransform) {
+			this._transformIntervalId = setInterval(() => {
+				this.updateDisplay();
+			}, transformMs);
+		}
 	}
 
 	stop() {
 		if (this.intervalId) {
 			clearInterval(this.intervalId);
 			this.intervalId = null;
+		}
+		if (this._transformIntervalId) {
+			clearInterval(this._transformIntervalId);
+			this._transformIntervalId = null;
 		}
 	}
 
@@ -110,13 +162,24 @@ export class Loader extends Text {
 			return;
 		}
 		if (this.hidden) this.show();
+		this._messageChanged = true;
 		this.message = message;
 		this.updateDisplay();
 	}
 
 	private updateDisplay() {
 		const frame = this.frames[this.currentFrame];
-		this.setText(`${this.spinnerColorFn(frame)} ${this.messageColorFn(this.message)}`);
+		let displayMessage = this.message;
+
+		if (Loader.defaultMessageTransform) {
+			displayMessage = Loader.defaultMessageTransform({
+				message: this.message,
+				tick: this._transformTick,
+				isInitialMessage: !this._messageChanged,
+			});
+		}
+
+		this.setText(`${this.spinnerColorFn(frame)} ${this.messageColorFn(displayMessage)}`);
 		if (this.ui) {
 			this.ui.requestRender();
 		}

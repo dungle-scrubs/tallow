@@ -8,6 +8,14 @@
  *   { "spinner": "arc" }
  * Or keep the default "random" behavior.
  *
+ * Spinner verbs: Shows a witty verb/phrase with a scramble-decrypt reveal
+ * animation. Each word starts fully obfuscated with rapid random characters,
+ * then staggers into clarity word by word.
+ *
+ * Configure via settings.json:
+ *   { "spinnerVerbs": ["Pondering the void", "Summoning bytes"] }
+ * Or omit for the built-in defaults.
+ *
  * Disable this extension to always use the Loader's hardcoded default (dots).
  */
 
@@ -15,13 +23,135 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Loader } from "@mariozechner/pi-tui";
+import { Loader, type MessageTransformContext } from "@mariozechner/pi-tui";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface SpinnerPreset {
 	interval: number;
 	frames: string[];
+}
+
+interface SpinnerSettings {
+	spinner?: string;
+	spinnerVerbs?: string[];
+}
+
+// ─── Default Witty Verbs ─────────────────────────────────────────────────────
+
+const DEFAULT_VERBS: string[] = [
+	"Thinking",
+	"Plotting",
+	"Scheming",
+	"Manifesting",
+	"Brewing",
+	"Pondering the void",
+	"Consulting the runes",
+	"Summoning bytes",
+	"Bending logic",
+	"Defying entropy",
+	"Parsing intentions",
+	"Assembling thoughts",
+	"Untangling threads",
+	"Weaving code",
+	"Computing furiously",
+	"Hallucinating responsibly",
+	"Rethinking everything",
+	"Channeling wisdom",
+	"Composing chaos",
+	"Invoking patterns",
+];
+
+// ─── Scramble-Reveal Animation ───────────────────────────────────────────────
+
+/** Characters used for the scramble effect — ASCII-safe, monospace-reliable. */
+const SCRAMBLE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&?!";
+
+/** Ticks of pure scramble before the reveal sweep begins. */
+const INITIAL_SCRAMBLE_TICKS = 4;
+
+/**
+ * Generate a random scramble character.
+ * @returns A single random character from the scramble set
+ */
+function scrambleChar(): string {
+	return SCRAMBLE_CHARS[Math.floor(Math.random() * SCRAMBLE_CHARS.length)];
+}
+
+/**
+ * Create the message transform for the scramble-decrypt reveal effect.
+ *
+ * How it works:
+ * 1. A random phrase is chosen and locked for this Loader's lifetime.
+ * 2. Every character position is initialized with a random char (spaces stay).
+ * 3. Each render frame, exactly ONE position cycles to a new random char
+ *    (round-robin through positions, creating a visible wave).
+ * 4. On each progress tick, one more char locks to its real value (right-to-left).
+ * 5. Once fully revealed, the phrase stays until the Loader is destroyed.
+ *
+ * @param verbs - Array of verb/phrase strings to pick from
+ * @returns Transform function compatible with Loader.defaultMessageTransform
+ */
+function createScrambleTransform(verbs: string[]): (ctx: MessageTransformContext) => string {
+	/** The full display string (verb + "..."). Fixed per Loader instance. */
+	let display = "";
+	/** Cached character array — the actual rendered output. */
+	let cachedChars: string[] = [];
+	/** Indices of non-space positions (candidates for scramble cycling). */
+	let nonSpaceIndices: number[] = [];
+	/** Whether state has been initialized for the current Loader instance. */
+	let initialized = false;
+	/** Last seen tick — used to detect new Loader instances (tick goes backwards). */
+	let lastTick = -1;
+	/** Render frame counter — drives the round-robin single-char cycling. */
+	let renderCount = 0;
+
+	return ({ message, tick, isInitialMessage }: MessageTransformContext): string => {
+		// Framework status update (e.g., "Reading file...") — show verbatim
+		if (!isInitialMessage) return message;
+
+		// Detect new Loader instance: tick went backwards (new Loader resets to 0)
+		if (tick < lastTick) initialized = false;
+
+		// Step 1–2: Pick phrase, initialize all slots with random chars
+		if (!initialized) {
+			const verb = verbs[Math.floor(Math.random() * verbs.length)];
+			display = `${verb}...`;
+			cachedChars = [...display].map((c) => (c === " " ? " " : scrambleChar()));
+			nonSpaceIndices = [];
+			for (let i = 0; i < display.length; i++) {
+				if (display[i] !== " ") nonSpaceIndices.push(i);
+			}
+			renderCount = 0;
+			initialized = true;
+		}
+
+		lastTick = tick;
+		renderCount++;
+
+		const len = display.length;
+		const totalTicks = INITIAL_SCRAMBLE_TICKS + len;
+
+		// Step 6: Fully revealed — return the real phrase, stable until Loader dies
+		if (tick >= totalTicks) return display;
+
+		// Step 4: Lock revealed chars (right-to-left sweep, one per progress tick)
+		const revealedFromRight = Math.max(0, tick - INITIAL_SCRAMBLE_TICKS);
+		for (let i = 0; i < len; i++) {
+			if (display[i] !== " " && i >= len - revealedFromRight) {
+				cachedChars[i] = display[i];
+			}
+		}
+
+		// Step 3: Cycle exactly ONE unrevealed position per render frame (round-robin)
+		const unrevealed = nonSpaceIndices.filter((i) => i < len - revealedFromRight);
+		if (unrevealed.length > 0) {
+			const idx = unrevealed[renderCount % unrevealed.length];
+			cachedChars[idx] = scrambleChar();
+		}
+
+		return cachedChars.join("");
+	};
 }
 
 // ─── Curated Presets ─────────────────────────────────────────────────────────
@@ -591,36 +721,47 @@ function resolve(name: string): SpinnerPreset | undefined {
 }
 
 /**
- * Read spinner setting from ~/.tallow/settings.json.
- * @returns Spinner preset name, or "random" by default
+ * Read spinner settings from ~/.tallow/settings.json.
+ * @returns Parsed spinner settings with defaults
  */
-function readSpinnerSetting(): string {
+function readSettings(): SpinnerSettings {
 	const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
 	try {
 		const raw = fs.readFileSync(settingsPath, "utf-8");
-		const settings = JSON.parse(raw) as { spinner?: string };
-		return settings.spinner ?? "random";
+		return JSON.parse(raw) as SpinnerSettings;
 	} catch {
-		return "random";
+		return {};
 	}
+}
+
+/**
+ * Validate that a spinnerVerbs setting is a non-empty array of strings.
+ * @param verbs - The value to validate
+ * @returns The validated array, or undefined if invalid
+ */
+function validateVerbs(verbs: unknown): string[] | undefined {
+	if (!Array.isArray(verbs)) return undefined;
+	const strings = verbs.filter((v): v is string => typeof v === "string" && v.length > 0);
+	return strings.length > 0 ? strings : undefined;
 }
 
 // ─── Extension Entry ─────────────────────────────────────────────────────────
 
 /**
  * Random spinner extension.
- * Reads the spinner setting on session_start and bridges into Loader defaults.
+ * Reads spinner and verb settings on session_start, bridges into Loader defaults.
+ * Sets up the scramble-decrypt reveal animation for spinner verbs.
  *
  * @param pi - Extension API
  */
 export default function randomSpinnerExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async () => {
-		const setting = readSpinnerSetting();
-		const isRandom = setting === "random";
+		const settings = readSettings();
+		const spinnerSetting = settings.spinner ?? "random";
+		const isRandom = spinnerSetting === "random";
 
+		// ── Spinner frames ──
 		if (isRandom) {
-			// Re-roll on every Loader construction via getter.
-			// Cache one roll so both getters return values from the same spinner.
 			let cached: SpinnerPreset | undefined;
 			const roll = (): SpinnerPreset => {
 				if (!cached) cached = pickRandom();
@@ -638,11 +779,16 @@ export default function randomSpinnerExtension(pi: ExtensionAPI): void {
 				configurable: true,
 			});
 		} else {
-			const preset = resolve(setting);
+			const preset = resolve(spinnerSetting);
 			if (preset) {
 				Loader.defaultFrames = preset.frames;
 				Loader.defaultIntervalMs = preset.interval;
 			}
 		}
+
+		// ── Scramble-reveal verbs ──
+		const verbs = validateVerbs(settings.spinnerVerbs) ?? DEFAULT_VERBS;
+		Loader.defaultMessageTransform = createScrambleTransform(verbs);
+		Loader.defaultTransformIntervalMs = 25;
 	});
 }
