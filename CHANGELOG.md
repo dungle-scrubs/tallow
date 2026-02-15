@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core:** piped stdin support — `cat file.md | tallow` reads stdin and enters
+  print mode automatically, combinable with `-p` for context + prompt workflows,
+  with 10 MB size limit and JSON mode support
 - **subagent-tool:** `auto-cheap`/`auto-premium` routing keywords for agent
   frontmatter — set `model: auto-cheap` to force eco routing without picking a
   specific model, integrates with existing cost preference and per-call hints

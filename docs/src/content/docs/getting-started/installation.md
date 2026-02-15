@@ -111,6 +111,8 @@ configuration lives in `.tallow/` within your project directory.
 ```
 tallow                            Interactive mode
 tallow -p "Fix the tests"         Single-shot print mode
+echo "prompt" | tallow            Piped stdin as prompt
+cat file.md | tallow -p "Review"  Piped stdin + explicit prompt
 tallow --continue                 Continue most recent session
 tallow --session-id my-run        Start or continue a named session
 tallow --resume <id>              Resume a specific session (fails if not found)
@@ -128,6 +130,29 @@ tallow install                    Run the interactive installer
 
 `--api-key` is intentionally unsupported to avoid leaking secrets in
 process arguments. Use `TALLOW_API_KEY` or `TALLOW_API_KEY_REF`.
+
+### Piped input
+
+Pipe file contents or command output directly into tallow:
+
+```bash
+# Stdin becomes the prompt
+echo "What is 2+2?" | tallow
+
+# Stdin as context + explicit prompt
+cat src/main.ts | tallow -p "Find bugs in this code"
+
+# Pipe command output
+git log --oneline -20 | tallow -p "Summarize recent changes"
+
+# Works with JSON mode too
+cat data.json | tallow --mode json -p "Parse this"
+```
+
+When stdin is piped (not a TTY), tallow reads the full stream and
+enters print mode automatically. If both stdin and `-p` are
+provided, stdin content is prepended as context before the prompt.
+Piped input is capped at 10 MB to prevent memory exhaustion.
 
 ### Session targeting (headless / CI)
 
