@@ -203,12 +203,27 @@ async function run(opts: {
 		sessionOpts.thinkingLevel = opts.thinking as TallowSessionOptions["thinkingLevel"];
 	}
 
+	// ── Read piped stdin early (before the nested-session guard) ─────────────
+	// Stdin must be consumed before the guard so piped input triggers print
+	// mode instead of being blocked by the interactive nesting check.
+
+	let stdinContent: string | undefined;
+	try {
+		stdinContent = await readStdin();
+	} catch (error) {
+		console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+		process.exit(1);
+	}
+
+	// Will this invocation produce output (print mode) rather than start a TUI?
+	const hasPrintInput = Boolean(opts.print || stdinContent);
+
 	// Guard: block nested interactive sessions (two TUIs on one terminal)
 	// Do this before session setup so it fails fast without requiring model/auth resolution.
-	if (opts.mode === "interactive" && !opts.print && process.env.TALLOW_INTERACTIVE === "1") {
+	if (opts.mode === "interactive" && !hasPrintInput && process.env.TALLOW_INTERACTIVE === "1") {
 		console.error(
 			"Error: Cannot start interactive tallow inside an existing interactive session.\n" +
-				'Use `tallow -p "..."` for single-shot prompts, or exit the current session first.'
+				'Use `tallow -p "..."` or pipe input for single-shot prompts, or exit the current session first.'
 		);
 		process.exit(1);
 	}
@@ -245,15 +260,25 @@ async function run(opts: {
 
 	switch (opts.mode) {
 		case "interactive": {
-			if (opts.print) {
-				// Print mode: single-shot
+			// Compose the initial message from stdin and/or -p flag
+			const initialMessage = composeMessage(stdinContent, opts.print);
+
+			if (initialMessage) {
+				// Print mode: single-shot (explicit -p, piped stdin, or both)
 				await runPrintMode(tallow.session, {
 					mode: "text",
-					initialMessage: opts.print,
+					initialMessage,
 				});
 				emitSessionId(tallow.sessionId);
+			} else if (!process.stdin.isTTY) {
+				// Stdin is piped/redirected but empty — can't start a TUI without a real TTY.
+				console.error(
+					"Error: stdin is piped but empty. Provide input via pipe or use -p <prompt>.\n" +
+						"Example: echo 'hello' | tallow"
+				);
+				process.exit(1);
 			} else {
-				// Interactive TUI
+				// Interactive TUI — stdin is a real TTY
 				if (tallow.extensionOverrides.length > 0) {
 					const names = tallow.extensionOverrides.map((o) => o.name).join(", ");
 					console.log(`\x1b[33mℹ User extensions overriding bundled: ${names}\x1b[0m`);
@@ -278,13 +303,14 @@ async function run(opts: {
 		}
 
 		case "json": {
-			if (!opts.print) {
-				console.error("JSON mode requires -p <prompt>");
+			const jsonMessage = composeMessage(stdinContent, opts.print);
+			if (!jsonMessage) {
+				console.error("JSON mode requires -p <prompt> or piped stdin");
 				process.exit(1);
 			}
 			await runPrintMode(tallow.session, {
 				mode: "json",
-				initialMessage: opts.print,
+				initialMessage: jsonMessage,
 			});
 			emitSessionId(tallow.sessionId);
 			break;
@@ -297,6 +323,63 @@ async function run(opts: {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Compose the initial message from piped stdin content and/or a -p prompt.
+ * When both are provided, stdin is prepended as context before the prompt.
+ *
+ * @param stdinContent - Content read from piped stdin, or undefined
+ * @param prompt - Explicit -p prompt string, or undefined
+ * @returns Combined message string, or undefined if neither is present
+ */
+function composeMessage(
+	stdinContent: string | undefined,
+	prompt: string | undefined
+): string | undefined {
+	if (stdinContent && prompt) return `${stdinContent}\n\n${prompt}`;
+	return stdinContent ?? prompt;
+}
+
+/** Maximum stdin size (10 MB) to prevent memory exhaustion from accidental binary pipes. */
+const MAX_STDIN_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Read all content from stdin when it's a pipe or redirected stream.
+ * Returns `undefined` when stdin is a TTY (interactive terminal).
+ *
+ * @returns The full stdin content as a string, or undefined if stdin is a TTY
+ * @throws {Error} When stdin exceeds MAX_STDIN_BYTES
+ */
+async function readStdin(): Promise<string | undefined> {
+	if (process.stdin.isTTY) return undefined;
+
+	return new Promise((resolve, reject) => {
+		const chunks: Buffer[] = [];
+		let totalBytes = 0;
+
+		process.stdin.on("data", (chunk: Buffer) => {
+			totalBytes += chunk.byteLength;
+			if (totalBytes > MAX_STDIN_BYTES) {
+				process.stdin.destroy();
+				reject(
+					new Error(
+						`Piped input exceeds ${MAX_STDIN_BYTES / 1024 / 1024} MB limit. ` +
+							"Use @file.md syntax for very large files."
+					)
+				);
+				return;
+			}
+			chunks.push(chunk);
+		});
+
+		process.stdin.on("end", () => {
+			const content = Buffer.concat(chunks).toString("utf-8").trim();
+			resolve(content.length > 0 ? content : undefined);
+		});
+
+		process.stdin.on("error", reject);
+	});
+}
 
 /**
  * Emit the session ID to stderr for programmatic chaining.
