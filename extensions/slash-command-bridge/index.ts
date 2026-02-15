@@ -164,12 +164,31 @@ WHEN NOT TO USE:
 				}
 
 				case "compact": {
-					ctx.compact();
+					// ctx.compact() is fire-and-forget: it calls session.abort(),
+					// killing the agent mid-tool-call. The return value below will
+					// almost certainly never be processed — the agent is dead before
+					// it can read it. We pass onComplete/onError callbacks for
+					// completeness, but the real UX is handled by the framework's
+					// executeCompaction (Loader, Esc handler, summary component).
+					ctx.compact({
+						onComplete: () => {
+							// Framework's executeCompaction already rebuilds the UI
+							// and shows the compaction summary. No extra action needed.
+						},
+						onError: () => {
+							// Framework's executeCompaction already shows error/cancel
+							// messages in the UI. No extra handling needed.
+						},
+					});
+
 					return {
 						content: [
 							{
 								type: "text",
-								text: "Session compaction triggered. Context will be summarized to free up space.",
+								text:
+									"Session compaction initiated. The agent will be interrupted while " +
+									"context is summarized. This is expected — the session will resume " +
+									"with a compacted context after summarization completes.",
 							},
 						],
 						details: { command },
