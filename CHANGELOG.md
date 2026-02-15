@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.6.0...tallow-v0.6.1) (2026-02-15)
+
+
+### Fixed
+
+* **docs:** wrap extension badges, widen theme swatches on hover ([f59e833](https://github.com/dungle-scrubs/tallow/commit/f59e8334e3b85b27582fc0b10347e5d14b1209e5))
+
 ## [0.6.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.5.0...tallow-v0.6.0) (2026-02-15)
 
 
