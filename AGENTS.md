@@ -146,6 +146,42 @@ package-manager language. CI runs this on every PR — fix drift before merging.
 - Commits use conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 - PRs use **rebase merge** (not squash) to preserve individual commits on main
 
+### Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Release-please manages version bumps and PR creation, but **entries are
+human-written** — never raw commit log dumps.
+
+Entry format: `- **scope:** description of the change` (lowercase start, no period).
+Multi-line entries indent continuation by 2 spaces. Group by: Added, Changed,
+Fixed, Documentation, Deprecated, Removed, Security.
+
+```markdown
+## [Unreleased]
+
+### Added
+
+- **context-files:** `@import` directives with recursive resolution and
+  circular import detection
+- **health:** `/doctor` validation — 7 diagnostic checks with actionable
+  suggestions
+
+### Fixed
+
+- **tui:** stop horizontal compression when height-clamping images
+```
+
+When updating the changelog:
+- Add to `[Unreleased]` — release-please promotes it on release
+- One bullet per logical change, not per commit
+- Scope matches the extension or module name (`tui`, `sdk`, `core`, `deps`)
+- Write for users reading release notes, not developers reading git log
+
+Release-please (`release-please-config.json`) auto-generates entries from
+conventional commits. Its output is a starting point — **clean up the release
+PR's changelog edits** before merging to match this format. The GitHub Action
+workflow is in `.github/workflows/release.yml`.
+
 ## Testing
 
 Unit tests live in `extensions/<name>/__tests__/` and use `bun:test`.
