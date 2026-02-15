@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **mcp-adapter-tool:** server instructions support — captures `instructions`
+  from MCP initialize responses and injects them into the system prompt before
+  tool listings, giving servers a way to declare usage guidance
 - **mcp-adapter-tool:** structured content support — handles `resource` and
   annotated content types from MCP servers, with safe fallback serialization
   for unknown types
