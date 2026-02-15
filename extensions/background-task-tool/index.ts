@@ -35,6 +35,7 @@ import {
 	type InteropBackgroundTaskView,
 	onInteropEvent,
 } from "../_shared/interop-events.js";
+import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
 
 // ANSI escape codes for Catppuccin Macchiato colors (medium-dark variant)
@@ -332,6 +333,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			tasks.set(taskId, task);
 			cleanupOldTasks();
 
+			// Track PID for orphan cleanup if parent is killed (SIGKILL, OOM, crash)
+			if (child.pid != null) {
+				registerPid(child.pid, params.command);
+			}
+
 			// Buffer output (and stream if not fire-and-forget)
 			const onData = (data: Buffer) => {
 				if (task.outputBytes < MAX_OUTPUT_BYTES) {
@@ -363,6 +369,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					if (task.status === "running" && task.process) {
 						task.process.kill("SIGTERM");
 						task.status = "killed";
+						if (child.pid != null) unregisterPid(child.pid);
 						task.output.push(`\n[Killed: timeout after ${params.timeout}s]\n`);
 						syncTaskState(ctx);
 					}
@@ -376,6 +383,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.endTime = Date.now();
 					task.exitCode = code;
 					task.status = code === 0 ? "completed" : "failed";
+					if (child.pid != null) unregisterPid(child.pid);
 					task.process = null;
 					syncTaskState(ctx);
 				});
@@ -383,6 +391,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.endTime = Date.now();
 					task.status = "failed";
 					task.output.push(`\nError: ${err.message}\n`);
+					if (child.pid != null) unregisterPid(child.pid);
 					task.process = null;
 					syncTaskState(ctx);
 				});
@@ -411,6 +420,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.endTime = Date.now();
 					task.exitCode = code;
 					task.status = code === 0 ? "completed" : "failed";
+					if (child.pid != null) unregisterPid(child.pid);
 					task.process = null;
 					syncTaskState(ctx);
 					resolve({ exitCode: code });
@@ -419,6 +429,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.endTime = Date.now();
 					task.status = "failed";
 					task.output.push(`\nError: ${err.message}\n`);
+					if (child.pid != null) unregisterPid(child.pid);
 					task.process = null;
 					syncTaskState(ctx);
 					resolve({ exitCode: null, error: err.message });
@@ -430,6 +441,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						task.process.kill("SIGTERM");
 						task.status = "killed";
 						task.endTime = Date.now();
+						if (child.pid != null) unregisterPid(child.pid);
 						task.output.push("\n[Killed: aborted by user]\n");
 						syncTaskState(ctx);
 						resolve({ exitCode: null, error: "Aborted" });
@@ -813,6 +825,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				};
 			}
 
+			if (task.process.pid != null) unregisterPid(task.process.pid);
 			task.process.kill("SIGTERM");
 			task.status = "killed";
 			task.endTime = Date.now();
@@ -863,6 +876,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify(`Task ${rest} is not running`, "error");
 					return;
 				}
+				if (task.process.pid != null) unregisterPid(task.process.pid);
 				task.process.kill("SIGTERM");
 				task.status = "killed";
 				task.endTime = Date.now();
@@ -963,6 +977,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						if ((data === "k" || data === "x") && taskList.length > 0) {
 							const task = taskList[selectedIndex];
 							if (task.status === "running" && task.process) {
+								if (task.process.pid != null) unregisterPid(task.process.pid);
 								task.process.kill("SIGTERM");
 								task.status = "killed";
 								task.endTime = Date.now();
@@ -1007,6 +1022,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						if ((data === "k" || data === "x") && selectedTaskId) {
 							const task = tasks.get(selectedTaskId);
 							if (task && task.status === "running" && task.process) {
+								if (task.process.pid != null) unregisterPid(task.process.pid);
 								task.process.kill("SIGTERM");
 								task.status = "killed";
 								task.endTime = Date.now();
@@ -1170,9 +1186,10 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 	// Cleanup on session end
 	pi.on("session_shutdown", async () => {
-		// Kill all running tasks
+		// Kill all running tasks and unregister PIDs
 		for (const task of tasks.values()) {
 			if (task.status === "running" && task.process) {
+				if (task.process.pid != null) unregisterPid(task.process.pid);
 				task.process.kill("SIGTERM");
 			}
 		}
