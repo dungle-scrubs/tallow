@@ -207,6 +207,7 @@ const VERB_TENSES: ReadonlyMap<string, VerbTense> = new Map([
 	["ls", { present: "Listing…", past: "Listed" }],
 	["grep", { present: "Searching…", past: "Searched" }],
 	["find", { present: "Finding…", past: "Found" }],
+	["web_search", { present: "Searching…", past: "Searched" }],
 ]);
 
 /**
