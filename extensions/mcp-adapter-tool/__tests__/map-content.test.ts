@@ -99,4 +99,60 @@ describe("mapContent", () => {
 		const result = mapContent(items);
 		expect((result[0] as { text: string }).text).toBe("clean");
 	});
+
+	// ── resource_link tests ──────────────────────────────────────────────
+
+	test("maps resource_link with URI", () => {
+		const items: McpContentItem[] = [{ type: "resource_link", uri: "file:///tmp/data.csv" }];
+		const result = mapContent(items);
+		expect(result).toHaveLength(1);
+		expect((result[0] as { text: string }).text).toBe("[Resource: file:///tmp/data.csv]");
+	});
+
+	test("maps resource_link with mimeType", () => {
+		const items: McpContentItem[] = [
+			{ type: "resource_link", uri: "https://api.example.com/users", mimeType: "application/json" },
+		];
+		const text = (mapContent(items)[0] as { text: string }).text;
+		expect(text).toBe("[Resource (application/json): https://api.example.com/users]");
+	});
+
+	test("maps resource_link with description", () => {
+		const items: McpContentItem[] = [
+			{ type: "resource_link", uri: "file:///logs/app.log", description: "Application logs" },
+		];
+		const text = (mapContent(items)[0] as { text: string }).text;
+		expect(text).toContain("file:///logs/app.log");
+		expect(text).toContain("Application logs");
+	});
+
+	test("maps resource_link with mimeType and description", () => {
+		const items: McpContentItem[] = [
+			{
+				type: "resource_link",
+				uri: "s3://bucket/report.pdf",
+				mimeType: "application/pdf",
+				description: "Monthly report",
+			},
+		];
+		const text = (mapContent(items)[0] as { text: string }).text;
+		expect(text).toBe("[Resource (application/pdf): s3://bucket/report.pdf] — Monthly report");
+	});
+
+	test("handles resource_link with missing URI", () => {
+		const items: McpContentItem[] = [{ type: "resource_link" }];
+		const text = (mapContent(items)[0] as { text: string }).text;
+		expect(text).toContain("unknown");
+	});
+
+	test("maps multiple resource_links in one result", () => {
+		const items: McpContentItem[] = [
+			{ type: "resource_link", uri: "file:///a.txt" },
+			{ type: "resource_link", uri: "file:///b.txt" },
+		];
+		const result = mapContent(items);
+		expect(result).toHaveLength(2);
+		expect((result[0] as { text: string }).text).toContain("a.txt");
+		expect((result[1] as { text: string }).text).toContain("b.txt");
+	});
 });
