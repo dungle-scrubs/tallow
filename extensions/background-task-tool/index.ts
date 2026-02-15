@@ -340,6 +340,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 			// Buffer output (and stream if not fire-and-forget)
 			const onData = (data: Buffer) => {
+				// Guard: ignore data arriving after task is no longer running
+				if (task.status !== "running") return;
+
 				if (task.outputBytes < MAX_OUTPUT_BYTES) {
 					const text = data.toString();
 					task.output.push(text);
@@ -363,6 +366,15 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			child.stdout?.on("data", onData);
 			child.stderr?.on("data", onData);
 
+			/**
+			 * Remove onData listeners from child streams to prevent leaks
+			 * in long sessions with many background tasks.
+			 */
+			const cleanupStreams = () => {
+				child.stdout?.removeListener("data", onData);
+				child.stderr?.removeListener("data", onData);
+			};
+
 			// Handle timeout
 			if (params.timeout && params.timeout > 0) {
 				setTimeout(() => {
@@ -380,6 +392,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			if (fireAndForget) {
 				// Handle completion in background
 				child.on("close", (code) => {
+					cleanupStreams();
 					task.endTime = Date.now();
 					task.exitCode = code;
 					task.status = code === 0 ? "completed" : "failed";
@@ -388,6 +401,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					syncTaskState(ctx);
 				});
 				child.on("error", (err) => {
+					cleanupStreams();
 					task.endTime = Date.now();
 					task.status = "failed";
 					task.output.push(`\nError: ${err.message}\n`);
@@ -417,6 +431,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				error?: string;
 			}>((resolve) => {
 				child.on("close", (code) => {
+					cleanupStreams();
 					task.endTime = Date.now();
 					task.exitCode = code;
 					task.status = code === 0 ? "completed" : "failed";
@@ -426,6 +441,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					resolve({ exitCode: code });
 				});
 				child.on("error", (err) => {
+					cleanupStreams();
 					task.endTime = Date.now();
 					task.status = "failed";
 					task.output.push(`\nError: ${err.message}\n`);
