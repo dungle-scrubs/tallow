@@ -65,8 +65,9 @@ describe("nested interactive session guard", () => {
 	});
 
 	test("allows interactive mode without TALLOW_INTERACTIVE", async () => {
-		// Unset the sentinel; process may be killed or exit for unrelated setup reasons
-		const { stderr } = await runCli([], { TALLOW_INTERACTIVE: "" }, 2000);
+		// Unset the sentinel. stdio: ["ignore"] means stdin is /dev/null (not a TTY),
+		// so the empty-pipe guard will fire — but the nesting guard must not.
+		const { stderr } = await runCli([], { TALLOW_INTERACTIVE: "" }, 5000);
 
 		// The nested-session guard must not trigger when sentinel is unset.
 		expect(stderr).not.toContain(
