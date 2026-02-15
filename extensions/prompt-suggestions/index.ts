@@ -18,6 +18,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { type EditorTheme } from "@mariozechner/pi-tui";
+import { AutocompleteEngine } from "./autocomplete.js";
 import { GENERAL_TEMPLATES, type PromptTemplate } from "./templates.js";
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -56,75 +57,7 @@ function pickIdleSuggestion(): string | null {
 	return pool[idx]?.text ?? null;
 }
 
-// ─── Autocomplete model ──────────────────────────────────────────────────────
-
-/** Preferred fallback models for autocomplete, cheapest first. */
-const AUTOCOMPLETE_FALLBACKS = [
-	"groq/llama-3.1-8b-instant",
-	"anthropic/claude-haiku-4-5",
-	"anthropic/claude-3-5-haiku-latest",
-	"openai/gpt-4o-mini",
-];
-
-/**
- * Resolve the autocomplete model from the registry.
- * Tries the configured model, then preferred cheap models, then any available model.
- *
- * @param ctx - Extension context with model registry
- * @param modelSetting - Provider/model string (e.g. "groq/llama-3.1-8b-instant")
- * @returns Resolved model and API key, or null if unavailable
- */
-async function resolveAutocompleteModel(
-	ctx: ExtensionContext,
-	modelSetting: string
-): Promise<{ model: Model<Api>; apiKey: string } | null> {
-	// Try configured model first
-	const result = await tryResolveModel(ctx, modelSetting);
-	if (result) return result;
-
-	// Try preferred cheap fallbacks
-	for (const fallback of AUTOCOMPLETE_FALLBACKS) {
-		if (fallback === modelSetting) continue;
-		const fbResult = await tryResolveModel(ctx, fallback);
-		if (fbResult) return fbResult;
-	}
-
-	// Last resort: pick the cheapest available model by input cost
-	const available = ctx.modelRegistry.getAvailable();
-	const sorted = [...available].sort((a, b) => (a.cost?.input ?? 0) - (b.cost?.input ?? 0));
-	for (const model of sorted) {
-		const apiKey = await ctx.modelRegistry.getApiKey(model);
-		if (apiKey) return { model, apiKey };
-	}
-
-	return null;
-}
-
-/**
- * Try to resolve a specific provider/model string.
- *
- * @param ctx - Extension context with model registry
- * @param modelStr - Provider/model string (e.g. "groq/llama-3.1-8b-instant")
- * @returns Resolved model and API key, or null if unavailable
- */
-async function tryResolveModel(
-	ctx: ExtensionContext,
-	modelStr: string
-): Promise<{ model: Model<Api>; apiKey: string } | null> {
-	const slashIdx = modelStr.indexOf("/");
-	if (slashIdx === -1) return null;
-
-	const provider = modelStr.slice(0, slashIdx);
-	const modelId = modelStr.slice(slashIdx + 1);
-
-	const model = ctx.modelRegistry.find(provider, modelId);
-	if (!model) return null;
-
-	const apiKey = await ctx.modelRegistry.getApiKey(model);
-	if (!apiKey) return null;
-
-	return { model, apiKey };
-}
+// ─── LLM completion ──────────────────────────────────────────────────────────
 
 /**
  * Call the autocomplete model with the user's partial input.
@@ -165,17 +98,14 @@ async function getCompletion(
 
 		if (signal.aborted) return null;
 
-		// Extract text from the response
 		const text = result.content
 			.filter((c): c is { type: "text"; text: string } => c.type === "text")
 			.map((c) => c.text)
 			.join("");
 
-		// Clean up: trim, remove quotes, take first line only
 		const cleaned = text.trim().split("\n")[0]?.trim() ?? "";
 		return cleaned.length > 0 ? cleaned : null;
 	} catch {
-		// Silently swallow errors (network, abort, rate limit)
 		return null;
 	}
 }
@@ -199,32 +129,17 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 	/** Reference to the editor instance for ghost text control. */
 	let editorRef: CustomEditor | null = null;
 
-	/** Extension context, captured on session_start for model registry access. */
-	let ctxRef: ExtensionContext | null = null;
-
-	/** Whether the agent is currently processing (suppress suggestions while busy). */
-	let agentBusy = false;
+	/** Autocomplete engine instance, created after editor is available. */
+	let engine: AutocompleteEngine | null = null;
 
 	/** Debounce timer for idle suggestions (shows when input is cleared). */
 	let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-	/** Debounce timer for autocomplete model calls. */
-	let autocompleteTimer: ReturnType<typeof setTimeout> | null = null;
-
-	/** Abort controller for in-flight autocomplete requests. */
-	let abortController: AbortController | null = null;
-
-	/** Number of autocomplete calls made this session (cost guardrail). */
-	let callCount = 0;
-
-	/** Cached resolved model (resolved once on first autocomplete attempt). */
-	let resolvedModel: { model: Model<Api>; apiKey: string } | null | undefined;
 
 	/**
 	 * Show an idle suggestion if the editor is empty and agent is idle.
 	 */
 	function showIdleSuggestion(): void {
-		if (!editorRef || agentBusy) return;
+		if (!editorRef || engine?.busy) return;
 		if (editorRef.getText().length > 0) return;
 
 		const suggestion = pickIdleSuggestion();
@@ -233,69 +148,18 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 		}
 	}
 
-	/** Cancel any pending or in-flight autocomplete. */
-	function cancelAutocomplete(): void {
-		if (autocompleteTimer) {
-			clearTimeout(autocompleteTimer);
-			autocompleteTimer = null;
+	/** Clear the idle suggestion timer. */
+	function clearIdleTimer(): void {
+		if (idleTimer) {
+			clearTimeout(idleTimer);
+			idleTimer = null;
 		}
-		if (abortController) {
-			abortController.abort();
-			abortController = null;
-		}
-	}
-
-	/**
-	 * Trigger debounced autocomplete for the given partial input.
-	 * Cancels any prior pending/in-flight request.
-	 *
-	 * @param partialInput - Current editor text
-	 */
-	function triggerAutocomplete(partialInput: string): void {
-		cancelAutocomplete();
-
-		if (!autocompleteEnabled || !ctxRef || agentBusy) return;
-		if (callCount >= MAX_CALLS_PER_SESSION) return;
-
-		// Don't autocomplete slash commands (handled by built-in autocomplete)
-		if (partialInput.startsWith("/")) return;
-
-		// Need at least a few characters to generate a useful completion
-		if (partialInput.trim().length < 4) return;
-
-		autocompleteTimer = setTimeout(async () => {
-			if (!editorRef || !ctxRef) return;
-
-			// Resolve model on first call
-			if (resolvedModel === undefined) {
-				resolvedModel = (await resolveAutocompleteModel(ctxRef, modelSetting as string)) ?? null;
-			}
-			if (!resolvedModel) return;
-
-			abortController = new AbortController();
-			callCount++;
-
-			const completion = await getCompletion(
-				resolvedModel.model,
-				resolvedModel.apiKey,
-				partialInput,
-				abortController.signal
-			);
-
-			abortController = null;
-
-			// Only show if editor text hasn't changed since we started
-			if (editorRef && editorRef.getText() === partialInput && completion) {
-				editorRef.setGhostText(completion);
-			}
-		}, debounceMs);
 	}
 
 	// ── Editor component registration ────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
-		ctxRef = ctx;
 
 		// Register Groq as a provider if not already available and env var is set
 		if (!ctx.modelRegistry.find("groq", "llama-3.1-8b-instant") && process.env.GROQ_API_KEY) {
@@ -321,28 +185,31 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 			const editor = new CustomEditor(tui, editorTheme, keybindings);
 			editorRef = editor;
 
-			// Use addChangeListener so the framework can overwrite onChange
-			// without clobbering our handler.
-			editor.addChangeListener((newText: string) => {
-				// Clear pending timers on any text change
-				if (idleTimer) {
-					clearTimeout(idleTimer);
-					idleTimer = null;
-				}
+			engine = new AutocompleteEngine(
+				{
+					enabled: autocompleteEnabled,
+					debounceMs: debounceMs,
+					maxCalls: MAX_CALLS_PER_SESSION,
+					modelSetting: modelSetting as string,
+				},
+				ctx.modelRegistry,
+				getCompletion,
+				(text) => editor.setGhostText(text),
+				() => editor.getText()
+			);
 
-				if (newText.length === 0 && !agentBusy) {
-					// Text cleared — show idle suggestion after short delay
-					cancelAutocomplete();
+			editor.addChangeListener((newText: string) => {
+				clearIdleTimer();
+
+				if (newText.length === 0 && !engine?.busy) {
+					engine?.cancel();
 					idleTimer = setTimeout(showIdleSuggestion, 300);
 				} else if (newText.length > 0) {
-					// User is typing — trigger autocomplete
-					triggerAutocomplete(newText);
+					engine?.trigger(newText);
 				}
 			});
 
-			// Show initial idle suggestion
 			setTimeout(showIdleSuggestion, 100);
-
 			return editor;
 		});
 	});
@@ -350,29 +217,22 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 	// ── Agent lifecycle ──────────────────────────────────────────────────────
 
 	pi.on("turn_start", async () => {
-		agentBusy = true;
-		cancelAutocomplete();
+		if (engine) engine.busy = true;
 		if (editorRef) editorRef.setGhostText(null);
-		if (idleTimer) {
-			clearTimeout(idleTimer);
-			idleTimer = null;
-		}
+		clearIdleTimer();
 	});
 
 	pi.on("turn_end", async () => {
-		agentBusy = false;
+		if (engine) engine.busy = false;
 		setTimeout(showIdleSuggestion, 200);
 	});
 
 	// ── Cleanup ──────────────────────────────────────────────────────────────
 
 	pi.on("session_shutdown", async () => {
-		cancelAutocomplete();
-		if (idleTimer) {
-			clearTimeout(idleTimer);
-			idleTimer = null;
-		}
+		engine?.dispose();
+		engine = null;
+		clearIdleTimer();
 		editorRef = null;
-		ctxRef = null;
 	});
 }
