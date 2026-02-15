@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **background-task-tool:** inline completion notifications for fire-and-forget
+  background tasks — shows status icon, exit code, duration, and 3-line output
+  preview as a chat message when `background: true` tasks complete
+- **subagent-tool:** inline completion notifications for background subagents —
+  shows agent name, duration, and 3-line response preview when background
+  subagents finish
+- **background-task-tool:** `/toggle-inline-results` command to enable/disable
+  inline result notifications (persists to settings.json, enabled by default)
 - **core:** piped stdin support — `cat file.md | tallow` reads stdin and enters
   print mode automatically, combinable with `-p` for context + prompt workflows,
   with 10 MB size limit and JSON mode support
