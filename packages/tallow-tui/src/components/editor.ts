@@ -214,6 +214,9 @@ export class Editor implements Component, Focusable {
 	// Undo support
 	private undoStack = new UndoStack<EditorState>();
 
+	// Ghost text (inline suggestion shown as dim text after cursor)
+	private ghostTextValue: string | null = null;
+
 	public onSubmit?: (text: string) => void;
 	public onChange?: (text: string) => void;
 	public disableSubmit: boolean = false;
@@ -422,6 +425,25 @@ export class Editor implements Component, Focusable {
 				}
 			}
 
+			// Ghost text: show dim suggestion after cursor on the cursor line (end of input only)
+			if (
+				layoutLine.hasCursor &&
+				this.ghostTextValue &&
+				layoutLine.cursorPos !== undefined &&
+				layoutLine.cursorPos >= layoutLine.text.length
+			) {
+				// Truncate ghost text to fit remaining content width
+				const available = contentWidth - lineVisibleWidth;
+				if (available > 0) {
+					const truncated =
+						this.ghostTextValue.length > available
+							? this.ghostTextValue.slice(0, available)
+							: this.ghostTextValue;
+					displayText += `\x1b[2m${truncated}\x1b[0m`;
+					lineVisibleWidth += truncated.length;
+				}
+			}
+
 			// Calculate padding based on actual visible width
 			const padding = " ".repeat(Math.max(0, contentWidth - lineVisibleWidth));
 			const lineRightPadding = cursorInPadding ? rightPadding.slice(1) : rightPadding;
@@ -574,8 +596,19 @@ export class Editor implements Component, Focusable {
 			}
 		}
 
-		// Tab - trigger completion
+		// Escape - dismiss ghost text when no autocomplete is active
+		if (kb.matches(data, "selectCancel") && !this.autocompleteState && this.ghostTextValue) {
+			this.ghostTextValue = null;
+			this.tui.requestRender();
+			return;
+		}
+
+		// Tab - accept ghost text or trigger completion
 		if (kb.matches(data, "tab") && !this.autocompleteState) {
+			if (this.ghostTextValue) {
+				this.acceptGhostText();
+				return;
+			}
 			this.handleTabCompletion();
 			return;
 		}
@@ -655,6 +688,13 @@ export class Editor implements Component, Focusable {
 		// Submit (Enter)
 		if (kb.matches(data, "submit")) {
 			if (this.disableSubmit) return;
+
+			// Accept ghost text on Enter when input is empty — "just hit Enter" experience
+			if (this.isEditorEmpty() && this.ghostTextValue) {
+				this.acceptGhostText();
+				this.submitValue();
+				return;
+			}
 
 			// Workaround for terminals without Shift+Enter support:
 			// If char before cursor is \, delete it and insert newline instead of submitting.
@@ -868,6 +908,44 @@ export class Editor implements Component, Focusable {
 	}
 
 	/**
+	 * Set ghost text (inline suggestion shown as dim text after the cursor).
+	 * Pass null to clear. Ghost text is purely visual — not part of the buffer.
+	 *
+	 * @param text - Suggestion to display, or null to clear
+	 */
+	setGhostText(text: string | null): void {
+		if (this.ghostTextValue !== text) {
+			this.ghostTextValue = text;
+			this.tui.requestRender();
+		}
+	}
+
+	/**
+	 * Get the current ghost text, or null if none.
+	 *
+	 * @returns Current ghost text string, or null
+	 */
+	getGhostText(): string | null {
+		return this.ghostTextValue;
+	}
+
+	/**
+	 * Accept ghost text into the editor buffer at the cursor position.
+	 * Clears ghost text and triggers onChange.
+	 *
+	 * @returns true if ghost text was accepted, false if none was showing
+	 */
+	private acceptGhostText(): boolean {
+		if (!this.ghostTextValue) return false;
+		const text = this.ghostTextValue;
+		this.ghostTextValue = null;
+		this.pushUndoSnapshot();
+		this.insertTextAtCursorInternal(text);
+		if (this.onChange) this.onChange(this.getText());
+		return true;
+	}
+
+	/**
 	 * Insert text at the current cursor position.
 	 * Used for programmatic insertion (e.g., clipboard image markers).
 	 * This is atomic for undo - single undo restores entire pre-insert state.
@@ -931,6 +1009,8 @@ export class Editor implements Component, Focusable {
 	// All the editor methods from before...
 	private insertCharacter(char: string, skipUndoCoalescing?: boolean): void {
 		this.historyIndex = -1; // Exit history browsing mode
+		// Dismiss ghost text on any character input
+		this.ghostTextValue = null;
 
 		// Undo coalescing (fish-style):
 		// - Consecutive word chars coalesce into one undo unit
@@ -1111,6 +1191,7 @@ export class Editor implements Component, Focusable {
 	private handleBackspace(): void {
 		this.historyIndex = -1; // Exit history browsing mode
 		this.lastAction = null;
+		this.ghostTextValue = null;
 
 		if (this.state.cursorCol > 0) {
 			this.pushUndoSnapshot();
@@ -1439,6 +1520,7 @@ export class Editor implements Component, Focusable {
 	private handleForwardDelete(): void {
 		this.historyIndex = -1; // Exit history browsing mode
 		this.lastAction = null;
+		this.ghostTextValue = null;
 
 		const currentLine = this.state.lines[this.state.cursorLine] || "";
 
