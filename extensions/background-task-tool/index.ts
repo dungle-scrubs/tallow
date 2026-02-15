@@ -16,6 +16,9 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { type ExtensionAPI, type ExtensionContext, keyHint } from "@mariozechner/pi-coding-agent";
 import {
 	Container,
@@ -29,6 +32,7 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitInteropEvent,
 	INTEROP_EVENT_NAMES,
@@ -79,6 +83,9 @@ const MAX_TASKS = 20; // Max concurrent/recent tasks
 
 /** Reference to pi events bus, set when the extension initializes. */
 let piEventsRef: ExtensionAPI["events"] | null = null;
+
+/** Reference to pi extension API, for sendMessage from async close handlers. */
+let piRef: ExtensionAPI | null = null;
 
 /**
  * Abort controllers for promoted tasks (bash → background handoff).
@@ -212,6 +219,26 @@ export function promoteToBackground(opts: {
 			task.status = exitCode === 0 ? "completed" : "failed";
 			promotedAbortControllers.delete(taskId);
 			if (piEventsRef) publishBackgroundTaskSnapshot(piEventsRef);
+			// Post inline result for promoted tasks (bash → background handoff)
+			if (piRef && isInlineResultsEnabled()) {
+				const duration = formatDuration((task.endTime ?? Date.now()) - task.startTime);
+				const output = task.output.join("");
+				const preview = extractPreview(output, 3, 80);
+				piRef.sendMessage({
+					customType: "background-task-complete",
+					content: `Task ${task.id} ${task.status} (${duration})`,
+					display: true,
+					details: {
+						taskId: task.id,
+						command: task.command,
+						exitCode: task.exitCode ?? null,
+						duration,
+						preview,
+						status: task.status as "completed" | "failed",
+						timestamp: Date.now(),
+					} satisfies BgTaskCompleteDetails,
+				});
+			}
 		},
 	};
 }
@@ -323,8 +350,83 @@ export function detectsHangPattern(command: string): string | null {
  * Registers background task tools (bg_bash, task_output, task_status, task_kill) and /bg command.
  * @param pi - Extension API for registering tools and commands
  */
+/** Details for inline background-task-complete messages. */
+interface BgTaskCompleteDetails {
+	readonly taskId: string;
+	readonly command: string;
+	readonly exitCode: number | null;
+	readonly duration: string;
+	readonly preview: string[];
+	readonly status: "completed" | "failed" | "killed";
+	readonly timestamp: number;
+}
+
 export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	piEventsRef = pi.events;
+	piRef = pi;
+
+	// Register inline result renderer for fire-and-forget task completions
+	pi.registerMessageRenderer<BgTaskCompleteDetails>(
+		"background-task-complete",
+		(message, _options, theme) => {
+			const d = message.details;
+			if (!d) return undefined;
+
+			const icon =
+				d.status === "completed"
+					? theme.fg("success", getIcon("success"))
+					: theme.fg("error", getIcon("error"));
+			const label = d.status === "completed" ? "completed" : d.status;
+
+			let text = `${icon} ${theme.fg("muted", "⚙ Task")} ${theme.fg("accent", d.taskId)} ${theme.fg("muted", label)} ${theme.fg("dim", `(exit ${d.exitCode ?? "?"}, ${d.duration})`)}`;
+
+			if (d.preview.length > 0) {
+				for (const line of d.preview) {
+					text += `\n  ${theme.fg("dim", line)}`;
+				}
+			} else {
+				text += `\n  ${theme.fg("dim", "(no output)")}`;
+			}
+
+			text += `\n  ${theme.fg("muted", `Use task_output("${d.taskId}") to view full output`)}`;
+
+			return new Text(text, 0, 0);
+		}
+	);
+
+	/**
+	 * Post an inline notification when a fire-and-forget task completes.
+	 *
+	 * Checks the inlineAgentResults setting before posting.
+	 * Only fires for fire-and-forget tasks (background: true).
+	 *
+	 * @param task - Completed background task
+	 * @returns void
+	 */
+	function postInlineResult(task: BackgroundTask): void {
+		if (!piRef || !isInlineResultsEnabled()) return;
+		// Skip killed tasks
+		if (task.status === "killed") return;
+
+		const duration = formatDuration((task.endTime ?? Date.now()) - task.startTime);
+		const output = task.output.join("");
+		const preview = extractPreview(output, 3, 80);
+
+		piRef.sendMessage({
+			customType: "background-task-complete",
+			content: `Task ${task.id} ${task.status} (${duration})`,
+			display: true,
+			details: {
+				taskId: task.id,
+				command: task.command,
+				exitCode: task.exitCode ?? null,
+				duration,
+				preview,
+				status: task.status as "completed" | "failed",
+				timestamp: Date.now(),
+			} satisfies BgTaskCompleteDetails,
+		});
+	}
 
 	/**
 	 * Updates the status bar indicator for running background tasks.
@@ -477,6 +579,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					if (child.pid != null) unregisterPid(child.pid);
 					task.process = null;
 					syncTaskState(ctx);
+					postInlineResult(task);
 				});
 				child.on("error", (err) => {
 					cleanupStreams();
@@ -486,6 +589,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					if (child.pid != null) unregisterPid(child.pid);
 					task.process = null;
 					syncTaskState(ctx);
+					postInlineResult(task);
 				});
 				child.unref();
 				syncTaskState(ctx);
@@ -1312,6 +1416,30 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			// which leaves stale lines on screen because clearOnShrink is off by default.
 			tuiRef?.requestRender(true);
 			syncTaskState(ctx);
+		},
+	});
+
+	// Command: /toggle-inline-results — Enable or disable inline completion notifications
+	pi.registerCommand("toggle-inline-results", {
+		description: "Toggle inline result notifications for background tasks and subagents",
+		handler: async (_args, ctx) => {
+			const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+			let settings: Record<string, unknown> = {};
+			try {
+				const raw = fs.readFileSync(settingsPath, "utf-8");
+				settings = JSON.parse(raw) as Record<string, unknown>;
+			} catch {
+				/* no settings file yet */
+			}
+
+			const current = settings.inlineAgentResults !== false;
+			settings.inlineAgentResults = !current;
+
+			fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+			fs.writeFileSync(settingsPath, JSON.stringify(settings, null, "\t"), "utf-8");
+
+			const state = settings.inlineAgentResults ? "enabled" : "disabled";
+			ctx.ui.notify(`Inline agent results: ${state}`, "info");
 		},
 	});
 
