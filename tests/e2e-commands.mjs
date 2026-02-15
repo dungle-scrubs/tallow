@@ -14,8 +14,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } fro
 import os from "node:os";
 
 // Run from a clean temp dir to avoid project-local .tallow/ conflicts
-const originalCwd = process.cwd();
-const testCwd = mkdtempSync(os.tmpdir() + "/tallow-e2e-");
+const _originalCwd = process.cwd();
+const testCwd = mkdtempSync(`${os.tmpdir()}/tallow-e2e-`);
 process.chdir(testCwd);
 
 import { join, resolve } from "node:path";
@@ -188,7 +188,7 @@ const missing = allExpected.filter((c) => !commandNames.has(c));
 check(
 	`${registered.length}/${allExpected.length} expected commands registered`,
 	missing.length === 0,
-	missing.length > 0 ? `Missing: ${missing.map((c) => "/" + c).join(", ")}` : undefined
+	missing.length > 0 ? `Missing: ${missing.map((c) => `/${c}`).join(", ")}` : undefined
 );
 
 // Log any extra extension commands (informational, not a failure)
@@ -196,7 +196,7 @@ const extCommands = commands.filter((c) => c.source === "extension").map((c) => 
 const extras = extCommands.filter((c) => !allExpected.includes(c));
 if (extras.length > 0) {
 	console.log(
-		`\n  \x1b[2mAdditional commands found: ${extras.map((c) => "/" + c).join(", ")}\x1b[0m`
+		`\n  \x1b[2mAdditional commands found: ${extras.map((c) => `/${c}`).join(", ")}\x1b[0m`
 	);
 }
 
