@@ -17,6 +17,7 @@ import {
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+import { cleanupOrphanPids } from "./pid-manager.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 
@@ -452,6 +453,14 @@ function ensureTallowHome(): void {
 
 	// Migrate flat session files to per-cwd subdirectories (one-time, idempotent)
 	migrateSessionsToPerCwdDirs(join(TALLOW_HOME, "sessions"));
+
+	// Kill orphaned child processes from crashed/killed previous sessions
+	const orphansKilled = cleanupOrphanPids();
+	if (orphansKilled > 0) {
+		console.error(
+			`\x1b[33m⚠ Cleaned up ${orphansKilled} orphaned background process${orphansKilled > 1 ? "es" : ""} from a previous session\x1b[0m`
+		);
+	}
 
 	ensureKeybindings();
 }

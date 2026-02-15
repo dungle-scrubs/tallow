@@ -11,6 +11,7 @@
  */
 
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import { cleanupAllTrackedPids } from "./pid-manager.js";
 
 /** Guard against re-entrant cleanup (signal + EIO racing). */
 let cleaning = false;
@@ -46,6 +47,10 @@ async function cleanup(session: AgentSession | undefined, exitCode: number): Pro
 	} catch {
 		// Best-effort — don't let extension errors prevent exit
 	}
+
+	// Safety net: kill any tracked PIDs that session_shutdown didn't clean up.
+	// If extensions already killed and unregistered their processes, this is a no-op.
+	cleanupAllTrackedPids();
 
 	process.exit(exitCode);
 }
