@@ -3,7 +3,12 @@
  * natural width clamping, and aspect ratio preservation.
  */
 import { describe, expect, it } from "bun:test";
-import { calculateImageLayout, type ImageDimensions } from "../terminal-image.js";
+import {
+	calculateImageLayout,
+	detectImageFormat,
+	type ImageDimensions,
+	imageFormatToMime,
+} from "../terminal-image.js";
 
 const DEFAULT_CELL = { widthPx: 9, heightPx: 18 };
 
@@ -116,5 +121,89 @@ describe("calculateImageLayout", () => {
 			expect(layout.rows).toBe(25);
 			expect(layout.columns).toBeLessThanOrEqual(12);
 		});
+	});
+});
+
+// ── detectImageFormat ────────────────────────────────────────────────────────
+
+describe("detectImageFormat", () => {
+	it("detects PNG from magic bytes", () => {
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+		expect(detectImageFormat(png)).toBe("png");
+	});
+
+	it("detects JPEG from magic bytes", () => {
+		const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+		expect(detectImageFormat(jpeg)).toBe("jpeg");
+	});
+
+	it("detects JPEG with EXIF marker", () => {
+		const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0, 0, 0, 0, 0, 0, 0, 0]);
+		expect(detectImageFormat(jpeg)).toBe("jpeg");
+	});
+
+	it("detects GIF87a", () => {
+		// "GIF87a" = 47 49 46 38 37 61
+		const gif = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x37, 0x61, 0, 0, 0, 0, 0, 0]);
+		expect(detectImageFormat(gif)).toBe("gif");
+	});
+
+	it("detects GIF89a", () => {
+		const gif = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0, 0, 0, 0, 0, 0]);
+		expect(detectImageFormat(gif)).toBe("gif");
+	});
+
+	it("detects WebP from RIFF...WEBP header", () => {
+		// "RIFF" + 4 bytes size + "WEBP"
+		const webp = Buffer.from([
+			0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+		]);
+		expect(detectImageFormat(webp)).toBe("webp");
+	});
+
+	it("returns null for text content", () => {
+		const text = Buffer.from("Hello, world! This is plain text.");
+		expect(detectImageFormat(text)).toBeNull();
+	});
+
+	it("returns null for empty buffer", () => {
+		expect(detectImageFormat(Buffer.alloc(0))).toBeNull();
+	});
+
+	it("returns null for buffer too short for any format", () => {
+		expect(detectImageFormat(Buffer.from([0xff, 0xd8]))).toBeNull();
+	});
+
+	it("returns null for partial PNG header", () => {
+		// Only 4 bytes of PNG header (needs 8)
+		expect(detectImageFormat(Buffer.from([0x89, 0x50, 0x4e, 0x47]))).toBeNull();
+	});
+
+	it("returns null for RIFF without WEBP marker", () => {
+		// RIFF + size + "AVI " instead of "WEBP"
+		const avi = Buffer.from([
+			0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x41, 0x56, 0x49, 0x20,
+		]);
+		expect(detectImageFormat(avi)).toBeNull();
+	});
+});
+
+// ── imageFormatToMime ────────────────────────────────────────────────────────
+
+describe("imageFormatToMime", () => {
+	it("maps png to image/png", () => {
+		expect(imageFormatToMime("png")).toBe("image/png");
+	});
+
+	it("maps jpeg to image/jpeg", () => {
+		expect(imageFormatToMime("jpeg")).toBe("image/jpeg");
+	});
+
+	it("maps gif to image/gif", () => {
+		expect(imageFormatToMime("gif")).toBe("image/gif");
+	});
+
+	it("maps webp to image/webp", () => {
+		expect(imageFormatToMime("webp")).toBe("image/webp");
 	});
 });
