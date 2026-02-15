@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **tui:** `ImageMetadata` type, `createImageMetadata()`, and
+  `formatImageDimensions()` for tracking original vs display dimensions when
+  images are resized before API upload
+- **tui:** `detectImageFormat(buffer)` and `imageFormatToMime()` utilities for
+  identifying PNG/JPEG/GIF/WebP from file header magic numbers without external
+  dependencies
+- **read-tool-enhanced:** image dimension metadata — captures original and
+  display dimensions, format, and file size when reading images; shows compact
+  summary like `image.png (PNG, 3840×2160 → 1920×1080, 245KB)`
+- **read-tool-enhanced:** byte-based image format detection — reads first 12
+  bytes to identify images regardless of file extension, complementing the base
+  tool's `file-type` detection
 - **background-task-tool:** inline completion notifications for fire-and-forget
   background tasks — shows status icon, exit code, duration, and 3-line output
   preview as a chat message when `background: true` tasks complete
