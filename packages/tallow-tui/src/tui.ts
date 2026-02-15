@@ -429,30 +429,36 @@ export class TUI extends Container {
 		});
 	}
 
-	/**
-	 * Input middleware functions — called before the focused component receives input.
-	 * Return `true` to consume the input (prevents further propagation).
-	 */
-	private inputMiddleware: Array<(data: string) => boolean> = [];
+	/** Input listener functions — called before the focused component receives input. */
+	private inputListeners = new Set<
+		(data: string) => { consume?: boolean; data?: string } | undefined
+	>();
 
 	/**
-	 * Register an input middleware function.
-	 * Middleware runs before the focused component and can consume input.
+	 * Register an input listener. Listeners run before the focused component and can
+	 * consume input (return `{consume: true}`) or transform it (return `{data: newData}`).
 	 *
-	 * @param fn - Middleware function; return true to consume, false to pass through
+	 * @param listener - Listener function
+	 * @returns Unsubscribe function
 	 */
-	addInputMiddleware(fn: (data: string) => boolean): void {
-		this.inputMiddleware.push(fn);
+	addInputListener(
+		listener: (data: string) => { consume?: boolean; data?: string } | undefined
+	): () => void {
+		this.inputListeners.add(listener);
+		return () => {
+			this.inputListeners.delete(listener);
+		};
 	}
 
 	/**
-	 * Remove a previously registered input middleware function.
+	 * Remove a previously registered input listener.
 	 *
-	 * @param fn - The middleware function to remove
+	 * @param listener - The listener function to remove
 	 */
-	removeInputMiddleware(fn: (data: string) => boolean): void {
-		const idx = this.inputMiddleware.indexOf(fn);
-		if (idx !== -1) this.inputMiddleware.splice(idx, 1);
+	removeInputListener(
+		listener: (data: string) => { consume?: boolean; data?: string } | undefined
+	): void {
+		this.inputListeners.delete(listener);
 	}
 
 	private handleInput(data: string): void {
@@ -484,9 +490,22 @@ export class TUI extends Container {
 			}
 		}
 
-		// Run input middleware — any can consume the input
-		for (const mw of this.inputMiddleware) {
-			if (mw(data)) return;
+		// Run input listeners — can consume or transform input
+		if (this.inputListeners.size > 0) {
+			let current = data;
+			for (const listener of this.inputListeners) {
+				const result = listener(current);
+				if (result?.consume) {
+					return;
+				}
+				if (result?.data !== undefined) {
+					current = result.data;
+				}
+			}
+			if (current.length === 0) {
+				return;
+			}
+			data = current;
 		}
 
 		// Pass input to focused component (including Ctrl+C)
@@ -1081,22 +1100,35 @@ export class TUI extends Container {
 			let line = newLines[i];
 			const isImage = isImageLine(line);
 			if (!isImage && visibleWidth(line) > width) {
-				// Defensive clamp: truncate the line instead of crashing.
-				// This catches any extension that fails to truncate its output,
-				// unterminated OSC sequences that inflate visibleWidth, or any
-				// other edge case. Log for debugging so the source can be fixed.
+				// Log all lines to crash file for debugging
 				const crashLogPath = path.join(os.homedir(), ".pi", "agent", "pi-crash.log");
-				const entry = [
-					`[${new Date().toISOString()}] Width overflow: line ${i} is ${visibleWidth(line)}, terminal is ${width}. Clamped.`,
-					`  Content: ${line.slice(0, 200)}${line.length > 200 ? "..." : ""}`,
+				const crashData = [
+					`Crash at ${new Date().toISOString()}`,
+					`Terminal width: ${width}`,
+					`Line ${i} visible width: ${visibleWidth(line)}`,
+					"",
+					"=== All rendered lines ===",
+					...newLines.map((l, idx) => `[${idx}] (w=${visibleWidth(l)}) ${l}`),
 					"",
 				].join("\n");
-				try {
-					fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
-					fs.appendFileSync(crashLogPath, entry);
-				} catch {
-					// Best-effort logging — never crash over logging
+				fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
+				fs.writeFileSync(crashLogPath, crashData);
+
+				if (process.env.TALLOW_DEBUG || process.env.PI_DEBUG) {
+					// In debug mode, throw to surface the problem for fixing
+					this.stop();
+					const errorMsg = [
+						`Rendered line ${i} exceeds terminal width (${visibleWidth(line)} > ${width}).`,
+						"",
+						"This is likely caused by a custom TUI component not truncating its output.",
+						"Use visibleWidth() to measure and truncateToWidth() to truncate lines.",
+						"",
+						`Debug log written to: ${crashLogPath}`,
+					].join("\n");
+					throw new Error(errorMsg);
 				}
+
+				// Production: defensively clamp the line instead of crashing
 				line = truncateToWidth(line, width, "");
 				newLines[i] = line;
 			}

@@ -40,9 +40,9 @@ interface HealthDetails {
 		readonly input: readonly string[];
 	};
 	readonly context: {
-		readonly tokens: number;
+		readonly tokens: number | null;
 		readonly contextWindow: number;
-		readonly percent: number;
+		readonly percent: number | null;
 		readonly status: "OK" | "Warning" | "Critical";
 	};
 	readonly tools: {
@@ -91,7 +91,8 @@ function readPackageVersion(pkgPath: string): string {
  * @param percent - Usage percentage (0–100)
  * @returns Status label
  */
-function deriveContextStatus(percent: number): "OK" | "Warning" | "Critical" {
+function deriveContextStatus(percent: number | null): "OK" | "Warning" | "Critical" {
+	if (percent === null) return "OK";
 	if (percent > 80) return "Critical";
 	if (percent > 50) return "Warning";
 	return "OK";
@@ -166,7 +167,9 @@ function buildSections(d: HealthDetails): Section[] {
 		{ label: "Input", value: d.model.input.join(", "), last: true },
 	];
 
-	const usageStr = `${formatTokens(d.context.tokens)}/${formatTokens(d.context.contextWindow)} tokens (${d.context.percent.toFixed(0)}%)`;
+	const tokensStr = d.context.tokens !== null ? formatTokens(d.context.tokens) : "?";
+	const percentStr = d.context.percent !== null ? `${d.context.percent.toFixed(0)}%` : "?";
+	const usageStr = `${tokensStr}/${formatTokens(d.context.contextWindow)} tokens (${percentStr})`;
 	const contextRows = [
 		{ label: "Usage", value: usageStr, last: false },
 		{ label: "Status", value: d.context.status, last: true },

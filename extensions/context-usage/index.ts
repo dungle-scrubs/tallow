@@ -431,18 +431,19 @@ function buildDetails(
 		categories[6].tokens = reserveTokens;
 	}
 
+	const usedTokens = usage.tokens ?? 0;
 	const staticTokens =
 		categories[0].tokens + categories[1].tokens + categories[2].tokens + categories[3].tokens;
-	const messageTokens = Math.max(0, usage.tokens - staticTokens);
+	const messageTokens = Math.max(0, usedTokens - staticTokens);
 	categories[4].tokens = messageTokens;
 
-	const freeTokens = Math.max(0, contextWindow - usage.tokens - reserveTokens);
+	const freeTokens = Math.max(0, contextWindow - usedTokens - reserveTokens);
 	categories[5].tokens = freeTokens;
 
 	return {
 		modelId,
 		contextWindow,
-		usedTokens: usage.tokens,
+		usedTokens,
 		categories: categories.map((c) => ({
 			name: c.name,
 			icon: c.icon,
