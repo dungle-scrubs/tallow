@@ -155,7 +155,7 @@ Inside an interactive session, type `/` to see available commands:
 | `/test` | Write or fix tests |
 | `/scout-and-plan` | Explore the codebase and create a plan |
 | `/scaffold` | Scaffold a new project |
-| `/question` | Ask a question about the codebase |
+| `/question` | Introspect on agent reasoning without triggering actions |
 
 ## SDK
 
