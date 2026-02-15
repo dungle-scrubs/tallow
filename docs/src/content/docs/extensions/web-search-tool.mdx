@@ -1,0 +1,91 @@
+---
+title: web-search-tool
+description: "Web search via Brave Search API with structured results and hyperlinks"
+---
+
+Searches the web and returns structured results with titles,
+URLs, snippets, and metadata. Uses the Brave Search API.
+
+## How it works
+
+The agent calls `web_search` with a query string. The extension
+sends the query to Brave Search, parses the JSON response, and
+returns structured results with clickable OSC 8 hyperlinks.
+
+Results include:
+- **Title** — page title as a clickable link
+- **URL** — full page URL
+- **Snippet** — text excerpt with context
+- **Domain** — source website
+- **Date** — publish/index date (when available)
+
+## Setup
+
+### 1. Get an API key
+
+Sign up at [api.search.brave.com/register](https://api.search.brave.com/register)
+and create an API key. The free tier includes 2,000 queries
+per month with 1 query per second rate limit.
+
+### 2. Set the environment variable
+
+Add `BRAVE_API_KEY` to your environment:
+
+**Option A: tallow .env** (recommended)
+
+```bash
+# ~/.tallow/.env
+BRAVE_API_KEY=your-key-here
+```
+
+**Option B: Shell profile**
+
+```bash
+# ~/.zshrc or ~/.bashrc
+export BRAVE_API_KEY="your-key-here"
+```
+
+**Option C: direnv** (per-project)
+
+```bash
+# .envrc in your project root
+export BRAVE_API_KEY="your-key-here"
+```
+
+### 3. Verify
+
+Run tallow and ask it to search for something:
+
+```
+search for the latest bun release notes
+```
+
+## Parameters
+
+| Parameter   | Type   | Default | Description                                  |
+|-------------|--------|---------|----------------------------------------------|
+| `query`     | string | —       | Search query                                 |
+| `maxResults`| number | 5       | Max results to return (max: 20)              |
+| `freshness` | string | —       | Restrict to recent: "day", "week", "month", "year" |
+
+## When to use
+
+- Need current information beyond training data
+- Looking up error messages or stack traces
+- Finding documentation URLs for unfamiliar libraries
+- Checking latest versions or release notes
+- Researching recent technologies
+
+## When NOT to use
+
+- You already have the URL — use `web-fetch` instead
+- The information is in the codebase — use `grep` or `find`
+- Looking up well-known, stable APIs from training data
+
+## Adding more providers
+
+The extension uses a provider interface. To add a new search
+backend (Tavily, SerpAPI, etc.), implement the `SearchProvider`
+interface in `providers/` and add it to the provider list in
+`index.ts`. The first available provider (with a configured
+API key) is used automatically.
