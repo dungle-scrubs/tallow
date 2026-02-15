@@ -2,15 +2,15 @@
  * Tests for autocomplete engine — model resolution, debouncing, cancellation,
  * cost caps, and the full trigger lifecycle.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import {
 	AUTOCOMPLETE_FALLBACKS,
-	AutocompleteEngine,
 	type AutocompleteConfig,
+	AutocompleteEngine,
 	type CompletionFn,
-	type ModelRegistryLike,
 	MIN_CHARS,
+	type ModelRegistryLike,
 	resolveAutocompleteModel,
 	tryResolveModel,
 } from "../autocomplete.js";
@@ -74,11 +74,9 @@ function createTestEngine(opts: {
 
 	const model = mockModel("test", "model");
 	const registry =
-		opts.registry ??
-		createMockRegistry([model], new Map([["test/model", "test-key"]]));
+		opts.registry ?? createMockRegistry([model], new Map([["test/model", "test-key"]]));
 
-	const completionFn =
-		opts.completionFn ?? (async () => "completion result");
+	const completionFn = opts.completionFn ?? (async () => "completion result");
 
 	const engine = new AutocompleteEngine(
 		defaultConfig(opts.config),
@@ -113,8 +111,8 @@ describe("tryResolveModel", () => {
 		);
 		const result = await tryResolveModel(registry, "groq/llama-3.1-8b-instant");
 		expect(result).not.toBeNull();
-		expect(result!.model.id).toBe("llama-3.1-8b-instant");
-		expect(result!.apiKey).toBe("gsk_abc");
+		expect(result?.model.id).toBe("llama-3.1-8b-instant");
+		expect(result?.apiKey).toBe("gsk_abc");
 	});
 
 	test("returns null for missing model", async () => {
@@ -142,13 +140,10 @@ describe("tryResolveModel", () => {
 describe("resolveAutocompleteModel", () => {
 	test("uses configured model when available", async () => {
 		const model = mockModel("custom", "fast-model");
-		const registry = createMockRegistry(
-			[model],
-			new Map([["custom/fast-model", "key-123"]])
-		);
+		const registry = createMockRegistry([model], new Map([["custom/fast-model", "key-123"]]));
 		const result = await resolveAutocompleteModel(registry, "custom/fast-model");
 		expect(result).not.toBeNull();
-		expect(result!.model.id).toBe("fast-model");
+		expect(result?.model.id).toBe("fast-model");
 	});
 
 	test("falls back through AUTOCOMPLETE_FALLBACKS", async () => {
@@ -160,7 +155,7 @@ describe("resolveAutocompleteModel", () => {
 		// Configured model doesn't exist; should find haiku in fallbacks
 		const result = await resolveAutocompleteModel(registry, "groq/nonexistent");
 		expect(result).not.toBeNull();
-		expect(result!.model.id).toBe("claude-haiku-4-5");
+		expect(result?.model.id).toBe("claude-haiku-4-5");
 	});
 
 	test("falls back to cheapest available model", async () => {
@@ -175,7 +170,7 @@ describe("resolveAutocompleteModel", () => {
 		);
 		const result = await resolveAutocompleteModel(registry, "missing/model");
 		expect(result).not.toBeNull();
-		expect(result!.model.id).toBe("cheap");
+		expect(result?.model.id).toBe("cheap");
 	});
 
 	test("returns null when no models available", async () => {
@@ -432,7 +427,7 @@ describe("AutocompleteEngine lifecycle", () => {
 		engine.trigger("test input");
 		await waitForDebounce();
 		expect(receivedSignal).not.toBeNull();
-		expect(receivedSignal!.aborted).toBe(false);
+		expect(receivedSignal?.aborted).toBe(false);
 	});
 
 	test("dispose cleans up timers", async () => {

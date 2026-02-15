@@ -16,8 +16,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
-import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { type EditorTheme } from "@mariozechner/pi-tui";
+import { CustomEditor, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { EditorTheme } from "@mariozechner/pi-tui";
 import { AutocompleteEngine } from "./autocomplete.js";
 import { GENERAL_TEMPLATES, type PromptTemplate } from "./templates.js";
 
