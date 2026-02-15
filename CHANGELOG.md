@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/dungle-scrubs/tallow/compare/v0.4.0...v0.5.0) (2026-02-15)
+
+
+### Features
+
+* add wrap option to shared renderLines helper ([1f855bc](https://github.com/dungle-scrubs/tallow/commit/1f855bc771fbc003d61c7ff87be9ad2756c79681))
+* **auth:** add secure auth storage with credential references ([bcdd4dc](https://github.com/dungle-scrubs/tallow/commit/bcdd4dc85160758c6e05d16de01db05678453a04))
+* **auth:** remove --api-key CLI flag, use env vars instead ([87f656e](https://github.com/dungle-scrubs/tallow/commit/87f656ef86753e6c144f9acbffb763f8e152ad5c))
+* **interop:** add typed cross-extension event contracts ([6f3896b](https://github.com/dungle-scrubs/tallow/commit/6f3896b2b2891b051c1f8a13487c93b429023346))
+* **shell-interpolation:** require explicit opt-in by default ([94c62b0](https://github.com/dungle-scrubs/tallow/commit/94c62b0922c2123038c15dd73bb2ca8314d53fe3))
+* **shell-policy:** add centralized policy and audit trail ([fe336b6](https://github.com/dungle-scrubs/tallow/commit/fe336b6775fbeab8912b025aba608bca6a94646e))
+* **shell:** enforce high-risk confirmation for bash tools ([50d1e10](https://github.com/dungle-scrubs/tallow/commit/50d1e1001b0c7989c9c9ff08e3ba082b68f031c2))
+* **subagent-tool:** model inheritance, ephemeral recovery, defaults ([400b634](https://github.com/dungle-scrubs/tallow/commit/400b634ad90e80d75ccd5c2315d3a845749db16b))
+* **tallow-tui:** add alternate screen terminal support ([d310cf4](https://github.com/dungle-scrubs/tallow/commit/d310cf49174709eac8ec8501e33eb305bc5f23e3))
+* **teams-tool:** add live team dashboard workspace ([f28e2ce](https://github.com/dungle-scrubs/tallow/commit/f28e2ce619233aad3a1b2db1fc63fa139f7fe320))
+* **wezterm-pane-control:** add WezTerm pane management tool ([902f2c6](https://github.com/dungle-scrubs/tallow/commit/902f2c6d80e7f4428c6151ce9b8d65ea3bf4c165))
+* wrap long lines in expanded tool output ([5709755](https://github.com/dungle-scrubs/tallow/commit/5709755b6404cb21331dd592717e5865d754ad46))
+
+
+### Bug Fixes
+
+* **ci:** build tallow-tui before typecheck and repair context-fork tests ([4e2cf60](https://github.com/dungle-scrubs/tallow/commit/4e2cf60922580133843382f5e7413acb569af7d2))
+* **ci:** build tallow-tui before unit tests ([046a1c8](https://github.com/dungle-scrubs/tallow/commit/046a1c879f8a3d2f359b6163417d6cc32d08209b))
+* **ci:** resolve biome lint errors in test files ([490a20b](https://github.com/dungle-scrubs/tallow/commit/490a20ba524921b38f14ba7301db02a38750512e))
+* **ci:** stabilize workflows and make tests CI-safe ([b548de7](https://github.com/dungle-scrubs/tallow/commit/b548de716d09ec426f0db73d1e83bd231f91c3b5))
+* **ci:** use workspace protocol for tallow-tui fork ([5ed1440](https://github.com/dungle-scrubs/tallow/commit/5ed14405dd2713bd571deb87a824804c28027f5a))
+* preserve ANSI styling through truncation ellipsis ([d9e075e](https://github.com/dungle-scrubs/tallow/commit/d9e075ec30aa3e23766fa1bb090a77e3fca18297))
+* **shell-policy:** harden confirmation handling and risk matching ([744ce07](https://github.com/dungle-scrubs/tallow/commit/744ce078c1165a49f075e3a4b1d5ec3193038873))
+
 ## [0.5.0](https://github.com/dungle-scrubs/tallow/compare/v0.4.0...v0.5.0) (2026-02-14)
 
 ### Added
