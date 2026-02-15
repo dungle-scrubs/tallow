@@ -25,7 +25,7 @@ Every feature is an extension. They're organized by category:
 
 | Category | Extensions | Examples |
 |----------|-----------|----------|
-| **Tools** (18) | Core coding tools and agent capabilities | bash, edit, read, write, cd, web-fetch, subagent, teams, tasks, plan-mode, MCP adapter, session-memory, wezterm-pane-control |
+| **Tools** (19) | Core coding tools and agent capabilities | bash, edit, read, write, cd, web_fetch, web_search, subagent, teams, tasks, plan-mode, MCP adapter, session-memory, wezterm-pane-control |
 | **UI & Display** (6) | Terminal rendering and status | custom footer, git status, tool display, minimal skill display, session-namer, random-spinner |
 | **Commands** (7) | Prompt/command system | command-prompt, command-expansion, context-fork, health, shell-interpolation, skill-commands |
 | **Utilities** (6) | Helper features | cheatsheet, context-usage, debug, init, show-system-prompt, read-tool-enhanced |

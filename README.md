@@ -265,7 +265,7 @@ If it shares a name with a bundled extension, yours takes precedence.
 
 - Requires Node.js 22+ (uses modern ESM features)
 - Session persistence is local — no cloud sync
-- The `web-fetch` extension works best with a [Firecrawl](https://firecrawl.dev) API key for JS-heavy pages
+- The `web_fetch` extension works best with a [Firecrawl](https://firecrawl.dev) API key for JS-heavy pages
 
 ## Contributing
 

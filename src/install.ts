@@ -347,7 +347,7 @@ function groupExtensions(extensions: readonly ExtensionInfo[]): readonly Extensi
 
 	return [
 		{
-			label: "Core Tools (bash, edit, read, write, cd, web-fetch)",
+			label: "Core Tools (bash, edit, read, write, cd, web_fetch)",
 			extensions: categorize(coreTools),
 		},
 		{

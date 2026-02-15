@@ -88,12 +88,12 @@ async function tryFirecrawl(url: string, signal?: AbortSignal): Promise<string |
 }
 
 /**
- * Registers the web-fetch tool.
+ * Registers the web_fetch tool.
  * @param pi - Extension API for registering tools
  */
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "web-fetch",
+		name: "web_fetch",
 		label: "WebFetch",
 		description: `Fetch content from a URL. Returns the page text, truncated to 100KB by default.
 
@@ -211,7 +211,7 @@ WHEN TO USE:
 		renderCall(args, theme) {
 			const url = args.url.length > 60 ? `${args.url.slice(0, 60)}...` : args.url;
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web-fetch ")) + theme.fg("accent", url),
+				theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("accent", url),
 				0,
 				0
 			);
