@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core:** `--tools` CLI flag to restrict available tools per session — supports
+  individual names (`read,bash,edit`), presets (`readonly`, `coding`, `none`),
+  and validates with clear error messages
 - **bash-tool-enhanced:** `BASH_MAINTAIN_PROJECT_WORKING_DIR` setting — resets
   bash execution to the project root before each command, preventing directory
   drift from `cd` tool calls

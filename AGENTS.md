@@ -41,6 +41,28 @@ bun dist/cli.js
 The husky hook runs `typecheck`, `typecheck:extensions`, and `lint-staged`
 (biome check on staged files). All three must pass.
 
+### CLI: `--tools` flag
+
+Restrict which tools are available in a session. Accepts comma-separated
+tool names or preset aliases.
+
+**Individual tools:** `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
+
+**Presets:**
+- `readonly` → `read`, `grep`, `find`, `ls` (no file modifications, no shell)
+- `coding` → `read`, `bash`, `edit`, `write` (default set)
+- `none` → no tools (chat only)
+
+```bash
+tallow --tools readonly          # Safe exploration mode
+tallow --tools read,grep,find    # Custom subset
+tallow --tools none              # Pure conversation
+```
+
+When `--tools` is used, only the specified built-in tools are available.
+Extension-registered tools (MCP adapters, enhanced versions, etc.) still
+load normally — they wrap or extend the built-in tools that are present.
+
 ## Architecture
 
 Tallow is a CLI coding agent built on the
