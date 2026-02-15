@@ -30,6 +30,7 @@ import { getIcon } from "../_icons/index.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
 import { type PromotedTaskHandle, promoteToBackground } from "../background-task-tool/index.js";
 import {
+	formatToolVerb,
 	formatTruncationIndicator,
 	getToolDisplayConfig,
 	renderLines,
@@ -171,8 +172,9 @@ export default function bashLive(pi: ExtensionAPI): void {
 			const firstLine = cmd.split("\n")[0];
 			const preview = firstLine.length > 80 ? `${firstLine.slice(0, 80)}...` : firstLine;
 			const multiLine = cmd.includes("\n") ? theme.fg("dim", " (multiline)") : "";
+			const verb = formatToolVerb("bash", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold("bash ")) + theme.fg("muted", preview) + multiLine,
+				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", preview) + multiLine,
 				0,
 				0
 			);
@@ -346,7 +348,8 @@ export default function bashLive(pi: ExtensionAPI): void {
 			// Exit 0–1: normal (grep no-match, diff, test false, etc.)
 			const statusIcon = exitCode <= 1 ? getIcon("success") : getIcon("error");
 			const statusColor = exitCode <= 1 ? "muted" : "error";
-			const summary = `${statusIcon} bash (${lineCount} lines, ${sizeKb}KB, exit ${exitCode})`;
+			const verb = formatToolVerb("bash", true);
+			const summary = `${statusIcon} ${verb} (${lineCount} lines, ${sizeKb}KB, exit ${exitCode})`;
 			const fullPathSuffix = details?.fullOutputPath
 				? theme.fg("dim", ` → ${details.fullOutputPath}`)
 				: "";

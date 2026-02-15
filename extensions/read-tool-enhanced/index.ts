@@ -30,7 +30,12 @@ import {
 import { fileLink, Text, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
-import { getToolDisplayConfig, renderLines, truncateForDisplay } from "../tool-display/index.js";
+import {
+	formatToolVerb,
+	getToolDisplayConfig,
+	renderLines,
+	truncateForDisplay,
+} from "../tool-display/index.js";
 import {
 	formatPdfOutput,
 	isPdf,
@@ -336,10 +341,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 			}
 
 			// PDF file: show pages if specified
+			const verb = formatToolVerb("read", false);
 			const pagesArg = args.pages as string | undefined;
 			if (pagesArg) {
 				return new Text(
-					theme.fg("toolTitle", theme.bold("read ")) +
+					theme.fg("toolTitle", theme.bold(`${verb} `)) +
 						theme.fg("muted", `${fileLink(path)} (pages ${pagesArg})`),
 					0,
 					0
@@ -347,7 +353,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 			}
 
 			return new Text(
-				theme.fg("toolTitle", theme.bold("read ")) + theme.fg("muted", fileLink(path)),
+				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", fileLink(path)),
 				0,
 				0
 			);
@@ -471,6 +477,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 			}
 
 			// PDF file: compact summary collapsed, full text expanded
+			const readVerb = formatToolVerb("read", true);
 			if (details?.[PDF_MARKER]) {
 				const summary = textContent?.text ?? "PDF";
 				const parenIdx = summary.indexOf(" (");
@@ -478,7 +485,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 					parenIdx > 0
 						? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
 						: fileLink(summary);
-				const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
+				const footer = theme.fg("muted", `${getIcon("success")} ${readVerb} ${linkedSummary}`);
 
 				if (expanded && details?._fullText) {
 					const contentLines = details._fullText.split("\n").map((l) => theme.fg("dim", l));
@@ -500,7 +507,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 				parenIdx > 0
 					? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
 					: fileLink(summary);
-			const footer = theme.fg("muted", `${getIcon("success")} ${linkedSummary}`);
+			const footer = theme.fg("muted", `${getIcon("success")} ${readVerb} ${linkedSummary}`);
 
 			// Expanded: full content with wrapping, then summary footer at bottom
 			if (expanded && details?._fullText) {
