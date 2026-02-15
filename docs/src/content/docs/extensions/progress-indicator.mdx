@@ -1,0 +1,42 @@
+---
+title: progress-indicator
+description: Terminal progress bar via OSC 9;4 during agent turns.
+---
+
+Shows a progress indicator in the terminal's title bar or tab
+during agent turns using
+[OSC 9;4](https://conemu.github.io/en/AnsiEscapeCodes.html#ConEmu_specific_OSC)
+escape sequences.
+
+## How it works
+
+When an agent turn starts, the extension emits an **indeterminate**
+progress sequence (`state=3`). When the turn ends, it clears the
+progress. Safety-net clears also fire on `agent_end` and
+`session_shutdown` to ensure the indicator never gets stuck.
+
+Since the total number of tool calls per turn isn't known ahead of
+time, indeterminate mode (pulsing/spinning) is used rather than a
+percentage bar.
+
+## Terminal support
+
+| Terminal | Display |
+|----------|---------|
+| Windows Terminal | Tab progress indicator |
+| iTerm2 | Title bar progress |
+| WezTerm | Tab progress indicator |
+| ConEmu | Taskbar progress |
+
+Unsupported terminals silently ignore the sequences — no errors or
+visual artifacts.
+
+## Technical details
+
+Progress is only emitted when `process.stdout.isTTY` is true,
+avoiding noise in piped or non-interactive contexts.
+
+The underlying `Terminal` interface also exposes `setProgress(percent)`
+and `clearProgress()` methods for extensions that need determinate
+(percentage-based) progress bars with built-in throttling (max 1
+update per 100ms).

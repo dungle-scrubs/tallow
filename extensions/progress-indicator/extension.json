@@ -1,0 +1,10 @@
+{
+	"name": "progress-indicator",
+	"version": "0.1.0",
+	"description": "Shows terminal progress bar via OSC 9;4 during tool execution",
+	"category": "ui",
+	"tags": ["progress", "osc", "terminal", "visual"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
