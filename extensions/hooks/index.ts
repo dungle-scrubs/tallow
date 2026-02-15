@@ -288,6 +288,11 @@ async function runCommandHook(
 			resolve({ ok: true });
 			return;
 		}
+		// shell: true is required for user-authored hook commands (pipes, redirects,
+		// env expansion). Commands come from settings.json, NOT from LLM input, so
+		// this is not an injection vector. However, shell expansion applies — users
+		// should avoid untrusted interpolation in hook commands. When a permission
+		// system lands, this should require explicit shell opt-in.
 		const proc = spawn(handler.command, {
 			cwd,
 			shell: true,
