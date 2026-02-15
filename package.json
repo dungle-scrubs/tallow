@@ -1,6 +1,6 @@
 {
 	"name": "tallow",
-	"version": "0.5.0",
+	"version": "1.0.0",
 	"description": "An opinionated coding agent. Built on pi.",
 	"piConfig": {
 		"name": "tallow",
