@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **mcp-adapter-tool:** structured content support — handles `resource` and
   annotated content types from MCP servers, with safe fallback serialization
   for unknown types
+- **mcp-adapter-tool:** `resource_link` content type — renders fetchable
+  resource pointers with URI, MIME type, and description as readable text
+  references
 - **tui:** `ImageMetadata` type, `createImageMetadata()`, and
   `formatImageDimensions()` for tracking original vs display dimensions when
   images are resized before API upload
