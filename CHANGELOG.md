@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **core:** `atomicWriteFileSync` utility with write-tmp-then-rename pattern,
+  optional fsync, file mode, and `.bak` backup support
+- **core:** `restoreFromBackup` utility for startup recovery from `.bak` files
+  with optional content validation
+- **core:** automatic backup recovery for `settings.json` and `auth.json` when
+  primary file is corrupt
+
+### Fixed
+
+- **core:** config/state file writes (`settings.json`, `auth.json`,
+  `keybindings.json`, session headers) are now atomic — interrupted writes
+  can no longer corrupt files
+- **extensions:** theme-selector, skill-commands, pid-registry, and
+  output-styles-tool writes are now atomic
+- **tasks:** refactored inline write-tmp-then-rename to use shared
+  `atomicWriteFileSync` utility
+
+### Added
+
 - **hooks:** wire all declared-but-unwired pi events — `before_agent_start`,
   `agent_start`, `turn_end`, `session_shutdown`, `session_before_compact`,
   `session_compact`, `session_before_switch`, `session_switch`,
