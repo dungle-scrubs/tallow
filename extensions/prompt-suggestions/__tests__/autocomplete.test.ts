@@ -485,7 +485,7 @@ describe("AutocompleteEngine conversation context", () => {
 	});
 
 	test("passes null context when no conversation history", async () => {
-		let receivedContext: ConversationContext | null | undefined = undefined;
+		let receivedContext: ConversationContext | null | undefined;
 
 		const result = createTestEngine({
 			config: { debounceMs: 5 },
