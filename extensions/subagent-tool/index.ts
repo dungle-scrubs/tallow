@@ -770,11 +770,15 @@ function formatUsageStats(
 		cost: number;
 		contextTokens?: number;
 		turns?: number;
+		denials?: number;
 	},
 	model?: string
 ): string {
 	const parts: string[] = [];
 	if (usage.turns) parts.push(`${usage.turns} turn${usage.turns > 1 ? "s" : ""}`);
+	if (usage.denials && usage.denials > 0) {
+		parts.push(`${usage.denials} denied`);
+	}
 	if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
 	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
 	if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
@@ -875,6 +879,7 @@ interface UsageStats {
 	cost: number;
 	contextTokens: number;
 	turns: number;
+	denials: number;
 }
 
 /** Result from a single subagent execution. */
@@ -890,6 +895,8 @@ interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	/** Tool names that were denied permission during execution. */
+	deniedTools?: string[];
 }
 
 /** Details passed to renderResult for subagent tool execution display. */
@@ -1099,6 +1106,7 @@ async function spawnBackgroundSubagent(
 			cost: 0,
 			contextTokens: 0,
 			turns: 0,
+			denials: 0,
 		},
 		model: agent.model,
 	};
@@ -1163,14 +1171,22 @@ async function spawnBackgroundSubagent(
 				}
 				if (event.type === "tool_result_end" && event.message) {
 					result.messages.push(event.message);
-					// Emit subagent_tool_result when tool completes
+					// Detect permission denials vs regular errors
 					const resultMsg = event.message;
+					const denied = isToolDenialEvent(resultMsg as Record<string, unknown>);
+					if (denied) {
+						if (!result.deniedTools) result.deniedTools = [];
+						result.deniedTools.push(resultMsg.toolName ?? "unknown");
+						result.usage.denials++;
+					}
+					// Emit subagent_tool_result when tool completes
 					piEvents?.emit("subagent_tool_result", {
 						agent_id: id,
 						agent_type: agentName,
 						tool_name: resultMsg.toolName ?? "unknown",
 						tool_call_id: resultMsg.toolCallId ?? "",
 						is_error: resultMsg.isError ?? false,
+						is_denied: denied,
 					} satisfies SubagentToolResultEvent);
 				}
 			} catch {
@@ -1300,6 +1316,47 @@ function isModelLevelError(result: SingleResult): boolean {
 	return MODEL_ERROR_PATTERNS.some((p) => text.includes(p));
 }
 
+/** Patterns in tool result content that indicate a permission denial rather than execution failure. */
+const DENIAL_PATTERNS = [
+	"permission denied",
+	"tool denied",
+	"user declined",
+	"denied by user",
+	"user rejected",
+	"request denied",
+];
+
+/**
+ * Checks if a tool_result_end event message indicates a permission denial.
+ *
+ * Distinguishes user/framework permission denials from regular tool execution
+ * failures. Checks for an explicit `isDenied` flag (forward-compatible with
+ * future pi framework support) and falls back to pattern-matching the result
+ * content text.
+ *
+ * @param eventMessage - The raw event message from the pi JSON protocol
+ * @returns true if the result indicates a tool was denied permission
+ */
+function isToolDenialEvent(eventMessage: Record<string, unknown>): boolean {
+	if (!eventMessage.isError) return false;
+
+	// Explicit denial flag (forward-compatible with pi framework changes)
+	if (eventMessage.isDenied === true) return true;
+
+	// Pattern-match content array for denial indicators
+	const content = eventMessage.content;
+	if (Array.isArray(content)) {
+		const text = content
+			.filter((p: Record<string, unknown>) => p.type === "text")
+			.map((p: Record<string, unknown>) => p.text as string)
+			.join(" ")
+			.toLowerCase();
+		return DENIAL_PATTERNS.some((p) => text.includes(p));
+	}
+
+	return false;
+}
+
 /**
  * Run a single subagent. Retries with fallback models on API/quota errors.
  */
@@ -1347,6 +1404,7 @@ async function runSingleAgent(
 				cost: 0,
 				contextTokens: 0,
 				turns: 0,
+				denials: 0,
 			},
 			errorMessage: routing.error,
 			step,
@@ -1417,6 +1475,7 @@ async function runSingleAgent(
 			cost: 0,
 			contextTokens: 0,
 			turns: 0,
+			denials: 0,
 		},
 		model: agent.model,
 		step,
@@ -1533,14 +1592,22 @@ async function runSingleAgent(
 
 				if (event.type === "tool_result_end" && event.message) {
 					currentResult.messages.push(event.message as Message);
-					// Emit subagent_tool_result when tool completes
+					// Detect permission denials vs regular errors
 					const resultMsg = event.message;
+					const denied = isToolDenialEvent(resultMsg as unknown as Record<string, unknown>);
+					if (denied) {
+						if (!currentResult.deniedTools) currentResult.deniedTools = [];
+						currentResult.deniedTools.push(resultMsg.toolName ?? "unknown");
+						currentResult.usage.denials++;
+					}
+					// Emit subagent_tool_result when tool completes
 					piEvents?.emit("subagent_tool_result", {
 						agent_id: taskId,
 						agent_type: agentName,
 						tool_name: resultMsg.toolName ?? "unknown",
 						tool_call_id: resultMsg.toolCallId ?? "",
 						is_error: resultMsg.isError ?? false,
+						is_denied: denied,
 					} satisfies SubagentToolResultEvent);
 					emitUpdate();
 				}
@@ -1767,6 +1834,8 @@ export interface SubagentToolResultEvent {
 	tool_name: string;
 	tool_call_id: string;
 	is_error: boolean;
+	/** Whether the error was a permission denial rather than an execution failure. */
+	is_denied: boolean;
 }
 
 /** Details for inline subagent-complete messages. */
@@ -2169,6 +2238,7 @@ WHEN NOT TO USE SUBAGENTS:
 							cost: 0,
 							contextTokens: 0,
 							turns: 0,
+							denials: 0,
 						},
 					};
 				}
@@ -2482,6 +2552,12 @@ WHEN NOT TO USE SUBAGENTS:
 					container.addChild(new Text(header, 0, 0));
 					if (isError && r.errorMessage)
 						container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
+					if (r.deniedTools && r.deniedTools.length > 0) {
+						const unique = [...new Set(r.deniedTools)];
+						container.addChild(
+							new Text(theme.fg("warning", `⚠ Denied tools: ${unique.join(", ")}`), 0, 0)
+						);
+					}
 					container.addChild(new Spacer(1));
 					container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
 					container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
@@ -2532,6 +2608,10 @@ WHEN NOT TO USE SUBAGENTS:
 					if (displayItems.length > COLLAPSED_ITEM_COUNT)
 						text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				}
+				if (r.deniedTools && r.deniedTools.length > 0) {
+					const unique = [...new Set(r.deniedTools)];
+					text += `\n${theme.fg("warning", `⚠ Denied: ${unique.join(", ")}`)}`;
+				}
 				{
 					const usageStr = formatUsageStats(r.usage, r.model);
 					if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
@@ -2540,7 +2620,15 @@ WHEN NOT TO USE SUBAGENTS:
 			}
 
 			const aggregateUsage = (results: SingleResult[]) => {
-				const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+				const total = {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					cost: 0,
+					turns: 0,
+					denials: 0,
+				};
 				for (const r of results) {
 					total.input += r.usage.input;
 					total.output += r.usage.output;
@@ -2548,6 +2636,7 @@ WHEN NOT TO USE SUBAGENTS:
 					total.cacheWrite += r.usage.cacheWrite;
 					total.cost += r.usage.cost;
 					total.turns += r.usage.turns;
+					total.denials += r.usage.denials;
 				}
 				return total;
 			};
