@@ -1,6 +1,9 @@
 # Dependencies
 node_modules/
 
+# Profiling scripts
+profile-*
+
 # Build
 dist/
 *.tsbuildinfo

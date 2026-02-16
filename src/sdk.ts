@@ -26,7 +26,7 @@ import {
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
-import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
@@ -249,6 +249,10 @@ export async function createTallowSession(
 	// Ensure env is configured before any framework internals resolve paths
 	bootstrap();
 	ensureTallowHome();
+
+	// Resolve any op:// secrets not loaded from cache during bootstrap.
+	// Runs in parallel (~2.4s for all) instead of sequential (~2.4s each).
+	await resolveOpSecrets();
 
 	const cwd = options.cwd ?? process.cwd();
 	const eventBus = createEventBus();
