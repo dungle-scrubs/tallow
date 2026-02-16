@@ -261,13 +261,14 @@ function cleanDoc(doc) {
 function extractEvents(src) {
 	const events = [];
 	const re = /on\(event:\s*"(\w+)",\s*handler:\s*ExtensionHandler<(\w+)(?:,\s*(\w+))?>/g;
-	let m;
-	while ((m = re.exec(src)) !== null) {
+	let m = re.exec(src);
+	while (m !== null) {
 		events.push({
 			event: m[1],
 			eventType: m[2],
 			resultType: m[3] || null,
 		});
+		m = re.exec(src);
 	}
 	return events;
 }

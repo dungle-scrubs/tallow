@@ -229,7 +229,7 @@ export function calculateImageLayout(
 	if (maxHeightCells && rows > maxHeightCells) {
 		const clampedHeightPx = maxHeightCells * cellDims.heightPx;
 		const heightScale = clampedHeightPx / imageDimensions.heightPx;
-		columns = Math.max(1, Math.floor(imageDimensions.widthPx * heightScale / cellDims.widthPx));
+		columns = Math.max(1, Math.floor((imageDimensions.widthPx * heightScale) / cellDims.widthPx));
 		rows = maxHeightCells;
 	}
 

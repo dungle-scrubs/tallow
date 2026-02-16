@@ -197,9 +197,10 @@ describe("resolveAutocompleteModel", () => {
 			},
 			registerProvider() {},
 		};
-		await resolveAutocompleteModel(registry, AUTOCOMPLETE_FALLBACKS[0]!);
+		const first = AUTOCOMPLETE_FALLBACKS[0] as string;
+		await resolveAutocompleteModel(registry, first);
 		// The configured model is also the first fallback — should only be tried once
-		const firstFallback = AUTOCOMPLETE_FALLBACKS[0]!;
+		const firstFallback = first;
 		const attempts = findCalls.filter((c) => c === firstFallback);
 		expect(attempts.length).toBe(1);
 	});

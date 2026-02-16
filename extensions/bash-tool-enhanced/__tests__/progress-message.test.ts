@@ -89,7 +89,7 @@ describe("formatProgressMessage", () => {
 		const longLine = "a".repeat(80);
 		const result = formatProgressMessage("cmd", [longLine], 60);
 		// Truncated to 59 chars + ellipsis
-		expect(result).toContain("a".repeat(59) + "…");
+		expect(result).toContain(`${"a".repeat(59)}…`);
 		expect(result).not.toContain("a".repeat(60));
 	});
 
