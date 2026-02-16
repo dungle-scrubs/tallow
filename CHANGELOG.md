@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.1] - 2026-02-16
+
+### Added
+
+- **test:** E2E profile runner and extension profile definitions — creates
+  headless sessions with real bundled extensions loaded by path, matching
+  the production loading path
+- **test:** 39 E2E tests across 7 files covering profile boot, tool/command
+  conflict detection, EventBus interop wiring, headless install, and user
+  extension override mechanism
+
+### Changed
+
+- **subagent-tool:** split 2967-line index.ts into 6 focused modules
+  (agents, formatting, widget, process, schema) — largest file reduced
+  to 1297 lines with no behavioral changes
+
+### Fixed
+
+- **core:** startup with `op://` secrets in `~/.tallow/.env` reduced from
+  ~9s to ~2s by resolving references in parallel with a local cache
+  (`~/.tallow/.env.cache`, 1h TTL) instead of sequential synchronous calls
+- **extension-harness:** EventBus emit now catches per-listener exceptions
+  instead of aborting the entire emit chain
+- **extension-harness:** sendMessage merges options instead of overwriting
+- **extension-harness:** getTheme() throws consistently with theme getter
+- **extension-harness:** replace `as never` cast with typed
+  `as ExtensionAPI['events']`
+- **tui:** fix isKeyRelease/isKeyRepeat docs to match behavior
+- **tui:** resolve Ctrl+C binding conflict (copy → Ctrl+Shift+C)
+- **pid-registry:** add file locking around read-modify-write to prevent races
+- **mcp-adapter-tool:** parseSseResponse now matches response ID to request ID
+- **init:** wrap renameSync in try-catch for TOCTOU resilience
+- **test:** clean up tmpHome on error, track session for disposal to prevent
+  resource leaks
+
+### Documentation
+
+- **core:** document `.env.cache` and two-phase secret loading architecture
+  in AGENTS.md and installation guide
+
 ## [0.7.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.6.1...tallow-v0.7.0) (2026-02-16)
 
 

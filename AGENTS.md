@@ -73,7 +73,7 @@ is thin — most functionality lives in bundled extensions.
 
 | File | Role |
 |------|------|
-| `config.ts` | Identity constants, path resolution, env-var bootstrap. `TALLOW_HOME` resolves via `~/.config/tallow-work-dirs` overrides, falling back to `~/.tallow`. Env vars are set at **module scope** (not in `bootstrap()`) because ESM hoists imports — pi reads them before `bootstrap()` runs. |
+| `config.ts` | Identity constants, path resolution, env-var bootstrap. `TALLOW_HOME` resolves via `~/.config/tallow-work-dirs` overrides, falling back to `~/.tallow`. Env vars are set at **module scope** (not in `bootstrap()`) because ESM hoists imports — pi reads them before `bootstrap()` runs. `op://` secrets from `~/.tallow/.env` use a two-phase load: sync cache read in `bootstrap()`, then parallel async resolution in `resolveOpSecrets()` (called from `createTallowSession()`). Cache lives at `~/.tallow/.env.cache` with 1h TTL. |
 | `sdk.ts` | `createTallowSession()` — the main entry point. Wires auth, models, settings, resource loading, session management, and extension discovery. Contains `rebrandSystemPrompt` (factory extension that rewrites pi → tallow in system prompts). |
 | `cli.ts` | Commander CLI. Parses flags, calls `createTallowSession()`, dispatches to interactive/print/rpc mode. |
 | `install.ts` | Interactive installer (clack prompts). Discovers bundled extensions/themes, copies templates to `~/.tallow/`. |
