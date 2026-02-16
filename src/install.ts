@@ -22,18 +22,12 @@
  * builds the project, links the binary globally, and sets up ~/.tallow/.
  */
 
-import {
-	copyFileSync,
-	existsSync,
-	mkdirSync,
-	readdirSync,
-	readFileSync,
-	writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
+import { atomicWriteFileSync, restoreFromBackup } from "./atomic-write.js";
 import { persistProviderApiKey } from "./auth-hardening.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -124,6 +118,18 @@ function readSettings(): Record<string, unknown> {
 		try {
 			return JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) as Record<string, unknown>;
 		} catch {
+			// Primary file is corrupt — attempt backup recovery
+			const restored = restoreFromBackup(SETTINGS_PATH, (content) => {
+				JSON.parse(content);
+			});
+			if (restored) {
+				console.error("settings: restored settings.json from backup after corruption");
+				try {
+					return JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) as Record<string, unknown>;
+				} catch {
+					return {};
+				}
+			}
 			return {};
 		}
 	}
@@ -139,7 +145,7 @@ function readSettings(): Record<string, unknown> {
 function writeSettings(settings: Record<string, unknown>): void {
 	const schemaPath = `file://${join(PACKAGE_DIR, "schemas", "settings.schema.json")}`;
 	const withSchema = { $schema: schemaPath, ...settings };
-	writeFileSync(SETTINGS_PATH, `${JSON.stringify(withSchema, null, 2)}\n`);
+	atomicWriteFileSync(SETTINGS_PATH, `${JSON.stringify(withSchema, null, 2)}\n`, { backup: true });
 }
 
 /**
