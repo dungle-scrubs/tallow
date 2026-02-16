@@ -75,7 +75,7 @@ export class Loader extends Text {
 
 	/**
 	 * Global message transform — called each tick to modify the displayed message.
-	 * Extensions use this to animate or replace the loader text (e.g., scramble reveal).
+	 * Extensions use this to animate or replace the loader text.
 	 * Return the string to display. The transform is applied before messageColorFn.
 	 */
 	static defaultMessageTransform?: (ctx: MessageTransformContext) => string;
@@ -83,7 +83,7 @@ export class Loader extends Text {
 	/**
 	 * Interval (ms) for the message transform tick — independent of the spinner frame rate.
 	 * When set to a value faster than the spinner interval, a separate timer drives
-	 * the transform tick and re-renders, giving animations like scramble-reveal higher
+	 * the transform tick and re-renders, giving animations higher
 	 * frame rates without affecting the spinner animation speed.
 	 */
 	static defaultTransformIntervalMs: number | undefined;
@@ -130,7 +130,7 @@ export class Loader extends Text {
 		}, this.intervalMs);
 
 		// Separate faster interval for message transform re-renders only.
-		// Does NOT advance _transformTick — just re-rolls random visuals (e.g. scramble chars).
+		// Does NOT advance _transformTick — just re-rolls random visuals.
 		if (hasFastTransform) {
 			this._transformIntervalId = setInterval(() => {
 				this.updateDisplay();
