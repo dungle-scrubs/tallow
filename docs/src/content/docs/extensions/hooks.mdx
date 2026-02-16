@@ -78,6 +78,38 @@ Every event you can hook into:
 | `task_completed` | When a team task completes | `assignee` | No |
 | `setup` | Before session starts (via `--init` / `--maintenance`) | `trigger` | No |
 
+## Once-hooks
+
+Add `"once": true` to any hook handler to run it exactly once.
+The hook executes on the first matching event, then auto-disables
+itself. State persists to `~/.tallow/hooks-state.json` so it
+survives session restarts.
+
+Use cases: welcome messages, first-time setup, one-shot migration
+checks.
+
+```json
+{
+  "session_start": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "echo '{\"ok\": true, \"additionalContext\": \"👋 Welcome!\"}'",
+          "once": true,
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
+For sync hooks, state is recorded after successful execution
+(`ok: true`), so a failing once-hook retries on the next event.
+For async hooks, state is recorded immediately before execution
+to prevent race conditions from duplicate events.
+
 ## Multi-source merge
 
 Hooks are loaded from all sources and merged additively at

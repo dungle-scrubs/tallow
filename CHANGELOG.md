@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **hooks:** `once: true` option for hook handlers — runs exactly once then
+  auto-disables, with state persisted to `~/.tallow/hooks-state.json`
+- **stats:** `/stats` command for per-session and aggregate usage statistics
+  with token counts, costs, tool usage bar charts, model breakdowns, and
+  usage streaks — persisted to `~/.tallow/stats.jsonl`
 - **core:** `atomicWriteFileSync` utility with write-tmp-then-rename pattern,
   optional fsync, file mode, and `.bak` backup support
 - **core:** `restoreFromBackup` utility for startup recovery from `.bak` files
