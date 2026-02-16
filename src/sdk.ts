@@ -505,6 +505,10 @@ function rebrandSystemPrompt(pi: ExtensionAPI): void {
 			.replace(/read pi \.md files/g, "read tallow .md files")
 			.replace(/the user asks about pi itself/g, "the user asks about tallow itself");
 
+		// Core guidelines baked into every tallow session
+		prompt +=
+			"\n\nLLM intelligence is not always the answer. When a well-designed algorithm, heuristic, or deterministic approach can solve the problem reliably, prefer that over reaching for another LLM call. Reserve model inference for tasks that genuinely require reasoning, creativity, or natural-language understanding.";
+
 		// Inject model identity so non-Claude models don't confabulate their identity
 		if (ctx.model) {
 			prompt += `\n\nYou are running as ${ctx.model.name} (${ctx.model.provider}/${ctx.model.id}).`;
