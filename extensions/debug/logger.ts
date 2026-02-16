@@ -10,7 +10,14 @@
  *   3. Running via tsx (source in /src/ not /dist/)
  */
 
-import { appendFileSync, existsSync, mkdirSync, truncateSync, writeFileSync } from "node:fs";
+import {
+	appendFileSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	truncateSync,
+	writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -202,4 +209,83 @@ export function createDebugLogger(sessionId: string, logDir?: string): DebugLogg
 	const logger = new DebugLogger(sessionId, logDir);
 	globalThis.__piDebugLogger = logger;
 	return logger;
+}
+
+// ── Log Query Infrastructure ─────────────────────────────────
+
+/** Filter options for querying log entries. */
+export interface QueryOptions {
+	/** Filter by log category (session, tool, model, etc.) */
+	category?: LogCategory;
+	/** Filter by event type within a category */
+	eventType?: string;
+	/** Maximum number of entries to return (newest first) */
+	limit?: number;
+	/** Only include entries after this ISO timestamp */
+	since?: string;
+	/** Free-text search across serialized entry data */
+	search?: string;
+}
+
+/**
+ * Reads and filters JSONL log entries from the debug log.
+ *
+ * Parses each line individually — malformed lines are silently skipped.
+ * Results are returned newest-first (reversed from file order).
+ *
+ * @param logPath - Absolute path to the JSONL log file
+ * @param options - Filter criteria for narrowing results
+ * @returns Array of matching LogEntry objects, newest first
+ */
+export function queryLog(logPath: string, options: QueryOptions = {}): LogEntry[] {
+	if (!existsSync(logPath)) return [];
+
+	const content = readFileSync(logPath, "utf-8");
+	const lines = content.trim().split("\n").filter(Boolean);
+
+	const sinceMs = options.since ? new Date(options.since).getTime() : null;
+	const searchLower = options.search?.toLowerCase();
+
+	const matched: LogEntry[] = [];
+
+	for (const line of lines) {
+		let entry: LogEntry;
+		try {
+			entry = JSON.parse(line) as LogEntry;
+		} catch {
+			continue; // skip malformed lines
+		}
+
+		// Category filter
+		if (options.category && entry.cat !== options.category) continue;
+
+		// Event type filter
+		if (options.eventType && entry.evt !== options.eventType) continue;
+
+		// Timestamp filter
+		if (sinceMs !== null) {
+			const entryMs = new Date(entry.ts).getTime();
+			if (entryMs < sinceMs) continue;
+		}
+
+		// Free-text search across serialized data
+		if (searchLower) {
+			const serialized = JSON.stringify(entry.data).toLowerCase();
+			if (!serialized.includes(searchLower) && !entry.evt.toLowerCase().includes(searchLower)) {
+				continue;
+			}
+		}
+
+		matched.push(entry);
+	}
+
+	// Return newest first
+	matched.reverse();
+
+	// Apply limit after filtering
+	if (options.limit && options.limit > 0) {
+		return matched.slice(0, options.limit);
+	}
+
+	return matched;
 }

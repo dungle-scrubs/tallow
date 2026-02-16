@@ -1,10 +1,10 @@
 {
 	"name": "debug",
 	"version": "0.1.0",
-	"description": "Structured diagnostic logging — tool timings, extension lifecycle, model info, errors",
+	"description": "Structured diagnostic logging and interactive troubleshooting — tool timings, error analysis, turn metrics",
 	"category": "utility",
-	"tags": ["debug", "diagnostics", "logging"],
-	"files": ["index.ts", "logger.ts"],
+	"tags": ["debug", "diagnostics", "logging", "troubleshooting"],
+	"files": ["index.ts", "logger.ts", "analysis.ts"],
 	"relationships": [
 		{
 			"name": "hooks",
