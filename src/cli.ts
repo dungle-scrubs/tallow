@@ -81,6 +81,7 @@ program
 	.option("--no-extensions", "Disable all extensions (bundled + user)")
 	.option("--list", "List available sessions")
 	.option("--home", "Print Tallow home directory")
+	.option("--debug", "Enable debug diagnostic logging")
 	.addOption(new Option("--init").hideHelp())
 	.addOption(new Option("--init-only").hideHelp())
 	.addOption(new Option("--maintenance").hideHelp())
@@ -115,6 +116,7 @@ program.parse();
  */
 async function run(opts: {
 	continue?: boolean;
+	debug?: boolean;
 	extension?: string[];
 	extensions?: boolean;
 	forkSession?: string;
@@ -151,6 +153,12 @@ async function run(opts: {
 			console.log(`  ${date}  ${s.messageCount} msgs  ${label}`);
 		}
 		return;
+	}
+
+	// ── Debug flag (env var consumed by debug extension on session_start) ────
+
+	if (opts.debug) {
+		process.env.TALLOW_DEBUG = "1";
 	}
 
 	// ── Setup trigger (env var consumed by hooks extension on session_start) ─
