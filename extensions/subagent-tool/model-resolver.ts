@@ -31,6 +31,9 @@ function getAllModels(): CandidateModel[] {
 	return result;
 }
 
+/** Model-fetching function signature for dependency injection. */
+export type ModelSource = () => CandidateModel[];
+
 /**
  * Builds a ResolvedModel from a candidate.
  * @param m - Candidate model
@@ -85,10 +88,14 @@ function normalize(s: string): string {
  * 6. Normalized substring — strips separators before substring comparison
  *
  * @param query - Human-friendly model name (e.g. "opus", "sonnet 4.5", "claude-opus-4-5")
+ * @param modelSource - Optional model-fetching function (defaults to pi-ai registry)
  * @returns Resolved model, or undefined if no match found
  */
-export function resolveModelFuzzy(query: string): ResolvedModel | undefined {
-	const models = getAllModels();
+export function resolveModelFuzzy(
+	query: string,
+	modelSource?: ModelSource
+): ResolvedModel | undefined {
+	const models = modelSource ? modelSource() : getAllModels();
 	if (models.length === 0) return undefined;
 
 	const q = query.trim();
@@ -158,8 +165,10 @@ export function resolveModelFuzzy(query: string): ResolvedModel | undefined {
 
 /**
  * Lists all available models from the registry for error messages.
+ * @param modelSource - Optional model-fetching function (defaults to pi-ai registry)
  * @returns Array of model display strings ("provider/id")
  */
-export function listAvailableModels(): string[] {
-	return getAllModels().map((m) => `${m.provider}/${m.id}`);
+export function listAvailableModels(modelSource?: ModelSource): string[] {
+	const models = modelSource ? modelSource() : getAllModels();
+	return models.map((m) => `${m.provider}/${m.id}`);
 }

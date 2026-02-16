@@ -40,16 +40,6 @@ mock.module("@mariozechner/pi-ai", () => ({
 	getModels: (provider: string) => mockModels.filter((m) => m.provider === provider),
 }));
 
-// Mock fs to avoid reading real settings.json
-mock.module("node:fs", () => ({
-	readFileSync: () => {
-		throw new Error("no file");
-	},
-	existsSync: () => false,
-	mkdirSync: () => {},
-	writeFileSync: () => {},
-}));
-
 // Mock model-resolver for routeModel tests
 mock.module("../model-resolver.js", () => ({
 	resolveModelFuzzy: (query: string) => {

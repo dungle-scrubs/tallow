@@ -28,6 +28,9 @@ jobs:
 
       - run: bun run build
 
+      - name: Strip bun workspace overrides before npm publish
+        run: node -e "const p=require('./package.json'); delete p.overrides; require('fs').writeFileSync('package.json', JSON.stringify(p, null, '\t') + '\n')"
+
       - name: Publish with OIDC
         run: npm publish --access public
         env:

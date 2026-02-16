@@ -189,7 +189,7 @@ describe("Teams runtime wiring", () => {
 			team: "alpha",
 			name: "alice",
 			role: "Researcher",
-			model: "definitely-not-a-real-model",
+			model: "zzz-nonexistent-qqq-xyzzy",
 		});
 
 		expect(result.isError).toBe(true);

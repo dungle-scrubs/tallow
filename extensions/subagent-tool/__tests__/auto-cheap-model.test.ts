@@ -39,15 +39,6 @@ mock.module("@mariozechner/pi-ai", () => ({
 	getModels: (provider: string) => mockModels.filter((m) => m.provider === provider),
 }));
 
-mock.module("node:fs", () => ({
-	readFileSync: () => {
-		throw new Error("no file");
-	},
-	existsSync: () => false,
-	mkdirSync: () => {},
-	writeFileSync: () => {},
-}));
-
 mock.module("../model-resolver.js", () => ({
 	resolveModelFuzzy: (query: string) => {
 		const m = mockModels.find(
