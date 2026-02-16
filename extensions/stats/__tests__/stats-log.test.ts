@@ -1,10 +1,11 @@
 /**
  * Tests for stats-log JSONL persistence: append, read, countSessions.
  */
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { SessionStats } from "../stats-log.js";
 import { appendStats, countSessions, readAllStats } from "../stats-log.js";
 

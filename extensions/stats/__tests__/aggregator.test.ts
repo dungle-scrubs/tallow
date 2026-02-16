@@ -70,8 +70,8 @@ describe("parseCustomRange", () => {
 	it("parses valid date range", () => {
 		const range = parseCustomRange("2026-01-01", "2026-01-31");
 		expect(range).not.toBeNull();
-		expect(range!.start.getFullYear()).toBe(2026);
-		expect(range!.end.getHours()).toBe(23);
+		expect(range?.start.getFullYear()).toBe(2026);
+		expect(range?.end.getHours()).toBe(23);
 	});
 
 	it("returns null for invalid dates", () => {
@@ -82,8 +82,8 @@ describe("parseCustomRange", () => {
 	it("end date is inclusive (end of day)", () => {
 		const range = parseCustomRange("2026-02-01", "2026-02-01");
 		expect(range).not.toBeNull();
-		expect(range!.end.getHours()).toBe(23);
-		expect(range!.end.getMinutes()).toBe(59);
+		expect(range?.end.getHours()).toBe(23);
+		expect(range?.end.getMinutes()).toBe(59);
 	});
 });
 
@@ -97,7 +97,9 @@ describe("filterSessions", () => {
 	];
 
 	it("filters by time range", () => {
-		const range = parseCustomRange("2026-01-01", "2026-01-31")!;
+		const range = parseCustomRange("2026-01-01", "2026-01-31") as NonNullable<
+			ReturnType<typeof parseCustomRange>
+		>;
 		const result = filterSessions(sessions, range);
 		expect(result).toHaveLength(1);
 		expect(result[0].sessionId).toBe("jan");
@@ -110,7 +112,9 @@ describe("filterSessions", () => {
 	});
 
 	it("returns empty for range with no sessions", () => {
-		const range = parseCustomRange("2024-01-01", "2024-12-31")!;
+		const range = parseCustomRange("2024-01-01", "2024-12-31") as NonNullable<
+			ReturnType<typeof parseCustomRange>
+		>;
 		const result = filterSessions(sessions, range);
 		expect(result).toHaveLength(0);
 	});
@@ -223,8 +227,8 @@ describe("aggregate", () => {
 
 	it("calculates averages", () => {
 		const sessions = [
-			makeStats({ totalCost: 0.10, messageCount: 10 }),
-			makeStats({ totalCost: 0.20, messageCount: 20 }),
+			makeStats({ totalCost: 0.1, messageCount: 10 }),
+			makeStats({ totalCost: 0.2, messageCount: 20 }),
 		];
 		const range = resolvePreset("all");
 		const result = aggregate(sessions, sessions, range);
@@ -268,7 +272,9 @@ describe("aggregate", () => {
 	});
 
 	it("uses date label for custom ranges", () => {
-		const range = parseCustomRange("2026-01-01", "2026-01-31")!;
+		const range = parseCustomRange("2026-01-01", "2026-01-31") as NonNullable<
+			ReturnType<typeof parseCustomRange>
+		>;
 		const result = aggregate([], [], range);
 		expect(result.rangeLabel).toBe("2026-01-01 to 2026-01-31");
 	});
