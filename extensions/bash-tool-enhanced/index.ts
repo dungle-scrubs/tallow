@@ -188,6 +188,72 @@ function handleBashError(err: unknown): AgentToolResult<BashToolDetails | undefi
 	throw err;
 }
 
+/** Maximum number of output tail lines shown in the working message. */
+const PROGRESS_TAIL_LINES = 3;
+
+/** Maximum character width per progress line before truncation. */
+const PROGRESS_LINE_WIDTH = 60;
+
+/** Minimum interval between working message updates (milliseconds). */
+const PROGRESS_DEBOUNCE_MS = 100;
+
+/** Visual prefix for output lines in the progress message. */
+const PROGRESS_LINE_PREFIX = "│ ";
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal escape sequences
+const ANSI_STRIP_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g;
+
+/**
+ * Strip all ANSI escape sequences for clean progress message display.
+ *
+ * @param text - Text that may contain ANSI escape codes
+ * @returns Text with all ANSI sequences removed
+ */
+/** @internal */
+export function stripAllAnsi(text: string): string {
+	return text.replace(ANSI_STRIP_RE, "");
+}
+
+/**
+ * Extract the last N non-empty lines from output text.
+ *
+ * @param text - Full output text
+ * @param maxLines - Maximum number of lines to return
+ * @returns Array of the last non-empty lines
+ */
+/** @internal */
+export function extractTailLines(text: string, maxLines: number): string[] {
+	const lines = text.split("\n");
+	const nonEmpty = lines.filter((line) => line.trim().length > 0);
+	return nonEmpty.slice(-maxLines);
+}
+
+/**
+ * Format a progress message with command preview and latest output tail.
+ * Shows the command being run and the last few lines of output beneath it,
+ * each prefixed with a visual separator.
+ *
+ * @param preview - Truncated command preview string
+ * @param tailLines - Last N lines of output
+ * @param maxWidth - Maximum width per output line before truncation
+ * @returns Formatted multi-line progress message for setWorkingMessage
+ */
+/** @internal */
+export function formatProgressMessage(
+	preview: string,
+	tailLines: string[],
+	maxWidth: number
+): string {
+	let msg = `Running: ${preview}`;
+	for (const line of tailLines) {
+		const clean = stripAllAnsi(line).trim();
+		if (clean.length === 0) continue;
+		const truncated = clean.length > maxWidth ? `${clean.slice(0, maxWidth - 1)}…` : clean;
+		msg += `\n  ${PROGRESS_LINE_PREFIX}${truncated}`;
+	}
+	return msg;
+}
+
 /** Whether ripgrep (rg) is available on the system. Detected once at init. */
 let hasRipgrep = false;
 
@@ -279,15 +345,70 @@ export default function bashLive(pi: ExtensionAPI): void {
 			const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
 			ctx.ui.setWorkingMessage(`Running: ${preview}`);
 
+			// Progress: surface output tail in the working message area
+			let lastProgressTime = 0;
+			let progressTimeout: ReturnType<typeof setTimeout> | null = null;
+
+			/**
+			 * Debounced update of the working message with the latest output tail.
+			 *
+			 * @param text - Full output text so far
+			 */
+			const updateProgress = (text: string): void => {
+				const now = Date.now();
+				const doUpdate = (): void => {
+					lastProgressTime = Date.now();
+					const tail = extractTailLines(text, PROGRESS_TAIL_LINES);
+					ctx.ui.setWorkingMessage(formatProgressMessage(preview, tail, PROGRESS_LINE_WIDTH));
+				};
+				if (now - lastProgressTime >= PROGRESS_DEBOUNCE_MS) {
+					if (progressTimeout) {
+						clearTimeout(progressTimeout);
+						progressTimeout = null;
+					}
+					doUpdate();
+				} else if (!progressTimeout) {
+					progressTimeout = setTimeout(
+						() => {
+							progressTimeout = null;
+							doUpdate();
+						},
+						PROGRESS_DEBOUNCE_MS - (now - lastProgressTime)
+					);
+				}
+			};
+
+			/** Clear any pending progress update timeout. */
+			const clearProgressTimeout = (): void => {
+				if (progressTimeout) {
+					clearTimeout(progressTimeout);
+					progressTimeout = null;
+				}
+			};
+
+			/**
+			 * Wraps onUpdate to surface output progress in the working message.
+			 *
+			 * @param partialResult - Partial tool result from bash execution
+			 */
+			const progressOnUpdate: typeof onUpdate = (partialResult) => {
+				onUpdate?.(partialResult);
+				const text = partialResult?.content?.find((c: { type: string }) => c.type === "text") as
+					| { text: string }
+					| undefined;
+				if (text?.text) updateProgress(text.text);
+			};
+
 			const autoTimeout = readAutoBackgroundTimeout();
 
 			// Fast path: auto-background disabled or user-provided timeout shorter
 			if (autoTimeout <= 0 || (params.timeout && params.timeout * 1000 <= autoTimeout)) {
 				try {
-					return await baseBashTool.execute(toolCallId, params, signal, onUpdate);
+					return await baseBashTool.execute(toolCallId, params, signal, progressOnUpdate);
 				} catch (err) {
 					return handleBashError(err);
 				} finally {
+					clearProgressTimeout();
 					ctx.ui.setWorkingMessage();
 				}
 			}
@@ -321,6 +442,8 @@ export default function bashLive(pi: ExtensionAPI): void {
 					if (text?.text) promotedHandle.replaceOutput(text.text);
 				} else {
 					onUpdate?.(partialResult);
+					// Update progress message while still in foreground
+					if (text?.text) updateProgress(text.text);
 				}
 			};
 
@@ -341,6 +464,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 			});
 
 			const winner = await Promise.race([bashPromise, timeoutPromise]);
+			clearProgressTimeout();
 			ctx.ui.setWorkingMessage();
 
 			if (winner.type === "completed") {
