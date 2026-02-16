@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills } from "@mariozechner/pi-coding-agent";
+import { atomicWriteFileSync } from "../_shared/atomic-write.js";
 
 /** Frontmatter parsed from a SKILL.md file. */
 interface SkillFrontmatter {
@@ -116,7 +117,7 @@ function disableBuiltinSkillCommands(): void {
 		}
 		if (settings.enableSkillCommands !== false) {
 			settings.enableSkillCommands = false;
-			fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+			atomicWriteFileSync(settingsPath, JSON.stringify(settings, null, 2), { backup: true });
 		}
 	} catch {
 		// Best-effort — if it fails, built-in commands just coexist
