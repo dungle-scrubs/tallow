@@ -22,12 +22,19 @@ export interface ModelRegistryLike {
 	registerProvider(name: string, config: Record<string, unknown>): void;
 }
 
+/** Recent conversation context for autocomplete relevance. */
+export interface ConversationContext {
+	/** Formatted recent exchanges (user + assistant text, no tool calls). */
+	recentExchanges: string;
+}
+
 /** Function that calls the LLM and returns completion text. */
 export type CompletionFn = (
 	model: Model<Api>,
 	apiKey: string,
 	partialInput: string,
-	signal: AbortSignal
+	signal: AbortSignal,
+	context: ConversationContext | null
 ) => Promise<string | null>;
 
 /** Callback to set ghost text on the editor. */
@@ -35,6 +42,9 @@ export type SetGhostTextFn = (text: string | null) => void;
 
 /** Callback to get current editor text. */
 export type GetTextFn = () => string;
+
+/** Callback to get recent conversation context for autocomplete. */
+export type GetConversationContextFn = () => ConversationContext | null;
 
 /** Configuration for the autocomplete engine. */
 export interface AutocompleteConfig {
@@ -135,6 +145,7 @@ export class AutocompleteEngine {
 	private completionFn: CompletionFn;
 	private setGhostText: SetGhostTextFn;
 	private getText: GetTextFn;
+	private getConversationContext: GetConversationContextFn;
 	private registry: ModelRegistryLike;
 
 	private timer: ReturnType<typeof setTimeout> | null = null;
@@ -149,19 +160,22 @@ export class AutocompleteEngine {
 	 * @param completionFn - Function that calls the LLM
 	 * @param setGhostText - Callback to display ghost text
 	 * @param getText - Callback to read current editor text
+	 * @param getConversationContext - Callback to get recent conversation for relevance
 	 */
 	constructor(
 		config: AutocompleteConfig,
 		registry: ModelRegistryLike,
 		completionFn: CompletionFn,
 		setGhostText: SetGhostTextFn,
-		getText: GetTextFn
+		getText: GetTextFn,
+		getConversationContext: GetConversationContextFn = () => null
 	) {
 		this.config = config;
 		this.registry = registry;
 		this.completionFn = completionFn;
 		this.setGhostText = setGhostText;
 		this.getText = getText;
+		this.getConversationContext = getConversationContext;
 	}
 
 	/** Number of API calls made this session. */
@@ -215,11 +229,14 @@ export class AutocompleteEngine {
 				this.abortController = new AbortController();
 				this._callCount++;
 
+				const conversationContext = this.getConversationContext();
+
 				const completion = await this.completionFn(
 					this.resolvedModel.model,
 					this.resolvedModel.apiKey,
 					partialInput,
-					this.abortController.signal
+					this.abortController.signal,
+					conversationContext
 				);
 
 				this.abortController = null;
