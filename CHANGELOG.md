@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **mcp-adapter-tool:** SSE and Streamable HTTP transport support — connect to
+  remote MCP servers via `{ "type": "sse", "url": "..." }` or
+  `{ "type": "streamable-http", "url": "..." }` in settings.json
+- **mcp-adapter-tool:** auto-reconnect with exponential backoff (1s/2s/4s, max
+  3 attempts) for network transports on connection loss
+- **mcp-adapter-tool:** `/mcp` command now shows transport type in server status
+- **mcp-adapter-tool:** config validation for SSE/HTTP (url required) and STDIO
+  (command required) with clear error messages
 - **debug:** `/debug <query>` interactive troubleshooting command with
   `debug_inspect` tool for model-assisted log analysis
 - **debug:** log query infrastructure (`queryLog()`) with category, event type,
@@ -62,7 +70,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **progress-indicator:** add terminal progress bar extension ([173429c](https://github.com/dungle-scrubs/tallow/commit/173429c75ae4ac4398b0441de64a121f51e7c649))
 * **prompt-suggestions:** idle ghost text and Groq inline autocomplete ([910afeb](https://github.com/dungle-scrubs/tallow/commit/910afeb3a461b0dfc7ddd20cc54718647441c55e))
 * **random-spinner:** add extension manifest and centipede spinner ([26edf73](https://github.com/dungle-scrubs/tallow/commit/26edf735c2f117bdcf1cf6b16d9d13783ea83a17))
-* **random-spinner:** scramble-decrypt reveal animation for spinner verbs ([b709758](https://github.com/dungle-scrubs/tallow/commit/b7097588541f51138e285c34ed25c633b843defe))
 * **read-tool-enhanced:** byte-based image format detection ([f212b22](https://github.com/dungle-scrubs/tallow/commit/f212b22d2d65578b47473d5e6ba2cd7bf6c420b1))
 * **read-tool-enhanced:** image dimension metadata in read results ([b9d8ec7](https://github.com/dungle-scrubs/tallow/commit/b9d8ec77212c38aaa0aec53273e4650b97daa316))
 * **session-namer:** auto-generate session names via Haiku after first response ([750543e](https://github.com/dungle-scrubs/tallow/commit/750543e5fa1aad31ac2edc1263cf71cd5d666edc))
