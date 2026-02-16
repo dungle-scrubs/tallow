@@ -18,8 +18,9 @@ or async (fire-and-forget background tasks). Matchers filter which
 tools or events trigger each hook using regex patterns.
 
 Configure in `hooks.json` at the project root or in settings.
-Only `tool_call` and `input` events support blocking. All other
-events are observe-only.
+Events prefixed with `before_` or `session_before_` support
+blocking (can cancel the operation). `tool_call` and `input`
+also support blocking. All other events are observe-only.
 
 ## All pi events
 
@@ -31,18 +32,25 @@ Every event you can hook into:
 |-------|-------------|---------------|------------|
 | `tool_call` | Before a tool executes | `toolName` | Yes |
 | `tool_result` | After a tool returns | `toolName` | No |
-| `user_bash` | When bash runs via the built-in tool | | No |
+| `user_bash` | When user runs `!` or `!!` commands | `command` | No |
 
 ### Agent lifecycle
 
 | Event | Description | Matcher field | Can block? |
 |-------|-------------|---------------|------------|
-| `before_agent_start` | Before the agent starts, can inject context | | No |
+| `before_agent_start` | After user submits, before agent loop starts | | No |
 | `agent_start` | When the agent starts processing | | No |
 | `agent_end` | When the agent finishes processing | | No |
 | `turn_start` | At the start of each agent turn | | No |
 | `turn_end` | At the end of each agent turn | | No |
 | `input` | When the user submits input | | Yes |
+
+### Subagent lifecycle
+
+| Event | Description | Matcher field | Can block? |
+|-------|-------------|---------------|------------|
+| `subagent_start` | When a subagent spawns | `agent_type` | No |
+| `subagent_stop` | When a subagent completes | `agent_type` | No |
 
 ### Session lifecycle
 
@@ -50,21 +58,25 @@ Every event you can hook into:
 |-------|-------------|---------------|------------|
 | `session_start` | When a session starts or resumes | | No |
 | `session_shutdown` | When a session is shutting down | | No |
+| `session_before_compact` | Before context compaction | | Yes |
 | `session_compact` | After context is compacted | | No |
-| `session_before_compact` | Before context compaction, can preserve data | | No |
-| `session_fork` | After a session fork | | No |
-| `session_before_fork` | Before a session fork | | No |
+| `session_before_switch` | Before switching sessions | | Yes |
 | `session_switch` | After switching sessions | | No |
-| `session_before_switch` | Before switching sessions | | No |
-| `session_tree` | After session tree operations | | No |
-| `session_before_tree` | Before session tree operations | | No |
+| `session_before_fork` | Before a session fork | | Yes |
+| `session_fork` | After a session fork | | No |
+| `session_before_tree` | Before session tree navigation | | Yes |
+| `session_tree` | After session tree navigation | | No |
 
 ### Other
 
 | Event | Description | Matcher field | Can block? |
 |-------|-------------|---------------|------------|
-| `context` | Context filtering, can modify messages sent to the model | | No |
-| `model_select` | When the model changes (set, cycle, or restore) | | No |
+| `context` | Before each LLM call with message context | | No |
+| `model_select` | When the model changes (set, cycle, restore) | `source` | No |
+| `notification` | When a notification is emitted via event bus | `type` | No |
+| `teammate_idle` | When a team teammate becomes idle | `teammate` | No |
+| `task_completed` | When a team task completes | `assignee` | No |
+| `setup` | Before session starts (via `--init` / `--maintenance`) | `trigger` | No |
 
 ## Multi-source merge
 
@@ -190,6 +202,79 @@ were completed.
           "type": "agent",
           "agent": "reviewer",
           "prompt": "Check if all tasks were completed. Return { \"ok\": true } or { \"ok\": false, \"reason\": \"...\" }.\n\n$ARGUMENTS",
+          "async": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Track subagent lifecycle
+
+Log when subagents start and stop. The matcher filters on
+`agent_type` (the agent name).
+
+```json
+{
+  "subagent_start": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "echo \"Subagent started: $(echo $PI_HOOK_EVENT | jq -r .agent_type)\" >> /tmp/subagent.log",
+          "async": true
+        }
+      ]
+    }
+  ],
+  "subagent_stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "echo \"Subagent stopped: $(echo $PI_HOOK_EVENT | jq -r '.agent_type + \" exit=\" + (.exit_code|tostring)')\" >> /tmp/subagent.log",
+          "async": true
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Gate compaction
+
+Block compaction unless the session has been running for a while.
+
+```json
+{
+  "session_before_compact": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "echo $PI_HOOK_EVENT | jq -e '.tokensBefore > 50000' > /dev/null || (echo 'Too early to compact' >&2; exit 2)",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Log model changes
+
+Track when the model switches, filtered to `cycle` events only.
+
+```json
+{
+  "model_select": [
+    {
+      "matcher": "cycle",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "echo \"Model cycled to: $(echo $PI_HOOK_EVENT | jq -r .modelName)\" >> /tmp/model.log",
           "async": true
         }
       ]

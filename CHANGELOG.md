@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **hooks:** wire all declared-but-unwired pi events — `before_agent_start`,
+  `agent_start`, `turn_end`, `session_shutdown`, `session_before_compact`,
+  `session_compact`, `session_before_switch`, `session_switch`,
+  `session_before_fork`, `session_fork`, `session_before_tree`,
+  `session_tree`, `context`, `model_select`, and `user_bash`
+- **hooks:** `subagent_start` and `subagent_stop` events via EventBus, with
+  `agent_type` matcher field for filtering by agent name
+- **hooks:** `notification` event via EventBus for observing notifications
+- **hooks:** blocking support for `session_before_compact`,
+  `session_before_switch`, `session_before_fork`, and `session_before_tree`
+  events — hooks can cancel these operations
+- **hooks:** matcher fields for `model_select` (`source`), `user_bash`
+  (`command`), and `notification` (`type`)
 - **mcp-adapter-tool:** SSE and Streamable HTTP transport support — connect to
   remote MCP servers via `{ "type": "sse", "url": "..." }` or
   `{ "type": "streamable-http", "url": "..." }` in settings.json
