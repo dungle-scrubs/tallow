@@ -33,7 +33,7 @@ Relay that answer to the user.
 
 | Component | Location |
 |-----------|----------|
-| Core source | `src/` (auth-hardening.ts, cli.ts, config.ts, extensions-global.d.ts, fatal-errors.ts, index.ts, install.ts, pid-manager.ts, process-cleanup.ts, sdk.ts, session-migration.ts, session-utils.ts) |
+| Core source | `src/` (atomic-write.ts, auth-hardening.ts, cli.ts, config.ts, extensions-global.d.ts, fatal-errors.ts, index.ts, install.ts, pid-manager.ts, process-cleanup.ts, sdk.ts, session-migration.ts, session-utils.ts) |
 | Extensions | `extensions/` — extension.json + index.ts each (47 bundled) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
