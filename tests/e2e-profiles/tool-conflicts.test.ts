@@ -6,7 +6,7 @@
  * in unit tests which load extensions in isolation.
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, it } from "bun:test";
 import type { TallowSession } from "../../src/sdk.js";
 import {
 	createProfileSession,

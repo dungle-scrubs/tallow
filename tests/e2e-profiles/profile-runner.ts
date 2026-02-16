@@ -98,6 +98,14 @@ export async function createProfileSession(
 		};
 
 		return { tallow, home: tmpHome, run, dispose };
+	} catch (error) {
+		// Clean up tmpHome if session creation fails
+		try {
+			rmSync(tmpHome, { recursive: true, force: true });
+		} catch {
+			// best-effort
+		}
+		throw error;
 	} finally {
 		// Restore env immediately — session already has what it needs
 		if (originalHome !== undefined) {

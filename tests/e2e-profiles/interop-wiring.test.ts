@@ -42,6 +42,7 @@ function eventBusCaptureExtension(pi: ExtensionAPI): void {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 let tmpHome: string | undefined;
+let lastSession: TallowSession | undefined;
 
 /**
  * Create a session with standard extensions + our capture extension.
@@ -68,6 +69,7 @@ async function createInteropSession(): Promise<TallowSession> {
 		});
 
 		tallow.session.agent.streamFn = createScriptedStreamFn([{ text: "ok" }]);
+		lastSession = tallow;
 		return tallow;
 	} finally {
 		if (originalHome !== undefined) {
@@ -79,6 +81,7 @@ async function createInteropSession(): Promise<TallowSession> {
 }
 
 afterEach(() => {
+	lastSession = undefined;
 	if (tmpHome) {
 		try {
 			rmSync(tmpHome, { recursive: true, force: true });
