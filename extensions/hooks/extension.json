@@ -4,7 +4,7 @@
 	"description": "Lifecycle hooks — run scripts on events like pre-tool, post-tool, etc.",
 	"category": "integration",
 	"tags": ["hooks", "lifecycle", "automation"],
-	"files": ["index.ts", "hooks.schema.json", "hooks.example.json"],
+	"files": ["index.ts", "state-manager.ts", "hooks.schema.json", "hooks.example.json"],
 	"relationships": [],
 	"npmDependencies": {},
 	"configFiles": ["hooks.example.json"]

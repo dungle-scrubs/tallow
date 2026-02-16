@@ -23,6 +23,18 @@
 				]
 			}
 		],
+		"session_start": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "echo '{\"ok\": true, \"additionalContext\": \"👋 Welcome! Run /help for available commands.\"}'",
+						"once": true,
+						"timeout": 5
+					}
+				]
+			}
+		],
 		"tool_call": [
 			{
 				"matcher": "bash",

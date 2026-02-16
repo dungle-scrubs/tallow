@@ -30,6 +30,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { createHookStateManager, type HookStateManager } from "./state-manager.js";
 
 /** Hook execution strategy: shell command, LLM prompt, or agent subprocess. */
 type HookType = "command" | "prompt" | "agent";
@@ -44,6 +45,7 @@ interface HookHandler {
 	timeout?: number; // Seconds, default: 60 for agent, 30 for prompt, 600 for command
 	async?: boolean; // Run in background (command/agent only)
 	statusMessage?: string; // Custom spinner message
+	once?: boolean; // Run exactly once, then auto-disable (state persisted to hooks-state.json)
 }
 
 /** Event matcher with associated hooks — runs hooks when matcher regex matches. */
@@ -496,6 +498,7 @@ export default function (pi: ExtensionAPI) {
 	let agentsDir = "";
 	let currentCwd = "";
 	let ctx: ExtensionContext | null = null;
+	let stateManager: HookStateManager | null = null;
 
 	// Pending async hook results to deliver on next turn
 	const pendingAsyncResults: Array<{ event: string; result: HookResult }> = [];
@@ -580,6 +583,10 @@ export default function (pi: ExtensionAPI) {
 		currentCwd = context.cwd;
 		hooksConfig = loadHooksConfig(currentCwd);
 		agentsDir = path.join(process.env.HOME || "", ".tallow", "agents");
+
+		// Initialize once-hook state manager
+		const tallowHome = path.join(process.env.HOME || "", ".tallow");
+		stateManager = createHookStateManager(tallowHome);
 
 		// Check for project-local agents dir
 		const projectAgentsDir = path.join(currentCwd, ".tallow", "agents");
@@ -670,8 +677,24 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			for (const handler of matcher.hooks) {
+				// Skip already-executed once-hooks
+				if (handler.once && stateManager) {
+					const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
+					if (stateManager.hasRun(hookId)) {
+						continue;
+					}
+				}
+
 				// Async hooks run in background, cannot block
 				if (handler.async) {
+					// For async once-hooks, mark immediately to prevent race conditions.
+					// Multiple events could fire before the first async hook completes,
+					// so we claim the slot eagerly rather than waiting for completion.
+					if (handler.once && stateManager) {
+						const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
+						stateManager.markAsRun(hookId);
+					}
+
 					// Fire and forget
 					(async () => {
 						let result: HookResult;
@@ -709,6 +732,12 @@ export default function (pi: ExtensionAPI) {
 					continue;
 				} else {
 					continue;
+				}
+
+				// Mark sync once-hooks as run after successful execution
+				if (handler.once && result.ok && stateManager) {
+					const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
+					stateManager.markAsRun(hookId);
 				}
 
 				if (result.additionalContext) {
