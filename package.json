@@ -42,6 +42,7 @@
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
 		"test": "bun test",
+		"test:e2e-profiles": "bun test tests/e2e-profiles",
 		"format:check": "biome format .",
 		"prepare": "test -d .git && husky || true"
 	},
