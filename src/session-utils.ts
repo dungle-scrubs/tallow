@@ -7,9 +7,10 @@
  * @module
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type SessionHeader, SessionManager } from "@mariozechner/pi-coding-agent";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import { TALLOW_HOME } from "./config.js";
 import { encodeSessionDirName } from "./session-migration.js";
 
@@ -97,6 +98,6 @@ export function createSessionWithId(sessionId: string, cwd: string): SessionMana
 		cwd,
 	};
 
-	writeFileSync(filePath, `${JSON.stringify(header)}\n`);
+	atomicWriteFileSync(filePath, `${JSON.stringify(header)}\n`);
 	return SessionManager.open(filePath, sessionsDir);
 }

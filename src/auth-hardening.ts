@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { dirname } from "node:path";
 import {
@@ -7,6 +7,7 @@ import {
 	type AuthCredential,
 	AuthStorage,
 } from "@mariozechner/pi-coding-agent";
+import { atomicWriteFileSync, restoreFromBackup } from "./atomic-write.js";
 
 const AUTH_FILE_MODE = 0o600;
 const AUTH_DIRECTORY_MODE = 0o700;
@@ -246,6 +247,18 @@ function readAuthData(authPath: string): Record<string, AuthCredential> {
 		}
 		return {};
 	} catch {
+		// Primary file is corrupt — attempt backup recovery
+		const restored = restoreFromBackup(authPath, (content) => {
+			JSON.parse(content);
+		});
+		if (restored) {
+			console.error("auth: restored auth.json from backup after corruption");
+			try {
+				return JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, AuthCredential>;
+			} catch {
+				return {};
+			}
+		}
 		return {};
 	}
 }
@@ -262,8 +275,11 @@ function writeAuthData(authPath: string, data: Record<string, AuthCredential>): 
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true, mode: AUTH_DIRECTORY_MODE });
 	}
-	writeFileSync(authPath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
-	chmodSync(authPath, AUTH_FILE_MODE);
+	atomicWriteFileSync(authPath, `${JSON.stringify(data, null, 2)}\n`, {
+		fsync: true,
+		mode: AUTH_FILE_MODE,
+		backup: true,
+	});
 }
 
 /**

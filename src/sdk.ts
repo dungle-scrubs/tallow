@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
 	bashTool,
@@ -24,6 +24,7 @@ import {
 	writeTool,
 } from "@mariozechner/pi-coding-agent";
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
+import { atomicWriteFileSync } from "./atomic-write.js";
 import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
@@ -630,6 +631,6 @@ function ensureKeybindings(): void {
 	const currentJson = JSON.stringify(existing, null, "\t");
 	const mergedJson = JSON.stringify(merged, null, "\t");
 	if (currentJson !== mergedJson) {
-		writeFileSync(keybindingsPath, `${mergedJson}\n`);
+		atomicWriteFileSync(keybindingsPath, `${mergedJson}\n`);
 	}
 }
