@@ -345,6 +345,7 @@ export async function createTallowSession(
 		extensionFactories: [
 			rebrandSystemPrompt,
 			injectImageFilePaths,
+			detectOutputTruncation,
 			...(options.extensionFactories ?? []),
 		],
 		systemPromptOverride: options.systemPrompt ? () => options.systemPrompt : undefined,
@@ -509,6 +510,10 @@ function rebrandSystemPrompt(pi: ExtensionAPI): void {
 		prompt +=
 			"\n\nLLM intelligence is not always the answer. When a well-designed algorithm, heuristic, or deterministic approach can solve the problem reliably, prefer that over reaching for another LLM call. Reserve model inference for tasks that genuinely require reasoning, creativity, or natural-language understanding.";
 
+		// Communicate strategy changes proactively
+		prompt +=
+			"\n\nIf you hit an internal limit (thinking budget, output length, or planning complexity) that forces you to change approach — say so immediately. Never silently pivot from planning to execution, or drop planned items, without telling the user what happened and why.";
+
 		// Inject model identity so non-Claude models don't confabulate their identity
 		if (ctx.model) {
 			prompt += `\n\nYou are running as ${ctx.model.name} (${ctx.model.provider}/${ctx.model.id}).`;
@@ -532,6 +537,29 @@ function injectImageFilePaths(pi: ExtensionAPI): void {
 		if (hasImage && event.input?.path) {
 			const filePath = resolve(String(event.input.path));
 			setNextImageFilePath(filePath);
+		}
+	});
+}
+
+/**
+ * Detects when a model response was truncated due to max_tokens and notifies
+ * the user. Without this, truncated responses silently stop — the model may
+ * change strategy or drop work without explanation.
+ *
+ * @param pi - Extension API
+ */
+function detectOutputTruncation(pi: ExtensionAPI): void {
+	pi.on("turn_end", async (event, ctx) => {
+		if (!ctx.hasUI) return;
+
+		const msg = event.message;
+		if (!msg || !("stopReason" in msg)) return;
+
+		if (msg.stopReason === "length") {
+			ctx.ui.notify(
+				"Response was truncated (hit max output tokens). The model may have dropped planned work — consider re-prompting.",
+				"warning"
+			);
 		}
 	});
 }
