@@ -39,19 +39,8 @@ mock.module("@mariozechner/pi-ai", () => ({
 	getModels: (provider: string) => mockModels.filter((m) => m.provider === provider),
 }));
 
-mock.module("../model-resolver.js", () => ({
-	resolveModelFuzzy: (query: string) => {
-		const m = mockModels.find(
-			(model) =>
-				model.id === query ||
-				model.id.includes(query) ||
-				model.name.toLowerCase().includes(query.toLowerCase())
-		);
-		if (m) return { provider: m.provider, id: m.id, displayName: `${m.provider}/${m.id}` };
-		return undefined;
-	},
-	listAvailableModels: () => mockModels.map((m) => `${m.provider}/${m.id}`),
-}));
+// NOTE: Do NOT mock ../model-resolver.js — it leaks across test files in bun.
+// The pi-ai mock above provides model data that resolveModelFuzzy uses.
 
 mock.module("../task-classifier.js", () => ({
 	classifyTask: async (_task: string, primaryType: string) => ({

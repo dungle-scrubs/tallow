@@ -1,66 +1,48 @@
 import { describe, expect, it, mock } from "bun:test";
 
 /**
- * Tests for the model selection algorithm.
+ * Tests for the model selection algorithm (selectModels + loadRoutingConfig).
  *
- * Mocks pi-ai registry and model-resolver to test selectModels
- * and loadRoutingConfig in isolation.
+ * Only mocks @mariozechner/pi-ai to provide deterministic model data.
+ * Does NOT mock node:fs, model-resolver, or task-classifier — those
+ * leaking mocks caused 100+ test failures across the suite.
  */
-
-// Mock pi-ai with models that match the capability matrix
-const mockModels = [
-	{
-		id: "claude-opus-4-6",
-		name: "Claude Opus 4.6",
-		provider: "anthropic",
-		cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 15 },
-	},
-	{
-		id: "claude-sonnet-4-5-20250514",
-		name: "Claude Sonnet 4.5",
-		provider: "anthropic",
-		cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
-	},
-	{
-		id: "claude-haiku-4-5-20250514",
-		name: "Claude Haiku 4.5",
-		provider: "anthropic",
-		cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 0.8 },
-	},
-	{
-		id: "gemini-3-flash",
-		name: "Gemini 3 Flash",
-		provider: "google",
-		cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
-	},
-];
 
 mock.module("@mariozechner/pi-ai", () => ({
 	getProviders: () => ["anthropic", "google"],
-	getModels: (provider: string) => mockModels.filter((m) => m.provider === provider),
-}));
-
-// Mock model-resolver for routeModel tests
-mock.module("../model-resolver.js", () => ({
-	resolveModelFuzzy: (query: string) => {
-		const m = mockModels.find(
-			(m) =>
-				m.id === query || m.id.includes(query) || m.name.toLowerCase().includes(query.toLowerCase())
-		);
-		if (m) return { provider: m.provider, id: m.id, displayName: `${m.provider}/${m.id}` };
-		return undefined;
+	getModels: (provider: string) => {
+		const models: Record<string, Array<Record<string, unknown>>> = {
+			anthropic: [
+				{
+					id: "claude-opus-4-6",
+					name: "Claude Opus 4.6",
+					provider: "anthropic",
+					cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 15 },
+				},
+				{
+					id: "claude-sonnet-4-5-20250514",
+					name: "Claude Sonnet 4.5",
+					provider: "anthropic",
+					cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+				},
+				{
+					id: "claude-haiku-4-5-20250514",
+					name: "Claude Haiku 4.5",
+					provider: "anthropic",
+					cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 0.8 },
+				},
+			],
+			google: [
+				{
+					id: "gemini-3-flash",
+					name: "Gemini 3 Flash",
+					provider: "google",
+					cost: { input: 0.15, output: 0.6, cacheRead: 0.015, cacheWrite: 0.15 },
+				},
+			],
+		};
+		return models[provider] ?? [];
 	},
-	listAvailableModels: () => mockModels.map((m) => `${m.provider}/${m.id}`),
-}));
-
-// Mock task-classifier to avoid spawning subprocesses
-mock.module("../task-classifier.js", () => ({
-	classifyTask: async (_task: string, primaryType: string) => ({
-		type: primaryType,
-		complexity: 3,
-		reasoning: "mock classification",
-	}),
-	findCheapestModel: () => "claude-haiku-4-5-20250514",
 }));
 
 const { selectModels, loadRoutingConfig } = await import("../model-router.js");
