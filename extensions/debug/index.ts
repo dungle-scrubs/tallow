@@ -15,7 +15,17 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
-import { createDebugLogger, type DebugLogger, isDebug } from "./logger.js";
+import { Type } from "@sinclair/typebox";
+import {
+	calculateTurnMetrics,
+	formatEntries,
+	formatErrors,
+	formatToolTimings,
+	formatTurnMetrics,
+	groupErrors,
+	summarizeToolTimings,
+} from "./analysis.js";
+import { createDebugLogger, type DebugLogger, isDebug, queryLog } from "./logger.js";
 
 /** Map of toolCallId → start timestamp for duration tracking. */
 const toolTimings = new Map<string, number>();
@@ -319,7 +329,181 @@ export default function (pi: ExtensionAPI) {
 		process.removeListener("unhandledRejection", onUnhandledRejection);
 	});
 
-	// ── /diag commands ───────────────────────────────────────────
+	// ── debug_inspect tool ───────────────────────────────────────
+
+	const DebugInspectParams = Type.Object({
+		category: Type.Optional(
+			Type.Union(
+				[
+					Type.Literal("session"),
+					Type.Literal("tool"),
+					Type.Literal("model"),
+					Type.Literal("turn"),
+					Type.Literal("agent"),
+					Type.Literal("mcp"),
+					Type.Literal("subagent"),
+					Type.Literal("error"),
+				],
+				{
+					description:
+						"Filter by log category: session, tool, model, turn, agent, mcp, subagent, error",
+				}
+			)
+		),
+		eventType: Type.Optional(
+			Type.String({
+				description:
+					"Filter by event type within a category (e.g. 'call', 'result', 'start', 'stop')",
+			})
+		),
+		limit: Type.Optional(
+			Type.Number({
+				description: "Maximum entries to return (default: 50, newest first)",
+			})
+		),
+		since: Type.Optional(
+			Type.String({
+				description: "Only entries after this ISO timestamp or relative duration (e.g. '5m')",
+			})
+		),
+		search: Type.Optional(
+			Type.String({
+				description: "Free-text search across log entry data",
+			})
+		),
+		analysis: Type.Optional(
+			Type.Union(
+				[
+					Type.Literal("tool_timings"),
+					Type.Literal("errors"),
+					Type.Literal("turn_metrics"),
+					Type.Literal("raw"),
+				],
+				{
+					description:
+						"Analysis mode: 'tool_timings' for timing histograms, 'errors' for grouped errors, " +
+						"'turn_metrics' for efficiency stats, 'raw' for formatted entries (default: raw)",
+				}
+			)
+		),
+	});
+
+	/**
+	 * Parses a relative duration string (e.g. "5m", "2h", "30s") into an ISO timestamp.
+	 *
+	 * @param since - Relative duration or ISO timestamp string
+	 * @returns ISO timestamp string
+	 */
+	function resolveSince(since: string): string {
+		// If it's already an ISO timestamp, return as-is
+		if (since.includes("T") || since.includes("-")) return since;
+
+		const match = since.match(/^(\d+)\s*(s|m|h|d)$/);
+		if (!match) return since;
+
+		const amount = parseInt(match[1], 10);
+		const unit = match[2];
+		const multipliers: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+		const ms = amount * (multipliers[unit] ?? 0);
+
+		return new Date(Date.now() - ms).toISOString();
+	}
+
+	pi.registerTool({
+		name: "debug_inspect",
+		label: "Debug Inspect",
+		description:
+			"Read and analyze debug diagnostic logs. Returns filtered, summarized log data — " +
+			"not raw JSONL. Use to diagnose errors, find slow tools, check turn efficiency, " +
+			"or inspect recent events. Only available when debug mode is active.",
+		parameters: DebugInspectParams,
+
+		/**
+		 * Reads and analyzes debug log entries based on filters and analysis mode.
+		 *
+		 * @param _toolCallId - Unique tool call identifier
+		 * @param params - Query filters and analysis mode
+		 * @returns Formatted analysis results or error message
+		 */
+		async execute(_toolCallId, params) {
+			if (!logger) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Debug mode is not active. Enable it with /diag-on or start tallow with --debug.",
+						},
+					],
+					details: undefined,
+				};
+			}
+
+			const logPath = getLogPath();
+			const since = params.since ? resolveSince(params.since) : undefined;
+			const limit = params.limit ?? 50;
+			const analysisMode = params.analysis ?? "raw";
+
+			const entries = queryLog(logPath, {
+				category: params.category,
+				eventType: params.eventType,
+				limit: analysisMode === "raw" ? limit : undefined, // analysis modes need all data
+				since,
+				search: params.search,
+			});
+
+			let result: string;
+
+			switch (analysisMode) {
+				case "tool_timings":
+					result = formatToolTimings(summarizeToolTimings(entries));
+					break;
+				case "errors":
+					result = formatErrors(groupErrors(entries));
+					break;
+				case "turn_metrics":
+					result = formatTurnMetrics(calculateTurnMetrics(entries));
+					break;
+				default:
+					result = formatEntries(entries);
+					break;
+			}
+
+			return {
+				content: [{ type: "text", text: result }],
+				details: undefined,
+			};
+		},
+	});
+
+	// ── /debug command ───────────────────────────────────────────
+
+	pi.registerCommand("debug", {
+		description: "Interactive troubleshooting — model analyzes debug logs",
+		handler: async () => {
+			if (!logger) {
+				pi.sendMessage({
+					customType: "debug",
+					content:
+						"Debug mode is not active. Enable with `/diag-on` or start tallow with `--debug`.",
+					display: true,
+				});
+				return;
+			}
+
+			// Inject a prompt so the model knows debugging tools are available
+			pi.sendMessage({
+				customType: "debug",
+				content:
+					"The user wants to troubleshoot. You have the `debug_inspect` tool available. " +
+					"Ask what they'd like to investigate, or proactively check for errors and " +
+					"slow tool calls. Use the tool's `analysis` parameter for structured summaries: " +
+					"'errors', 'tool_timings', 'turn_metrics', or 'raw'.",
+				display: false,
+			});
+		},
+	});
+
+	// ── /diag commands (kept for backward compatibility) ─────────
 	// Separate commands — no space-separated subcommands.
 	// Autocomplete can't handle `/diag on`; must be `/diag-on`.
 
@@ -360,6 +544,7 @@ export default function (pi: ExtensionAPI) {
 				`Recent entries:\n${recent}`,
 				"",
 				"Commands: /diag-on, /diag-off, /diag-tail, /diag-clear",
+				"Interactive: /debug — model-assisted troubleshooting",
 			].join("\n");
 
 			pi.sendMessage({ customType: "diag", content: status, display: true });

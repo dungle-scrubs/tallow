@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **debug:** `/debug <query>` interactive troubleshooting command with
+  `debug_inspect` tool for model-assisted log analysis
+- **debug:** log query infrastructure (`queryLog()`) with category, event type,
+  time range, and free-text search filters
+- **debug:** analysis utilities — tool timing histograms, error grouping, and
+  turn efficiency metrics
+
 ## [0.6.1](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.6.0...tallow-v0.6.1) (2026-02-15)
 
 
