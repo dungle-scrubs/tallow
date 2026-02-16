@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.6.1...tallow-v0.7.0) (2026-02-16)
+
+
+### Added
+
+* **bash-tool:** detect ripgrep and inject rg preference into system prompt ([e42fa01](https://github.com/dungle-scrubs/tallow/commit/e42fa01c8fc9347b07937a2708c6b0b6c451c172))
+* **bash:** surface output tail in working message during execution ([5108631](https://github.com/dungle-scrubs/tallow/commit/5108631a2717fb7012652cf4ddd61c907f5af365))
+* **cli:** add --debug flag for debug mode activation ([2d1fc32](https://github.com/dungle-scrubs/tallow/commit/2d1fc32366c0cdc4ce68f205a93e5c4fd5566dc0))
+* **core:** add algorithm-over-LLM guideline to system prompt ([984f2aa](https://github.com/dungle-scrubs/tallow/commit/984f2aa80de32d28c112edc4a7690ecadeb421b9))
+* **core:** add atomic file write utility ([fca06fd](https://github.com/dungle-scrubs/tallow/commit/fca06fd991b572d2d4fbcdf220ab653b7d3edffb))
+* **core:** detect output truncation and instruct proactive strategy communication ([1da56ab](https://github.com/dungle-scrubs/tallow/commit/1da56ab651869c3cf40ba17677d1aaf842905c8d))
+* **debug:** interactive troubleshooting with debug_inspect tool ([4f207bb](https://github.com/dungle-scrubs/tallow/commit/4f207bb6ef03cd584e104966dc6844d31c92d65f))
+* **hooks:** add `once: true` option for run-once hooks ([f961701](https://github.com/dungle-scrubs/tallow/commit/f9617011b58d92d23c94c7a0489bee6b36fa5fb4))
+* **hooks:** wire all declared-but-unwired lifecycle events ([e32e821](https://github.com/dungle-scrubs/tallow/commit/e32e8213ff2d47f9222f99d9fb19a3ecc431fe93))
+* **mcp-adapter-tool:** add SSE and Streamable HTTP transport support ([d3e0055](https://github.com/dungle-scrubs/tallow/commit/d3e0055e96f082fd3f301fd816be06d7b3c86ff3))
+* **prompt-suggestions:** feed conversation history into autocomplete ([677fcd7](https://github.com/dungle-scrubs/tallow/commit/677fcd7435f78846015674662176932e08bc19c0))
+* **stats:** add per-session and aggregate usage statistics extension ([d2e2742](https://github.com/dungle-scrubs/tallow/commit/d2e27427104f0315b8aa1adf8b545b4ff9a44bfc))
+* **subagent-tool:** detect and surface tool permission denials ([5c42c43](https://github.com/dungle-scrubs/tallow/commit/5c42c437074f25bb9107af81620ec35969e93d7e))
+* **tallow-expert:** auto-regenerate skill reference on pre-commit ([5d8a37c](https://github.com/dungle-scrubs/tallow/commit/5d8a37ca6b0476d66a978890302a0a27e8663d66))
+
+
+### Fixed
+
+* **ci:** remove dead MODEL_ALIASES import, fix model-dependent tests ([235270e](https://github.com/dungle-scrubs/tallow/commit/235270e4a38c6d9069745bb643512848065d99b9))
+* **ci:** remove leaking mock.module for model-resolver and task-classifier ([f0882de](https://github.com/dungle-scrubs/tallow/commit/f0882de9b93a4b5245a9e5d44edbd0748e3c8070))
+* **ci:** remove leaking node:fs mock, fix test assertions ([1531d79](https://github.com/dungle-scrubs/tallow/commit/1531d794f902ddbc6e9d25d3dd7192a3291b2585))
+* **core:** use atomic writes for config and state files ([86c68ee](https://github.com/dungle-scrubs/tallow/commit/86c68eee16ec3f927ec34f38723e89414c499637))
+* **extensions:** use atomic writes for config and state files ([5cf61a9](https://github.com/dungle-scrubs/tallow/commit/5cf61a9013aa72f00c62ba71e6598a11e3c33036))
+* **tui:** reduce columns proportionally when height-clamping images ([0fbb547](https://github.com/dungle-scrubs/tallow/commit/0fbb547705c8ce1717c1ac2cca699cac4dbdfa72))
+
+
+### Changed
+
+* **random-spinner:** remove scramble-decrypt reveal animation ([ce74277](https://github.com/dungle-scrubs/tallow/commit/ce742775c61b86f757c9b33a98b2e732de5e863e))
+
+
+### Documentation
+
+* add changelog entries for atomic writes ([41ddf56](https://github.com/dungle-scrubs/tallow/commit/41ddf56c0efdbaf3418426f9224450c935407b0a))
+* bump extension count to 48 ([08ab0d0](https://github.com/dungle-scrubs/tallow/commit/08ab0d0591f7e2dba36d371bfd75af7036e165cf))
+* **hooks:** document once-hook behavior ([33124fe](https://github.com/dungle-scrubs/tallow/commit/33124feec7c1732e21c7a3db8e5258e69959e161))
+* **hooks:** update event tables, examples, and changelog ([2c50e4a](https://github.com/dungle-scrubs/tallow/commit/2c50e4a998c7794d6c1546139caa595f03a7458b))
+* **mcp-adapter-tool:** update changelog, version, and roadmap ([4613a43](https://github.com/dungle-scrubs/tallow/commit/4613a43f1184dbab8f9928701486877e0fc26537))
+
+
+### Maintenance
+
+* **bash:** add unit tests for progress message helpers ([c2ca29f](https://github.com/dungle-scrubs/tallow/commit/c2ca29fa0fadf2b645f5ac6fa7d80b4c66870d70))
+* bump version to 0.7.0 ([9ce4afc](https://github.com/dungle-scrubs/tallow/commit/9ce4afc38d6530be12e371ab3e2c83d2d8e7cb98))
+* **debug:** add tests for queryLog and analysis utilities ([0792afd](https://github.com/dungle-scrubs/tallow/commit/0792afd74b86393ceff5b25e74ff436b0f6981ad))
+* **hooks:** add once-hook state manager tests ([c4f5e1d](https://github.com/dungle-scrubs/tallow/commit/c4f5e1db6bced33a6ebbefc1e5b7f64417df94b0))
+* lint autofix formatting ([809e7c6](https://github.com/dungle-scrubs/tallow/commit/809e7c6bcda54316e90141aa0bb7889f9062279c))
+* **mcp-adapter-tool:** add transport, config, and reconnect tests ([af60bc4](https://github.com/dungle-scrubs/tallow/commit/af60bc4e1c7a57a624456519b3595e9f956a9460))
+* **prompt-suggestions:** add conversation context tests ([27edefd](https://github.com/dungle-scrubs/tallow/commit/27edefd2416e9d6eac4374f17c803aa57817fe93))
+* **subagent-tool:** add denial detection unit tests ([2c8d686](https://github.com/dungle-scrubs/tallow/commit/2c8d68618428884ba61b9e4d770fae9afbff70fa))
+
 ## [0.7.0] - 2026-02-16
 
 ### Added
