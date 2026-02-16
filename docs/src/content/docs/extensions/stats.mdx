@@ -1,0 +1,54 @@
+---
+title: stats
+description: Per-session and aggregate usage statistics with /stats command.
+---
+
+The **stats** extension records session metadata on shutdown and
+provides a `/stats` command for viewing usage statistics across
+sessions.
+
+## Usage
+
+```
+/stats              # current session
+/stats today        # today's aggregate
+/stats week         # last 7 days
+/stats month        # last 30 days
+/stats all          # all time
+/stats range 2026-01-01 to 2026-01-31
+```
+
+### Flags
+
+| Flag | Effect |
+|------|--------|
+| `--tools` | Show detailed tool usage breakdown |
+| `--json` | Output raw JSON |
+| `--model <name>` | Filter by model name (substring match) |
+
+## What it tracks
+
+Each session records:
+
+- Token counts (input, output, cache read, cache write)
+- Cost in USD
+- Duration (first message to last message)
+- Tool invocation counts
+- Model used
+- Message count
+
+## Aggregate views
+
+Time-range views show:
+
+- Total and average tokens/cost across sessions
+- Per-model breakdown
+- Tool usage bar charts
+- Usage streaks (consecutive days with sessions)
+
+## Data storage
+
+Stats are stored in `~/.tallow/stats.jsonl` as append-only
+JSON lines. Each line is one session summary, written on
+session shutdown. Sessions with fewer than 2 messages are
+skipped.
