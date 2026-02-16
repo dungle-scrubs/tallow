@@ -16,6 +16,7 @@
  * Auto-background: commands exceeding a configurable timeout (default 30s)
  * are promoted to background tasks via the background-task-tool extension.
  */
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -187,12 +188,51 @@ function handleBashError(err: unknown): AgentToolResult<BashToolDetails | undefi
 	throw err;
 }
 
+/** Whether ripgrep (rg) is available on the system. Detected once at init. */
+let hasRipgrep = false;
+
+/**
+ * Check if ripgrep is installed by running `which rg`.
+ *
+ * @returns True if rg is found on PATH
+ */
+function detectRipgrep(): boolean {
+	try {
+		execSync("which rg", { stdio: "ignore" });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export default function bashLive(pi: ExtensionAPI): void {
 	const baseBashTool = createBashTool(process.cwd());
 	const displayConfig = getToolDisplayConfig("bash");
 
 	// Capture project root for BASH_MAINTAIN_PROJECT_WORKING_DIR
 	projectCwd = process.cwd();
+
+	// Detect ripgrep availability
+	hasRipgrep = detectRipgrep();
+
+	pi.on("session_start", async (_event, ctx) => {
+		if (!hasRipgrep) {
+			ctx.ui.notify(
+				"ripgrep not found — install it for faster search (brew install ripgrep)",
+				"warning"
+			);
+		}
+	});
+
+	pi.on("before_agent_start", async (event) => {
+		if (hasRipgrep) {
+			return {
+				systemPrompt:
+					event.systemPrompt +
+					"\n\nripgrep (rg) is installed on this system. Prefer `rg` over `grep` in bash commands — it is faster, respects .gitignore, and skips binary files by default.",
+			};
+		}
+	});
 
 	pi.registerTool({
 		name: "bash",
