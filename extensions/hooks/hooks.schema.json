@@ -188,6 +188,11 @@
 					"description": "Run in background without blocking. Only for command/agent types.",
 					"default": false
 				},
+				"once": {
+					"type": "boolean",
+					"description": "Run exactly once, then auto-disable. State persisted to ~/.tallow/hooks-state.json.",
+					"default": false
+				},
 				"statusMessage": {
 					"type": "string",
 					"description": "Custom spinner message while hook executes."
