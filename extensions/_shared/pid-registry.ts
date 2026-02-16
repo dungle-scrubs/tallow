@@ -9,7 +9,7 @@
  * and {@link unregisterPid} when the child exits or is killed.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
 
@@ -76,37 +76,94 @@ function writePidFile(file: PidFile): void {
 	atomicWriteFileSync(path, `${JSON.stringify(file, null, "\t")}\n`);
 }
 
+// ─── Locking ─────────────────────────────────────────────────────────────────
+
+/**
+ * Acquire an exclusive file lock for the PID file using O_EXCL.
+ *
+ * Retries briefly to handle contention from concurrent processes.
+ * Falls back to unlocked access after max retries to avoid deadlock
+ * from stale lockfiles.
+ *
+ * @returns Cleanup function to release the lock
+ */
+function acquirePidLock(): () => void {
+	const lockPath = `${getPidFilePath()}.lock`;
+	const maxRetries = 10;
+	const retryDelayMs = 20;
+
+	for (let i = 0; i < maxRetries; i++) {
+		try {
+			const fd = openSync(lockPath, "wx");
+			closeSync(fd);
+			return () => {
+				try {
+					unlinkSync(lockPath);
+				} catch {
+					/* lock already removed */
+				}
+			};
+		} catch {
+			// Lock held by another process — busy-wait
+			const start = Date.now();
+			while (Date.now() - start < retryDelayMs) {
+				/* spin */
+			}
+		}
+	}
+
+	// Stale lock — force remove and proceed unprotected
+	try {
+		unlinkSync(lockPath);
+	} catch {
+		/* already gone */
+	}
+	return () => {};
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
  * Register a spawned child process PID in the tracking file.
  *
  * Called immediately after `spawn()` with `detached: true`. Duplicate
- * PIDs are silently ignored.
+ * PIDs are silently ignored. Uses file locking to prevent concurrent
+ * read-modify-write races.
  *
  * @param pid - Child process ID
  * @param command - Shell command that was spawned (for diagnostics)
  */
 export function registerPid(pid: number, command: string): void {
-	const file = readPidFile();
-	if (file.entries.some((e) => e.pid === pid)) return;
-	file.entries.push({ pid, command, startedAt: Date.now() });
-	writePidFile(file);
+	const unlock = acquirePidLock();
+	try {
+		const file = readPidFile();
+		if (file.entries.some((e) => e.pid === pid)) return;
+		file.entries.push({ pid, command, startedAt: Date.now() });
+		writePidFile(file);
+	} finally {
+		unlock();
+	}
 }
 
 /**
  * Remove a child process PID from the tracking file.
  *
  * Called when a child process exits (close/error event) or is killed.
- * No-op when the PID is not in the file.
+ * No-op when the PID is not in the file. Uses file locking to prevent
+ * concurrent read-modify-write races.
  *
  * @param pid - Child process ID to remove
  */
 export function unregisterPid(pid: number): void {
-	const file = readPidFile();
-	const before = file.entries.length;
-	file.entries = file.entries.filter((e) => e.pid !== pid);
-	if (file.entries.length < before) {
-		writePidFile(file);
+	const unlock = acquirePidLock();
+	try {
+		const file = readPidFile();
+		const before = file.entries.length;
+		file.entries = file.entries.filter((e) => e.pid !== pid);
+		if (file.entries.length < before) {
+			writePidFile(file);
+		}
+	} finally {
+		unlock();
 	}
 }

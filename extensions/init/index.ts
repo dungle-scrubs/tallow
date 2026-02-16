@@ -35,12 +35,23 @@ After creating AGENTS.md, also analyze the codebase and suggest any improvements
  * Renames .claude/ to .tallow/ in the project directory.
  * Moves all contents; tallow's claude-bridge extension still reads .claude/ if present,
  * but .tallow/ is the canonical location.
+ *
+ * Uses try-catch to handle TOCTOU races where the filesystem may change
+ * between the caller's existence checks and this rename.
+ *
  * @param cwd - Project root directory
+ * @returns true if renamed, false if the rename failed (e.g., source gone or target exists)
  */
-function renameClaudeDir(cwd: string): void {
+function renameClaudeDir(cwd: string): boolean {
 	const claudeDir = path.join(cwd, ".claude");
 	const tallowDir = path.join(cwd, ".tallow");
-	fs.renameSync(claudeDir, tallowDir);
+	try {
+		fs.renameSync(claudeDir, tallowDir);
+		return true;
+	} catch {
+		// Source deleted or target created between check and rename
+		return false;
+	}
 }
 
 /**
@@ -64,8 +75,14 @@ export default function (pi: ExtensionAPI) {
 					"Found a .claude/ directory. Renaming to .tallow/ makes this a tallow-native project. All contents will be preserved."
 				);
 				if (ok) {
-					renameClaudeDir(cwd);
-					ctx.ui.notify("Renamed .claude/ → .tallow/", "info");
+					if (renameClaudeDir(cwd)) {
+						ctx.ui.notify("Renamed .claude/ → .tallow/", "info");
+					} else {
+						ctx.ui.notify(
+							"Could not rename .claude/ — it may have been moved or .tallow/ already exists",
+							"warning"
+						);
+					}
 				}
 			}
 

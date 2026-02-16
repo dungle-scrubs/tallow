@@ -81,7 +81,13 @@ function createMockEventBus(): MockEventBus {
 	const listeners = new Map<string, Set<(data: unknown) => void>>();
 	return {
 		emit(channel, data) {
-			for (const fn of listeners.get(channel) ?? []) fn(data);
+			for (const fn of listeners.get(channel) ?? []) {
+				try {
+					fn(data);
+				} catch {
+					// Ensure all listeners fire even if one throws
+				}
+			}
 		},
 		on(channel, handler) {
 			if (!listeners.has(channel)) listeners.set(channel, new Set());
@@ -137,8 +143,8 @@ function createStubUIContext(): ExtensionUIContext {
 		getAllThemes() {
 			return [];
 		},
-		getTheme() {
-			return undefined;
+		getTheme(): never {
+			throw new Error("Theme not available in test harness");
 		},
 		setTheme() {
 			return { success: false, error: "Test harness" };
@@ -323,7 +329,10 @@ export class ExtensionHarness {
 				self.messageRenderers.set(customType, renderer);
 			},
 			sendMessage(message: SentMessage, options?: SentMessage["options"]) {
-				self.sentMessages.push({ ...message, options });
+				self.sentMessages.push({
+					...message,
+					options: options ? { ...message.options, ...options } : message.options,
+				});
 			},
 			sendUserMessage(
 				content: string | (TextContent | ImageContent)[],
@@ -372,7 +381,7 @@ export class ExtensionHarness {
 			registerProvider(name: string, config: ProviderConfig) {
 				self.providers.push({ name, config });
 			},
-			events: self.eventBus as never,
+			events: self.eventBus as ExtensionAPI["events"],
 		} as unknown as ExtensionAPI;
 	}
 }

@@ -96,8 +96,8 @@ export const DEFAULT_EDITOR_KEYBINDINGS: Required<EditorKeybindingsConfig> = {
 	selectPageDown: "pageDown",
 	selectConfirm: "enter",
 	selectCancel: ["escape", "ctrl+c"],
-	// Clipboard
-	copy: "ctrl+c",
+	// Clipboard (ctrl+c in editor is handled as selectCancel/interrupt, not copy)
+	copy: "ctrl+shift+c",
 	// Kill ring
 	yank: "ctrl+y",
 	yankPop: "alt+y",

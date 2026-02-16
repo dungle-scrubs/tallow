@@ -475,12 +475,16 @@ interface ParsedKittySequence {
 	eventType: KeyEventType;
 }
 
-// Store the last parsed event type for isKeyRelease() to query
+// Tracks the event type from the most recent parseKey() call.
 let _lastEventType: KeyEventType = "press";
 
 /**
- * Check if the last parsed key event was a key release.
+ * Check if the given input data represents a key release event.
+ * Performs fast pattern matching on raw terminal escape sequences.
  * Only meaningful when Kitty keyboard protocol with flag 2 is active.
+ *
+ * @param data - Raw terminal input string
+ * @returns true if the data contains a key release escape sequence
  */
 export function isKeyRelease(data: string): boolean {
 	// Don't treat bracketed paste content as key release, even if it contains
@@ -509,8 +513,12 @@ export function isKeyRelease(data: string): boolean {
 }
 
 /**
- * Check if the last parsed key event was a key repeat.
+ * Check if the given input data represents a key repeat event.
+ * Performs fast pattern matching on raw terminal escape sequences.
  * Only meaningful when Kitty keyboard protocol with flag 2 is active.
+ *
+ * @param data - Raw terminal input string
+ * @returns true if the data contains a key repeat escape sequence
  */
 export function isKeyRepeat(data: string): boolean {
 	// Don't treat bracketed paste content as key repeat, even if it contains

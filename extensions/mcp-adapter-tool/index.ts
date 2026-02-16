@@ -471,7 +471,9 @@ class SseTransport implements McpTransport {
 						reject(new Error(`SSE POST to ${this.name} failed: ${resp.status}`));
 						return;
 					}
-					// Some servers return JSON-RPC response directly
+					// Some servers return JSON-RPC response directly.
+					// If we successfully parse and resolve here, the SSE stream
+					// handler will no-op (pendingRequests entry already removed).
 					const ct = resp.headers.get("content-type") || "";
 					if (ct.includes("application/json")) {
 						try {
@@ -482,7 +484,9 @@ class SseTransport implements McpTransport {
 								resolve(body);
 							}
 						} catch {
-							/* Response will arrive via SSE stream */
+							// JSON parse failed — fall through to SSE stream delivery.
+							// Timer and pendingRequests entry remain intact so the
+							// SSE handler or timeout can still resolve/reject.
 						}
 					}
 				})
@@ -700,7 +704,7 @@ class StreamableHttpTransport implements McpTransport {
 				let result: JsonRpcResponse;
 
 				if (ct.includes("text/event-stream")) {
-					result = await this.parseSseResponse(resp);
+					result = await this.parseSseResponse(resp, request.id);
 				} else {
 					result = (await resp.json()) as JsonRpcResponse;
 				}
@@ -765,10 +769,14 @@ class StreamableHttpTransport implements McpTransport {
 	 * Handles server notifications embedded in the stream.
 	 *
 	 * @param resp - Fetch response with SSE body
+	 * @param expectedId - JSON-RPC request ID to match against
 	 * @returns The JSON-RPC response found in the stream
 	 * @throws Error if no response found
 	 */
-	private async parseSseResponse(resp: Response): Promise<JsonRpcResponse> {
+	private async parseSseResponse(
+		resp: Response,
+		expectedId?: string | number
+	): Promise<JsonRpcResponse> {
 		if (!resp.body) throw new Error(`No response body from ${this.name}`);
 		const reader = resp.body.getReader();
 		const decoder = new TextDecoder();
@@ -794,7 +802,7 @@ class StreamableHttpTransport implements McpTransport {
 							if (eventType === "message") {
 								try {
 									const msg = JSON.parse(data);
-									if (msg.id != null) {
+									if (msg.id != null && (expectedId == null || msg.id === expectedId)) {
 										result = msg;
 									} else if (msg.method) {
 										this.notificationHandler?.(msg.method, msg.params);
