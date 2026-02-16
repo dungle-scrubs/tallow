@@ -1,0 +1,9 @@
+{
+	"name": "stats",
+	"version": "0.1.0",
+	"description": "Per-session and aggregate usage statistics with /stats command",
+	"category": "utility",
+	"tags": ["stats", "tokens", "cost", "usage", "analytics"],
+	"files": ["index.ts", "stats-log.ts", "aggregator.ts", "formatters.ts"],
+	"relationships": []
+}
