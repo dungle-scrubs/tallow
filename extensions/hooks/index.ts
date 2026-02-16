@@ -65,10 +65,15 @@ interface HookResult {
 	decision?: "block" | "allow";
 }
 
-// Events that support blocking via hook decisions
+// Events that support blocking via hook decisions.
+// "before_*" session events can cancel the operation via pi's return value.
 const BLOCKABLE_EVENTS = new Set([
 	"tool_call", // Can block before tool executes
 	"input", // Can block user input
+	"session_before_compact", // Can cancel compaction
+	"session_before_switch", // Can cancel session switch
+	"session_before_fork", // Can cancel session fork
+	"session_before_tree", // Can cancel tree navigation
 ]);
 
 /** Track prompt-type hooks that have already been warned about (once per command) */
@@ -81,6 +86,11 @@ const MATCHER_FIELDS: Record<string, string> = {
 	teammate_idle: "teammate",
 	task_completed: "assignee",
 	setup: "trigger",
+	subagent_start: "agent_type",
+	subagent_stop: "agent_type",
+	model_select: "source",
+	user_bash: "command",
+	notification: "type",
 };
 
 /**
@@ -528,6 +538,41 @@ export default function (pi: ExtensionAPI) {
 		runHooks("task_completed", event);
 	};
 
+	/** Forward subagent_start events from EventBus to hook handlers. */
+	const onSubagentStart = (data: unknown) => {
+		const event = data as {
+			agent_id: string;
+			agent_type: string;
+			task: string;
+			cwd: string;
+			background: boolean;
+		};
+		runHooks("subagent_start", event);
+	};
+
+	/** Forward subagent_stop events from EventBus to hook handlers. */
+	const onSubagentStop = (data: unknown) => {
+		const event = data as {
+			agent_id: string;
+			agent_type: string;
+			task: string;
+			exit_code: number;
+			result: string;
+			background: boolean;
+		};
+		runHooks("subagent_stop", event);
+	};
+
+	/** Forward notification events from EventBus to hook handlers. */
+	const onNotification = (data: unknown) => {
+		const event = data as {
+			message: string;
+			type: string;
+			source?: string;
+		};
+		runHooks("notification", event);
+	};
+
 	// ── Session lifecycle ────────────────────────────────────────
 
 	pi.on("session_start", async (_event, context) => {
@@ -554,10 +599,16 @@ export default function (pi: ExtensionAPI) {
 		const unsub1 = pi.events.on("hooks:merge", onHooksMerge);
 		const unsub2 = pi.events.on("teammate_idle", onTeammateIdle);
 		const unsub3 = pi.events.on("task_completed", onTaskCompleted);
+		const unsub4 = pi.events.on("subagent_start", onSubagentStart);
+		const unsub5 = pi.events.on("subagent_stop", onSubagentStop);
+		const unsub6 = pi.events.on("notification", onNotification);
 		G.__hooksEventCleanup = () => {
 			unsub1();
 			unsub2();
 			unsub3();
+			unsub4();
+			unsub5();
+			unsub6();
 		};
 
 		// Run setup hooks if triggered by --init, --init-only, or --maintenance CLI flags.
@@ -727,5 +778,156 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui?.notify(`⛔ Hook blocked input: ${reason}`, "error");
 			return { action: "handled" as const }; // Block the input
 		}
+	});
+
+	// ── Agent lifecycle events ───────────────────────────────────
+
+	// Hook into before_agent_start — fires after user submits but before agent loop
+	pi.on("before_agent_start", async (event) => {
+		await runHooks("before_agent_start", {
+			prompt: event.prompt,
+			systemPrompt: event.systemPrompt,
+			hasImages: (event.images?.length ?? 0) > 0,
+		});
+	});
+
+	// Hook into agent_start events
+	pi.on("agent_start", async () => {
+		await runHooks("agent_start", {});
+	});
+
+	// Hook into turn_end events
+	pi.on("turn_end", async (event) => {
+		await runHooks("turn_end", {
+			turnIndex: event.turnIndex,
+		});
+	});
+
+	// ── Session lifecycle events ─────────────────────────────────
+
+	// Hook into session_shutdown — fires on process exit
+	pi.on("session_shutdown", async () => {
+		await runHooks("session_shutdown", {});
+	});
+
+	// Hook into session_before_compact — fires before context compaction (can cancel)
+	pi.on("session_before_compact", async (event, ctx) => {
+		const result = await runHooks(
+			"session_before_compact",
+			{
+				tokensBefore: event.preparation.tokensBefore,
+				isSplitTurn: event.preparation.isSplitTurn,
+			},
+			event.signal
+		);
+
+		if (result.block) {
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked compaction: ${reason}`, "error");
+			return { cancel: true };
+		}
+	});
+
+	// Hook into session_compact — fires after compaction completes
+	pi.on("session_compact", async (event) => {
+		await runHooks("session_compact", {
+			fromExtension: event.fromExtension,
+		});
+	});
+
+	// Hook into session_before_switch — fires before switching sessions (can cancel)
+	pi.on("session_before_switch", async (event, ctx) => {
+		const result = await runHooks("session_before_switch", {
+			reason: event.reason,
+			targetSessionFile: event.targetSessionFile,
+		});
+
+		if (result.block) {
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked session switch: ${reason}`, "error");
+			return { cancel: true };
+		}
+	});
+
+	// Hook into session_switch — fires after switching sessions
+	pi.on("session_switch", async (event) => {
+		await runHooks("session_switch", {
+			reason: event.reason,
+			previousSessionFile: event.previousSessionFile,
+		});
+	});
+
+	// Hook into session_before_fork — fires before forking (can cancel)
+	pi.on("session_before_fork", async (event, ctx) => {
+		const result = await runHooks("session_before_fork", {
+			entryId: event.entryId,
+		});
+
+		if (result.block) {
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked session fork: ${reason}`, "error");
+			return { cancel: true };
+		}
+	});
+
+	// Hook into session_fork — fires after forking
+	pi.on("session_fork", async (event) => {
+		await runHooks("session_fork", {
+			previousSessionFile: event.previousSessionFile,
+		});
+	});
+
+	// Hook into session_before_tree — fires before tree navigation (can cancel)
+	pi.on("session_before_tree", async (event, ctx) => {
+		const result = await runHooks(
+			"session_before_tree",
+			{
+				targetId: event.preparation.targetId,
+				oldLeafId: event.preparation.oldLeafId,
+			},
+			event.signal
+		);
+
+		if (result.block) {
+			const reason = result.reason || "Blocked by hook";
+			ctx.ui?.notify(`⛔ Hook blocked tree navigation: ${reason}`, "error");
+			return { cancel: true };
+		}
+	});
+
+	// Hook into session_tree — fires after tree navigation
+	pi.on("session_tree", async (event) => {
+		await runHooks("session_tree", {
+			newLeafId: event.newLeafId,
+			oldLeafId: event.oldLeafId,
+		});
+	});
+
+	// ── Other events ─────────────────────────────────────────────
+
+	// Hook into context — fires before each LLM call with messages
+	pi.on("context", async (event) => {
+		await runHooks("context", {
+			messageCount: event.messages.length,
+		});
+	});
+
+	// Hook into model_select — fires when model changes
+	pi.on("model_select", async (event) => {
+		await runHooks("model_select", {
+			modelId: event.model.id,
+			modelName: event.model.name,
+			previousModelId: event.previousModel?.id,
+			source: event.source,
+		});
+	});
+
+	// Hook into user_bash — fires when user runs ! or !! commands
+	pi.on("user_bash", async (event) => {
+		await runHooks("user_bash", {
+			command: event.command,
+			excludeFromContext: event.excludeFromContext,
+			cwd: event.cwd,
+		});
 	});
 }

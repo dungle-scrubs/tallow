@@ -98,6 +98,26 @@
 				"user_bash": {
 					"$ref": "#/$defs/eventHooks",
 					"description": "When a bash command is run via the built-in bash tool."
+				},
+				"subagent_start": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a subagent spawns. Matcher filters on agent_type."
+				},
+				"subagent_stop": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a subagent completes. Matcher filters on agent_type."
+				},
+				"notification": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a notification is emitted via the event bus. Matcher filters on type."
+				},
+				"teammate_idle": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a team teammate becomes idle. Matcher filters on teammate name."
+				},
+				"task_completed": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a team task completes. Matcher filters on assignee."
 				}
 			},
 			"additionalProperties": {
