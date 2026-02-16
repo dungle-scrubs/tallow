@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.0...tallow-v0.8.0) (2026-02-16)
+
+
+### Added
+
+* **test:** add E2E profile runner and extension profile definitions ([3db96f3](https://github.com/dungle-scrubs/tallow/commit/3db96f3963acc85b95516e2adf6549d403863892))
+
+
+### Fixed
+
+* resolve 10 bugs found by bones game d3a57b9e0f07 ([4de12fb](https://github.com/dungle-scrubs/tallow/commit/4de12fb7ea7bd9b07c1b9935df95005171e36ded))
+* **test:** clean up tmpHome on error, track session for disposal ([bd5ee96](https://github.com/dungle-scrubs/tallow/commit/bd5ee96ceb9acfbd332df6b60734581186cbecb6))
+
+
+### Changed
+
+* **config:** parallelize op:// secret resolution with local cache ([aeff46d](https://github.com/dungle-scrubs/tallow/commit/aeff46d81884f10902dc5e8b86145a3b7f4d76d2))
+* **subagent-tool:** split 2967-line index.ts into 6 focused modules ([80316f2](https://github.com/dungle-scrubs/tallow/commit/80316f2b8dbdb57bd81534b578046faa17950e64))
+
+
+### Maintenance
+
+* **e2e:** add extension profile boot, conflict, interop, install, and override tests ([c55f369](https://github.com/dungle-scrubs/tallow/commit/c55f3699f9d6fcf68b2262648efee06597272747))
+* release 0.7.1 ([f819e0b](https://github.com/dungle-scrubs/tallow/commit/f819e0b5c87dd6178edbc683612587de3df0ed71))
+
 ## [Unreleased]
 
 ## [0.7.1] - 2026-02-16
