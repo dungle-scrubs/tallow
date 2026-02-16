@@ -27,12 +27,14 @@ Invoke the `tallow-expert` agent via the subagent tool:
 The agent explores the tallow source code and returns an answer.
 Relay that answer to the user.
 
+<!-- BEGIN GENERATED -->
+
 ## Quick Reference
 
 | Component | Location |
 |-----------|----------|
-| Core source | `src/` (config.ts, sdk.ts, cli.ts, install.ts, index.ts, session-utils.ts, session-migration.ts, extensions-global.d.ts) |
-| Extensions | `extensions/` — extension.json + index.ts each (43 bundled) |
+| Core source | `src/` (auth-hardening.ts, cli.ts, config.ts, extensions-global.d.ts, fatal-errors.ts, index.ts, install.ts, pid-manager.ts, process-cleanup.ts, sdk.ts, session-migration.ts, session-utils.ts) |
+| Extensions | `extensions/` — extension.json + index.ts each (47 bundled) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
 | Themes | `themes/` — JSON files (34 dark-only themes) |
@@ -57,40 +59,37 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 
 #### Registration
 
-- `registerTool<TParams, TDetails>(tool: ToolDefinition)` — LLM-callable tools
-- `registerCommand(name, { description, handler, getArgumentCompletions? })` — slash commands
-- `registerShortcut(shortcut: KeyId, { description?, handler })` — keyboard shortcuts
-- `registerFlag(name, { description?, type, default? })` — CLI flags
-- `registerMessageRenderer<T>(customType, renderer)` — custom message display
-- `registerProvider(name, config: ProviderConfig)` — model providers (with optional OAuth)
+- `registerTool(tool: ToolDefinition<TParams, TDetails>)` — Register a tool that the LLM can call.
+- `registerCommand(name: string, options: Omit<RegisteredCommand, "name">)` — Register a custom command.
+- `registerShortcut(shortcut: KeyId, options: object)` — Register a keyboard shortcut.
+- `registerFlag(name: string, options: object)` — Register a CLI flag.
+- `registerMessageRenderer(customType: string, renderer: MessageRenderer<T>)` — Register a custom renderer for CustomMessageEntry.
+- `registerProvider(name: string, config: ProviderConfig)` — Register or override a model provider.
 
 #### Messaging
 
-- `sendMessage<T>(message, options?)` — emit custom messages (options: `triggerTurn`, `deliverAs`)
-- `sendUserMessage(content, options?)` — send user message to agent (always triggers turn)
-- `appendEntry<T>(customType, data?)` — persist custom data to session (not sent to LLM)
+- `sendMessage(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: object)` — Send a custom message to the session.
+- `sendUserMessage(content: string | (TextContent | ImageContent)[], options?: object)` — Send a user message to the agent.
+- `appendEntry(customType: string, data?: T)` — Append a custom entry to the session for state persistence (not sent to LLM).
 
 #### Session
 
-- `setSessionName(name)` / `getSessionName()` — session display name
-- `setLabel(entryId, label)` — set/clear labels on entries
+- `setSessionName(name: string)` — Set the session display name (shown in session selector).
+- `getSessionName()` — Get the current session name, if set.
+- `setLabel(entryId: string, label: string)` — Set or clear a label on an entry.
 
 #### Tools & Model
 
-- `getActiveTools()` / `setActiveTools(toolNames)` — active tool set
-- `getAllTools()` — all registered tools with name, description, parameters
-- `getCommands()` — available slash commands
-- `setModel(model)` — switch model (returns false if no API key)
-- `getThinkingLevel()` / `setThinkingLevel(level)` — thinking level control
-- `getFlag(name)` — read CLI flag value
-
-#### Shell
-
-- `exec(command, args, options?)` — execute shell commands
-
-#### Events
-
-- `events: EventBus` — shared event bus for inter-extension communication
+- `getFlag(name: string)` — Get the value of a registered CLI flag.
+- `exec(command: string, args: string[], options?: ExecOptions)` — Execute a shell command.
+- `getActiveTools()` — Get the list of currently active tool names.
+- `getAllTools()` — Get all configured tools with name and description.
+- `setActiveTools(toolNames: string[])` — Set the active tools by name.
+- `getCommands()` — Get available slash commands in the current session.
+- `setModel(model: Model<any>)` — Set the current model.
+- `getThinkingLevel()` — Get current thinking level.
+- `setThinkingLevel(level: ThinkingLevel)` — Set thinking level (clamped to model capabilities).
+- `events` — Shared event bus for extension communication.
 
 ### Events (`pi.on(event, handler)`)
 
@@ -98,83 +97,108 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 
 | Event | Payload | Can return |
 |-------|---------|------------|
-| `session_start` | `{}` | — |
-| `session_before_switch` | `{ reason, targetSessionFile? }` | `{ cancel? }` |
-| `session_switch` | `{ reason, previousSessionFile }` | — |
-| `session_before_fork` | `{ entryId }` | `{ cancel?, skipConversationRestore? }` |
-| `session_fork` | `{ previousSessionFile }` | — |
-| `session_before_compact` | `{ preparation, branchEntries, signal }` | `{ cancel?, compaction? }` |
-| `session_compact` | `{ compactionEntry, fromExtension }` | — |
-| `session_before_tree` | `{ preparation, signal }` | `{ cancel?, summary?, customInstructions? }` |
-| `session_tree` | `{ newLeafId, oldLeafId, summaryEntry? }` | — |
-| `session_shutdown` | `{}` | — |
+| `resources_discover` | `ResourcesDiscoverEvent` | `ResourcesDiscoverResult` |
+| `session_start` | `SessionStartEvent` | — |
+| `session_before_switch` | `SessionBeforeSwitchEvent` | `SessionBeforeSwitchResult` |
+| `session_switch` | `SessionSwitchEvent` | — |
+| `session_before_fork` | `SessionBeforeForkEvent` | `SessionBeforeForkResult` |
+| `session_fork` | `SessionForkEvent` | — |
+| `session_before_compact` | `SessionBeforeCompactEvent` | `SessionBeforeCompactResult` |
+| `session_compact` | `SessionCompactEvent` | — |
+| `session_shutdown` | `SessionShutdownEvent` | — |
+| `session_before_tree` | `SessionBeforeTreeEvent` | `SessionBeforeTreeResult` |
+| `session_tree` | `SessionTreeEvent` | — |
 
 #### Agent lifecycle
 
 | Event | Payload | Can return |
 |-------|---------|------------|
-| `before_agent_start` | `{ prompt, images?, systemPrompt }` | `{ message?, systemPrompt? }` |
-| `agent_start` | `{}` | — |
-| `agent_end` | `{ messages }` | — |
-| `turn_start` | `{ turnIndex, timestamp }` | — |
-| `turn_end` | `{ turnIndex, message, toolResults }` | — |
-| `model_select` | `{ model, previousModel, source }` | — |
+| `before_agent_start` | `BeforeAgentStartEvent` | `BeforeAgentStartEventResult` |
+| `agent_start` | `AgentStartEvent` | — |
+| `agent_end` | `AgentEndEvent` | — |
+| `turn_start` | `TurnStartEvent` | — |
+| `turn_end` | `TurnEndEvent` | — |
+| `model_select` | `ModelSelectEvent` | — |
 
 #### Tool events
 
 | Event | Payload | Can return |
 |-------|---------|------------|
-| `tool_call` | `{ toolCallId, toolName, input }` | `{ block?, reason? }` |
-| `tool_result` | `{ toolCallId, toolName, input, content, isError, details }` | `{ content?, details?, isError? }` |
+| `tool_execution_start` | `ToolExecutionStartEvent` | — |
+| `tool_execution_update` | `ToolExecutionUpdateEvent` | — |
+| `tool_execution_end` | `ToolExecutionEndEvent` | — |
+| `tool_call` | `ToolCallEvent` | `ToolCallEventResult` |
+| `tool_result` | `ToolResultEvent` | `ToolResultEventResult` |
 
 #### Input & resources
 
 | Event | Payload | Can return |
 |-------|---------|------------|
-| `input` | `{ text, images?, source }` | `{ action: "continue" \| "transform" \| "handled" }` |
-| `user_bash` | `{ command, excludeFromContext, cwd }` | `{ operations?, result? }` |
-| `context` | `{ messages }` | `{ messages? }` |
-| `resources_discover` | `{ cwd, reason }` | `{ skillPaths?, promptPaths?, themePaths? }` |
+| `context` | `ContextEvent` | `ContextEventResult` |
+| `user_bash` | `UserBashEvent` | `UserBashEventResult` |
+| `input` | `InputEvent` | `InputEventResult` |
+
+#### Message streaming
+
+| Event | Payload | Can return |
+|-------|---------|------------|
+| `message_start` | `MessageStartEvent` | — |
+| `message_update` | `MessageUpdateEvent` | — |
+| `message_end` | `MessageEndEvent` | — |
 
 ### ExtensionContext (`ctx` in event handlers)
 
-- `ui: ExtensionUIContext` — UI methods (see below)
-- `hasUI: boolean` — false in print/RPC mode
-- `cwd: string` — current working directory
-- `sessionManager: ReadonlySessionManager` — session state
-- `modelRegistry: ModelRegistry` — API key resolution
-- `model: Model | undefined` — current model
-- `isIdle()` / `abort()` / `hasPendingMessages()`
-- `shutdown()` — graceful exit
-- `getContextUsage()` — token counts and context window info
-- `compact(options?)` — trigger context compaction
-- `getSystemPrompt()` — current effective system prompt
+- `ui` — UI methods for user interaction
+- `hasUI` — Whether UI is available (false in print/RPC mode)
+- `cwd` — Current working directory
+- `sessionManager` — Session manager (read-only)
+- `modelRegistry` — Model registry for API key resolution
+- `model` — Current model (may be undefined)
+- `isIdle()` — Whether the agent is idle (not streaming)
+- `abort()` — Abort the current agent operation
+- `hasPendingMessages()` — Whether there are queued messages waiting
+- `shutdown()` — Gracefully shutdown pi and exit.
+- `getContextUsage()` — Get current context usage for the active model.
+- `compact(options?: CompactOptions)` — Trigger compaction without awaiting completion.
+- `getSystemPrompt()` — Get the current effective system prompt.
 
 ### ExtensionCommandContext (`ctx` in command handlers, extends ExtensionContext)
 
-- `waitForIdle()` — wait for agent to finish streaming
-- `newSession(options?)` — start a new session
-- `fork(entryId)` — fork from a specific entry
-- `navigateTree(targetId, options?)` — navigate session tree
-- `switchSession(sessionPath)` — switch to a different session
-- `reload()` — reload extensions, skills, prompts, themes
+- `waitForIdle()` — Wait for the agent to finish streaming
+- `newSession(options?: object)` — Start a new session, optionally with initialization.
+- `fork(entryId: string)` — Fork from a specific entry, creating a new session file.
+- `navigateTree(targetId: string, options?: object)` — Navigate to a different point in the session tree.
+- `switchSession(sessionPath: string)` — Switch to a different session file.
+- `reload()` — Reload extensions, skills, prompts, and themes.
 
 ### ExtensionUIContext (`ctx.ui`)
 
-- `select(title, options, opts?)` — selector dialog
-- `confirm(title, message, opts?)` — confirmation dialog
-- `input(title, placeholder?, opts?)` — text input dialog
-- `editor(title, prefill?)` — multi-line editor
-- `notify(message, type?)` — notification (info/warning/error)
-- `setStatus(key, text)` — footer status text
-- `setWorkingMessage(message?)` — loading/streaming message
-- `setWidget(key, content, options?)` — above/below editor widgets
-- `setFooter(factory)` / `setHeader(factory)` — custom header/footer components
-- `setTitle(title)` — terminal window title
-- `setEditorComponent(factory)` — custom editor component
-- `setEditorText(text)` / `getEditorText()` — editor content
-- `pasteToEditor(text)` — paste with collapse handling
-- `custom<T>(factory, options?)` — render custom TUI component with focus
-- `theme` — current theme (readonly)
-- `getAllThemes()` / `getTheme(name)` / `setTheme(name)` — theme management
-- `getToolsExpanded()` / `setToolsExpanded(expanded)` — tool output expansion
+- `select(title: string, options: string[], opts?: ExtensionUIDialogOptions)` — Show a selector and return the user's choice.
+- `confirm(title: string, message: string, opts?: ExtensionUIDialogOptions)` — Show a confirmation dialog.
+- `input(title: string, placeholder?: string, opts?: ExtensionUIDialogOptions)` — Show a text input dialog.
+- `notify(message: string, type?: "info" | "warning" | "error")` — Show a notification to the user.
+- `onTerminalInput(handler: TerminalInputHandler)` — Listen to raw terminal input (interactive mode only).
+- `setStatus(key: string, text: string)` — Set status text in the footer/status bar.
+- `setWorkingMessage(message?: string)` — Set the working/loading message shown during streaming.
+- `setWidget(key: string, content: string[], options?: ExtensionWidgetOptions)` — Set a widget to display above or below the editor.
+- `setFooter(factory: ((tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?()` — Set a custom footer component, or undefined to restore the built-in footer.
+- `setHeader(factory: ((tui: TUI, theme: Theme) => Component & { dispose?()` — Set a custom header component (shown at startup, above chat), or undefined to restore the built-in header.
+- `setTitle(title: string)` — Set the terminal window/tab title.
+- `pasteToEditor(text: string)` — Paste text into the editor, triggering paste handling (collapse for large content).
+- `setEditorText(text: string)` — Set the text in the core input editor.
+- `getEditorText()` — Get the current text from the core input editor.
+- `editor(title: string, prefill?: string)` — Show a multi-line editor for text editing.
+- `readonly theme` — Get the current theme for styling.
+- `getAllThemes()` — Get all available themes with their names and file paths.
+- `getTheme(name: string)` — Load a theme by name without switching to it.
+- `setTheme(theme: string | Theme)` — Set the current theme by name or Theme object.
+- `getToolsExpanded()` — Get current tool output expansion state.
+- `setToolsExpanded(expanded: boolean)` — Set tool output expansion state.
+
+<!-- END GENERATED -->
+
+
+
+
+
+
