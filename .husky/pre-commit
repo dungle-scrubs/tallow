@@ -1,5 +1,10 @@
 #!/bin/sh
 
+# Regenerate tallow-expert skill reference (auto-stage if changed)
+echo "📝 Updating tallow-expert skill reference..."
+node scripts/update-tallow-expert.mjs
+git diff --quiet skills/tallow-expert/SKILL.md || git add skills/tallow-expert/SKILL.md
+
 # Type checking
 echo "🔍 Running type check..."
 npx tsc --noEmit || {
