@@ -26,7 +26,7 @@ const TYPES_PATH = join(
 	"dist",
 	"core",
 	"extensions",
-	"types.d.ts",
+	"types.d.ts"
 );
 
 const BEGIN = "<!-- BEGIN GENERATED -->";
@@ -109,14 +109,20 @@ function collapseMembers(block) {
 		if (trimmed.startsWith("/**")) {
 			inDoc = true;
 			pendingDoc = "";
-			const content = trimmed.replace(/^\/\*\*\s*/, "").replace(/\s*\*\/\s*$/, "").trim();
+			const content = trimmed
+				.replace(/^\/\*\*\s*/, "")
+				.replace(/\s*\*\/\s*$/, "")
+				.trim();
 			if (content) pendingDoc = content;
 			if (trimmed.endsWith("*/")) inDoc = false;
 			continue;
 		}
 		if (inDoc) {
 			if (trimmed.endsWith("*/")) {
-				const content = trimmed.replace(/\*\/\s*$/, "").replace(/^\*\s?/, "").trim();
+				const content = trimmed
+					.replace(/\*\/\s*$/, "")
+					.replace(/^\*\s?/, "")
+					.trim();
 				if (content && !content.startsWith("@")) {
 					pendingDoc += (pendingDoc ? " " : "") + content;
 				}
@@ -173,7 +179,7 @@ function parseMembers(block, skip = new Set()) {
 	for (const { doc, statement } of collapsed) {
 		// Match method: name<generics>?(params...): ReturnType;
 		const methodMatch = statement.match(
-			/^(readonly\s+)?(\w+)(?:<[^>]*>)?\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*:\s*(.+);$/,
+			/^(readonly\s+)?(\w+)(?:<[^>]*>)?\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*:\s*(.+);$/
 		);
 		if (methodMatch) {
 			const name = methodMatch[2];
@@ -201,7 +207,6 @@ function parseMembers(block, skip = new Set()) {
 				signature: `${readonly}${name}`,
 				doc: cleanDoc(doc),
 			});
-			continue;
 		}
 	}
 
@@ -217,15 +222,13 @@ function parseMembers(block, skip = new Set()) {
  */
 function simplifyParams(params) {
 	// Collapse inline object types: { key: Type; ... } → simplified
-	let result = params
-		.replace(/\s{2,}/g, " ")
-		.replace(/\s*\|\s*undefined/g, "");
+	let result = params.replace(/\s{2,}/g, " ").replace(/\s*\|\s*undefined/g, "");
 
 	// Replace verbose inline objects with a shorthand
 	// e.g. options: { description?: string; handler: ... } → options?: object
 	result = result.replace(
 		/(\w+)(\??):\s*\{[^}]+\}/g,
-		(_, name, optional) => `${name}${optional}: object`,
+		(_, name, optional) => `${name}${optional}: object`
 	);
 
 	return result.trim();
@@ -288,7 +291,14 @@ function categorizeEvents(events) {
 		if (e.event.startsWith("session_") || e.event.startsWith("resources_")) {
 			categories["Session lifecycle"].push(e);
 		} else if (
-			["before_agent_start", "agent_start", "agent_end", "turn_start", "turn_end", "model_select"].includes(e.event)
+			[
+				"before_agent_start",
+				"agent_start",
+				"agent_end",
+				"turn_start",
+				"turn_end",
+				"model_select",
+			].includes(e.event)
 		) {
 			categories["Agent lifecycle"].push(e);
 		} else if (e.event.startsWith("tool_")) {
@@ -326,8 +336,12 @@ function formatMembers(members) {
  */
 function groupAPIMethods(methods) {
 	const registrationNames = new Set([
-		"registerTool", "registerCommand", "registerShortcut", "registerFlag",
-		"registerMessageRenderer", "registerProvider",
+		"registerTool",
+		"registerCommand",
+		"registerShortcut",
+		"registerFlag",
+		"registerMessageRenderer",
+		"registerProvider",
 	]);
 	const messagingNames = new Set(["sendMessage", "sendUserMessage", "appendEntry"]);
 	const sessionNames = new Set(["setSessionName", "getSessionName", "setLabel"]);
@@ -365,12 +379,16 @@ function generateReference() {
 	lines.push("| Component | Location |");
 	lines.push("|-----------|----------|");
 	lines.push(`| Core source | \`src/\` (${coreFiles.join(", ")}) |`);
-	lines.push(`| Extensions | \`extensions/\` — extension.json + index.ts each (${extensions.length} bundled) |`);
+	lines.push(
+		`| Extensions | \`extensions/\` — extension.json + index.ts each (${extensions.length} bundled) |`
+	);
 	lines.push("| Skills | `skills/` — subdirs with SKILL.md |");
 	lines.push("| Agents | `agents/` — markdown with YAML frontmatter |");
 	lines.push(`| Themes | \`themes/\` — JSON files (${themes.length} dark-only themes) |`);
 	lines.push("| Forked TUI | `packages/tallow-tui/` — forked `@mariozechner/pi-tui` |");
-	lines.push("| Pi framework types | `node_modules/@mariozechner/pi-coding-agent/dist/core/extensions/types.d.ts` |");
+	lines.push(
+		"| Pi framework types | `node_modules/@mariozechner/pi-coding-agent/dist/core/extensions/types.d.ts` |"
+	);
 	lines.push("| User config | `~/.tallow/` (settings.json, auth.json, keybindings.json) |");
 	lines.push("| User extensions | `~/.tallow/extensions/` |");
 	lines.push("| User agents | `~/.tallow/agents/`, `~/.claude/agents/` |");
@@ -382,13 +400,17 @@ function generateReference() {
 	lines.push("| Sessions | `~/.tallow/sessions/` — per-cwd subdirs |");
 	lines.push("| Docs site | `docs/` — Astro Starlight site |");
 	lines.push("");
-	lines.push("**Agent frontmatter fields**: `tools`, `disallowedTools`, `maxTurns`, `mcpServers`, `context: fork`, `agent`, `model`");
+	lines.push(
+		"**Agent frontmatter fields**: `tools`, `disallowedTools`, `maxTurns`, `mcpServers`, `context: fork`, `agent`, `model`"
+	);
 	lines.push("");
 
 	// ── Extension API Surface ──
 	lines.push("### Extension API Surface");
 	lines.push("");
-	lines.push("Extensions export a default function receiving `ExtensionAPI` (conventionally named `pi`):");
+	lines.push(
+		"Extensions export a default function receiving `ExtensionAPI` (conventionally named `pi`):"
+	);
 	lines.push("");
 
 	const apiBlock = findInterfaceBlock(typesSrc, "ExtensionAPI");
@@ -414,7 +436,9 @@ function generateReference() {
 		lines.push("| Event | Payload | Can return |");
 		lines.push("|-------|---------|------------|");
 		for (const e of evts) {
-			lines.push(`| \`${e.event}\` | \`${e.eventType}\` | ${e.resultType ? `\`${e.resultType}\`` : "—"} |`);
+			lines.push(
+				`| \`${e.event}\` | \`${e.eventType}\` | ${e.resultType ? `\`${e.resultType}\`` : "—"} |`
+			);
 		}
 		lines.push("");
 	}
