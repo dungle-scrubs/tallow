@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-02-16
 
 ### Added
 
@@ -303,7 +303,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **teams:** add runtime wiring integration coverage ([ec5d06e](https://github.com/dungle-scrubs/tallow/commit/ec5d06e3f1ba15ac2c1f33c03efe3e53f1ef6d6e))
 * **teams:** add team_send wait=true cancellation tests ([91eede8](https://github.com/dungle-scrubs/tallow/commit/91eede88c50a2ec07549ef47f96a5e9bbb90a89e))
 
-## [Unreleased]
+## [0.6.0-pre] - 2026-02-15
 
 ### Added
 
