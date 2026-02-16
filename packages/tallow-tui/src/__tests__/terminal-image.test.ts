@@ -58,12 +58,13 @@ describe("calculateImageLayout", () => {
 	});
 
 	describe("maxHeightCells clamping", () => {
-		it("clamps portrait images to maxHeightCells but keeps full width", () => {
+		it("reduces columns proportionally when height-clamped (portrait)", () => {
 			const dims: ImageDimensions = { widthPx: 1000, heightPx: 2000 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.rows).toBe(25);
-			// Width stays at natural cols (ceil(1000/9) = 112 > 60, so capped at 60)
-			expect(layout.columns).toBe(60);
+			// Unclamped: 60 cols → rows = ceil(2000*(540/1000)/18) = 60
+			// Clamped: heightScale = (25*18)/2000 = 0.225, cols = floor(1000*0.225/9) = 25
+			expect(layout.columns).toBe(25);
 		});
 
 		it("does not clamp landscape images below maxHeightCells", () => {
@@ -74,20 +75,20 @@ describe("calculateImageLayout", () => {
 			expect(layout.columns).toBe(60);
 		});
 
-		it("clamps tall portrait rows but preserves full width", () => {
+		it("reduces columns proportionally when height-clamped (tall portrait)", () => {
 			const dims: ImageDimensions = { widthPx: 500, heightPx: 3000 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.rows).toBe(25);
-			// Width stays at natural cols: ceil(500/9) = 56
-			expect(layout.columns).toBe(56);
+			// heightScale = 450/3000 = 0.15, cols = floor(500*0.15/9) = 8
+			expect(layout.columns).toBe(8);
 		});
 
-		it("keeps full width when clamping height on square images", () => {
+		it("reduces columns proportionally when height-clamped (square)", () => {
 			const dims: ImageDimensions = { widthPx: 1024, heightPx: 1024 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			expect(layout.rows).toBe(25);
-			// Width stays at 60 (natural = ceil(1024/9) = 114 > 60)
-			expect(layout.columns).toBe(60);
+			// heightScale = 450/1024 = 0.4395, cols = floor(1024*0.4395/9) = 50
+			expect(layout.columns).toBe(50);
 		});
 
 		it("does nothing when maxHeightCells is undefined", () => {
@@ -113,15 +114,15 @@ describe("calculateImageLayout", () => {
 	});
 
 	describe("combined natural width + height clamping", () => {
-		it("clamps width first, then height", () => {
+		it("clamps width first, then height reduces columns further", () => {
 			// Small AND tall: 100×1000
 			const dims: ImageDimensions = { widthPx: 100, heightPx: 1000 };
 			const layout = calculateImageLayout(dims, 60, DEFAULT_CELL, 25);
 			// Natural cols = ceil(100/9) = 12 (clamped from 60)
-			// At 12 cols: rows = ceil(1000 * (12*9/100) / 18) = ceil(60) = 60
-			// Then clamped to 25 rows, back-calc columns
+			// At 12 cols: rows = ceil(1000*(108/100)/18) = 60
+			// Clamped: heightScale = 450/1000 = 0.45, cols = floor(100*0.45/9) = 5
 			expect(layout.rows).toBe(25);
-			expect(layout.columns).toBeLessThanOrEqual(12);
+			expect(layout.columns).toBe(5);
 		});
 	});
 });
