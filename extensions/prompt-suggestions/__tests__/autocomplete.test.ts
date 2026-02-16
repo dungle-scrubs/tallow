@@ -9,6 +9,7 @@ import {
 	type AutocompleteConfig,
 	AutocompleteEngine,
 	type CompletionFn,
+	type ConversationContext,
 	MIN_CHARS,
 	type ModelRegistryLike,
 	resolveAutocompleteModel,
@@ -68,6 +69,7 @@ function createTestEngine(opts: {
 	registry?: ModelRegistryLike;
 	completionFn?: CompletionFn;
 	currentText?: string;
+	conversationContext?: ConversationContext | null;
 }) {
 	const ghostTexts: (string | null)[] = [];
 	let currentText = opts.currentText ?? "";
@@ -83,7 +85,8 @@ function createTestEngine(opts: {
 		registry,
 		completionFn,
 		(text) => ghostTexts.push(text),
-		() => currentText
+		() => currentText,
+		() => opts.conversationContext ?? null
 	);
 
 	return {
@@ -445,5 +448,58 @@ describe("AutocompleteEngine lifecycle", () => {
 		engine.dispose();
 		await waitForDebounce(100);
 		expect(calls.length).toBe(0);
+	});
+});
+
+// ─── Conversation context passthrough ────────────────────────────────────────
+
+describe("AutocompleteEngine conversation context", () => {
+	let engine: AutocompleteEngine;
+
+	afterEach(() => {
+		engine?.dispose();
+	});
+
+	test("passes conversation context to completion function", async () => {
+		let receivedContext: ConversationContext | null = null;
+		const context: ConversationContext = {
+			recentExchanges: "User: fix the auth bug\n\nAssistant: I found the issue in auth.ts",
+		};
+
+		const result = createTestEngine({
+			config: { debounceMs: 5 },
+			completionFn: async (_m, _k, _input, _signal, ctx) => {
+				receivedContext = ctx;
+				return "done";
+			},
+			currentText: "now also",
+			conversationContext: context,
+		});
+		engine = result.engine;
+
+		engine.trigger("now also");
+		await waitForDebounce();
+		expect(receivedContext).not.toBeNull();
+		expect(receivedContext?.recentExchanges).toContain("fix the auth bug");
+		expect(receivedContext?.recentExchanges).toContain("auth.ts");
+	});
+
+	test("passes null context when no conversation history", async () => {
+		let receivedContext: ConversationContext | null | undefined = undefined;
+
+		const result = createTestEngine({
+			config: { debounceMs: 5 },
+			completionFn: async (_m, _k, _input, _signal, ctx) => {
+				receivedContext = ctx;
+				return "done";
+			},
+			currentText: "hello",
+			conversationContext: null,
+		});
+		engine = result.engine;
+
+		engine.trigger("hello");
+		await waitForDebounce();
+		expect(receivedContext).toBeNull();
 	});
 });
