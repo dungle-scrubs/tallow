@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, matchesKey, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { atomicWriteFileSync } from "../_shared/atomic-write.js";
 
 /**
  * Theme switcher extension with live preview.
@@ -335,7 +336,7 @@ function persistTheme(themeName: string): void {
 			}
 		}
 		settings.theme = themeName;
-		writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
+		atomicWriteFileSync(settingsPath, JSON.stringify(settings, null, 2), { backup: true });
 	} catch (err) {
 		console.error(`theme-selector: failed to persist theme: ${err}`);
 	}

@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { atomicWriteFileSync } from "../_shared/atomic-write.js";
 import {
 	buildReminderContent,
 	buildStyledPrompt,
@@ -92,7 +93,7 @@ function writeActiveStyleId(id: string | null): void {
 	try {
 		fs.mkdirSync(USER_STYLES_DIR, { recursive: true });
 		if (id) {
-			fs.writeFileSync(STATE_FILE, id);
+			atomicWriteFileSync(STATE_FILE, id);
 		} else if (fs.existsSync(STATE_FILE)) {
 			fs.unlinkSync(STATE_FILE);
 		}

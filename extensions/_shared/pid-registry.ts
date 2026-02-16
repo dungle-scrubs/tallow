@@ -9,8 +9,9 @@
  * and {@link unregisterPid} when the child exits or is killed.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { atomicWriteFileSync } from "./atomic-write.js";
 
 // ─── Types (mirror src/pid-manager.ts) ──────────────────────────────────────
 
@@ -72,7 +73,7 @@ function writePidFile(file: PidFile): void {
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
-	writeFileSync(path, `${JSON.stringify(file, null, "\t")}\n`);
+	atomicWriteFileSync(path, `${JSON.stringify(file, null, "\t")}\n`);
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────

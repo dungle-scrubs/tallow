@@ -6,25 +6,23 @@
  * locking and `fs.watch`, and pure predicates that operate on task arrays.
  */
 
-import { randomUUID } from "node:crypto";
 import type { FSWatcher } from "node:fs";
 import {
 	existsSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
-	renameSync,
 	rmdirSync,
 	rmSync,
 	statSync,
 	unlinkSync,
 	watch,
-	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
+import { atomicWriteFileSync } from "../../_shared/atomic-write.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -291,21 +289,15 @@ export class TaskListStore {
 
 		const filename = `${task.id}.json`;
 		const filePath = join(this.dirPath, filename);
-		const tmpPath = join(this.dirPath, `.${filename}.${randomUUID().slice(0, 8)}.tmp`);
 		const unlock = this.lock();
 
 		try {
 			this.recentWrites.add(filename);
-			writeFileSync(tmpPath, JSON.stringify(task, null, 2), "utf-8");
-			renameSync(tmpPath, filePath);
+			atomicWriteFileSync(filePath, JSON.stringify(task, null, 2));
 			setTimeout(() => this.recentWrites.delete(filename), 200);
 		} catch {
 			this.recentWrites.delete(filename);
-			try {
-				writeFileSync(filePath, JSON.stringify(task, null, 2), "utf-8");
-			} catch {
-				// Silent — state still in session entries
-			}
+			// Silent — state still in session entries
 		} finally {
 			unlock();
 		}
