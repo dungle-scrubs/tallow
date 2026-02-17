@@ -77,6 +77,14 @@ program
 		"--tools <names>",
 		"Restrict available tools (comma-separated: read,bash,edit,write,grep,find,ls or presets: readonly,coding,none)"
 	)
+	.option(
+		"--allowedTools <rules...>",
+		'Permission allow rules in Tool(specifier) format (e.g. "Bash(npm *)" "Read")'
+	)
+	.option(
+		"--disallowedTools <rules...>",
+		'Permission deny rules in Tool(specifier) format (e.g. "Bash(ssh *)" "WebFetch")'
+	)
 	.option("-e, --extension <path...>", "Additional extension paths")
 	.option("--no-extensions", "Disable all extensions (bundled + user)")
 	.option("--list", "List available sessions")
@@ -115,8 +123,10 @@ program.parse();
  * @returns Promise that resolves when execution completes
  */
 async function run(opts: {
+	allowedTools?: string[];
 	continue?: boolean;
 	debug?: boolean;
+	disallowedTools?: string[];
 	extension?: string[];
 	extensions?: boolean;
 	forkSession?: string;
@@ -224,6 +234,15 @@ async function run(opts: {
 			console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
 			process.exit(1);
 		}
+	}
+
+	// Permission rules via CLI flags — pass as env vars for extension pickup.
+	// Extensions live in a separate tsconfig so CLI can't import them directly.
+	if (opts.allowedTools?.length) {
+		process.env.TALLOW_ALLOWED_TOOLS = JSON.stringify(opts.allowedTools);
+	}
+	if (opts.disallowedTools?.length) {
+		process.env.TALLOW_DISALLOWED_TOOLS = JSON.stringify(opts.disallowedTools);
 	}
 
 	// ── Read piped stdin early (before the nested-session guard) ─────────────
