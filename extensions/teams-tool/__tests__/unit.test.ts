@@ -166,10 +166,10 @@ describe("isTaskReady", () => {
 		expect(isTaskReady(team, task)).toBe(false);
 	});
 
-	it("returns false when blocker ID does not exist", () => {
+	it("treats missing blocker ID as satisfied to prevent deadlock", () => {
 		const team = freshTeam();
 		const task = addTaskToBoard(team, "orphan", "", ["999"]);
-		expect(isTaskReady(team, task)).toBe(false);
+		expect(isTaskReady(team, task)).toBe(true);
 	});
 });
 

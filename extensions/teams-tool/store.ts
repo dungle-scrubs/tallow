@@ -221,7 +221,9 @@ export function isTaskReady(team: Team, task: TeamTask): boolean {
 	if (task.status !== "pending") return false;
 	return task.blockedBy.every((id) => {
 		const blocker = team.tasks.find((t) => t.id === id);
-		return blocker?.status === "completed";
+		// Treat missing blockers as satisfied — prevents permanent deadlock
+		// from invalid/deleted blocker IDs
+		return !blocker || blocker.status === "completed";
 	});
 }
 

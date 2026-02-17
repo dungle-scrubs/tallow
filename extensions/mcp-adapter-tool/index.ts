@@ -277,7 +277,15 @@ class StdioTransport implements McpTransport {
 				},
 			});
 
-			this.process.stdin.write(`${JSON.stringify(request)}\n`);
+			try {
+				this.process.stdin.write(`${JSON.stringify(request)}\n`);
+			} catch {
+				this.pendingRequests.delete(request.id);
+				clearTimeout(timer);
+				reject(
+					new Error(`MCP server "${this.name}" stdin write failed — process may have crashed`)
+				);
+			}
 		});
 	}
 
@@ -287,7 +295,11 @@ class StdioTransport implements McpTransport {
 	 */
 	notify(notification: JsonRpcNotification): void {
 		if (this._connected && this.process?.stdin) {
-			this.process.stdin.write(`${JSON.stringify(notification)}\n`);
+			try {
+				this.process.stdin.write(`${JSON.stringify(notification)}\n`);
+			} catch {
+				/* Process may have crashed between guard and write — ignore for fire-and-forget */
+			}
 		}
 	}
 

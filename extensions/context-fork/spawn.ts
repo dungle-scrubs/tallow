@@ -193,14 +193,18 @@ export async function spawnForkSubprocess(options: ForkOptions): Promise<ForkRes
 			});
 
 			// Timeout with SIGTERM → SIGKILL escalation
+			let killTimer: ReturnType<typeof setTimeout> | undefined;
 			const timeout = setTimeout(() => {
 				proc.kill("SIGTERM");
-				setTimeout(() => {
+				killTimer = setTimeout(() => {
 					if (!proc.killed) proc.kill("SIGKILL");
 				}, 5000);
 			}, TIMEOUT_MS);
 
-			proc.on("close", () => clearTimeout(timeout));
+			proc.on("close", () => {
+				clearTimeout(timeout);
+				if (killTimer) clearTimeout(killTimer);
+			});
 		});
 
 		const { text, model } = extractFinalOutput(events);

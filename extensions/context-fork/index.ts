@@ -163,7 +163,13 @@ function getPackageAgentDirs(settingsPath: string): string[] {
 		const settingsDir = path.dirname(settingsPath);
 
 		for (const pkg of settings.packages) {
-			const source = typeof pkg === "string" ? pkg : pkg.source;
+			const source =
+				typeof pkg === "string"
+					? pkg
+					: typeof pkg === "object" && pkg !== null && "source" in pkg
+						? pkg.source
+						: null;
+			if (!source || typeof source !== "string") continue;
 			if (source.startsWith("npm:") || source.startsWith("git:") || source.startsWith("https://"))
 				continue;
 

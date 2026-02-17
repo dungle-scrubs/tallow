@@ -34,7 +34,9 @@ export function getCellDimensions(): CellDimensions {
 }
 
 export function setCellDimensions(dims: CellDimensions): void {
-	cellDimensions = dims;
+	if (dims.widthPx > 0 && dims.heightPx > 0) {
+		cellDimensions = dims;
+	}
 }
 
 export function detectCapabilities(): TerminalCapabilities {

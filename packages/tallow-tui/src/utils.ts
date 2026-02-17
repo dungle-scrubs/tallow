@@ -123,9 +123,9 @@ export function visibleWidth(str: string): number {
 		// Strip APC sequences: \x1b_...\x07 or \x1b_...\x1b\\
 		// Also handles unterminated APC sequences.
 		clean = clean.replace(/\x1b_[^\x07\x1b]*(?:\x07|\x1b\\)?/g, "");
-		// Strip all CSI sequences: ESC [ (optional ?/!/>) params final-byte
+		// Strip all CSI sequences: ESC [ (optional ?/!/>) params final-byte (0x40-0x7E)
 		// Covers SGR (m), cursor movement (A-H), erase (J/K), DEC private mode (?25l/h), etc.
-		clean = clean.replace(/\x1b\[[?!>]?[0-9;]*[a-zA-Z]/g, "");
+		clean = clean.replace(/\x1b\[[?!>]?[0-9;]*[\x40-\x7e]/g, "");
 	}
 
 	// Calculate width
@@ -154,7 +154,7 @@ export function extractAnsiCode(str: string, pos: number): { code: string; lengt
 
 	const next = str[pos + 1];
 
-	// CSI sequence: ESC [ (optional ?/!/>) digits/semicolons then final letter
+	// CSI sequence: ESC [ (optional ?/!/>) digits/semicolons then final byte (0x40-0x7E)
 	// Covers SGR, cursor movement, erase, DEC private mode, etc.
 	if (next === "[") {
 		let j = pos + 2;
@@ -162,8 +162,9 @@ export function extractAnsiCode(str: string, pos: number): { code: string; lengt
 		if (j < str.length && (str[j] === "?" || str[j] === "!" || str[j] === ">")) j++;
 		// Skip parameter bytes (digits and semicolons)
 		while (j < str.length && /[0-9;]/.test(str[j]!)) j++;
-		// Must end with a letter (final byte of CSI sequence)
-		if (j < str.length && /[a-zA-Z]/.test(str[j]!)) {
+		// Must end with a final byte in the 0x40-0x7E range (@ through ~)
+		const code = str.charCodeAt(j);
+		if (j < str.length && code >= 0x40 && code <= 0x7e) {
 			return { code: str.substring(pos, j + 1), length: j + 1 - pos };
 		}
 		return null;
