@@ -245,7 +245,7 @@ export function formatProgressMessage(
 	tailLines: string[],
 	maxWidth: number
 ): string {
-	let msg = `Running: ${preview}`;
+	let msg = `Bash: ${preview}`;
 	for (const line of tailLines) {
 		const clean = stripAllAnsi(line).trim();
 		if (clean.length === 0) continue;
@@ -366,7 +366,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 			const cmd = params.command ?? "";
 			const firstLine = cmd.split("\n")[0];
 			const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
-			ctx.ui.setWorkingMessage(`Running: ${preview}`);
+			ctx.ui.setWorkingMessage(`Bash: ${preview}`);
 
 			// Progress: surface output tail in the working message area
 			let lastProgressTime = 0;

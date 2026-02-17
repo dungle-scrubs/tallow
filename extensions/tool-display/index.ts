@@ -196,7 +196,7 @@ interface VerbTense {
 }
 
 /**
- * Mapping of tool names to their verb tense pairs.
+ * Mapping of tool names to their display label and verb tense pairs.
  * Custom tools not in this map fall back to title-casing the tool name.
  */
 const VERB_TENSES: ReadonlyMap<string, VerbTense> = new Map([
@@ -211,20 +211,53 @@ const VERB_TENSES: ReadonlyMap<string, VerbTense> = new Map([
 ]);
 
 /**
+ * Display labels for tools. Maps internal tool names to user-facing names.
+ * Tools not in this map use a title-cased version of their name.
+ */
+const TOOL_LABELS: ReadonlyMap<string, string> = new Map([
+	["bash", "Bash"],
+	["read", "Read"],
+	["write", "Write"],
+	["edit", "Edit"],
+	["ls", "Ls"],
+	["grep", "Grep"],
+	["find", "Find"],
+	["web_search", "Web Search"],
+	["web_fetch", "Web Fetch"],
+]);
+
+/**
+ * Get the user-facing display label for a tool.
+ *
+ * @param toolName - Internal tool name (e.g., "bash", "web_search")
+ * @returns Display label (e.g., "Bash", "Web Search")
+ */
+function getToolLabel(toolName: string): string {
+	return (
+		TOOL_LABELS.get(toolName) ??
+		toolName
+			.split("_")
+			.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+			.join(" ")
+	);
+}
+
+/**
  * Get the appropriate verb form for a tool based on execution state.
  *
- * Returns present continuous during execution ("Reading…") and
- * past tense on completion ("Read"). Falls back to the raw tool name
+ * Returns the tool label followed by a verb: "Bash: Running…" during
+ * execution, "Bash: Ran" on completion. Falls back to the tool label
  * with "…" appended (present) or as-is (past) for unmapped tools.
  *
  * @param toolName - Name of the tool (e.g., "read", "bash")
  * @param isComplete - Whether the tool has finished executing
- * @returns Formatted verb string for display
+ * @returns Formatted verb string for display (e.g., "Bash: Running…")
  */
 export function formatToolVerb(toolName: string, isComplete: boolean): string {
+	const label = getToolLabel(toolName);
 	const tense = VERB_TENSES.get(toolName);
-	if (tense) return isComplete ? tense.past : tense.present;
-	return isComplete ? toolName : `${toolName}…`;
+	if (tense) return `${label}: ${isComplete ? tense.past : tense.present}`;
+	return isComplete ? label : `${label}…`;
 }
 
 /** Noop — this extension is a shared library, not an active extension */

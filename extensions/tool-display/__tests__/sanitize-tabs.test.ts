@@ -20,32 +20,32 @@ describe("sanitizeTabs", () => {
 });
 
 describe("formatToolVerb", () => {
-	it("returns present continuous for known tools during execution", () => {
-		expect(formatToolVerb("read", false)).toBe("Reading…");
-		expect(formatToolVerb("write", false)).toBe("Writing…");
-		expect(formatToolVerb("edit", false)).toBe("Editing…");
-		expect(formatToolVerb("bash", false)).toBe("Running…");
-		expect(formatToolVerb("ls", false)).toBe("Listing…");
-		expect(formatToolVerb("grep", false)).toBe("Searching…");
-		expect(formatToolVerb("find", false)).toBe("Finding…");
+	it("returns label + present continuous for known tools during execution", () => {
+		expect(formatToolVerb("read", false)).toBe("Read: Reading…");
+		expect(formatToolVerb("write", false)).toBe("Write: Writing…");
+		expect(formatToolVerb("edit", false)).toBe("Edit: Editing…");
+		expect(formatToolVerb("bash", false)).toBe("Bash: Running…");
+		expect(formatToolVerb("ls", false)).toBe("Ls: Listing…");
+		expect(formatToolVerb("grep", false)).toBe("Grep: Searching…");
+		expect(formatToolVerb("find", false)).toBe("Find: Finding…");
 	});
 
-	it("returns past tense for known tools when complete", () => {
-		expect(formatToolVerb("read", true)).toBe("Read");
-		expect(formatToolVerb("write", true)).toBe("Wrote");
-		expect(formatToolVerb("edit", true)).toBe("Edited");
-		expect(formatToolVerb("bash", true)).toBe("Ran");
-		expect(formatToolVerb("ls", true)).toBe("Listed");
-		expect(formatToolVerb("grep", true)).toBe("Searched");
-		expect(formatToolVerb("find", true)).toBe("Found");
+	it("returns label + past tense for known tools when complete", () => {
+		expect(formatToolVerb("read", true)).toBe("Read: Read");
+		expect(formatToolVerb("write", true)).toBe("Write: Wrote");
+		expect(formatToolVerb("edit", true)).toBe("Edit: Edited");
+		expect(formatToolVerb("bash", true)).toBe("Bash: Ran");
+		expect(formatToolVerb("ls", true)).toBe("Ls: Listed");
+		expect(formatToolVerb("grep", true)).toBe("Grep: Searched");
+		expect(formatToolVerb("find", true)).toBe("Find: Found");
 	});
 
-	it("falls back to tool name with ellipsis for unknown tools during execution", () => {
-		expect(formatToolVerb("custom_tool", false)).toBe("custom_tool…");
+	it("falls back to title-cased label with ellipsis for unknown tools during execution", () => {
+		expect(formatToolVerb("custom_tool", false)).toBe("Custom Tool…");
 	});
 
-	it("falls back to raw tool name for unknown tools when complete", () => {
-		expect(formatToolVerb("custom_tool", true)).toBe("custom_tool");
+	it("falls back to title-cased label for unknown tools when complete", () => {
+		expect(formatToolVerb("custom_tool", true)).toBe("Custom Tool");
 	});
 });
 

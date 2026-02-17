@@ -71,16 +71,16 @@ describe("extractTailLines", () => {
 
 describe("formatProgressMessage", () => {
 	it("shows command only when no tail lines", () => {
-		expect(formatProgressMessage("ls -la", [], 60)).toBe("Running: ls -la");
+		expect(formatProgressMessage("ls -la", [], 60)).toBe("Bash: ls -la");
 	});
 
 	it("shows command only when tail lines are all empty", () => {
-		expect(formatProgressMessage("ls -la", ["", "  "], 60)).toBe("Running: ls -la");
+		expect(formatProgressMessage("ls -la", ["", "  "], 60)).toBe("Bash: ls -la");
 	});
 
 	it("appends tail lines with visual prefix", () => {
 		const result = formatProgressMessage("bun install", ["added 42 packages", "done in 3s"], 60);
-		expect(result).toContain("Running: bun install");
+		expect(result).toContain("Bash: bun install");
 		expect(result).toContain("│ added 42 packages");
 		expect(result).toContain("│ done in 3s");
 	});
