@@ -56,7 +56,7 @@ const QuestionParams = Type.Object({
 export default function askUserQuestion(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ask_user_question",
-		label: "Ask User Question",
+		label: "ask_user_question",
 		description: `Ask the user a question and let them pick from options. Use when you need user input to proceed.
 
 WHEN TO USE:

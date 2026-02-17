@@ -20,36 +20,36 @@ describe("sanitizeTabs", () => {
 });
 
 describe("formatToolVerb", () => {
-	it("returns label + present continuous for known tools during execution", () => {
-		expect(formatToolVerb("read", false)).toBe("Read: Reading…");
-		expect(formatToolVerb("write", false)).toBe("Write: Writing…");
-		expect(formatToolVerb("edit", false)).toBe("Edit: Editing…");
-		expect(formatToolVerb("bash", false)).toBe("Bash: Running…");
-		expect(formatToolVerb("ls", false)).toBe("Ls: Listing…");
-		expect(formatToolVerb("grep", false)).toBe("Grep: Searching…");
-		expect(formatToolVerb("find", false)).toBe("Find: Finding…");
-		expect(formatToolVerb("generate_image", false)).toBe("GenerateImage: Generating…");
-		expect(formatToolVerb("web_search", false)).toBe("Web Search: Searching…");
+	it("returns name + present continuous for known tools during execution", () => {
+		expect(formatToolVerb("read", false)).toBe("read: Reading…");
+		expect(formatToolVerb("write", false)).toBe("write: Writing…");
+		expect(formatToolVerb("edit", false)).toBe("edit: Editing…");
+		expect(formatToolVerb("bash", false)).toBe("bash: Running…");
+		expect(formatToolVerb("ls", false)).toBe("ls: Listing…");
+		expect(formatToolVerb("grep", false)).toBe("grep: Searching…");
+		expect(formatToolVerb("find", false)).toBe("find: Finding…");
+		expect(formatToolVerb("generate_image", false)).toBe("generate_image: Generating…");
+		expect(formatToolVerb("web_search", false)).toBe("web_search: Searching…");
 	});
 
-	it("returns label + past tense for known tools when complete", () => {
-		expect(formatToolVerb("read", true)).toBe("Read: Read");
-		expect(formatToolVerb("write", true)).toBe("Write: Wrote");
-		expect(formatToolVerb("edit", true)).toBe("Edit: Edited");
-		expect(formatToolVerb("bash", true)).toBe("Bash: Ran");
-		expect(formatToolVerb("ls", true)).toBe("Ls: Listed");
-		expect(formatToolVerb("grep", true)).toBe("Grep: Searched");
-		expect(formatToolVerb("find", true)).toBe("Find: Found");
-		expect(formatToolVerb("generate_image", true)).toBe("GenerateImage: Generated");
-		expect(formatToolVerb("web_search", true)).toBe("Web Search: Searched");
+	it("returns name + past tense for known tools when complete", () => {
+		expect(formatToolVerb("read", true)).toBe("read: Read");
+		expect(formatToolVerb("write", true)).toBe("write: Wrote");
+		expect(formatToolVerb("edit", true)).toBe("edit: Edited");
+		expect(formatToolVerb("bash", true)).toBe("bash: Ran");
+		expect(formatToolVerb("ls", true)).toBe("ls: Listed");
+		expect(formatToolVerb("grep", true)).toBe("grep: Searched");
+		expect(formatToolVerb("find", true)).toBe("find: Found");
+		expect(formatToolVerb("generate_image", true)).toBe("generate_image: Generated");
+		expect(formatToolVerb("web_search", true)).toBe("web_search: Searched");
 	});
 
-	it("falls back to title-cased label with ellipsis for unknown tools during execution", () => {
-		expect(formatToolVerb("custom_tool", false)).toBe("Custom Tool…");
+	it("returns raw name with ellipsis for unknown tools during execution", () => {
+		expect(formatToolVerb("custom_tool", false)).toBe("custom_tool…");
 	});
 
-	it("falls back to title-cased label for unknown tools when complete", () => {
-		expect(formatToolVerb("custom_tool", true)).toBe("Custom Tool");
+	it("returns raw name for unknown tools when complete", () => {
+		expect(formatToolVerb("custom_tool", true)).toBe("custom_tool");
 	});
 });
 

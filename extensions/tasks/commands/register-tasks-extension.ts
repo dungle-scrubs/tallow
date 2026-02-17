@@ -965,7 +965,7 @@ export function registerTasksExtension(
 	// Tool for agent to manage tasks programmatically
 	pi.registerTool({
 		name: "manage_tasks",
-		label: "Manage Tasks",
+		label: "manage_tasks",
 		description: `Manage the task list - clear all tasks, complete specific tasks, or add new ones.
 
 WHEN TO CREATE TASKS:

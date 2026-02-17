@@ -577,7 +577,7 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "wezterm_pane",
-		label: "WezTerm Pane Control",
+		label: "wezterm_pane",
 		description: [
 			"Manage WezTerm panes and tabs from prompts.",
 			"Use action='list' to inspect panes in the current tab, then split/focus/close/zoom/resize/send_text/read_text/spawn_tab/move_to_tab.",

@@ -26,7 +26,7 @@ export function createTeammateTools(
 ): ToolDefinition[] {
 	const tasksTool: ToolDefinition = {
 		name: "team_tasks",
-		label: "Team Tasks",
+		label: "team_tasks",
 		description: [
 			"Manage the shared task board.",
 			"Actions: list (show all), claim (assign to yourself), complete (mark done), fail (mark failed).",
@@ -149,7 +149,7 @@ export function createTeammateTools(
 
 	const messageTool: ToolDefinition = {
 		name: "team_message",
-		label: "Team Message",
+		label: "team_message",
 		description:
 			"Send a message to another teammate (or 'all' to broadcast). If recipient is idle, they wake up automatically.",
 		parameters: Type.Object({
@@ -197,7 +197,7 @@ export function createTeammateTools(
 
 	const inboxTool: ToolDefinition = {
 		name: "team_inbox",
-		label: "Team Inbox",
+		label: "team_inbox",
 		description: "Check your inbox for unread messages from teammates or the orchestrator.",
 		parameters: Type.Object({}),
 		execute: async () => {

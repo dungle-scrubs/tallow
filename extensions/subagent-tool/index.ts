@@ -155,7 +155,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "subagent",
-		label: "Subagent",
+		label: "subagent",
 		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To include project-local agents, set agentScope: "both". Missing agent names recover gracefully via best-match or ephemeral fallback.
 
 MODEL SELECTION:
@@ -336,7 +336,7 @@ WHEN NOT TO USE SUBAGENTS:
 	// Tool to check status of background subagents
 	pi.registerTool({
 		name: "subagent_status",
-		label: "Subagent Status",
+		label: "subagent_status",
 		description:
 			"Check status of background subagents. Optionally provide a taskId to get details for a specific task.",
 		parameters: Type.Object({

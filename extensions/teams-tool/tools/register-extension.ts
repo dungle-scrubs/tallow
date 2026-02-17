@@ -382,7 +382,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_create",
-		label: "Team Create",
+		label: "team_create",
 		description: "Create a new agent team with a shared task board and inter-agent messaging.",
 		parameters: Type.Object({
 			name: Type.String({ description: "Team name (unique)" }),
@@ -426,7 +426,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_add_tasks",
-		label: "Team Add Tasks",
+		label: "team_add_tasks",
 		description:
 			"Add tasks to a team's shared board. Tasks can depend on other tasks (blockedBy). Blocked tasks become ready when all blockers complete.",
 		parameters: Type.Object({
@@ -488,7 +488,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_spawn",
-		label: "Team Spawn",
+		label: "team_spawn",
 		description: [
 			"Spawn a teammate with their own agent session, shared task board access, and inter-agent messaging.",
 			"They get standard coding tools plus team coordination tools.",
@@ -596,7 +596,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_send",
-		label: "Team Send",
+		label: "team_send",
 		description: [
 			"Send a message to a teammate. If idle, wakes them up.",
 			"Set wait=true to block until the teammate finishes processing.",
@@ -756,7 +756,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_status",
-		label: "Team Status",
+		label: "team_status",
 		description: "Get team overview: task board, teammate states, and recent messages.",
 		parameters: Type.Object({
 			team: Type.String({ description: "Team name" }),
@@ -786,7 +786,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_shutdown",
-		label: "Team Shutdown",
+		label: "team_shutdown",
 		description: "Shutdown a team. Aborts all running teammates and cleans up sessions.",
 		parameters: Type.Object({
 			team: Type.String({ description: "Team name" }),
@@ -845,7 +845,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "team_resume",
-		label: "Team Resume",
+		label: "team_resume",
 		description:
 			"Restore an archived team and its task board. Lists archived teams when called without a name. " +
 			"The restored team has no teammates — spawn new ones to continue work on remaining tasks.",

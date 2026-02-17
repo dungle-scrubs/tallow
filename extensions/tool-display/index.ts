@@ -212,48 +212,28 @@ const VERB_TENSES: ReadonlyMap<string, VerbTense> = new Map([
 ]);
 
 /**
- * Display labels for tools. Maps internal tool names to user-facing names.
- * Tools not in this map use a title-cased version of their name.
- */
-const TOOL_LABELS: ReadonlyMap<string, string> = new Map([
-	["bash", "Bash"],
-	["read", "Read"],
-	["write", "Write"],
-	["edit", "Edit"],
-	["ls", "Ls"],
-	["grep", "Grep"],
-	["find", "Find"],
-	["web_search", "Web Search"],
-	["web_fetch", "Web Fetch"],
-	["generate_image", "GenerateImage"],
-]);
-
-/**
- * Get the user-facing display label for a tool.
+ * Get the display label for a tool.
  *
- * @param toolName - Internal tool name (e.g., "bash", "web_search")
- * @returns Display label (e.g., "Bash", "Web Search")
+ * Returns the raw tool name as-is — no casing transformation.
+ * Tool names are snake_case by convention and displayed that way.
+ *
+ * @param toolName - Tool name (e.g., "bash", "web_search")
+ * @returns The tool name unchanged
  */
 function getToolLabel(toolName: string): string {
-	return (
-		TOOL_LABELS.get(toolName) ??
-		toolName
-			.split("_")
-			.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-			.join(" ")
-	);
+	return toolName;
 }
 
 /**
  * Get the appropriate verb form for a tool based on execution state.
  *
- * Returns the tool label followed by a verb: "Bash: Running…" during
- * execution, "Bash: Ran" on completion. Falls back to the tool label
+ * Returns the tool name followed by a verb: "bash: Running…" during
+ * execution, "bash: Ran" on completion. Falls back to the tool name
  * with "…" appended (present) or as-is (past) for unmapped tools.
  *
  * @param toolName - Name of the tool (e.g., "read", "bash")
  * @param isComplete - Whether the tool has finished executing
- * @returns Formatted verb string for display (e.g., "Bash: Running…")
+ * @returns Formatted verb string for display (e.g., "bash: Running…")
  */
 export function formatToolVerb(toolName: string, isComplete: boolean): string {
 	const label = getToolLabel(toolName);

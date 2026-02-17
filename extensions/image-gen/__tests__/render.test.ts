@@ -68,11 +68,11 @@ function renderCallToText(component: unknown): string {
 }
 
 describe("renderCall", () => {
-	it("shows GenerateImage label with prompt text", () => {
+	it("shows generate_image label with prompt text", () => {
 		const text = renderCallToText(
 			toolDef.renderCall({ prompt: "a sunset over mountains" }, mockTheme)
 		);
-		expect(text).toContain("GenerateImage:");
+		expect(text).toContain("generate_image:");
 		expect(text).toContain("Generating");
 		expect(text).toContain("a sunset over mountains");
 	});

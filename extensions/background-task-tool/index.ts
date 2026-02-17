@@ -476,7 +476,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	// Tool: Run bash in background
 	pi.registerTool({
 		name: "bg_bash",
-		label: "Background Bash",
+		label: "bg_bash",
 		description:
 			"Run a bash command in the background. By default, streams live output and waits for completion. Set background=true for fire-and-forget daemons/servers.\n\nWHEN TO USE:\n- Starting daemons or servers (with background: true)\n- Long-running builds or tests (default: streams output)\n- Any process you want to run independently\n\nWARNING: Never use bash tool with & to background processes - it will hang. Use bg_bash instead.",
 		parameters: Type.Object({
@@ -780,7 +780,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	// Tool: Get task output
 	pi.registerTool({
 		name: "task_output",
-		label: "Task Output",
+		label: "task_output",
 		description:
 			"Retrieve the output from a background task. Can be called while task is still running to get partial output.",
 		parameters: Type.Object({
@@ -919,7 +919,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	// Tool: Check task status
 	pi.registerTool({
 		name: "task_status",
-		label: "Task Status",
+		label: "task_status",
 		description: "Check if a background task is still running or has completed.",
 		parameters: Type.Object({
 			taskId: Type.String({ description: "Task ID returned by bg_bash" }),
@@ -1006,7 +1006,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	// Tool: Kill a background task
 	pi.registerTool({
 		name: "task_kill",
-		label: "Kill Task",
+		label: "task_kill",
 		description: "Kill a running background task.",
 		parameters: Type.Object({
 			taskId: Type.String({ description: "Task ID to kill" }),

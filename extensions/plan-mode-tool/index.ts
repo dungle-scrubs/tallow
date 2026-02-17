@@ -246,7 +246,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	// Tool for the agent to toggle plan mode programmatically
 	pi.registerTool({
 		name: "plan_mode",
-		label: "Plan Mode",
+		label: "plan_mode",
 		description: `Toggle plan mode on or off. Plan mode is a read-only exploration mode for safe code analysis.
 
 When enabled:

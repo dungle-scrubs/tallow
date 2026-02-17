@@ -95,7 +95,7 @@ export default function (pi: ExtensionAPI) {
 	// cd tool for LLM
 	pi.registerTool({
 		name: "cd",
-		label: "Change Directory",
+		label: "cd",
 		description:
 			"Change the current working directory. Use this before running commands that need to be in a specific directory.",
 		parameters: Type.Object({

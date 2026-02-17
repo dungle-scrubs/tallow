@@ -569,7 +569,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "switch_theme",
-		label: "Switch Theme",
+		label: "switch_theme",
 		description: `Switch the editor color theme by name, by mood tags, or randomly.
 
 WHEN TO USE:

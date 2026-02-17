@@ -94,7 +94,7 @@ async function tryFirecrawl(url: string, signal?: AbortSignal): Promise<string |
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "web_fetch",
-		label: "WebFetch",
+		label: "web_fetch",
 		description: `Fetch content from a URL. Returns the page text, truncated to 100KB by default.
 
 If FIRECRAWL_API_KEY is set and content exceeds the limit, automatically falls back

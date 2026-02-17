@@ -70,7 +70,7 @@ export default function webSearchTool(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "web_search",
-		label: "Web Search",
+		label: "web_search",
 		description: `Search the web for current information. Returns titles, URLs, snippets, and metadata.
 
 Requires BRAVE_API_KEY environment variable (free at https://api.search.brave.com/register).

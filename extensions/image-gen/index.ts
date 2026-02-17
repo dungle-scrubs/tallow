@@ -246,7 +246,7 @@ interface ImageGenDetails {
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "generate_image",
-		label: "ImageGen",
+		label: "generate_image",
 		description: `Generate images from text prompts. Auto-selects the best available provider based on capabilities and quality.
 
 Supports: OpenAI (gpt-image-1), Google (Gemini image, Imagen 4), xAI (Grok), BFL (Flux), Fal.
@@ -451,7 +451,7 @@ WHEN NOT TO USE:
 		renderCall(args, theme) {
 			const isIteration = !!args.thoughtSignature;
 			const verb = isIteration
-				? "GenerateImage: Iterating…"
+				? "generate_image: Iterating…"
 				: formatToolVerb("generate_image", false);
 			const model = args.model ? ` → ${args.model}` : "";
 			return new Text(

@@ -411,7 +411,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.registerTool({
 		name: "debug_inspect",
-		label: "Debug Inspect",
+		label: "debug_inspect",
 		description:
 			"Read and analyze debug diagnostic logs. Returns filtered, summarized log data — " +
 			"not raw JSONL. Use to diagnose errors, find slow tools, check turn efficiency, " +

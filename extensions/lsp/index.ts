@@ -501,7 +501,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 	// Tool: Go to Definition
 	pi.registerTool({
 		name: "lsp_definition",
-		label: "Go to Definition",
+		label: "lsp_definition",
 		description: `Jump to the definition of a symbol at a specific location in a file. Uses Language Server Protocol for precise navigation.
 
 WHEN TO USE:
@@ -577,7 +577,7 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 	// Tool: Find References
 	pi.registerTool({
 		name: "lsp_references",
-		label: "Find References",
+		label: "lsp_references",
 		description: `Find all references to a symbol at a specific location. Returns all files and locations where the symbol is used.
 
 WHEN TO USE:
@@ -654,7 +654,7 @@ WHEN TO USE:
 	// Tool: Hover (Type Info)
 	pi.registerTool({
 		name: "lsp_hover",
-		label: "Hover Info",
+		label: "lsp_hover",
 		description: `Get type information and documentation for a symbol at a specific location.
 
 WHEN TO USE:
@@ -721,7 +721,7 @@ WHEN TO USE:
 	// Tool: Document Symbols
 	pi.registerTool({
 		name: "lsp_symbols",
-		label: "Document Symbols",
+		label: "lsp_symbols",
 		description: `List all symbols (functions, classes, variables, etc.) in a file.
 
 WHEN TO USE:
@@ -785,7 +785,7 @@ WHEN TO USE:
 	// Tool: Workspace Symbol Search
 	pi.registerTool({
 		name: "lsp_workspace_symbols",
-		label: "Workspace Symbols",
+		label: "lsp_workspace_symbols",
 		description: `Search for symbols across the entire workspace/project by name.
 
 WHEN TO USE:
@@ -865,7 +865,7 @@ WHEN TO USE:
 	// Tool: Check LSP Status
 	pi.registerTool({
 		name: "lsp_status",
-		label: "LSP Status",
+		label: "lsp_status",
 		description: "Check which language servers are running and their capabilities.",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {

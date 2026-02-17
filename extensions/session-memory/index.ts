@@ -231,7 +231,7 @@ const SessionRecallParams = Type.Object({
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "session_recall",
-		label: "Session Recall",
+		label: "session_recall",
 		description:
 			"Search and recall relevant context from previous tallow sessions. " +
 			"Use when the user references something discussed in a prior session, or when you need " +
