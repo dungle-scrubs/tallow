@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.1...tallow-v0.7.2) (2026-02-17)
+
+
+### Added
+
+* **context-fork:** auto-route model when no explicit model specified ([6835e22](https://github.com/dungle-scrubs/tallow/commit/6835e22ce29b49fdec8a82006059afb034962fe8))
+* **subagent-tool:** add Arena leaderboard refresh script ([e7d1cdc](https://github.com/dungle-scrubs/tallow/commit/e7d1cdcfe32b0f9b2a29a5b59fd8f42658e317ba))
+* **subagent-tool:** add modelScope for scoped auto-routing ([8d884af](https://github.com/dungle-scrubs/tallow/commit/8d884af5cca71da36e35e431a076d02845774c71))
+* **teams-tool:** use full model routing for teammate spawning ([cb81ecd](https://github.com/dungle-scrubs/tallow/commit/cb81ecda3bf399a13bcf5e575320f14e074f1d10))
+
+
+### Fixed
+
+* address bugs found by bones agent hunt ([b33a1c6](https://github.com/dungle-scrubs/tallow/commit/b33a1c61e16a4a6e48db2022d23ff95a053bc48a))
+* **bash:** auto-backgrounded tasks invisible to task_output ([e086369](https://github.com/dungle-scrubs/tallow/commit/e0863692ffeeffc4e36b3dc77989431cc80f3083))
+* **subagent-tool:** show error details in failed parallel results ([1170038](https://github.com/dungle-scrubs/tallow/commit/11700385aefbebf2ffbffb3a13b98bfcd063f73b))
+* sync TALLOW_VERSION with package.json (0.7.1) ([5bb1afc](https://github.com/dungle-scrubs/tallow/commit/5bb1afc9d6e33be994a3a13afd1c411ff89a203a))
+
+
+### Changed
+
+* **subagent-tool:** improve resolver tiebreaking with capability scoring ([5951541](https://github.com/dungle-scrubs/tallow/commit/5951541b6024519e901d35ada469f2bb1f4ddcfe))
+
+
+### Maintenance
+
+* add dep-check and matrix-refresh workflows ([cdf4726](https://github.com/dungle-scrubs/tallow/commit/cdf4726b42d891ae906b83e99ff843f41c72d963))
+* **main:** release tallow 0.7.1 ([a1104bd](https://github.com/dungle-scrubs/tallow/commit/a1104bdfc59f86c95c9a5cec9e679c9f76bb1f29))
+* stop tracking AGENTS.md (user-local file) ([7591e7f](https://github.com/dungle-scrubs/tallow/commit/7591e7fadd32bda8cd9bf9c2ecbe33f3cf93ddb7))
+* **subagent-tool:** add gpt-5.3-codex, spark, and 5.1-codex-max to matrix ([11d30a9](https://github.com/dungle-scrubs/tallow/commit/11d30a9cee00080160a9d570beb031c206b0b64e))
+* treat feat as patch bump while pre-1.0 ([646cd71](https://github.com/dungle-scrubs/tallow/commit/646cd71687213dd40d093a6615505ead1b8f8bdf))
+
 ## [0.7.1](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.0...tallow-v0.7.1) (2026-02-17)
 
 
