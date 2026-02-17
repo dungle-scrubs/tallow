@@ -18,6 +18,14 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import {
+	type ExpansionVars,
+	evaluate as evaluatePermission,
+	type LoadedPermissions,
+	loadPermissionConfig,
+	type PermissionConfig,
+	parseRules,
+} from "./permissions.js";
 
 /** Trust classification for shell/process execution sources. */
 export type ShellTrustLevel = "explicit" | "implicit" | "internal";
@@ -160,6 +168,149 @@ const auditTrail: ShellAuditEntry[] =
 	((globalThis as Record<string, unknown>).__piShellAuditTrail as ShellAuditEntry[]) ?? [];
 (globalThis as Record<string, unknown>).__piShellAuditTrail = auditTrail;
 
+// ── Permission Cache ─────────────────────────────────────────────────────────
+
+/** Cached permission state, lazily loaded on first evaluateCommand() call. */
+let cachedPermissions: LoadedPermissions | null = null;
+/** CLI-provided permission config (set via setCliPermissionConfig). */
+let cliPermissionConfig: PermissionConfig | undefined;
+/** CWD used for the cached permission load. */
+let cachedPermissionsCwd: string | null = null;
+
+/**
+ * Set CLI-provided permission rules (from --allowedTools / --disallowedTools flags).
+ * Must be called before the first evaluateCommand() if CLI flags are present.
+ *
+ * @param config - CLI permission config
+ * @returns void
+ */
+export function setCliPermissionConfig(config: PermissionConfig): void {
+	cliPermissionConfig = config;
+	cachedPermissions = null; // Force reload on next access
+}
+
+/**
+ * Load CLI permission config from environment variables.
+ * Called lazily on first permission access. The CLI passes rules as
+ * JSON-encoded env vars since it can't import extensions directly.
+ *
+ * @returns CLI permission config, or undefined if no env vars set
+ */
+function loadCliPermissionConfigFromEnv(): PermissionConfig | undefined {
+	const allowJson = process.env.TALLOW_ALLOWED_TOOLS;
+	const denyJson = process.env.TALLOW_DISALLOWED_TOOLS;
+
+	if (!allowJson && !denyJson) return undefined;
+
+	const warnings: string[] = [];
+
+	let allowEntries: unknown[] = [];
+	let denyEntries: unknown[] = [];
+
+	try {
+		if (allowJson) allowEntries = JSON.parse(allowJson);
+	} catch {
+		warnings.push("Failed to parse TALLOW_ALLOWED_TOOLS env var");
+	}
+
+	try {
+		if (denyJson) denyEntries = JSON.parse(denyJson);
+	} catch {
+		warnings.push("Failed to parse TALLOW_DISALLOWED_TOOLS env var");
+	}
+
+	for (const w of warnings) {
+		console.error(`[permissions] ${w}`);
+	}
+
+	const allow = parseRules(allowEntries, warnings);
+	const deny = parseRules(denyEntries, warnings);
+
+	if (allow.length === 0 && deny.length === 0) return undefined;
+
+	return { allow, deny, ask: [] };
+}
+
+/**
+ * Get the currently loaded permission configuration.
+ * Loads lazily on first access from settings files.
+ * On first load, also checks env vars for CLI-provided permission rules.
+ *
+ * @param cwd - Current working directory
+ * @returns Loaded permission state
+ */
+export function getPermissions(cwd: string): LoadedPermissions {
+	if (cachedPermissions && cachedPermissionsCwd === cwd) {
+		return cachedPermissions;
+	}
+
+	// On first load, check for CLI env vars
+	if (!cliPermissionConfig) {
+		cliPermissionConfig = loadCliPermissionConfigFromEnv();
+	}
+
+	const { loaded, warnings } = loadPermissionConfig(cwd, cliPermissionConfig);
+	for (const w of warnings) {
+		console.error(`[permissions] ${w}`);
+	}
+	cachedPermissions = loaded;
+	cachedPermissionsCwd = cwd;
+	return loaded;
+}
+
+/**
+ * Force reload of permission configuration from disk.
+ * Returns warnings from the reload attempt.
+ *
+ * @param cwd - Current working directory
+ * @returns Array of warning messages from config parsing
+ */
+export function reloadPermissions(cwd: string): string[] {
+	cachedPermissions = null;
+	cachedPermissionsCwd = null;
+	const { loaded, warnings } = loadPermissionConfig(cwd, cliPermissionConfig);
+	cachedPermissions = loaded;
+	cachedPermissionsCwd = cwd;
+	return warnings;
+}
+
+/**
+ * Reset permission cache. Intended for tests.
+ *
+ * @returns void
+ */
+export function resetPermissionCache(): void {
+	cachedPermissions = null;
+	cliPermissionConfig = undefined;
+	cachedPermissionsCwd = null;
+}
+
+/**
+ * Build expansion variables for the current environment.
+ *
+ * @param cwd - Current working directory
+ * @returns Expansion variables for permission rule resolution
+ */
+function buildExpansionVars(cwd: string): ExpansionVars {
+	const home = homedir();
+	// Try to find git root for {project}
+	let project = cwd;
+	try {
+		const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+			cwd,
+			encoding: "utf-8",
+			timeout: 2000,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		if (result.status === 0 && result.stdout?.trim()) {
+			project = result.stdout.trim();
+		}
+	} catch {
+		// Not in a git repo — use cwd as project root
+	}
+	return { cwd, home, project };
+}
+
 /**
  * Clamp timeout values into the allowed execution range.
  *
@@ -221,7 +372,7 @@ export function getTrustLevel(source: ShellSource): ShellTrustLevel {
  * @param command - Raw command text
  * @returns Command text with quoted content replaced by spaces
  */
-function stripQuotedContent(command: string): string {
+export function stripQuotedContent(command: string): string {
 	let activeQuote: "'" | '"' | "`" | undefined;
 	let escaped = false;
 	let output = "";
@@ -390,6 +541,57 @@ export function evaluateCommand(
 			reason: "Command matches denylist",
 			normalizedCommand,
 		};
+	}
+
+	// ── User permission rules (after hardcoded denylist, before trust-level logic) ──
+	const permissions = getPermissions(cwd);
+	if (
+		permissions.merged.deny.length > 0 ||
+		permissions.merged.ask.length > 0 ||
+		permissions.merged.allow.length > 0
+	) {
+		const vars = buildExpansionVars(cwd);
+		const settingsDir = join(cwd, ".tallow");
+		const verdict = evaluatePermission(
+			"bash",
+			{ command: normalizedCommand },
+			permissions.merged,
+			vars,
+			settingsDir
+		);
+
+		if (verdict.action === "deny") {
+			return {
+				allowed: false,
+				requiresConfirmation: false,
+				trustLevel,
+				reason: verdict.reason ?? "Blocked by permission rule",
+				normalizedCommand,
+			};
+		}
+
+		if (verdict.action === "ask") {
+			return {
+				allowed: true,
+				requiresConfirmation: true,
+				trustLevel,
+				reason: verdict.reason ?? "Requires confirmation per permission rule",
+				normalizedCommand,
+			};
+		}
+
+		if (verdict.action === "allow") {
+			// Explicit allow skips trust-level prompting
+			return {
+				allowed: true,
+				requiresConfirmation: false,
+				trustLevel,
+				reason: verdict.reason,
+				normalizedCommand,
+			};
+		}
+
+		// "default" — fall through to trust-level logic
 	}
 
 	if (trustLevel === "internal") {
