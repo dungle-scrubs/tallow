@@ -232,6 +232,16 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 						pwd = `~${pwd.slice(home.length)}`;
 					}
 
+					// Demo mode: sanitize any remaining username references
+					// (paths outside $HOME that weren't shortened to ~)
+					const isDemo = process.env.IS_DEMO === "1" || process.env.TALLOW_DEMO === "1";
+					if (isDemo) {
+						const user = process.env.USER || process.env.USERNAME;
+						if (user && pwd.includes(user)) {
+							pwd = pwd.replaceAll(user, "demo");
+						}
+					}
+
 					// Git branch with status symbols (cached!)
 					const gitState = getGitState();
 					let gitBranch = "";
@@ -299,6 +309,7 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 								? `${modelName} • thinking off`
 								: `${modelName} • ${thinkingLevel}`;
 					}
+					if (isDemo) modelStr = `[DEMO] ${modelStr}`;
 
 					// Session name (set by session-namer extension)
 					const sessionName = sessionManager.getSessionName?.() ?? "";

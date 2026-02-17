@@ -22,7 +22,16 @@
 
 // ── Tallow SDK ───────────────────────────────────────────────────────────────
 
-export { APP_NAME, BUNDLED, bootstrap, CONFIG_DIR, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+export {
+	APP_NAME,
+	BUNDLED,
+	bootstrap,
+	CONFIG_DIR,
+	isDemoMode,
+	sanitizePath,
+	TALLOW_HOME,
+	TALLOW_VERSION,
+} from "./config.js";
 export { createTallowSession, type TallowSession, type TallowSessionOptions } from "./sdk.js";
 export { createSessionWithId, findSessionById } from "./session-utils.js";
 

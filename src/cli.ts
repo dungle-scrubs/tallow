@@ -12,7 +12,14 @@
  */
 
 // Bootstrap MUST happen before any framework imports resolve config
-import { APP_NAME, bootstrap, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+import {
+	APP_NAME,
+	bootstrap,
+	isDemoMode,
+	sanitizePath,
+	TALLOW_HOME,
+	TALLOW_VERSION,
+} from "./config.js";
 
 bootstrap();
 
@@ -89,6 +96,7 @@ program
 	.option("--no-extensions", "Disable all extensions (bundled + user)")
 	.option("--list", "List available sessions")
 	.option("--home", "Print Tallow home directory")
+	.option("--demo", "Demo mode: hide sensitive info (paths, session IDs) for recordings")
 	.option("--debug", "Enable debug diagnostic logging")
 	.addOption(new Option("--init").hideHelp())
 	.addOption(new Option("--init-only").hideHelp())
@@ -126,6 +134,7 @@ async function run(opts: {
 	allowedTools?: string[];
 	continue?: boolean;
 	debug?: boolean;
+	demo?: boolean;
 	disallowedTools?: string[];
 	extension?: string[];
 	extensions?: boolean;
@@ -145,6 +154,11 @@ async function run(opts: {
 	thinking?: string;
 	tools?: string;
 }): Promise<void> {
+	// Demo mode (set early — before --list and other output commands)
+	if (opts.demo) {
+		process.env.IS_DEMO = "1";
+	}
+
 	// Quick info commands
 	if (opts.home) {
 		console.log(TALLOW_HOME);
@@ -159,7 +173,8 @@ async function run(opts: {
 		}
 		for (const s of sessions) {
 			const date = s.modified.toLocaleDateString();
-			const label = s.name ?? s.firstMessage?.slice(0, 60) ?? "(empty)";
+			let label = s.name ?? s.firstMessage?.slice(0, 60) ?? "(empty)";
+			if (isDemoMode()) label = sanitizePath(label);
 			console.log(`  ${date}  ${s.messageCount} msgs  ${label}`);
 		}
 		return;
@@ -423,14 +438,19 @@ async function readStdin(): Promise<string | undefined> {
 	});
 }
 
+/** Counter for demo-mode session IDs. */
+let demoSessionCounter = 0;
+
 /**
  * Emit the session ID to stderr for programmatic chaining.
  * Keeps stdout clean for piping while exposing the ID via stderr.
+ * In demo mode, replaces the real UUID with a sequential label.
  *
  * @param sessionId - Session ID to emit
  */
 function emitSessionId(sessionId: string): void {
 	if (sessionId) {
-		process.stderr.write(`Session: ${sessionId}\n`);
+		const displayId = isDemoMode() ? `session-${++demoSessionCounter}` : sessionId;
+		process.stderr.write(`Session: ${displayId}\n`);
 	}
 }

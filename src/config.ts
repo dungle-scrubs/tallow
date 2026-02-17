@@ -72,6 +72,34 @@ export const TEMPLATES = {
 	commands: join(PACKAGE_DIR, "templates", "commands"),
 } as const;
 
+// ─── Demo Mode ───────────────────────────────────────────────────────────────
+
+/**
+ * Check if demo mode is enabled via IS_DEMO or TALLOW_DEMO env var.
+ * Demo mode sanitizes sensitive data (paths, session IDs) in UI output
+ * for screen recordings, live demos, and streaming.
+ *
+ * @returns True if demo mode is active
+ */
+export function isDemoMode(): boolean {
+	return process.env.IS_DEMO === "1" || process.env.TALLOW_DEMO === "1";
+}
+
+/**
+ * Sanitize a file path by replacing the current user's OS username with "demo".
+ * Returns the path unchanged when demo mode is off or the username can't be detected.
+ *
+ * @param path - File path to sanitize
+ * @returns Sanitized path with username replaced, or original if not in demo mode
+ */
+export function sanitizePath(path: string): string {
+	if (!isDemoMode()) return path;
+	const user = process.env.USER || process.env.USERNAME;
+	if (!user) return path;
+	// Replace /username/ segments and trailing /username
+	return path.replaceAll(`/${user}/`, "/demo/").replaceAll(`/${user}`, "/demo");
+}
+
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 /**
