@@ -3,6 +3,11 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. tallow-v0.7.2)"
+        required: true
 
 jobs:
   publish:
@@ -12,6 +17,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - uses: oven-sh/setup-bun@v2
         with:
