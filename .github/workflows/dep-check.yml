@@ -1,0 +1,124 @@
+name: Dependency Check
+
+on:
+  schedule:
+    # Daily at 08:00 UTC
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-pi-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.9"
+
+      - name: Check for pi-* dependency updates
+        id: check
+        run: |
+          # Extract current pinned versions from package.json
+          current=$(bun -e '
+            const pkg = require("./package.json");
+            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+            const pi = Object.entries(deps)
+              .filter(([k]) => k.startsWith("@mariozechner/pi-") && k !== "@mariozechner/pi-tui")
+              .map(([k, v]) => `${k}@${v}`);
+            console.log(pi.join("\n"));
+          ')
+
+          echo "Current versions:"
+          echo "$current"
+
+          # Check npm for latest versions
+          updates=""
+          has_ai_bump="false"
+
+          while IFS= read -r dep; do
+            pkg_name="${dep%@*}"
+            current_ver="${dep##*@}"
+            latest_ver=$(npm view "$pkg_name" version 2>/dev/null || echo "")
+
+            if [ -z "$latest_ver" ]; then
+              echo "⚠ Could not fetch latest for $pkg_name"
+              continue
+            fi
+
+            if [ "$current_ver" != "$latest_ver" ]; then
+              echo "📦 $pkg_name: $current_ver → $latest_ver"
+              updates="$updates\n- $pkg_name: $current_ver → $latest_ver"
+
+              if [ "$pkg_name" = "@mariozechner/pi-ai" ]; then
+                has_ai_bump="true"
+              fi
+            else
+              echo "✓ $pkg_name: $current_ver (up to date)"
+            fi
+          done <<< "$current"
+
+          if [ -z "$updates" ]; then
+            echo "All pi-* dependencies are up to date."
+            echo "has_updates=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_updates=true" >> "$GITHUB_OUTPUT"
+            echo "has_ai_bump=$has_ai_bump" >> "$GITHUB_OUTPUT"
+            # Store updates for PR body (escape newlines for GH output)
+            echo "updates<<EOF" >> "$GITHUB_OUTPUT"
+            echo -e "$updates" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update dependencies
+        if: steps.check.outputs.has_updates == 'true'
+        run: |
+          # Update all pi-* deps (except pi-tui which is workspace:*)
+          bun -e '
+            const pkg = require("./package.json");
+            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+            const piDeps = Object.keys(deps)
+              .filter(k => k.startsWith("@mariozechner/pi-") && k !== "@mariozechner/pi-tui");
+            console.log(piDeps.join(" "));
+          ' | xargs bun add
+
+          # Verify it builds
+          bun run build
+
+      - name: Create pull request
+        if: steps.check.outputs.has_updates == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: chore/bump-pi-deps
+          delete-branch: true
+          title: "chore(deps): bump pi-* dependencies"
+          body: |
+            Automated dependency update detected by daily cron.
+
+            ## Changes
+            ${{ steps.check.outputs.updates }}
+
+            ## Checklist
+            - [ ] Review changelog for breaking changes
+            - [ ] Verify CI passes
+            - [ ] Test locally if needed
+          labels: dependencies, automated
+          commit-message: "chore(deps): bump pi-* dependencies"
+
+      - name: Trigger matrix refresh on pi-ai bump
+        if: steps.check.outputs.has_ai_bump == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'matrix-refresh.yml',
+              ref: 'main',
+            });
+            console.log('Triggered matrix-refresh workflow (pi-ai version bumped)');
