@@ -1,12 +1,10 @@
-name: Publish to npm
+name: Publish to npm (manual)
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (e.g. tallow-v0.7.2)"
+        description: "Release tag to publish (e.g. tallow-v0.7.4)"
         required: true
 
 jobs:
@@ -18,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -27,7 +25,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Update npm (OIDC requires 11.5.1+)
         run: npm install -g npm@latest
@@ -39,7 +36,7 @@ jobs:
       - name: Strip bun workspace overrides before npm publish
         run: node -e "const p=require('./package.json'); delete p.overrides; require('fs').writeFileSync('package.json', JSON.stringify(p, null, '\t') + '\n')"
 
-      - name: Publish with OIDC
+      - name: Publish with OIDC provenance
         run: npm publish --access public
         env:
           NPM_CONFIG_PROVENANCE: true
