@@ -688,8 +688,11 @@ async function executeParallel(
 	const successCount = results.filter((r) => r.exitCode === 0).length;
 	const summaries = results.map((r) => {
 		const output = getFinalOutput(r.messages);
-		const preview = output.slice(0, 100) + (output.length > 100 ? "..." : "");
-		return `[${r.agent}] ${r.exitCode === 0 ? "completed" : "failed"}: ${preview || "(no output)"}`;
+		const fallback = r.errorMessage || r.stderr || "(no output)";
+		const preview = output
+			? output.slice(0, 100) + (output.length > 100 ? "..." : "")
+			: fallback.slice(0, 100) + (fallback.length > 100 ? "..." : "");
+		return `[${r.agent}] ${r.exitCode === 0 ? "completed" : "failed"}: ${preview}`;
 	});
 	return {
 		content: [
@@ -1231,6 +1234,14 @@ function renderParallelResult(
 			if (finalOutput) {
 				container.addChild(new Spacer(1));
 				container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+			} else {
+				const errInfo = r.errorMessage || r.stderr;
+				if (errInfo) {
+					container.addChild(new Spacer(1));
+					container.addChild(new Text(theme.fg("error", errInfo.trim().slice(0, 200)), 0, 0));
+				} else {
+					container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
+				}
 			}
 
 			const taskUsage = formatUsageStats(r.usage, r.model);
@@ -1283,8 +1294,15 @@ function renderParallelResult(
 		const displayItems = getDisplayItems(r.messages);
 		const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
 		text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}${modelTag}`;
-		if (displayItems.length === 0) text += `\n${contChar}${theme.fg("muted", "(no output)")}`;
-		else {
+		if (displayItems.length === 0) {
+			const errInfo = r.errorMessage || r.stderr;
+			if (errInfo) {
+				const errPreview = errInfo.trim().split("\n")[0].slice(0, 80);
+				text += `\n${contChar}${theme.fg("error", errPreview)}`;
+			} else {
+				text += `\n${contChar}${theme.fg("muted", "(no output)")}`;
+			}
+		} else {
 			const rendered = renderDisplayItems(displayItems, theme, expanded, 5)
 				.split("\n")
 				.filter((l) => l.trim())
