@@ -17,7 +17,7 @@
 				{ "type": "ci", "section": "Maintenance" },
 				{ "type": "test", "section": "Maintenance" }
 			],
-			"extra-files": ["docs/package.json"]
+			"extra-files": ["docs/package.json", "src/config.ts"]
 		}
 	}
 }
