@@ -30,6 +30,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { evaluateCommand } from "../_shared/shell-policy.js";
 import { createHookStateManager, type HookStateManager } from "./state-manager.js";
 
 /** Hook execution strategy: shell command, LLM prompt, or agent subprocess. */
@@ -299,6 +300,34 @@ async function runCommandHook(
 ): Promise<HookResult> {
 	if (!handler.command) return { ok: true };
 
+	// B12 hardening: check permission rules before spawning shell commands.
+	// Hooks run non-interactively, so ask-tier rules are treated as deny
+	// (hooks can't prompt the user).
+	// Source is "bash" (explicit trust) because hook commands come from user-authored
+	// config files (hooks.json / settings.json), not from LLM output. Using
+	// "shell-interpolation" (implicit trust) would block all hooks unless the user
+	// explicitly enables shell interpolation — which is unrelated to hooks.
+	const policyVerdict = evaluateCommand(handler.command, "bash", cwd);
+	if (!policyVerdict.allowed) {
+		console.error(
+			`[hooks] Blocked hook command by permission rule: ${handler.command} — ${policyVerdict.reason}`
+		);
+		return {
+			ok: false,
+			reason: `Hook command blocked by permission rule: ${policyVerdict.reason}`,
+		};
+	}
+	if (policyVerdict.requiresConfirmation) {
+		// Hooks can't prompt — skip with warning
+		console.error(
+			`[hooks] Skipped hook command (requires confirmation, non-interactive): ${handler.command}`
+		);
+		return {
+			ok: false,
+			reason: "Hook command requires confirmation but hooks run non-interactively",
+		};
+	}
+
 	const timeout = (handler.timeout ?? 600) * 1000;
 
 	return new Promise((resolve) => {
@@ -308,9 +337,7 @@ async function runCommandHook(
 		}
 		// shell: true is required for user-authored hook commands (pipes, redirects,
 		// env expansion). Commands come from settings.json, NOT from LLM input, so
-		// this is not an injection vector. However, shell expansion applies — users
-		// should avoid untrusted interpolation in hook commands. When a permission
-		// system lands, this should require explicit shell opt-in.
+		// this is not an injection vector. Permission rules provide defense-in-depth.
 		const proc = spawn(handler.command, {
 			cwd,
 			shell: true,
