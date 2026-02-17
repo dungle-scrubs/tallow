@@ -2,6 +2,7 @@
 name: explore
 description: Cheap, fast model for codebase discovery — grep/find/read only
 tools: read, grep, find, ls
+# skills: <none — read-only agent>
 maxTurns: 5
 model: auto-cheap
 ---
