@@ -209,9 +209,8 @@ WHEN TO USE:
 		},
 
 		renderCall(args, theme) {
-			const url = args.url.length > 60 ? `${args.url.slice(0, 60)}...` : args.url;
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("accent", url),
+				theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("accent", args.url),
 				0,
 				0
 			);

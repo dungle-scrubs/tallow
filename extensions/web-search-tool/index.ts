@@ -101,10 +101,9 @@ WHEN NOT TO USE:
 
 		renderCall(args, theme) {
 			const query = args.query ?? "";
-			const preview = query.length > 70 ? `${query.slice(0, 70)}…` : query;
 			const verb = formatToolVerb("web_search", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", `"${preview}"`),
+				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", `"${query}"`),
 				0,
 				0
 			);
