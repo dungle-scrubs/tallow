@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.4...tallow-v0.7.5) (2026-02-17)
+
+
+### Fixed
+
+* **ci:** move publish job into release workflow to fix GITHUB_TOKEN event propagation ([80e0f78](https://github.com/dungle-scrubs/tallow/commit/80e0f78e0544b8f0324fde56a16750789272d6fa))
+* **rewind:** use temp GIT_INDEX_FILE to avoid nuking staging area ([59e8a23](https://github.com/dungle-scrubs/tallow/commit/59e8a2352574e21bb1aa97be37734b0ed6ac2e75))
+
 ## [0.7.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.3...tallow-v0.7.4) (2026-02-17)
 
 
