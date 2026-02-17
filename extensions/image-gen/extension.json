@@ -1,0 +1,23 @@
+{
+	"name": "image-gen",
+	"version": "0.1.0",
+	"description": "Unified image generation tool — auto-routes across OpenAI, Google, xAI, BFL, and Fal via Vercel AI SDK",
+	"category": "tool",
+	"tags": ["image", "generation", "ai-sdk", "openai", "google", "flux"],
+	"files": ["index.ts", "providers.ts", "selector.ts", "ratings.ts"],
+	"relationships": [
+		{
+			"name": "tool-display",
+			"kind": "requires",
+			"reason": "Uses renderLines for result display"
+		}
+	],
+	"npmDependencies": {
+		"ai": "^6.0.0",
+		"@ai-sdk/openai": "^3.0.0",
+		"@ai-sdk/google": "^3.0.0",
+		"@ai-sdk/xai": "^3.0.0",
+		"@ai-sdk/fal": "^2.0.0",
+		"@ai-sdk/black-forest-labs": "^1.0.0"
+	}
+}
