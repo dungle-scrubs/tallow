@@ -99,6 +99,14 @@ export const SubagentParams = Type.Object({
 			maximum: 5,
 		})
 	),
+	modelScope: Type.Optional(
+		Type.String({
+			description:
+				'Constrain auto-routing to a model family (e.g. "codex", "gemini", "opus"). ' +
+				"The task is still classified and the best model within the family is selected " +
+				"based on complexity and cost preference. No effect when explicit model is set.",
+		})
+	),
 });
 
 // ── Event Types ──────────────────────────────────────────────────────────────

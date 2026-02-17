@@ -164,6 +164,7 @@ MODEL SELECTION:
 - costPreference: "eco" (cheapest capable), "balanced" (default), "premium" (best available)
 - taskType: override auto-detected type ("code", "vision", "text")
 - complexity: override auto-detected complexity (1=trivial to 5=expert)
+- modelScope: constrain auto-routing to a model family (e.g. "codex", "gemini"). Classifies the task and picks the right model within that family based on complexity and cost.
 - If the selected model fails (quota/auth), automatically retries with the next best candidate
 
 WHEN TO USE PARALLEL:
@@ -194,11 +195,12 @@ WHEN NOT TO USE SUBAGENTS:
 
 			// Build per-call routing hints from params
 			const routingHints: RoutingHints | undefined =
-				params.costPreference || params.taskType || params.complexity
+				params.costPreference || params.taskType || params.complexity || params.modelScope
 					? {
 							costPreference: params.costPreference as RoutingHints["costPreference"],
 							taskType: params.taskType as RoutingHints["taskType"],
 							complexity: params.complexity,
+							modelScope: params.modelScope,
 						}
 					: undefined;
 

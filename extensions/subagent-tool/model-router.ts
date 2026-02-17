@@ -17,7 +17,11 @@ import { getModels, getProviders } from "@mariozechner/pi-ai";
 import type { ModelRatings, TaskType } from "./model-matrix.js";
 import { getModelRatings } from "./model-matrix.js";
 import type { ResolvedModel } from "./model-resolver.js";
-import { listAvailableModels, resolveModelFuzzy } from "./model-resolver.js";
+import {
+	listAvailableModels,
+	resolveModelCandidates,
+	resolveModelFuzzy,
+} from "./model-resolver.js";
 import type { ClassificationResult } from "./task-classifier.js";
 import { classifyTask } from "./task-classifier.js";
 
@@ -49,6 +53,17 @@ export interface RoutingHints {
 	taskType?: TaskType;
 	/** Complexity (1-5) — skips classifier's complexity detection. */
 	complexity?: number;
+	/**
+	 * Constrain auto-routing to a model family via fuzzy match.
+	 *
+	 * When set, the auto-router only considers models matching this query
+	 * (e.g. "codex" → only codex models, "gemini" → only Gemini models).
+	 * The task is still classified and models are still filtered by capability
+	 * and sorted by cost preference — but only within the scoped pool.
+	 *
+	 * Has no effect when an explicit model override is provided.
+	 */
+	modelScope?: string;
 }
 
 /** Result of the model routing decision. */
@@ -62,7 +77,7 @@ export interface RoutingSuccess {
 	/** Fallback candidates in priority order (excludes the top pick). */
 	fallbacks: ResolvedModel[];
 	/** How the model was selected. */
-	reason: "explicit" | "agent-frontmatter" | "auto-routed" | "fallback";
+	reason: "explicit" | "agent-frontmatter" | "auto-routed" | "scoped-auto-routed" | "fallback";
 	/** Classification result if auto-routing was used. */
 	classification?: ClassificationResult;
 }
@@ -152,6 +167,34 @@ function enumerateCandidates(): ScoredCandidate[] {
 }
 
 /**
+ * Converts a set of pre-resolved models into scored candidates.
+ *
+ * Used for scoped routing: takes fuzzy-matched models and enriches them
+ * with ratings and cost data so they can be filtered/sorted by selectModels.
+ *
+ * @param pool - Pre-resolved models to convert
+ * @returns Scored candidates (only those with matrix ratings)
+ */
+function candidatesFromPool(pool: ResolvedModel[]): ScoredCandidate[] {
+	const candidates: ScoredCandidate[] = [];
+	for (const resolved of pool) {
+		const ratings = getModelRatings(resolved.id);
+		if (!ratings) continue;
+		// Look up cost from registry
+		let effectiveCost = 0;
+		for (const provider of getProviders()) {
+			for (const model of getModels(provider)) {
+				if (model.id === resolved.id && model.provider === resolved.provider) {
+					effectiveCost = (model.cost.input + model.cost.output) / 2;
+				}
+			}
+		}
+		candidates.push({ resolved, ratings, effectiveCost });
+	}
+	return candidates;
+}
+
+/**
  * Selects models for a classified task, ranked by preference.
  *
  * Algorithm:
@@ -170,10 +213,12 @@ function enumerateCandidates(): ScoredCandidate[] {
  */
 export function selectModels(
 	classification: ClassificationResult,
-	costPreference: CostPreference
+	costPreference: CostPreference,
+	pool?: ResolvedModel[]
 ): ResolvedModel[] {
 	const { type, complexity } = classification;
-	const candidates = enumerateCandidates().filter((c) => {
+	const allCandidates = pool ? candidatesFromPool(pool) : enumerateCandidates();
+	const candidates = allCandidates.filter((c) => {
 		const rating = c.ratings[type];
 		return rating !== undefined && rating >= complexity;
 	});
@@ -271,7 +316,7 @@ export async function routeModel(
 	agentRole?: string,
 	hints?: RoutingHints
 ): Promise<RoutingResult> {
-	// 1. Explicit per-call model override — must resolve or error
+	// 1. Explicit per-call model override — fuzzy resolve to best match
 	if (modelOverride) {
 		const resolved = resolveModelFuzzy(modelOverride);
 		if (resolved) return { ok: true, model: resolved, fallbacks: [], reason: "explicit" };
@@ -344,17 +389,30 @@ export async function routeModel(
 		}
 	}
 
-	const ranked = selectModels(classification, effectiveCostPref);
+	// Resolve model scope — constrains candidate pool to a model family
+	const scopePool = hints?.modelScope ? resolveModelCandidates(hints.modelScope) : undefined;
+
+	const ranked = selectModels(classification, effectiveCostPref, scopePool);
 	if (ranked.length > 0) {
 		return {
 			ok: true,
 			model: ranked[0],
 			fallbacks: ranked.slice(1),
-			reason: "auto-routed",
+			reason: scopePool ? "scoped-auto-routed" : "auto-routed",
 			classification,
 		};
 	}
 
-	// 5. No candidates matched → fallback to parent model
+	// 5. No candidates matched → fallback to parent model (or best from scope)
+	if (scopePool && scopePool.length > 0) {
+		// Scope had models but none met the complexity bar — use the best from scope
+		return {
+			ok: true,
+			model: scopePool[0],
+			fallbacks: scopePool.slice(1),
+			reason: "scoped-auto-routed",
+			classification,
+		};
+	}
 	return { ok: true, model: fallback, fallbacks: [], reason: "fallback", classification };
 }
