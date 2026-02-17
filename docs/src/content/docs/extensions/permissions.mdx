@@ -1,0 +1,122 @@
+---
+title: permissions
+description: Claude Code-compatible permission rules with Tool(specifier) syntax.
+---
+
+Declarative permission rules using Claude Code's exact `Tool(specifier)`
+syntax. Define `allow`, `deny`, and `ask` arrays in any `settings.json`
+to control which tools can run, which paths can be accessed, and which
+commands are permitted.
+
+## Configuration
+
+Add a `permissions` key to any settings file:
+
+```json
+// .tallow/settings.json (or .claude/settings.json)
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(git commit *)",
+      "Read",
+      "Edit(/src/**/*.ts)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Read(./.env)",
+      "Edit({home}/.ssh/**)"
+    ],
+    "ask": [
+      "Bash(docker *)",
+      "Edit(/config/**)"
+    ]
+  }
+}
+```
+
+## Rule format
+
+Rules follow `Tool(specifier)` or bare `Tool` (matches all uses):
+
+| Rule | Matches |
+|------|---------|
+| `Bash(npm *)` | Any npm command |
+| `Read` | All file reads |
+| `Edit(/src/**/*.ts)` | TypeScript files under src/ |
+| `WebFetch(domain:example.com)` | Fetch requests to example.com |
+| `mcp__puppeteer__*` | All puppeteer MCP tools |
+| `Task(Explore)` | The Explore subagent |
+
+## Resolution order
+
+1. **Deny** — any matching deny rule blocks. Deny always wins.
+2. **Ask** — any matching ask rule prompts for confirmation.
+3. **Allow** — any matching allow rule permits without prompting.
+4. **Default** — no match: permit (denylist-only) or prompt (allowlist mode).
+
+Hardcoded safety denylists (fork bombs, `rm -rf /`) are never overridable.
+
+## Tool name casing
+
+Both Claude Code and tallow casing work:
+
+| Claude Code | tallow | Both work |
+|-------------|--------|-----------|
+| `Bash` | `bash` | ✓ |
+| `Read` | `read` | ✓ |
+| `Edit` | `edit` | ✓ |
+| `Write` | `write` | ✓ |
+| `WebFetch` | `web_fetch` | ✓ |
+| `Task` | `subagent` | ✓ |
+
+## Path patterns
+
+Gitignore-style path conventions:
+
+| Pattern | Meaning |
+|---------|---------|
+| `//path` | Absolute from filesystem root |
+| `~/path` | Relative to home directory |
+| `/path` | Relative to settings file location |
+| `./path` | Relative to cwd |
+
+Plus tallow's variable expansion: `{cwd}`, `{home}`, `{project}`.
+
+`*` matches a single directory level, `**` matches recursively.
+
+## Shell operator awareness
+
+Bash rules split on `&&`, `||`, `;`, `|`, and newlines. Each segment
+is evaluated independently:
+
+- `Bash(git *)` deny rule blocks `git status && rm -rf /` (second segment fails)
+- `Bash(git *)` allow rule requires ALL segments to match
+
+Command substitution (`` ` `` and `$()`) is fail-closed for allow rules.
+
+## Settings precedence
+
+From highest to lowest:
+
+1. CLI flags (`--allowedTools`, `--disallowedTools`)
+2. Project local (`.tallow/settings.local.json`)
+3. Project shared (`.tallow/settings.json`)
+4. User (`~/.tallow/settings.json`)
+
+`.claude/settings.json` and `.claude/settings.local.json` are also
+read at their respective project tiers for full Claude Code compatibility.
+
+## CLI flags
+
+```bash
+tallow --allowedTools "Bash(npm *)" "Read" --disallowedTools "Bash(ssh *)"
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `/permissions` | Show all active rules grouped by source |
+| `/permissions test Bash(docker compose up)` | Test a rule against current config |
+| `/permissions reload` | Reload config from disk |
