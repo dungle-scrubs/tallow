@@ -28,8 +28,9 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
+import { INTEROP_API_CHANNELS } from "../_shared/interop-events.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
-import { type PromotedTaskHandle, promoteToBackground } from "../background-task-tool/index.js";
+import type { PromotedTaskHandle } from "../background-task-tool/index.js";
 import {
 	formatToolVerb,
 	formatTruncationIndicator,
@@ -278,6 +279,28 @@ export default function bashLive(pi: ExtensionAPI): void {
 	// Capture project root for BASH_MAINTAIN_PROJECT_WORKING_DIR
 	projectCwd = process.cwd();
 
+	// Retrieve promoteToBackground from background-task-tool via event bus.
+	// Direct static imports break under jiti's moduleCache:false — each
+	// extension gets its own module instance with a separate tasks Map.
+	let promoteToBackground:
+		| ((opts: {
+				command: string;
+				cwd: string;
+				startTime: number;
+				initialOutput: string;
+				abortController: AbortController;
+		  }) => PromotedTaskHandle)
+		| null = null;
+
+	pi.events.on(INTEROP_API_CHANNELS.promoteToBackgroundApi, (data: unknown) => {
+		const payload = data as { promote?: typeof promoteToBackground };
+		if (typeof payload?.promote === "function") {
+			promoteToBackground = payload.promote;
+		}
+	});
+	// Request in case background-task-tool loaded first
+	pi.events.emit(INTEROP_API_CHANNELS.promoteToBackgroundApiRequest, {});
+
 	// Detect ripgrep availability
 	hasRipgrep = detectRipgrep();
 
@@ -476,6 +499,13 @@ export default function bashLive(pi: ExtensionAPI): void {
 			}
 
 			// Command exceeded timeout — promote to background
+			if (!promoteToBackground) {
+				// Fallback: background-task-tool not loaded — wait for completion
+				const outcome = await bashPromise;
+				if (outcome.type === "completed") return outcome.result;
+				return handleBashError(outcome.err);
+			}
+
 			promotedHandle = promoteToBackground({
 				command: cmd,
 				cwd: ctx.cwd,

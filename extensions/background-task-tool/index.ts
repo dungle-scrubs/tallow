@@ -35,6 +35,7 @@ import { getIcon, getSpinner } from "../_icons/index.js";
 import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitInteropEvent,
+	INTEROP_API_CHANNELS,
 	INTEROP_EVENT_NAMES,
 	type InteropBackgroundTaskView,
 	onInteropEvent,
@@ -462,6 +463,15 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	interopStateRequestCleanup = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.stateRequest, () => {
 		publishBackgroundTaskSnapshot(pi.events);
 	});
+
+	// Expose promoteToBackground to other extensions via event bus.
+	// This avoids cross-extension static imports that break under jiti's
+	// moduleCache:false (each extension gets its own module instance).
+	const publishPromoteApi = () => {
+		pi.events.emit(INTEROP_API_CHANNELS.promoteToBackgroundApi, { promote: promoteToBackground });
+	};
+	publishPromoteApi();
+	pi.events.on(INTEROP_API_CHANNELS.promoteToBackgroundApiRequest, publishPromoteApi);
 
 	// Tool: Run bash in background
 	pi.registerTool({

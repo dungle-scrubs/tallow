@@ -14,6 +14,21 @@ export const INTEROP_EVENT_NAMES = {
 	teamsSnapshot: "interop.v1.teams.snapshot",
 } as const;
 
+/**
+ * Event channels for cross-extension function handshakes.
+ *
+ * These bypass TypeBox schema validation because they carry function
+ * references, not serializable data. Used when one extension needs to
+ * call another extension's API through the shared event bus (avoiding
+ * jiti module-cache duplication of module-scoped state).
+ */
+export const INTEROP_API_CHANNELS = {
+	/** background-task-tool publishes its promoteToBackground function. */
+	promoteToBackgroundApi: "interop.api.v1.background-tasks.promote",
+	/** bash-tool-enhanced requests the promote API (for load-order independence). */
+	promoteToBackgroundApiRequest: "interop.api.v1.background-tasks.promote-request",
+} as const;
+
 /** Valid interop event channel names. */
 export type InteropEventName = (typeof INTEROP_EVENT_NAMES)[keyof typeof INTEROP_EVENT_NAMES];
 
