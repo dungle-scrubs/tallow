@@ -7,6 +7,7 @@ import {
 	codingTools,
 	createAgentSession,
 	createEventBus,
+	DefaultPackageManager,
 	DefaultResourceLoader,
 	type ExtensionAPI,
 	type ExtensionFactory,
@@ -338,6 +339,12 @@ export async function createTallowSession(
 		additionalExtensionPaths.push(...options.additionalExtensions);
 	}
 
+	// ── Package AGENTS.md loading ────────────────────────────────────────────
+	// Packages contribute extensions, skills, prompts, themes — but the framework
+	// doesn't load AGENTS.md from packages. Use agentsFilesOverride to inject them.
+
+	const packageAgentsFiles = loadAgentsFilesFromPackages(settingsManager, cwd);
+
 	const loader = new DefaultResourceLoader({
 		cwd,
 		agentDir: TALLOW_HOME,
@@ -360,6 +367,12 @@ export async function createTallowSession(
 					return append ? [...base, append] : base;
 				}
 			: undefined,
+		agentsFilesOverride:
+			packageAgentsFiles.length > 0
+				? (base) => ({
+						agentsFiles: [...base.agentsFiles, ...packageAgentsFiles],
+					})
+				: undefined,
 		skillsOverride: (base) => {
 			const normalized = normalizeSkillNames(base);
 			const extra = options.additionalSkills;
@@ -472,6 +485,73 @@ export async function createTallowSession(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Context file loaded from a package directory. */
+interface AgentsFile {
+	path: string;
+	content: string;
+}
+
+/**
+ * Load AGENTS.md files from installed packages.
+ *
+ * The framework's PackageManager loads extensions, skills, prompts, and themes
+ * from packages — but not AGENTS.md. This fills the gap by resolving each
+ * package source, finding its root directory, and loading AGENTS.md if present.
+ *
+ * Handles local paths (~/..., /..., ./...), npm packages (installed under
+ * agentDir/node_modules), and git packages (installed under agentDir/packages).
+ *
+ * @param settingsManager - Settings manager with package list
+ * @param cwd - Current working directory for resolving relative paths
+ * @returns Array of { path, content } for each package AGENTS.md found
+ */
+function loadAgentsFilesFromPackages(settingsManager: SettingsManager, cwd: string): AgentsFile[] {
+	const packages = settingsManager.getPackages();
+	if (packages.length === 0) return [];
+
+	// Use a PackageManager to resolve installed paths for all source types
+	const pkgManager = new DefaultPackageManager({
+		cwd,
+		agentDir: TALLOW_HOME,
+		settingsManager,
+	});
+
+	const files: AgentsFile[] = [];
+	const seen = new Set<string>();
+
+	for (const pkg of packages) {
+		const source = typeof pkg === "string" ? pkg : pkg.source;
+
+		// Try both user and project scopes. parseSource inside getInstalledPath
+		// can throw for malformed sources — skip gracefully.
+		let installedPath: string | undefined;
+		try {
+			installedPath =
+				pkgManager.getInstalledPath(source, "user") ??
+				pkgManager.getInstalledPath(source, "project");
+		} catch {
+			continue;
+		}
+
+		if (!installedPath) continue;
+
+		const agentsPath = join(installedPath, "AGENTS.md");
+		if (seen.has(agentsPath)) continue;
+		seen.add(agentsPath);
+
+		if (!existsSync(agentsPath)) continue;
+
+		try {
+			const content = readFileSync(agentsPath, "utf-8");
+			files.push({ path: agentsPath, content });
+		} catch {
+			// Unreadable — skip silently
+		}
+	}
+
+	return files;
+}
+
 /**
  * Discover extension subdirectories — each dir with an index.ts is an extension.
  * Also picks up standalone .ts files.
@@ -518,6 +598,14 @@ function rebrandSystemPrompt(pi: ExtensionAPI): void {
 		// Communicate strategy changes proactively
 		prompt +=
 			"\n\nIf you hit an internal limit (thinking budget, output length, or planning complexity) that forces you to change approach — say so immediately. Never silently pivot from planning to execution, or drop planned items, without telling the user what happened and why.";
+
+		// Detect unexpected workspace changes
+		prompt +=
+			"\n\nWhile you are working, if you notice unexpected changes in the workspace that you didn't make — STOP IMMEDIATELY and tell the user what you found. Do not attempt to revert, overwrite, or work around them. Ask the user how they would like to proceed.";
+
+		// Review mindset
+		prompt +=
+			"\n\nWhen the user asks for a review, default to a code-review mindset. Prioritize identifying bugs, risks, behavioral regressions, and missing tests. Present findings first, ordered by severity, with file and line references where possible. State explicitly if no issues were found and call out any residual risks or test gaps.";
 
 		// Inject model identity so non-Claude models don't confabulate their identity
 		if (ctx.model) {
