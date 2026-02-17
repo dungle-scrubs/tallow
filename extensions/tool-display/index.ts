@@ -208,6 +208,7 @@ const VERB_TENSES: ReadonlyMap<string, VerbTense> = new Map([
 	["grep", { present: "Searching…", past: "Searched" }],
 	["find", { present: "Finding…", past: "Found" }],
 	["web_search", { present: "Searching…", past: "Searched" }],
+	["generate_image", { present: "Generating…", past: "Generated" }],
 ]);
 
 /**
@@ -224,6 +225,7 @@ const TOOL_LABELS: ReadonlyMap<string, string> = new Map([
 	["find", "Find"],
 	["web_search", "Web Search"],
 	["web_fetch", "Web Fetch"],
+	["generate_image", "GenerateImage"],
 ]);
 
 /**
