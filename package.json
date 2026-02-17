@@ -63,11 +63,6 @@
 		]
 	},
 	"dependencies": {
-		"@ai-sdk/black-forest-labs": "^1.0.20",
-		"@ai-sdk/fal": "^2.0.21",
-		"@ai-sdk/google": "^3.0.29",
-		"@ai-sdk/openai": "^3.0.29",
-		"@ai-sdk/xai": "^3.0.57",
 		"@clack/prompts": "^1.0.0",
 		"@mariozechner/pi-coding-agent": "0.52.12",
 		"@sinclair/typebox": "0.34.48",
