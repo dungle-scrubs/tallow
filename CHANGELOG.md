@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **permissions:** Claude Code-compatible `Tool(specifier)` permission rules with
+  `allow`/`deny`/`ask` tiers, `{cwd}`/`{home}`/`{project}` variable expansion,
+  gitignore-style path conventions, shell operator awareness, and symlink/traversal
+  defense
+- **permissions:** `/permissions` command for viewing, testing, and reloading rules
+- **permissions:** `--allowedTools` and `--disallowedTools` CLI flags at CLI precedence
+  tier
+- **permissions:** reads `.claude/settings.json` permission rules for drop-in
+  Claude Code compatibility
+- **hooks:** B12 hardening — hook shell commands now respect Bash permission rules
+
 ## [0.7.3](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.2...tallow-v0.7.3) (2026-02-17)
 
 
