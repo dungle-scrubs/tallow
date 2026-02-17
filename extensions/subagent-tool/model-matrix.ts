@@ -30,7 +30,10 @@ export const MODEL_MATRIX: Record<string, ModelRatings> = {
 	"gpt-5.2": { code: 4, vision: 4, text: 4 },
 	"gpt-5": { code: 4, vision: 4, text: 4 },
 	"gpt-5.1": { code: 3, vision: 4, text: 4 },
+	"gpt-5.3-codex": { code: 4, text: 4 },
+	"gpt-5.3-codex-spark": { code: 2, text: 2 },
 	"gpt-5.2-codex": { code: 3, text: 3 },
+	"gpt-5.1-codex-max": { code: 4, text: 4 },
 	"gpt-5.1-codex": { code: 3, text: 3 },
 	"gpt-5.1-codex-mini": { code: 2, text: 2 },
 	// Google
