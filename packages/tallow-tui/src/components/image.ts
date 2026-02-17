@@ -130,7 +130,12 @@ export class Image implements Component {
 
 		const showBorder = this.options.border === true;
 		const borderCols = showBorder ? BORDER_OVERHEAD : 0;
-		const maxWidth = Math.min(width - 2, this.options.maxWidthCells ?? width - 2) - borderCols;
+		const availableWidth = width - 2 - borderCols;
+		// Ignore maxWidthCells from upstream — it's hardcoded to 60 in
+		// pi-coding-agent and squashes landscape images. Use the full
+		// available terminal width instead; height capping and natural-width
+		// clamping in calculateImageLayout prevent oversized output.
+		const maxWidth = availableWidth;
 		const maxHeight = this.options.maxHeightCells ?? DEFAULT_MAX_HEIGHT_CELLS;
 
 		const caps = getCapabilities();
