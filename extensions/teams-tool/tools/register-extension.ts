@@ -498,7 +498,18 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 			team: Type.String({ description: "Team name" }),
 			name: Type.String({ description: "Teammate name (unique within team)" }),
 			role: Type.String({ description: "Role/description (guides their behavior)" }),
-			model: Type.Optional(Type.String({ description: 'Model ID (default: "claude-sonnet-4-5")' })),
+			model: Type.Optional(
+				Type.String({
+					description:
+						"Explicit model ID (fuzzy matched). When omitted, auto-routes based on role complexity.",
+				})
+			),
+			modelScope: Type.Optional(
+				Type.String({
+					description:
+						'Constrain auto-routing to a model family (e.g. "codex", "gemini"). Ignored when explicit model is set.',
+				})
+			),
 			tools: Type.Optional(
 				Type.Array(Type.String(), {
 					description:
@@ -506,7 +517,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 				})
 			),
 		}),
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const team = getRuntimeTeam(params.team);
 			if (!team) {
 				return {
@@ -534,9 +545,11 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 					team,
 					params.name,
 					params.role,
-					params.model || "claude-sonnet-4-5",
+					params.model,
 					params.tools,
-					pi.events
+					pi.events,
+					params.modelScope ? { modelScope: params.modelScope } : undefined,
+					ctx?.model?.id
 				);
 				mate.unsubscribe = bindDashboardSessionTracking(team.name, mate.name, mate.session);
 				const dashboardActivity = getDashboardActivity();

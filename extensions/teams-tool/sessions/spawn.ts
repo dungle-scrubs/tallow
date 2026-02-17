@@ -14,7 +14,8 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { listAvailableModels, resolveModelFuzzy } from "../../subagent-tool/model-resolver.js";
+import { listAvailableModels } from "../../subagent-tool/model-resolver.js";
+import { type RoutingHints, routeModel } from "../../subagent-tool/model-router.js";
 import { resolveStandardTools } from "../state/team-view.js";
 import type { Teammate } from "../state/types.js";
 import type { Team } from "../store.js";
@@ -22,13 +23,21 @@ import { createTeammateTools } from "../tools/teammate-tools.js";
 
 /**
  * Spawn a teammate as an in-process AgentSession with shared team tools.
+ *
+ * Model selection follows the same routing as subagents:
+ * - modelOverride set → explicit fuzzy resolution (best match)
+ * - modelScope set → auto-route within that model family
+ * - neither → full auto-route based on role complexity and cost preference
+ *
  * @param cwd - Working directory
  * @param team - Team to add the teammate to
  * @param name - Teammate name
- * @param role - Role description (becomes system prompt context)
- * @param modelName - Model to use
+ * @param role - Role description (used for task classification + system prompt)
+ * @param modelOverride - Explicit model name (fuzzy matched). Skips auto-routing.
  * @param toolNames - Standard tool names (defaults to all coding tools)
  * @param piEvents - Event emitter for lifecycle events
+ * @param hints - Optional routing hints (modelScope, costPreference, etc.)
+ * @param parentModelId - Parent model ID for fallback inheritance
  * @returns The created Teammate
  * @throws If model not found or session creation fails
  */
@@ -37,15 +46,18 @@ export async function spawnTeammateSession(
 	team: Team<Teammate>,
 	name: string,
 	role: string,
-	modelName: string,
+	modelOverride: string | undefined,
 	toolNames?: string[],
-	piEvents?: ExtensionAPI["events"]
+	piEvents?: ExtensionAPI["events"],
+	hints?: RoutingHints,
+	parentModelId?: string
 ): Promise<Teammate> {
-	const resolved = resolveModelFuzzy(modelName);
-	if (!resolved) {
+	const routing = await routeModel(role, modelOverride, undefined, parentModelId, role, hints);
+	if (!routing.ok) {
 		const available = listAvailableModels().slice(0, 20).join(", ");
-		throw new Error(`Model not found: "${modelName}". Available: ${available}`);
+		throw new Error(`Model not found: "${routing.query}". Available: ${available}`);
 	}
+	const resolved = routing.model;
 	const { findModel } = await import("../state/team-view.js");
 	const model = findModel(resolved.id);
 	if (!model) {
@@ -111,7 +123,7 @@ export async function spawnTeammateSession(
 		}),
 	});
 
-	const mate: Teammate = { name, role, model: modelName, session, status: "idle" };
+	const mate: Teammate = { name, role, model: resolved.id, session, status: "idle" };
 	team.teammates.set(name, mate);
 	return mate;
 }
