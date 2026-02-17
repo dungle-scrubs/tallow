@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.5...tallow-v0.7.6) (2026-02-17)
+
+
+### Added
+
+* **slash-command-bridge:** show command name in tool call header ([f447aad](https://github.com/dungle-scrubs/tallow/commit/f447aad83cec20c2c7a4ff038cdf5d0490f9ccc6))
+
+
+### Fixed
+
+* **ci:** restore registry-url for npm OIDC publish ([bda9b03](https://github.com/dungle-scrubs/tallow/commit/bda9b033a7870ffa9c84b56df66533c20ee06b5b))
+* **slash-command-bridge:** defer compact to agent_end to prevent spinner hang ([27b3edd](https://github.com/dungle-scrubs/tallow/commit/27b3edde127694d76f7bb20aafe7dbf9e7d58b5b))
+
+
+### Changed
+
+* **tool-display:** use raw snake_case for all tool display names ([de31c08](https://github.com/dungle-scrubs/tallow/commit/de31c08a25e12fbf7ee0f6dd6d7ebb055ae7fd4a))
+
+
+### Documentation
+
+* update roadmap — mark teams dashboard shipped, rules mostly shipped ([7f15de4](https://github.com/dungle-scrubs/tallow/commit/7f15de4030eed26e312ac967b551cd28366948cf))
+
+
+### Maintenance
+
+* **deps:** bump biome 2.3.15→2.4.2, vscode-jsonrpc 8.2.0→8.2.1 ([37f7652](https://github.com/dungle-scrubs/tallow/commit/37f76526d89e40f9d6cf7e6749a2d7bece2db7b4))
+
 ## [0.7.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.4...tallow-v0.7.5) (2026-02-17)
 
 
