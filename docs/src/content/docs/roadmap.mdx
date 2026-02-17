@@ -9,36 +9,24 @@ Where tallow is headed. These are concrete features in design, not
 vague aspirations. Each one has a detailed design document in
 the repository.
 
-<div class="roadmap-item" data-status="planned">
+<div class="roadmap-item" data-status="shipped">
   <div class="roadmap-header">
     <h3>Teams Live Dashboard</h3>
     <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
-    <span class="roadmap-badge" data-status="planned">Planned</span>
+    <span class="roadmap-badge" data-status="shipped">Shipped</span>
   </div>
   <div class="roadmap-description">
 
-The [teams extension](/extensions/teams-tool/) spawns persistent teammate
-sessions with a shared task board and inter-agent messaging, but
-has no live widget. You see tool output scroll by without an
-at-a-glance view of which teammates are working, which tasks are
-claimed or blocked, or what messages are flowing between agents.
-
-The fix: a persistent `setWidget` dashboard that auto-updates as
-team state changes. Task board with status icons, teammate list
-with colored names and working/idle indicators, and a live message
-feed, all in one responsive panel using the same visual language
-as the [tasks](/extensions/tasks/) and [subagent](/extensions/subagent-tool/)
-extensions.
-
-Wide terminals show tasks and teammates side-by-side. Narrow
-terminals stack vertically. The widget appears on `team_create`
-and disappears on `team_shutdown`.
+The [teams extension](/extensions/teams-tool/) now includes a live dashboard
+with teammate cards, task board status icons, and a rolling activity feed.
+Toggle with `/team-dashboard [on|off|status]`. Wide terminals show tasks and
+teammates side-by-side; narrow terminals stack vertically. The dashboard
+auto-updates as team state changes and disappears on `team_shutdown`.
 
   </div>
   <div class="roadmap-meta">
     <span class="roadmap-meta-item"><strong>Extension:</strong> teams</span>
-    <span class="roadmap-meta-item"><strong>API:</strong> ctx.ui.setWidget()</span>
-    <span class="roadmap-meta-item"><strong>Depends on:</strong> pi-tui, Theme API</span>
+    <span class="roadmap-meta-item"><strong>Command:</strong> /team-dashboard [on|off|status]</span>
   </div>
 </div>
 
@@ -205,28 +193,19 @@ with last-in-first-out. In-memory only. Not yet implemented.
   <div class="roadmap-header">
     <h3>Modular Project Rules (.tallow/rules/)</h3>
     <span class="roadmap-badge" data-complexity="medium">Medium complexity</span>
-    <span class="roadmap-badge" data-status="planned">Planned</span>
+    <span class="roadmap-badge" data-status="mostly-shipped">Mostly shipped</span>
   </div>
   <div class="roadmap-description">
 
-Today you either cram everything into one `AGENTS.md` or use
-skills (which are on-demand, not auto-loaded). There's no way
-to say "when working in `src/api/`, follow these API conventions"
-without a monolithic context file. Claude Code solved this with
-`.claude/rules/`, modular markdown files with optional path
-scoping via YAML frontmatter.
+**Shipped: unconditional rules.** The [context-files](/extensions/context-files/)
+extension scans three directories: `~/.tallow/rules/` (user global),
+`.tallow/rules/` (project), and `.claude/rules/` (CC compatibility). All `.md`
+and `.txt` files are discovered and injected into the system prompt at session
+start, alongside `AGENTS.md` / `CLAUDE.md` content.
 
-The `rules` extension brings the same pattern to pi. It scans
-three directories in priority order: `~/.tallow/rules/` (user
-global), `.tallow/rules/` (project), and `.claude/rules/` (CC
-compatibility). All `.md` files are discovered recursively,
-including through subdirectories and symlinks.
-
-**Unconditional rules** (no frontmatter) load at session start,
-same as `AGENTS.md`. **Path-scoped rules** use a `paths:` YAML
-frontmatter field with glob patterns, they only inject when the
-agent reads or edits a matching file. This keeps context lean:
-API conventions don't pollute frontend work and vice versa.
+**Remaining: path-scoped rules.** Rules with `paths:` YAML frontmatter that
+only inject when the agent reads or edits matching files. This keeps context
+lean: API conventions don't pollute frontend work and vice versa.
 
 ```markdown
 ---
@@ -240,21 +219,15 @@ paths:
 - Include OpenAPI JSDoc on every handler
 ```
 
-Commands: `/rules` lists all loaded rules with scope and path
-filters, `/rules:add` creates a new rule file, `/rules:edit`
-opens one in the system editor.
-
-**Resolved:** The `before_agent_start` event allows extensions to
-append to the system prompt at runtime, demonstrated by the
-[context-files](/extensions/context-files/) extension. The rules
-extension can use the same pattern to inject path-scoped rules
-without compiling to intermediate files.
+Also remaining: `/rules` command to list loaded rules with scope and path
+filters, `/rules:add` to create a new rule file, recursive subdirectory
+scanning.
 
   </div>
   <div class="roadmap-meta">
-    <span class="roadmap-meta-item"><strong>Extension:</strong> rules</span>
+    <span class="roadmap-meta-item"><strong>Extension:</strong> context-files</span>
     <span class="roadmap-meta-item"><strong>Scopes:</strong> ~/.tallow/rules/, .tallow/rules/, .claude/rules/</span>
-    <span class="roadmap-meta-item"><strong>Depends on:</strong> Context injection API (or compiled fallback)</span>
+    <span class="roadmap-meta-item"><strong>Shipped:</strong> Unconditional rules scanning and injection</span>
   </div>
 </div>
 
