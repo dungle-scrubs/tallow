@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **core:** `IS_DEMO` / `TALLOW_DEMO` env var and `--demo` CLI flag to hide
+  sensitive info (paths, session IDs) for screen recordings and live demos
+- **custom-footer:** `[DEMO]` badge and path sanitization when demo mode is active
+- **sdk:** export `isDemoMode()` and `sanitizePath()` helpers for extensions
+
 ## [0.7.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.5...tallow-v0.7.6) (2026-02-17)
 
 
