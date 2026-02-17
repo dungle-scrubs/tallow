@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **image-gen:** unified image generation tool with auto-routing across OpenAI,
+  Google (Gemini/Imagen), xAI, Black Forest Labs (Flux), and Fal via Vercel AI SDK
+- **image-gen:** quality-based model selection from Arena leaderboard ELO ratings
+  with eco/balanced/premium cost preferences
+- **image-gen:** dual invocation paths — dedicated image APIs (`generateImage`) and
+  hybrid LLMs (`generateText` with image output) handled transparently
 - **permissions:** Claude Code-compatible `Tool(specifier)` permission rules with
   `allow`/`deny`/`ask` tiers, `{cwd}`/`{home}`/`{project}` variable expansion,
   gitignore-style path conventions, shell operator awareness, and symlink/traversal
