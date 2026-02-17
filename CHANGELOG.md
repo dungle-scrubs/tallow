@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.3...tallow-v0.7.4) (2026-02-17)
+
+
+### Added
+
+* **cli:** add --allowedTools and --disallowedTools flags ([3f63765](https://github.com/dungle-scrubs/tallow/commit/3f63765e4503753c1dc9f3320c85f2bb54863c6b))
+* **image-gen:** add image generation extension ([7a7a35d](https://github.com/dungle-scrubs/tallow/commit/7a7a35dce5faf9561e02a8d00263765d6f96358a))
+* **permissions:** add /permissions command and extension ([f1c79ea](https://github.com/dungle-scrubs/tallow/commit/f1c79eaf60de7a02e0ae8fbb3e52e72e736e11ad))
+* **permissions:** add permission rule engine with Tool(specifier) syntax ([51ac5dd](https://github.com/dungle-scrubs/tallow/commit/51ac5dd798b00b1ebf823aab3c42ce1d7b9062dd))
+* **permissions:** integrate permission rules into shell policy evaluation ([9d54d1b](https://github.com/dungle-scrubs/tallow/commit/9d54d1bcf4e4d1cf079d5d187a859dda87d79d82))
+* **sdk:** load AGENTS.md from installed packages ([81ceb16](https://github.com/dungle-scrubs/tallow/commit/81ceb169e4801be7f0d75c1ca3c27d72f33ad478))
+* **tool-display:** add generate_image verb tenses and label ([cf31275](https://github.com/dungle-scrubs/tallow/commit/cf31275bf1c5ddd28fe984049489a4c2e5bd1970))
+
+
+### Fixed
+
+* **hooks:** respect permission rules in hook shell commands ([424714b](https://github.com/dungle-scrubs/tallow/commit/424714b006f3b691c5330a12b1c03d9a672dcb3f))
+* **tui:** remove hardcoded text truncation in renderCall ([594a0d8](https://github.com/dungle-scrubs/tallow/commit/594a0d8e97ca40b9f90854e6a5bfd05e4c0cf145))
+* **tui:** use full terminal width for inline images ([a19ca62](https://github.com/dungle-scrubs/tallow/commit/a19ca6266a6ffd3a74c2b7f5e9e051d565de824b))
+
+
+### Changed
+
+* **tool-display:** prefix tool verbs with display label ([6acc227](https://github.com/dungle-scrubs/tallow/commit/6acc227d50df52642a60a489dc6aded3e0b9a860))
+
+
+### Documentation
+
+* add image-gen extension, bump extension count to 50 ([74caf50](https://github.com/dungle-scrubs/tallow/commit/74caf5075c896ef787a2404fd24cb4d25d1d10ae))
+* add npm version, Bun, and docs badges to README ([d22ef03](https://github.com/dungle-scrubs/tallow/commit/d22ef033b6b2d4749444fa5dfdd32b7f50ac78cb))
+* add permissions changelog entries ([1d5808a](https://github.com/dungle-scrubs/tallow/commit/1d5808a448156b15cfd9c050b33a05069e437ce2))
+* **agents:** document all frontmatter properties in templates ([f838a96](https://github.com/dungle-scrubs/tallow/commit/f838a969b8af6a55c8222aac376afdd5ae1bd9b8))
+* **permissions:** add extension page and bump extension counts ([779c759](https://github.com/dungle-scrubs/tallow/commit/779c759d55e2f97ffb35cf3b6c13fb84573849bb))
+
+
+### Maintenance
+
+* **image-gen:** add selector, providers, ratings, render, layout, and elapsed tests ([05beb99](https://github.com/dungle-scrubs/tallow/commit/05beb99dd5ca498320070cf6a48bf9b332a916de))
+
 ## [Unreleased]
 
 ### Added
