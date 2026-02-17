@@ -28,6 +28,8 @@ describe("formatToolVerb", () => {
 		expect(formatToolVerb("ls", false)).toBe("Ls: Listing…");
 		expect(formatToolVerb("grep", false)).toBe("Grep: Searching…");
 		expect(formatToolVerb("find", false)).toBe("Find: Finding…");
+		expect(formatToolVerb("generate_image", false)).toBe("GenerateImage: Generating…");
+		expect(formatToolVerb("web_search", false)).toBe("Web Search: Searching…");
 	});
 
 	it("returns label + past tense for known tools when complete", () => {
@@ -38,6 +40,8 @@ describe("formatToolVerb", () => {
 		expect(formatToolVerb("ls", true)).toBe("Ls: Listed");
 		expect(formatToolVerb("grep", true)).toBe("Grep: Searched");
 		expect(formatToolVerb("find", true)).toBe("Find: Found");
+		expect(formatToolVerb("generate_image", true)).toBe("GenerateImage: Generated");
+		expect(formatToolVerb("web_search", true)).toBe("Web Search: Searched");
 	});
 
 	it("falls back to title-cased label with ellipsis for unknown tools during execution", () => {
