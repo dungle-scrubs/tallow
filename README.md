@@ -14,6 +14,9 @@
 
 <p align="center">
   <a href="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml"><img src="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://www.npmjs.com/package/tallow"><img src="https://img.shields.io/npm/v/tallow" alt="npm version" /></a>
+  <a href="https://img.shields.io/badge/Bun-%E2%89%A51.3.9-f9f1e1?logo=bun"><img src="https://img.shields.io/badge/Bun-%E2%89%A51.3.9-f9f1e1?logo=bun" alt="Bun ≥1.3.9" /></a>
+  <a href="https://tallow.dungle-scrubs.com"><img src="https://img.shields.io/badge/docs-tallow-blue" alt="Docs" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
 </p>
 
