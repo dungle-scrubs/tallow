@@ -4,6 +4,7 @@
  */
 
 import { getModels, getProviders } from "@mariozechner/pi-ai";
+import { getModelRatings } from "./model-matrix.js";
 
 export interface ResolvedModel {
 	provider: string;
@@ -44,22 +45,47 @@ function toResolved(m: CandidateModel): ResolvedModel {
 }
 
 /**
- * Picks the candidate with the shorter model ID (tiebreak heuristic).
- * @param models - Array of candidates to pick from
- * @returns The candidate with the shortest ID
+ * Sum of all capability ratings for a model from the matrix.
+ * Higher = more capable. Returns 0 if not in matrix.
  */
-function shortest(models: CandidateModel[]): CandidateModel {
-	return models.reduce((a, b) => (a.id.length <= b.id.length ? a : b));
+function capabilityScore(id: string): number {
+	const ratings = getModelRatings(id);
+	if (!ratings) return 0;
+	return Object.values(ratings).reduce((sum, v) => sum + (v ?? 0), 0);
 }
 
 /**
- * Splits a string into lowercase tokens on spaces, hyphens, underscores, and dots.
+ * Picks the best candidate from a list of fuzzy-match ties.
+ *
+ * Tiebreak order:
+ * 1. Highest capability score (from model matrix) — picks the most capable model
+ * 2. Shortest model ID — prefers concise canonical names over variants
+ * 3. Lexicographically last — higher version numbers win ("5.3" > "5.2")
+ *
+ * @param models - Array of candidates to pick from
+ * @returns The best candidate by capability-then-shortest-then-latest
+ */
+function pickBest(models: CandidateModel[]): CandidateModel {
+	return models.reduce((a, b) => {
+		const aCap = capabilityScore(a.id);
+		const bCap = capabilityScore(b.id);
+		if (aCap !== bCap) return aCap > bCap ? a : b;
+		if (a.id.length !== b.id.length) return a.id.length < b.id.length ? a : b;
+		return a.id >= b.id ? a : b;
+	});
+}
+
+/**
+ * Splits a string into lowercase tokens on spaces, hyphens, underscores, dots,
+ * and word↔digit boundaries (e.g. "codex5" → ["codex", "5"]).
  * @param s - Input string
  * @returns Array of non-empty lowercase tokens
  */
 function tokenize(s: string): string[] {
 	return s
 		.toLowerCase()
+		.replace(/([a-z])(\d)/g, "$1 $2")
+		.replace(/(\d)([a-z])/g, "$1 $2")
 		.split(/[\s\-_.]+/)
 		.filter((t) => t.length > 0);
 }
@@ -75,45 +101,47 @@ function normalize(s: string): string {
 }
 
 /**
- * Resolves a human-friendly model name to an exact provider/model-id.
+ * Finds all fuzzy-matched candidates for a query (before tiebreaking).
+ *
+ * Returns all models that tie at the best score for whichever resolution
+ * tier first produces a match. Used by `resolveModelFuzzy` (picks one)
+ * and `resolveModelCandidates` (returns all for scoped routing).
  *
  * Resolution cascade:
  * 1. Exact ID match across all providers
  * 2. Case-insensitive ID match
  * 2.5. Normalized match — strips separators ("glm5" → "glm-5")
  * 3. Provider/ID format (e.g. "anthropic/claude-sonnet-4-5")
- * 4. Token overlap — split query into tokens, score models by how many
- *    tokens appear in provider + id + name. Best score wins. Tiebreak: shorter ID.
+ * 4. Token overlap — split query into tokens, score models by weighted
+ *    token matches. ID/name matches score 2, provider-only matches score 1.
+ *    Best score wins.
  * 5. Substring match — query appears as substring in model ID or name
  * 6. Normalized substring — strips separators before substring comparison
  *
- * @param query - Human-friendly model name (e.g. "opus", "sonnet 4.5", "claude-opus-4-5")
+ * @param query - Human-friendly model name (e.g. "opus", "sonnet 4.5", "codex")
  * @param modelSource - Optional model-fetching function (defaults to pi-ai registry)
- * @returns Resolved model, or undefined if no match found
+ * @returns Array of tied candidates from the first matching tier, or empty
  */
-export function resolveModelFuzzy(
-	query: string,
-	modelSource?: ModelSource
-): ResolvedModel | undefined {
+function findCandidates(query: string, modelSource?: ModelSource): CandidateModel[] {
 	const models = modelSource ? modelSource() : getAllModels();
-	if (models.length === 0) return undefined;
+	if (models.length === 0) return [];
 
 	const q = query.trim();
-	if (q.length === 0) return undefined;
+	if (q.length === 0) return [];
 	const qLower = q.toLowerCase();
 
 	// 1. Exact ID match
 	const exact = models.filter((m) => m.id === q);
-	if (exact.length > 0) return toResolved(shortest(exact));
+	if (exact.length > 0) return exact;
 
 	// 2. Case-insensitive ID match
 	const ciMatch = models.filter((m) => m.id.toLowerCase() === qLower);
-	if (ciMatch.length > 0) return toResolved(shortest(ciMatch));
+	if (ciMatch.length > 0) return ciMatch;
 
 	// 2.5. Normalized match — strips separators ("glm5" matches "glm-5")
 	const qNorm = normalize(q);
 	const normMatch = models.filter((m) => normalize(m.id) === qNorm);
-	if (normMatch.length > 0) return toResolved(shortest(normMatch));
+	if (normMatch.length > 0) return normMatch;
 
 	// 3. Provider/ID format
 	if (q.includes("/")) {
@@ -123,18 +151,23 @@ export function resolveModelFuzzy(
 		const providerMatch = models.filter(
 			(m) => m.provider.toLowerCase() === provider && m.id.toLowerCase() === id
 		);
-		if (providerMatch.length > 0) return toResolved(shortest(providerMatch));
+		if (providerMatch.length > 0) return providerMatch;
 	}
 
-	// 4. Token overlap scoring
+	// 4. Token overlap scoring (ID/name matches weighted 2×, provider-only 1×)
 	const queryTokens = tokenize(q);
 	if (queryTokens.length > 0) {
 		let bestScore = 0;
 		let bestMatches: CandidateModel[] = [];
 
 		for (const m of models) {
-			const haystack = `${m.provider} ${m.id} ${m.name}`.toLowerCase();
-			const score = queryTokens.filter((t) => haystack.includes(t)).length;
+			const idName = `${m.id} ${m.name}`.toLowerCase();
+			const providerStr = m.provider.toLowerCase();
+			let score = 0;
+			for (const t of queryTokens) {
+				if (idName.includes(t)) score += 2;
+				else if (providerStr.includes(t)) score += 1;
+			}
 			if (score > bestScore) {
 				bestScore = score;
 				bestMatches = [m];
@@ -143,24 +176,57 @@ export function resolveModelFuzzy(
 			}
 		}
 
-		if (bestScore > 0 && bestMatches.length > 0) {
-			return toResolved(shortest(bestMatches));
-		}
+		if (bestScore > 0 && bestMatches.length > 0) return bestMatches;
 	}
 
 	// 5. Substring match (raw)
 	const subMatches = models.filter(
 		(m) => m.id.toLowerCase().includes(qLower) || m.name.toLowerCase().includes(qLower)
 	);
-	if (subMatches.length > 0) return toResolved(shortest(subMatches));
+	if (subMatches.length > 0) return subMatches;
 
 	// 6. Substring match (normalized — strips separators before comparing)
 	const normSubMatches = models.filter(
 		(m) => normalize(m.id).includes(qNorm) || normalize(m.name).includes(qNorm)
 	);
-	if (normSubMatches.length > 0) return toResolved(shortest(normSubMatches));
+	if (normSubMatches.length > 0) return normSubMatches;
 
-	return undefined;
+	return [];
+}
+
+/**
+ * Resolves a human-friendly model name to a single exact provider/model-id.
+ *
+ * Finds all tied candidates via the resolution cascade, then picks the
+ * best one using capability score → shortest ID → lexicographic ordering.
+ *
+ * @param query - Human-friendly model name (e.g. "opus", "sonnet 4.5", "claude-opus-4-5")
+ * @param modelSource - Optional model-fetching function (defaults to pi-ai registry)
+ * @returns Resolved model, or undefined if no match found
+ */
+export function resolveModelFuzzy(
+	query: string,
+	modelSource?: ModelSource
+): ResolvedModel | undefined {
+	const candidates = findCandidates(query, modelSource);
+	if (candidates.length === 0) return undefined;
+	return toResolved(pickBest(candidates));
+}
+
+/**
+ * Resolves a human-friendly model name to ALL tied candidates.
+ *
+ * Same resolution cascade as `resolveModelFuzzy`, but returns every model
+ * that ties at the best score instead of picking one. Used by the model
+ * router for scoped auto-routing: "codex" → all codex models → classify
+ * task → pick the right one for the job.
+ *
+ * @param query - Human-friendly model name (e.g. "codex", "opus", "gemini flash")
+ * @param modelSource - Optional model-fetching function (defaults to pi-ai registry)
+ * @returns Array of resolved models (may be empty if no match)
+ */
+export function resolveModelCandidates(query: string, modelSource?: ModelSource): ResolvedModel[] {
+	return findCandidates(query, modelSource).map(toResolved);
 }
 
 /**
