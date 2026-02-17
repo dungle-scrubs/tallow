@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.2...tallow-v0.7.3) (2026-02-17)
+
+
+### Fixed
+
+* **ci:** add registry-url for npm OIDC publish ([207d9c6](https://github.com/dungle-scrubs/tallow/commit/207d9c68fe498b49f410ca546dc0af410369ac12))
+* **ci:** add workflow_dispatch to publish for manual retrigger ([2b6f8bd](https://github.com/dungle-scrubs/tallow/commit/2b6f8bd394a2364b42acf551bcdcee866dc2a90e))
+
 ## [0.7.2](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.1...tallow-v0.7.2) (2026-02-17)
 
 
