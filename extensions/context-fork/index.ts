@@ -27,7 +27,7 @@ import { isShellInterpolationEnabled } from "../_shared/shell-policy.js";
 import { expandShellCommands } from "../shell-interpolation/index.js";
 import type { FrontmatterIndex } from "./frontmatter-index.js";
 import { buildFrontmatterIndex } from "./frontmatter-index.js";
-import { resolveModel } from "./model-resolver.js";
+import { resolveModel, routeForkedModel } from "./model-resolver.js";
 import { spawnForkSubprocess } from "./spawn.js";
 
 // ---------------------------------------------------------------------------
@@ -403,8 +403,11 @@ export default function (pi: ExtensionAPI): void {
 			}
 		}
 
-		// Resolve model: skill model > agent model > undefined (inherit)
-		const resolvedModel = resolveModel(fm.model) ?? resolveModel(agentConfig?.model);
+		// Resolve model: explicit model → fuzzy pick, otherwise → auto-route
+		const explicitModel = fm.model ?? agentConfig?.model;
+		const resolvedModel = explicitModel
+			? resolveModel(explicitModel)
+			: await routeForkedModel(content, undefined, ctx.model?.id);
 
 		// Show working indicator
 		const workingParts = [`🔀 forking: /${commandName}`];
