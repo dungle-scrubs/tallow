@@ -1,0 +1,26 @@
+{
+	"name": "permissions",
+	"version": "0.1.0",
+	"description": "Claude Code-compatible permission rules — Tool(specifier) syntax with allow/deny/ask tiers",
+	"category": "security",
+	"tags": ["permissions", "security", "policy", "allow", "deny"],
+	"files": ["index.ts"],
+	"relationships": [
+		{
+			"name": "bash-tool-enhanced",
+			"kind": "enhances",
+			"reason": "Enforces Bash permission rules via shell-policy integration"
+		},
+		{
+			"name": "claude-bridge",
+			"kind": "enhances",
+			"reason": "Reads .claude/settings.json permission rules"
+		},
+		{
+			"name": "hooks",
+			"kind": "enhances",
+			"reason": "Hook commands respect Bash permission rules (B12 hardening)"
+		}
+	],
+	"npmDependencies": {}
+}
