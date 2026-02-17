@@ -131,22 +131,20 @@ describe("context", () => {
 // ── Command execution: compact ───────────────────────────────────────────────
 
 describe("compact", () => {
-	test("calls ctx.compact() with onComplete and onError callbacks", async () => {
-		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+	test("does NOT call ctx.compact() immediately — defers to agent_end", async () => {
+		let compactCalled = false;
 		const ctx = buildContext({
-			compact: (options) => {
-				compactOptions = options;
+			compact: () => {
+				compactCalled = true;
 			},
 		});
 
 		await executeTool({ command: "compact" }, ctx);
 
-		expect(compactOptions).toBeDefined();
-		expect(typeof compactOptions?.onComplete).toBe("function");
-		expect(typeof compactOptions?.onError).toBe("function");
+		expect(compactCalled).toBe(false);
 	});
 
-	test("returns initiation message mentioning agent interruption", async () => {
+	test("returns message instructing model to finish response", async () => {
 		const ctx = buildContext({ compact: () => {} });
 
 		const result = await executeTool({ command: "compact" }, ctx);
@@ -154,8 +152,8 @@ describe("compact", () => {
 		expect(result.isError).toBeUndefined();
 		const text = result.content[0];
 		if (text?.type === "text") {
-			expect(text.text).toContain("interrupted");
-			expect(text.text).toContain("compaction initiated");
+			expect(text.text).toContain("compaction will begin after this response");
+			expect(text.text).toContain("Do NOT call any more tools");
 		}
 	});
 
@@ -165,6 +163,64 @@ describe("compact", () => {
 		const result = await executeTool({ command: "compact" }, ctx);
 
 		expect(result.details).toEqual({ command: "compact" });
+	});
+
+	test("agent_end hook triggers deferred compact with callbacks", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		// Tool sets the deferred flag
+		await executeTool({ command: "compact" }, toolCtx);
+
+		// agent_end fires — should trigger compact
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		expect(compactOptions).toBeDefined();
+		expect(typeof compactOptions?.onComplete).toBe("function");
+		expect(typeof compactOptions?.onError).toBe("function");
+	});
+
+	test("agent_end hook is a no-op when no compact is pending", async () => {
+		let compactCalled = false;
+		const ctx = buildContext({
+			compact: () => {
+				compactCalled = true;
+			},
+		});
+
+		// Fire agent_end without a preceding compact tool call
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, ctx);
+
+		expect(compactCalled).toBe(false);
+	});
+
+	test("session_before_switch clears pending compact", async () => {
+		let compactCalled = false;
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: () => {
+				compactCalled = true;
+			},
+		});
+
+		// Set pending compact
+		await executeTool({ command: "compact" }, toolCtx);
+
+		// Session switch fires — should clear the flag
+		await harness.fireEvent("session_before_switch", {
+			type: "session_before_switch",
+			reason: "switch",
+		});
+
+		// agent_end should now be a no-op
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		expect(compactCalled).toBe(false);
 	});
 });
 

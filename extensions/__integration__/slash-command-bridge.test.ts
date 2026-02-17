@@ -133,6 +133,6 @@ describe("slash-command-bridge integration", () => {
 		await runner.run("Compact the session");
 
 		expect(toolResults).toHaveLength(1);
-		expect(toolResults[0]).toContain("compaction initiated");
+		expect(toolResults[0]).toContain("compaction will begin");
 	});
 });

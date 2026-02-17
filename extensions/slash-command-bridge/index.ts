@@ -14,6 +14,14 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 /**
+ * Deferred compact request — set by the tool handler, consumed by the
+ * `agent_end` hook. Deferring avoids the spinner-hang bug where
+ * `ctx.compact()` aborts the agent mid-tool-call, orphaning the tool
+ * execution UI component. See plans 95 and 98 for full analysis.
+ */
+let pendingCompact: { customInstructions?: string } | null = null;
+
+/**
  * Commands the model is allowed to invoke.
  * Maps command name → whether it's executable from tool context.
  *
@@ -181,31 +189,19 @@ WHEN NOT TO USE:
 				}
 
 				case "compact": {
-					// ctx.compact() is fire-and-forget: it calls session.abort(),
-					// killing the agent mid-tool-call. The return value below will
-					// almost certainly never be processed — the agent is dead before
-					// it can read it. We pass onComplete/onError callbacks for
-					// completeness, but the real UX is handled by the framework's
-					// executeCompaction (Loader, Esc handler, summary component).
-					ctx.compact({
-						onComplete: () => {
-							// Framework's executeCompaction already rebuilds the UI
-							// and shows the compaction summary. No extra action needed.
-						},
-						onError: () => {
-							// Framework's executeCompaction already shows error/cancel
-							// messages in the UI. No extra handling needed.
-						},
-					});
+					// Don't call ctx.compact() here — it aborts the agent mid-tool-call,
+					// orphaning the tool execution spinner (plan 95/98). Defer to the
+					// agent_end hook so the tool completes normally first.
+					pendingCompact = { customInstructions: undefined };
 
 					return {
 						content: [
 							{
 								type: "text",
 								text:
-									"Session compaction initiated. The agent will be interrupted while " +
-									"context is summarized. This is expected — the session will resume " +
-									"with a compacted context after summarization completes.",
+									"Session compaction will begin after this response completes. " +
+									"Do NOT call any more tools — finish your response so " +
+									"compaction can start.",
 							},
 						],
 						details: { command },
@@ -240,5 +236,36 @@ WHEN NOT TO USE:
 				display: false,
 			},
 		};
+	});
+
+	// ── Deferred compact ─────────────────────────────────────────
+
+	/**
+	 * Fires compact after the agent finishes its turn. This avoids the
+	 * spinner-hang caused by aborting the agent mid-tool-execution.
+	 * The tool sets `pendingCompact`, then agent_end picks it up.
+	 */
+	pi.on("agent_end", (_event, ctx) => {
+		if (!pendingCompact) return;
+
+		const options = pendingCompact;
+		pendingCompact = null;
+
+		ctx.compact({
+			customInstructions: options.customInstructions,
+			onComplete: () => {
+				// Framework's executeCompaction rebuilds the UI and
+				// shows the compaction summary. No extra action needed.
+			},
+			onError: () => {
+				// Framework's executeCompaction handles error/cancel
+				// display. No extra handling needed.
+			},
+		});
+	});
+
+	/** Clear pending compact if the session switches before the turn ends. */
+	pi.on("session_before_switch", () => {
+		pendingCompact = null;
 	});
 }
