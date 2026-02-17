@@ -2,15 +2,19 @@
  * Git Snapshot Manager
  *
  * Creates and restores lightweight git ref-based snapshots at conversation
- * turn boundaries. Uses `git stash create` to capture working tree state
- * without modifying the index, then stores the SHA under a namespaced ref.
+ * turn boundaries. Uses a temporary GIT_INDEX_FILE to capture the full
+ * working tree state (tracked + untracked) without touching the user's
+ * staging area or polluting the reflog.
  *
- * Refs are stored at: refs/tallow/rewind/<session-id>/turn-<N>
+ * Snapshot commits are created via `git write-tree` + `git commit-tree`
+ * on the temporary index, then stored under a namespaced ref:
+ *   refs/tallow/rewind/<session-id>/turn-<N>
  *
  * Why refs over stashes: stashes are LIFO, refs give O(1) random access
  * and don't pollute the user's stash list.
  */
 
+import { spawnSync } from "node:child_process";
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { runGitCommandSync } from "../_shared/shell-policy.js";
@@ -65,32 +69,58 @@ export class SnapshotManager {
 	/**
 	 * Creates a snapshot of the current working tree state.
 	 *
-	 * Uses `git stash create` to produce a commit object capturing the
-	 * working tree + index without modifying either. If there are no
-	 * changes from HEAD, returns null.
+	 * Uses a temporary GIT_INDEX_FILE so the real index (user's staging
+	 * area) is never touched and no reflog entries are created.
+	 *
+	 * Strategy:
+	 * 1. Stage all files (tracked + untracked) into a temp index
+	 * 2. Write a tree object from that temp index
+	 * 3. Compare against HEAD's tree — bail if identical
+	 * 4. Create a commit from the tree, parented on HEAD
+	 * 5. Store the commit SHA under a namespaced ref
+	 * 6. Clean up the temp index file
 	 *
 	 * @param turnIndex - The conversation turn being snapshotted
 	 * @returns The ref name, or null if nothing to snapshot
 	 */
 	createSnapshot(turnIndex: number): string | null {
-		// Stage everything so stash create captures untracked files too
-		this.git(["add", "-A"]);
+		const tmpIndex = join(this.cwd, ".git", "tallow-snapshot-index");
 
-		const sha = this.git(["stash", "create"]);
-		if (!sha) {
-			// Nothing to stash — working tree matches HEAD
-			// Unstage what we just staged
-			this.git(["reset", "HEAD", "--quiet"]);
-			return null;
+		try {
+			// Stage everything into the temp index (captures untracked files too)
+			this.gitWithEnv(["add", "-A"], { GIT_INDEX_FILE: tmpIndex });
+
+			// Write a tree object from the temp index
+			const tree = this.gitWithEnv(["write-tree"], { GIT_INDEX_FILE: tmpIndex });
+			if (!tree) return null;
+
+			// Compare against HEAD's tree — skip if nothing changed
+			const headTree = this.git(["rev-parse", "HEAD^{tree}"]);
+			if (tree === headTree) return null;
+
+			// Create a commit from the tree, parented on HEAD
+			const sha = this.git([
+				"commit-tree",
+				tree,
+				"-p",
+				"HEAD",
+				"-m",
+				`tallow rewind: turn ${turnIndex}`,
+			]);
+			if (!sha) return null;
+
+			const ref = `${this.refPrefix}/turn-${turnIndex}`;
+			this.git(["update-ref", ref, sha]);
+
+			return ref;
+		} finally {
+			// Always clean up the temp index
+			try {
+				unlinkSync(tmpIndex);
+			} catch {
+				// May not exist if git add -A failed early
+			}
 		}
-
-		// Unstage — we don't want to leave the index dirty
-		this.git(["reset", "HEAD", "--quiet"]);
-
-		const ref = `${this.refPrefix}/turn-${turnIndex}`;
-		this.git(["update-ref", ref, sha]);
-
-		return ref;
 	}
 
 	/**
@@ -101,16 +131,13 @@ export class SnapshotManager {
 	 * 2. List current working tree files (tracked + untracked)
 	 * 3. Checkout all snapshot files from the ref
 	 * 4. Delete files that exist now but didn't exist in the snapshot
+	 * 5. Reset the index to HEAD (checkout stages files it touches)
 	 *
 	 * @param ref - The snapshot ref to restore (e.g. refs/tallow/rewind/.../turn-1)
 	 * @returns Detailed restore result
 	 * @throws {Error} If the ref doesn't exist or git commands fail
 	 */
 	restoreSnapshot(ref: string): RestoreResult {
-		// Get the tree SHA from the snapshot commit.
-		// `git stash create` produces a merge commit: parent[0] = HEAD, parent[1] = index,
-		// parent[2] = untracked. The working tree state is in the commit's own tree,
-		// but we need to check the third parent for untracked files too.
 		const snapshotFiles = this.getSnapshotFiles(ref);
 		const currentFiles = this.getCurrentFiles();
 
@@ -118,10 +145,8 @@ export class SnapshotManager {
 		const snapshotSet = new Set(snapshotFiles);
 		const filesToDelete = currentFiles.filter((f) => !snapshotSet.has(f));
 
-		// Restore all files from the snapshot
-		// Use git checkout from the stash ref — this handles tracked file contents
+		// Restore all files from the snapshot commit's tree
 		if (snapshotFiles.length > 0) {
-			// Checkout the working tree state from the stash commit
 			this.git(["checkout", ref, "--", "."]);
 		}
 
@@ -135,7 +160,9 @@ export class SnapshotManager {
 			}
 		}
 
-		// Clean the index so we don't leave staged changes
+		// Clean the index — `git checkout ref -- .` stages everything it touches.
+		// This is intentional (we just replaced the working tree), so the staging
+		// area reset is expected here.
 		this.git(["reset", "HEAD", "--quiet"]);
 
 		return {
@@ -186,27 +213,15 @@ export class SnapshotManager {
 	/**
 	 * Gets the list of files in a snapshot's tree.
 	 *
+	 * Snapshot commits are regular commits (not stashes), so all files —
+	 * including previously-untracked ones — are in the main tree.
+	 *
 	 * @param ref - Snapshot ref
 	 * @returns Array of file paths relative to the repo root
 	 */
 	private getSnapshotFiles(ref: string): string[] {
-		// The stash commit's tree contains the working tree state.
-		// Also check the 3rd parent (untracked files) if it exists.
-		const tracked = this.git(["ls-tree", "-r", "--name-only", ref]);
-		const files = new Set(tracked ? tracked.split("\n").filter(Boolean) : []);
-
-		// Check for untracked files parent (3rd parent of stash commit)
-		const untrackedParent = this.git(["rev-parse", "--verify", `${ref}^3`]);
-		if (untrackedParent) {
-			const untracked = this.git(["ls-tree", "-r", "--name-only", untrackedParent]);
-			if (untracked) {
-				for (const f of untracked.split("\n").filter(Boolean)) {
-					files.add(f);
-				}
-			}
-		}
-
-		return [...files];
+		const output = this.git(["ls-tree", "-r", "--name-only", ref]);
+		return output ? output.split("\n").filter(Boolean) : [];
 	}
 
 	/**
@@ -238,5 +253,29 @@ export class SnapshotManager {
 	 */
 	private git(args: string[]): string | null {
 		return runGitCommandSync(args, this.cwd, 10_000);
+	}
+
+	/**
+	 * Executes a git command with custom environment variables.
+	 *
+	 * Used for operations that need GIT_INDEX_FILE isolation to avoid
+	 * disturbing the user's staging area.
+	 *
+	 * @param args - Git subcommand and arguments as an array
+	 * @param env - Additional environment variables to set
+	 * @returns Trimmed output, or null on failure
+	 */
+	private gitWithEnv(args: string[], env: Record<string, string>): string | null {
+		const result = spawnSync("git", args, {
+			cwd: this.cwd,
+			encoding: "utf-8",
+			timeout: 10_000,
+			maxBuffer: 10 * 1024 * 1024,
+			stdio: ["pipe", "pipe", "pipe"],
+			env: { ...process.env, ...env },
+		});
+
+		if (result.error || result.status !== 0) return null;
+		return (result.stdout ?? "").toString().trim() || null;
 	}
 }

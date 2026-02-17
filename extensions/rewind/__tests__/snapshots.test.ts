@@ -190,4 +190,42 @@ describe("SnapshotManager", () => {
 	it("should return empty list when no snapshots exist", () => {
 		expect(mgr.listSnapshots()).toHaveLength(0);
 	});
+
+	it("should preserve user-staged files during snapshot creation", () => {
+		// User stages a file manually
+		writeFileSync(join(tmpDir, "staged.txt"), "user content");
+		git(["add", "staged.txt"], tmpDir);
+
+		// Also create an untracked file to trigger a snapshot
+		writeFileSync(join(tmpDir, "untracked.txt"), "other");
+
+		// Verify staged.txt is in the index before snapshot
+		const before = git(["diff", "--cached", "--name-only"], tmpDir);
+		expect(before).toContain("staged.txt");
+
+		// Create snapshot — this should NOT disturb the staging area
+		const ref = mgr.createSnapshot(1);
+		expect(ref).not.toBeNull();
+
+		// Verify staged.txt is STILL in the index after snapshot
+		const after = git(["diff", "--cached", "--name-only"], tmpDir);
+		expect(after).toContain("staged.txt");
+	});
+
+	it("should not pollute the reflog during snapshot creation", () => {
+		const reflogBefore = git(["reflog", "--format=%H"], tmpDir).split("\n").filter(Boolean).length;
+
+		// Create multiple snapshots
+		writeFileSync(join(tmpDir, "a.txt"), "v1");
+		mgr.createSnapshot(1);
+		writeFileSync(join(tmpDir, "a.txt"), "v2");
+		mgr.createSnapshot(2);
+		writeFileSync(join(tmpDir, "a.txt"), "v3");
+		mgr.createSnapshot(3);
+
+		const reflogAfter = git(["reflog", "--format=%H"], tmpDir).split("\n").filter(Boolean).length;
+
+		// Snapshot creation should add zero reflog entries
+		expect(reflogAfter).toBe(reflogBefore);
+	});
 });
