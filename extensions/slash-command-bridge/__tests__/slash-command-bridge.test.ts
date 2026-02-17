@@ -28,7 +28,7 @@ describe("registration", () => {
 
 	test("tool has correct label", () => {
 		const tool = harness.tools.get("run_slash_command");
-		expect(tool?.label).toBe("Run Slash Command");
+		expect(tool?.label).toBe("run_slash_command");
 	});
 
 	test("tool description lists available commands", () => {

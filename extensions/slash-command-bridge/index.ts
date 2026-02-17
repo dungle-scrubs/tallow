@@ -10,6 +10,7 @@
  */
 
 import type { ContextUsage, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 /**
@@ -63,7 +64,7 @@ export default function slashCommandBridge(pi: ExtensionAPI): void {
 
 	pi.registerTool({
 		name: "run_slash_command",
-		label: "Run Slash Command",
+		label: "run_slash_command",
 		description: `Invoke a slash command programmatically. Use this when you need to perform session management or introspection actions.
 
 Available commands:
@@ -84,6 +85,22 @@ WHEN NOT TO USE:
 					`One of: ${Array.from(ALLOWED_COMMANDS.keys()).join(", ")}`,
 			}),
 		}),
+
+		/**
+		 * Renders the tool call header showing which command is being invoked.
+		 *
+		 * @param args - Tool arguments containing the command name
+		 * @param theme - Theme for styling
+		 * @returns Text component with styled command display
+		 */
+		renderCall(args, theme) {
+			const cmd = args.command ?? "...";
+			return new Text(
+				theme.fg("toolTitle", theme.bold("run_slash_command ")) + theme.fg("accent", `/${cmd}`),
+				0,
+				0
+			);
+		},
 
 		/**
 		 * Executes the requested slash command.
