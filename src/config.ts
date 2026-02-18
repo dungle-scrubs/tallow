@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -134,9 +134,6 @@ export function bootstrap(): void {
 
 // ─── Secret Loading ──────────────────────────────────────────────────────────
 
-/** Cache TTL for resolved op:// secrets. */
-const SECRETS_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-
 /** Parsed op:// reference from .env. */
 interface OpRef {
 	key: string;
@@ -177,34 +174,6 @@ function parseEnvEntries(content: string): {
 }
 
 /**
- * Try loading op:// secrets from the local cache file.
- * Cache is invalidated when .env is newer than the cache or TTL expires.
- *
- * @param opRefs - Op references that need values
- */
-function loadSecretsFromCache(opRefs: OpRef[]): void {
-	const envPath = join(TALLOW_HOME, ".env");
-	const cachePath = join(TALLOW_HOME, ".env.cache");
-
-	try {
-		const cacheStat = statSync(cachePath);
-		if (Date.now() - cacheStat.mtimeMs > SECRETS_CACHE_TTL_MS) return;
-
-		const envStat = statSync(envPath);
-		if (envStat.mtimeMs > cacheStat.mtimeMs) return;
-
-		const cache: Record<string, string> = JSON.parse(readFileSync(cachePath, "utf-8"));
-		for (const { key } of opRefs) {
-			if (!process.env[key] && cache[key]) {
-				process.env[key] = cache[key];
-			}
-		}
-	} catch {
-		// Cache missing, corrupt, or unreadable — skip
-	}
-}
-
-/**
  * Resolve a single op:// reference via opchain.
  *
  * @param ref - The op:// URI to resolve
@@ -225,10 +194,10 @@ function resolveSecret(ref: string): Promise<string | null> {
 }
 
 /**
- * Load plain env vars and try cache for op:// references (sync).
+ * Load plain env vars from .env (sync).
  *
- * Plain values are set immediately. Op:// references are loaded from cache
- * if fresh; otherwise left unresolved for {@link resolveOpSecrets} to handle.
+ * Plain values are set immediately. Op:// references are left unresolved
+ * for {@link resolveOpSecrets} to handle asynchronously at session start.
  */
 function loadSecrets(): void {
 	const envPath = join(TALLOW_HOME, ".env");
@@ -239,14 +208,10 @@ function loadSecrets(): void {
 		return;
 	}
 
-	const { plain, opRefs } = parseEnvEntries(content);
+	const { plain } = parseEnvEntries(content);
 
 	for (const { key, value } of plain) {
 		if (!process.env[key]) process.env[key] = value;
-	}
-
-	if (opRefs.length > 0) {
-		loadSecretsFromCache(opRefs);
 	}
 }
 
@@ -254,8 +219,8 @@ function loadSecrets(): void {
  * Resolve any unresolved op:// references from .env in parallel.
  *
  * Call from an async context (e.g., createTallowSession) after bootstrap().
- * Skips secrets already in process.env (from cache or inherited environment).
- * Writes results to ~/.tallow/.env.cache for instant loading on next startup.
+ * Skips secrets already in process.env (from inherited environment).
+ * Resolved values are kept in process.env only — never written to disk.
  */
 export async function resolveOpSecrets(): Promise<void> {
 	const envPath = join(TALLOW_HOME, ".env");
@@ -272,26 +237,11 @@ export async function resolveOpSecrets(): Promise<void> {
 	const unresolved = opRefs.filter((r) => !process.env[r.key]);
 	if (unresolved.length === 0) return;
 
-	// Resolve all pending secrets in parallel (~2.4s instead of N × 2.4s)
+	// Resolve all pending secrets in parallel
 	await Promise.allSettled(
 		unresolved.map(async ({ key, ref }) => {
 			const value = await resolveSecret(ref);
 			if (value) process.env[key] = value;
 		})
 	);
-
-	// Write cache so next startup loads instantly
-	const cachePath = join(TALLOW_HOME, ".env.cache");
-	const cached: Record<string, string> = {};
-	for (const { key } of opRefs) {
-		const val = process.env[key];
-		if (val) cached[key] = val;
-	}
-	if (Object.keys(cached).length > 0) {
-		try {
-			writeFileSync(cachePath, JSON.stringify(cached), { mode: 0o600 });
-		} catch {
-			// Non-fatal — just means slower next startup
-		}
-	}
 }
