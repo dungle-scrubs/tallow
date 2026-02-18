@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.7...tallow-v0.8.0) (2026-02-18)
+
+
+### ⚠ BREAKING CHANGES
+
+* namespace package as @dungle-scrubs/tallow
+
+### Added
+
+* namespace package as @dungle-scrubs/tallow ([310af1d](https://github.com/dungle-scrubs/tallow/commit/310af1d7dd612e0142d91b9b4c107cbcc26184ba))
+
+
+### Fixed
+
+* **core:** revert package name to unscoped 'tallow' ([e6caff6](https://github.com/dungle-scrubs/tallow/commit/e6caff66c29803ddfbfba7b41fbb8eb1ff722b3c))
+
 ## [0.7.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.6...tallow-v0.7.7) (2026-02-18)
 
 
