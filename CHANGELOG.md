@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.1...tallow-v0.8.2) (2026-02-18)
+
+
+### Fixed
+
+* resolve CodeQL security alerts ([5d52f1d](https://github.com/dungle-scrubs/tallow/commit/5d52f1d55f817891b24be5d6f1bf961f6c6cb205))
+* resolve remaining CodeQL warnings ([1421691](https://github.com/dungle-scrubs/tallow/commit/1421691453052411a26d746f235bea6169c85b9d))
+
+
+### Maintenance
+
+* **codeql:** exclude test directories from analysis ([9c102eb](https://github.com/dungle-scrubs/tallow/commit/9c102eb4d0bd5cb6cf5bfe7b3540fc02d16b1fe8))
+
 ## [0.8.1](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.0...tallow-v0.8.1) (2026-02-18)
 
 
