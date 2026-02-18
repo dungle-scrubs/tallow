@@ -93,6 +93,10 @@ program
 		'Permission deny rules in Tool(specifier) format (e.g. "Bash(ssh *)" "WebFetch")'
 	)
 	.option("-e, --extension <path...>", "Additional extension paths")
+	.option(
+		"--plugin-dir <path...>",
+		"Load plugins from local directories (Claude Code or tallow format)"
+	)
 	.option("--no-extensions", "Disable all extensions (bundled + user)")
 	.option("--list", "List available sessions")
 	.option("--home", "Print Tallow home directory")
@@ -139,6 +143,7 @@ async function run(opts: {
 	extension?: string[];
 	extensions?: boolean;
 	forkSession?: string;
+	pluginDir?: string[];
 	home?: boolean;
 	init?: boolean;
 	initOnly?: boolean;
@@ -218,6 +223,7 @@ async function run(opts: {
 		modelId,
 		noBundledExtensions: opts.extensions === false,
 		noBundledSkills: opts.extensions === false,
+		plugins: opts.pluginDir,
 		provider,
 	};
 

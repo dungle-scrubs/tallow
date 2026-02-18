@@ -29,6 +29,7 @@ import { atomicWriteFileSync } from "./atomic-write.js";
 import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
+import { extractClaudePluginResources, type ResolvedPlugin, resolvePlugins } from "./plugins.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 
@@ -65,6 +66,9 @@ export interface TallowSessionOptions {
 
 	/** Additional extension paths (on top of bundled + user) */
 	additionalExtensions?: string[];
+
+	/** Plugin specs — remote repos or local paths (Claude Code or tallow format) */
+	plugins?: string[];
 
 	/** Additional extension factories (inline extensions) */
 	extensionFactories?: ExtensionFactory[];
@@ -187,6 +191,9 @@ export interface TallowSession {
 
 	/** Bundled extensions overridden by user extensions (name → user path) */
 	extensionOverrides: Array<{ name: string; userPath: string }>;
+
+	/** Resolved plugins (remote + local) */
+	resolvedPlugins: ResolvedPlugin[];
 
 	/** Session ID (UUID or user-provided) for programmatic chaining */
 	sessionId: string;
@@ -339,6 +346,69 @@ export async function createTallowSession(
 		additionalExtensionPaths.push(...options.additionalExtensions);
 	}
 
+	// ── Plugin Resolution ────────────────────────────────────────────────────
+	// Resolve plugins from settings + CLI options. Remote plugins are fetched
+	// and cached; local plugins are loaded live from disk.
+
+	const pluginSpecs = collectPluginSpecs(cwd, options.plugins);
+	const pluginResult = resolvePlugins(pluginSpecs);
+
+	// Report plugin errors (non-fatal — one bad plugin doesn't block startup)
+	for (const { spec, error } of pluginResult.errors) {
+		console.error(`\x1b[33m⚠ Plugin "${spec}": ${error}\x1b[0m`);
+	}
+
+	// Route resolved plugins to the appropriate loader
+	const resolvedPlugins: ResolvedPlugin[] = pluginResult.resolved;
+	const pluginCommandsDirs: string[] = [];
+	const pluginAgentsDirs: string[] = [];
+
+	for (const plugin of resolvedPlugins) {
+		switch (plugin.format) {
+			case "tallow-extension":
+				// Tallow extensions go through the standard extension loader
+				additionalExtensionPaths.push(plugin.path);
+				break;
+
+			case "claude-code": {
+				// Claude Code plugins: extract resources and feed into loaders
+				const resources = extractClaudePluginResources(plugin.path);
+				if (resources.skillPaths.length > 0) {
+					additionalSkillPaths.push(...resources.skillPaths);
+				}
+				if (resources.commandsDir) {
+					pluginCommandsDirs.push(resources.commandsDir);
+				}
+				if (resources.agentsDir) {
+					pluginAgentsDirs.push(resources.agentsDir);
+				}
+				break;
+			}
+
+			case "unknown":
+				console.error(
+					`\x1b[33m⚠ Plugin "${plugin.spec.raw}": unrecognized format ` +
+						`(expected .claude-plugin/plugin.json or extension.json)\x1b[0m`
+				);
+				break;
+		}
+	}
+
+	// Expose plugin commands/agents dirs as env vars for the command-prompt
+	// and agent-commands-tool extensions to discover at runtime.
+	if (pluginCommandsDirs.length > 0) {
+		const existing = process.env.TALLOW_PLUGIN_COMMANDS_DIRS;
+		process.env.TALLOW_PLUGIN_COMMANDS_DIRS = existing
+			? `${existing}:${pluginCommandsDirs.join(":")}`
+			: pluginCommandsDirs.join(":");
+	}
+	if (pluginAgentsDirs.length > 0) {
+		const existing = process.env.TALLOW_PLUGIN_AGENTS_DIRS;
+		process.env.TALLOW_PLUGIN_AGENTS_DIRS = existing
+			? `${existing}:${pluginAgentsDirs.join(":")}`
+			: pluginAgentsDirs.join(":");
+	}
+
 	// ── Package AGENTS.md loading ────────────────────────────────────────────
 	// Packages contribute extensions, skills, prompts, themes — but the framework
 	// doesn't load AGENTS.md from packages. Use agentsFilesOverride to inject them.
@@ -479,11 +549,60 @@ export async function createTallowSession(
 		modelFallbackMessage: result.modelFallbackMessage,
 		version: TALLOW_VERSION,
 		extensionOverrides,
+		resolvedPlugins,
 		sessionId: sessionManager.getSessionId(),
 	};
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// ─── Plugin Spec Collection ──────────────────────────────────────────────────
+
+/**
+ * Collect plugin specs from settings files and CLI options.
+ *
+ * Reads the `plugins` array from settings.json files (global + project),
+ * then merges in any CLI-provided specs. Deduplicates by raw spec string.
+ *
+ * The pi framework's SettingsManager doesn't know about `plugins` — it's
+ * a tallow-specific field. We read it directly from the JSON files.
+ *
+ * @param cwd - Current working directory (for project settings)
+ * @param cliPlugins - Additional plugin specs from CLI --plugin-dir or options.plugins
+ * @returns Deduplicated array of plugin spec strings
+ */
+function collectPluginSpecs(cwd: string, cliPlugins?: string[]): string[] {
+	const specs = new Set<string>();
+
+	// Read plugins from settings files (global, project .tallow/, project .pi/)
+	const settingsFiles = [
+		join(TALLOW_HOME, "settings.json"),
+		join(cwd, ".tallow", "settings.json"),
+		join(cwd, ".pi", "settings.json"),
+	];
+
+	for (const settingsPath of settingsFiles) {
+		try {
+			const content = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			if (Array.isArray(content.plugins)) {
+				for (const p of content.plugins) {
+					if (typeof p === "string") specs.add(p);
+				}
+			}
+		} catch {
+			// File doesn't exist or isn't valid JSON — skip
+		}
+	}
+
+	// CLI-provided plugins
+	if (cliPlugins) {
+		for (const p of cliPlugins) {
+			specs.add(p);
+		}
+	}
+
+	return [...specs];
+}
 
 /** Context file loaded from a package directory. */
 interface AgentsFile {

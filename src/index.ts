@@ -32,6 +32,23 @@ export {
 	TALLOW_HOME,
 	TALLOW_VERSION,
 } from "./config.js";
+export {
+	type ClaudePluginManifest,
+	type ClaudePluginResources,
+	clearPluginCache,
+	detectPluginFormat,
+	extractClaudePluginResources,
+	listCachedPlugins,
+	type PluginFormat,
+	type PluginResolutionResult,
+	type PluginSpec,
+	parsePluginSpec,
+	type ResolvedPlugin,
+	refreshPlugin,
+	resolvePlugin,
+	resolvePlugins,
+	type TallowExtensionManifest,
+} from "./plugins.js";
 export { createTallowSession, type TallowSession, type TallowSessionOptions } from "./sdk.js";
 export { createSessionWithId, findSessionById } from "./session-utils.js";
 
