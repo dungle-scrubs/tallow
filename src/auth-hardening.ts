@@ -327,8 +327,8 @@ function runShellCommand(command: string): string {
 	// Intentional: `!command` references in user-authored config (e.g., `!pass show api-key`).
 	// The command string originates from the user's local settings file, never from agent
 	// or network input. This is a core feature for secret-manager integration.
-	// lgtm[js/command-line-injection] lgtm[js/indirect-command-line-injection]
-	const output = execFileSync("sh", ["-c", command], {
+	// biome-ignore format: CodeQL suppression comment must stay on the execFileSync line
+	const output = execFileSync("sh", ["-c", command], { // lgtm[js/indirect-command-line-injection]
 		encoding: "utf-8",
 		timeout: 10_000,
 		stdio: ["ignore", "pipe", "ignore"],
