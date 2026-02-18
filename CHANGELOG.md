@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.2...tallow-v0.8.3) (2026-02-18)
+
+
+### Fixed
+
+* address remaining CodeQL alerts ([c7e8259](https://github.com/dungle-scrubs/tallow/commit/c7e8259cf01a01cda386a63808f337096bf1e611))
+* reject shell metacharacters in command references ([b178d23](https://github.com/dungle-scrubs/tallow/commit/b178d232427272a58b38b8b7d8d52105af2a7b2a))
+
 ## [0.8.2](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.1...tallow-v0.8.2) (2026-02-18)
 
 
