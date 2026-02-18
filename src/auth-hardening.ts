@@ -324,11 +324,21 @@ function runShellCommand(command: string): string {
 		throw new Error("Shell command reference exceeds 1024 character limit.");
 	}
 
+	// Reject shell metacharacters that could alter command semantics.
+	// Allowed: alphanumeric, whitespace, and common path/flag chars (-_./:"'=~@,+).
+	// Users needing pipes/subshells/expansion can wrap logic in a script file.
+	if (/[^a-zA-Z0-9\s\-_./"'=:~@,+\\]/.test(command)) {
+		throw new Error(
+			"Shell command reference contains disallowed characters. " +
+				"Only alphanumeric characters, spaces, and common path/flag characters " +
+				"(-_./\"'=:~@,+\\) are permitted. For complex commands, use a wrapper script."
+		);
+	}
+
 	// Intentional: `!command` references in user-authored config (e.g., `!pass show api-key`).
 	// The command string originates from the user's local settings file, never from agent
 	// or network input. This is a core feature for secret-manager integration.
-	// biome-ignore format: CodeQL suppression comment must stay on the execFileSync line
-	const output = execFileSync("sh", ["-c", command], { // lgtm[js/indirect-command-line-injection]
+	const output = execFileSync("sh", ["-c", command], {
 		encoding: "utf-8",
 		timeout: 10_000,
 		stdio: ["ignore", "pipe", "ignore"],
