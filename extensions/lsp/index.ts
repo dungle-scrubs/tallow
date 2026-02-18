@@ -567,8 +567,9 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 				};
 			} catch (error) {
 				return {
-					details: {},
 					content: [{ type: "text", text: `Error: ${error}` }],
+					details: {},
+					isError: true,
 				};
 			}
 		},
@@ -644,8 +645,9 @@ WHEN TO USE:
 				};
 			} catch (error) {
 				return {
-					details: {},
 					content: [{ type: "text", text: `Error: ${error}` }],
+					details: {},
+					isError: true,
 				};
 			}
 		},
@@ -711,8 +713,9 @@ WHEN TO USE:
 				};
 			} catch (error) {
 				return {
-					details: {},
 					content: [{ type: "text", text: `Error: ${error}` }],
+					details: {},
+					isError: true,
 				};
 			}
 		},
@@ -775,8 +778,9 @@ WHEN TO USE:
 				};
 			} catch (error) {
 				return {
-					details: {},
 					content: [{ type: "text", text: `Error: ${error}` }],
+					details: {},
+					isError: true,
 				};
 			}
 		},
@@ -855,8 +859,9 @@ WHEN TO USE:
 				};
 			} catch (error) {
 				return {
-					details: {},
 					content: [{ type: "text", text: `Error: ${error}` }],
+					details: {},
+					isError: true,
 				};
 			}
 		},

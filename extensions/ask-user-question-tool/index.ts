@@ -91,6 +91,7 @@ WHEN NOT TO USE:
 						options: params.options.map((o) => o.label),
 						answer: null,
 					} as QuestionDetails,
+					isError: true,
 				};
 			}
 
@@ -98,6 +99,7 @@ WHEN NOT TO USE:
 				return {
 					content: [{ type: "text", text: "Error: No options provided" }],
 					details: { question: params.question, options: [], answer: null } as QuestionDetails,
+					isError: true,
 				};
 			}
 

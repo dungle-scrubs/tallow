@@ -286,6 +286,7 @@ async function executePdf(
 ): Promise<{
 	content: Array<{ type: "text"; text: string }>;
 	details: Record<string, unknown>;
+	isError?: boolean;
 }> {
 	const buffer = fs.readFileSync(absolutePath);
 	let pages: number[] | undefined;
@@ -298,6 +299,7 @@ async function executePdf(
 			return {
 				content: [{ type: "text" as const, text: `Error parsing page range: ${msg}` }],
 				details: {},
+				isError: true,
 			};
 		}
 	}
