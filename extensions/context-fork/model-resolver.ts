@@ -3,10 +3,10 @@
  *
  * Resolves model specifiers using both fuzzy matching (for explicit picks)
  * and full model routing (for auto-routing with optional scope).
- * Delegates to the shared resolver/router in subagent-tool.
+ * Delegates to synapse for resolution and subagent-tool for routing.
  */
 
-import { resolveModelFuzzy } from "../subagent-tool/model-resolver.js";
+import { resolveModelFuzzy } from "@dungle-scrubs/synapse";
 import { type RoutingHints, routeModel } from "../subagent-tool/model-router.js";
 
 /**

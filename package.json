@@ -1,5 +1,5 @@
 {
-	"name": "tallow",
+	"name": "@dungle-scrubs/tallow",
 	"version": "0.7.6",
 	"description": "An opinionated coding agent. Built on pi.",
 	"piConfig": {
@@ -66,6 +66,7 @@
 		"@clack/prompts": "^1.0.0",
 		"@mariozechner/pi-coding-agent": "0.52.12",
 		"@sinclair/typebox": "0.34.48",
+		"@dungle-scrubs/synapse": "^0.1.1",
 		"ai": "^6.0.86",
 		"commander": "^14.0.3",
 		"unpdf": "^1.4.0",

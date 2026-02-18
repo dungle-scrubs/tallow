@@ -4,6 +4,7 @@
 
 import * as os from "node:os";
 import * as path from "node:path";
+import { listAvailableModels } from "@dungle-scrubs/synapse";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import {
 	AuthStorage,
@@ -14,7 +15,6 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { listAvailableModels } from "../../subagent-tool/model-resolver.js";
 import { type RoutingHints, routeModel } from "../../subagent-tool/model-router.js";
 import { resolveStandardTools } from "../state/team-view.js";
 import type { Teammate } from "../state/types.js";
