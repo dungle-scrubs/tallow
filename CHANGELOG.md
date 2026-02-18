@@ -13,6 +13,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sensitive info (paths, session IDs) for screen recordings and live demos
 - **custom-footer:** `[DEMO]` badge and path sanitization when demo mode is active
 - **sdk:** export `isDemoMode()` and `sanitizePath()` helpers for extensions
+- **plugins:** plugin resolver with cache, format detection, and session
+  startup integration
+- **context-files:** discover nested subdirectory rule files in
+  `.tallow/rules/` and `.claude/rules/`
+- **init:** nested `.claude/` → `.tallow/` directory rename and nested
+  `CLAUDE.md` → `AGENTS.md` migration in `/init`
+
+### Changed
+
+- **subagent:** extract model resolver, router, and matrix to
+  `@dungle-scrubs/synapse`
+- **web-fetch:** remove Firecrawl fallback and JS-detection — plain HTTP
+  fetch with 50KB truncation only
+
+### Fixed
+
+- **tools:** add missing `isError` flag to error responses in lsp, read,
+  and ask-user-question
+
+### Removed
+
+- **image-gen:** remove image-gen extension (moved to external plugin)
+
+### Maintenance
+
+- **ci:** remove redundant `publish.yml` — `release.yml` handles OIDC publish
 
 ## [0.7.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.5...tallow-v0.7.6) (2026-02-17)
 
