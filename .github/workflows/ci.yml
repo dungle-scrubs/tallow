@@ -26,7 +26,14 @@ jobs:
           bun-version: "1.3.9"
       - run: bun install --frozen-lockfile
       - name: Audit dependencies
-        run: bun audit --severity critical
+        run: |
+          # Report all vulnerabilities but only fail on critical
+          bun audit || true
+          # Fail if any critical-severity issues exist
+          if bun audit 2>&1 | grep -q "critical:"; then
+            echo "::error::Critical vulnerability found"
+            exit 1
+          fi
 
   lockfile-guardrail:
     runs-on: ubuntu-latest
