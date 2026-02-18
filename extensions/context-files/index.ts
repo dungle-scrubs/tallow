@@ -109,6 +109,51 @@ function findSubdirContextFiles(baseDir: string, maxDepth: number = 5): string[]
 }
 
 /**
+ * Recursively find rule files in subdirectory .tallow/rules/ and .claude/rules/ dirs.
+ *
+ * Walks subdirectories using the same skip-list and depth limits as
+ * findSubdirContextFiles. For each non-skipped subdirectory, peeks into
+ * .tallow/rules/ and .claude/rules/ within it.
+ *
+ * @param baseDir - Root directory to start walking from
+ * @param maxDepth - Maximum directory depth to traverse (default: 5)
+ * @returns Array of absolute file paths to rule files found
+ */
+function findSubdirRuleFiles(baseDir: string, maxDepth: number = 5): string[] {
+	const results: string[] = [];
+
+	function walk(dir: string, depth: number): void {
+		if (depth > maxDepth) return;
+
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
+
+			const subdir = path.join(dir, entry.name);
+
+			for (const filepath of findRuleFiles(path.join(subdir, ".tallow", "rules"))) {
+				results.push(filepath);
+			}
+			for (const filepath of findRuleFiles(path.join(subdir, ".claude", "rules"))) {
+				results.push(filepath);
+			}
+
+			walk(subdir, depth + 1);
+		}
+	}
+
+	walk(baseDir, 0);
+	return results;
+}
+
+/**
  * Determine which files pi natively loaded.
  *
  * Pi loads AGENTS.md OR CLAUDE.md (preferring AGENTS.md) from:
@@ -199,6 +244,15 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 			if (content) {
 				files.push({ filepath, content, source: "cwd", depth: 0 });
 			}
+		}
+	}
+
+	// --- Subdirectory rules (nested .tallow/rules/ and .claude/rules/) ---
+	for (const filepath of findSubdirRuleFiles(cwd)) {
+		const content = readFileSafe(filepath);
+		if (content) {
+			const depth = filepath.split(path.sep).length;
+			files.push({ filepath, content, source: "subdirectory", depth });
 		}
 	}
 
@@ -396,6 +450,19 @@ function collectFromAdditionalDir(dir: string): ContextFile[] {
 
 	// Subdirectory walk (same rules as cwd subdirectories)
 	for (const filepath of findSubdirContextFiles(dir)) {
+		const content = readFileSafe(filepath);
+		if (content) {
+			files.push({
+				filepath,
+				content,
+				source: "additional",
+				depth: filepath.split(path.sep).length,
+			});
+		}
+	}
+
+	// Subdirectory rules in additional dirs
+	for (const filepath of findSubdirRuleFiles(dir)) {
 		const content = readFileSafe(filepath);
 		if (content) {
 			files.push({
