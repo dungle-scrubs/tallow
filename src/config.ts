@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export const APP_NAME = "tallow";
-export const TALLOW_VERSION = "0.8.0"; // x-release-please-version
+export const TALLOW_VERSION = "0.8.1"; // x-release-please-version
 export const CONFIG_DIR = ".tallow";
 
 // ─── Paths ───────────────────────────────────────────────────────────────────

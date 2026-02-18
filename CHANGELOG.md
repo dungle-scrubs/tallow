@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.0...tallow-v0.8.1) (2026-02-18)
+
+
+### Fixed
+
+* **ci:** only fail audit on critical vulnerabilities ([94505a3](https://github.com/dungle-scrubs/tallow/commit/94505a344a42e89ef36923b415c2bd61aca44831))
+* **ci:** remove SonarCloud workflow (use Automatic Analysis), relax audit to critical-only ([a2222f6](https://github.com/dungle-scrubs/tallow/commit/a2222f6d41d0c2dc52f7128de93767329d5faf8f))
+* **config:** remove op:// secret cache to prevent plaintext secrets on disk ([d48ec89](https://github.com/dungle-scrubs/tallow/commit/d48ec89794ff0f43daeaf40567c49ee9c8c668d6))
+
+
+### Maintenance
+
+* **security:** add Semgrep, CodeQL, SonarCloud, and dependency audit ([e0c3548](https://github.com/dungle-scrubs/tallow/commit/e0c3548473d3ba943cc9565e86cbdb0b1ca32cea))
+
 ## [0.8.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.7...tallow-v0.8.0) (2026-02-18)
 
 
