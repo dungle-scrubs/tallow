@@ -1,7 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { clearAuditTrail, getAuditTrail } from "../../_shared/shell-policy.js";
 import { expandFileReferences } from "../../file-reference/index.js";
 import { expandShellCommands } from "../index.js";
+
+// These tests spawn real child processes via login shells (-lc).
+// Under parallel test execution, process contention can exceed bun's
+// default 5s timeout. Give them 15s of breathing room.
+setDefaultTimeout(15_000);
 
 const CWD = process.cwd();
 const ORIG_ENABLE = process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;

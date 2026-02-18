@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import {
 	clampTimeout,
 	clearAuditTrail,
@@ -16,6 +16,11 @@ import {
 	runGitCommandSync,
 	runShellCommandSync,
 } from "../shell-policy.js";
+
+// Tests that spawn child processes (runCommandSync, runShellCommandSync,
+// runGitCommandSync) use login shells which source user profiles. Under
+// parallel test execution this can exceed bun's default 5s timeout.
+setDefaultTimeout(15_000);
 
 const ORIG_ENABLE = process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
 const ORIG_LEGACY_ENABLE = process.env.TALLOW_SHELL_INTERPOLATION;
