@@ -61,7 +61,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 
 - `registerTool(tool: ToolDefinition<TParams, TDetails>)` — Register a tool that the LLM can call.
 - `registerCommand(name: string, options: Omit<RegisteredCommand, "name">)` — Register a custom command.
-- `registerShortcut(shortcut: KeyId, options: object)` — Register a keyboard shortcut.
 - `registerFlag(name: string, options: object)` — Register a CLI flag.
 - `registerMessageRenderer(customType: string, renderer: MessageRenderer<T>)` — Register a custom renderer for CustomMessageEntry.
 - `registerProvider(name: string, config: ProviderConfig)` — Register or override a model provider.
@@ -69,7 +68,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 #### Messaging
 
 - `sendMessage(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details">, options?: object)` — Send a custom message to the session.
-- `sendUserMessage(content: string | (TextContent | ImageContent)[], options?: object)` — Send a user message to the agent.
 - `appendEntry(customType: string, data?: T)` — Append a custom entry to the session for state persistence (not sent to LLM).
 
 #### Session
@@ -165,7 +163,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 ### ExtensionCommandContext (`ctx` in command handlers, extends ExtensionContext)
 
 - `waitForIdle()` — Wait for the agent to finish streaming
-- `newSession(options?: object)` — Start a new session, optionally with initialization.
 - `fork(entryId: string)` — Fork from a specific entry, creating a new session file.
 - `navigateTree(targetId: string, options?: object)` — Navigate to a different point in the session tree.
 - `switchSession(sessionPath: string)` — Switch to a different session file.
@@ -181,8 +178,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `setStatus(key: string, text: string)` — Set status text in the footer/status bar.
 - `setWorkingMessage(message?: string)` — Set the working/loading message shown during streaming.
 - `setWidget(key: string, content: string[], options?: ExtensionWidgetOptions)` — Set a widget to display above or below the editor.
-- `setFooter(factory: ((tui: TUI, theme: Theme, footerData: ReadonlyFooterDataProvider) => Component & { dispose?()` — Set a custom footer component, or undefined to restore the built-in footer.
-- `setHeader(factory: ((tui: TUI, theme: Theme) => Component & { dispose?()` — Set a custom header component (shown at startup, above chat), or undefined to restore the built-in header.
 - `setTitle(title: string)` — Set the terminal window/tab title.
 - `pasteToEditor(text: string)` — Paste text into the editor, triggering paste handling (collapse for large content).
 - `setEditorText(text: string)` — Set the text in the core input editor.

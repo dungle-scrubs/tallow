@@ -1161,7 +1161,7 @@ export class TUI extends Container {
 			fs.mkdirSync(debugDir, { recursive: true });
 			const debugPath = path.join(
 				debugDir,
-				`render-${Date.now()}-${Math.random().toString(36).slice(2)}.log`
+				`render-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.log`
 			);
 			const debugData = [
 				`firstChanged: ${firstChanged}`,
@@ -1185,7 +1185,7 @@ export class TUI extends Container {
 				"=== buffer ===",
 				JSON.stringify(buffer),
 			].join("\n");
-			fs.writeFileSync(debugPath, debugData);
+			fs.writeFileSync(debugPath, debugData, { mode: 0o600 });
 		}
 
 		// Write entire buffer at once

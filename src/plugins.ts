@@ -141,7 +141,7 @@ export function parsePluginSpec(spec: string): PluginSpec {
 
 	// Full GitHub URL: https://github.com/owner/repo[/tree/ref/subpath]
 	const ghMatch = trimmed.match(
-		/^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/tree\/([^/]+)\/?(.*?))?$/
+		/^https?:\/\/github\.com\/([^/]+)\/([^/.]+)(?:\.git)?(?:\/tree\/([^/]+)\/?(.*))?$/
 	);
 	if (ghMatch) {
 		const [, owner, repo, ref, subpath] = ghMatch;

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
 	closeSync,
 	copyFileSync,
@@ -26,12 +27,12 @@ interface AtomicWriteOptions {
 }
 
 /**
- * Generate a short random suffix for temp file names.
+ * Generate a cryptographically random suffix for temp file names.
  *
- * @returns 8-character hex string
+ * @returns 16-character hex string
  */
 function randomSuffix(): string {
-	return Math.random().toString(16).slice(2, 10);
+	return randomBytes(8).toString("hex");
 }
 
 /**

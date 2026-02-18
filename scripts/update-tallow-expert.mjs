@@ -179,7 +179,7 @@ function parseMembers(block, skip = new Set()) {
 	for (const { doc, statement } of collapsed) {
 		// Match method: name<generics>?(params...): ReturnType;
 		const methodMatch = statement.match(
-			/^(readonly\s+)?(\w+)(?:<[^>]*>)?\s*\(([^)]*(?:\([^)]*\)[^)]*)*)\)\s*:\s*(.+);$/
+			/^(readonly\s+)?(\w+)(?:<[^>]*>)?\s*\(([^)]*)\)\s*:\s*(.+);$/
 		);
 		if (methodMatch) {
 			const name = methodMatch[2];

@@ -133,13 +133,10 @@ export class DebugLogger {
 		this.logPath = join(dir, "debug.log");
 
 		if (!this.useStderr) {
-			if (!existsSync(dir)) {
-				mkdirSync(dir, { recursive: true });
-			}
-			// Touch the file so it exists even before the first log()
-			if (!existsSync(this.logPath)) {
-				writeFileSync(this.logPath, "");
-			}
+			// mkdirSync with recursive is idempotent (no TOCTOU race)
+			mkdirSync(dir, { recursive: true });
+			// Append mode creates the file atomically if it doesn't exist
+			writeFileSync(this.logPath, "", { flag: "a" });
 		}
 
 		// Write session header

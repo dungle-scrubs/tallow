@@ -306,14 +306,28 @@ function resolveReferenceValue(reference: string): string {
 }
 
 /**
- * Execute an arbitrary shell command reference.
+ * Execute a shell command reference from user config.
+ *
+ * This is an intentional feature: users configure API key resolution via
+ * `!command` references in their settings (e.g., `!pass show api-key`).
+ * The command is always user-authored config, never agent or network input.
  *
  * @param command - Shell command without leading `!`
  * @returns Trimmed stdout
  */
 function runShellCommand(command: string): string {
+	// Guard: reject null bytes and excessively long commands
+	if (command.includes("\0")) {
+		throw new Error("Shell command reference contains null bytes.");
+	}
+	if (command.length > 1024) {
+		throw new Error("Shell command reference exceeds 1024 character limit.");
+	}
+
+	// lgtm[js/command-line-injection] — intentional: user-authored config, not agent input
 	const output = execFileSync("sh", ["-c", command], {
 		encoding: "utf-8",
+		timeout: 10_000,
 		stdio: ["ignore", "pipe", "ignore"],
 	});
 	const value = output.trim();

@@ -122,9 +122,7 @@ function loadPromptTemplates(): PromptTemplate[] {
 
 				const filePath = path.join(dir, file);
 				try {
-					const stat = fs.statSync(filePath);
-					if (!stat.isFile()) continue;
-
+					// Read directly — avoids TOCTOU race between stat and read
 					const content = fs.readFileSync(filePath, "utf-8");
 					const name = file.replace(/\.md$/, "");
 
