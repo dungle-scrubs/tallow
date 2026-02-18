@@ -298,14 +298,16 @@ async function run(opts: {
 		tallow = await createTallowSession(sessionOpts);
 	} catch (error) {
 		if (error instanceof Error && error.message.startsWith("Session not found:")) {
-			// Only surface the session ID, not the full error which may contain paths
+			// Only surface the session ID (UUID), strip anything that isn't safe to log
 			const id = error.message.slice("Session not found:".length).trim();
-			console.error(`Error: Session not found: ${id}`);
+			const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
+			console.error(`Error: Session not found: ${safeId}`);
 			process.exit(1);
 		}
 		if (error instanceof Error && error.message.startsWith("Source session not found:")) {
 			const id = error.message.slice("Source session not found:".length).trim();
-			console.error(`Error: Source session not found: ${id}`);
+			const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "");
+			console.error(`Error: Source session not found: ${safeId}`);
 			process.exit(1);
 		}
 		throw error;

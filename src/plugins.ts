@@ -140,19 +140,32 @@ export function parsePluginSpec(spec: string): PluginSpec {
 	}
 
 	// Full GitHub URL: https://github.com/owner/repo[/tree/ref/subpath]
-	const ghMatch = trimmed.match(
-		/^https?:\/\/github\.com\/([^/]+)\/([^/.]+)(?:\.git)?(?:\/tree\/([^/]+)\/?(.*))?$/
-	);
-	if (ghMatch) {
-		const [, owner, repo, ref, subpath] = ghMatch;
-		return {
-			raw: spec,
-			isLocal: false,
-			owner,
-			repo,
-			subpath: subpath || "",
-			ref: ref || undefined,
-		};
+	// Uses URL parsing instead of regex to avoid ReDoS on untrusted input.
+	try {
+		const url = new URL(trimmed);
+		if (url.hostname === "github.com") {
+			const parts = url.pathname.split("/").filter(Boolean);
+			if (parts.length >= 2) {
+				const owner = parts[0];
+				const repo = parts[1].replace(/\.git$/, "");
+				let ref: string | undefined;
+				let subpath = "";
+				if (parts[2] === "tree" && parts.length >= 4) {
+					ref = parts[3];
+					subpath = parts.slice(4).join("/");
+				}
+				return {
+					raw: spec,
+					isLocal: false,
+					owner,
+					repo,
+					subpath,
+					ref,
+				};
+			}
+		}
+	} catch {
+		// Not a valid URL — fall through to the error below
 	}
 
 	throw new Error(

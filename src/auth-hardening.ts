@@ -324,7 +324,10 @@ function runShellCommand(command: string): string {
 		throw new Error("Shell command reference exceeds 1024 character limit.");
 	}
 
-	// lgtm[js/command-line-injection] — intentional: user-authored config, not agent input
+	// Intentional: `!command` references in user-authored config (e.g., `!pass show api-key`).
+	// The command string originates from the user's local settings file, never from agent
+	// or network input. This is a core feature for secret-manager integration.
+	// lgtm[js/command-line-injection] lgtm[js/indirect-command-line-injection]
 	const output = execFileSync("sh", ["-c", command], {
 		encoding: "utf-8",
 		timeout: 10_000,
