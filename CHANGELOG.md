@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.6...tallow-v0.7.7) (2026-02-18)
+
+
+### Added
+
+* **context-files:** discover nested subdirectory rule files ([34058bd](https://github.com/dungle-scrubs/tallow/commit/34058bd41d4387a63cd45c79c2d7c82779c740ca))
+* **core:** add demo mode for recordings and streaming ([232ba79](https://github.com/dungle-scrubs/tallow/commit/232ba796c8c352f7b91b0a109f622b76fbd60ac0))
+* **init:** support nested .claude/ rename and CLAUDE.md migration ([18b1ad4](https://github.com/dungle-scrubs/tallow/commit/18b1ad41dd75123e2f6b66247f2cf8606baa89d5))
+* **plugins:** add plugin resolver, cache, and format detection ([e7937cb](https://github.com/dungle-scrubs/tallow/commit/e7937cbbe9a0cf30f38fc69733aeb61063dc56ab))
+* **plugins:** integrate plugin resolution into session startup ([e87e191](https://github.com/dungle-scrubs/tallow/commit/e87e191008cdd1c1501a97ebec50a3522ddfbfe0))
+* remove image-gen extension ([85e01de](https://github.com/dungle-scrubs/tallow/commit/85e01de374f60ef0773d713c556a06833ba3a77c))
+
+
+### Fixed
+
+* **ci:** add NODE_AUTH_TOKEN for npm OIDC publish ([814ec12](https://github.com/dungle-scrubs/tallow/commit/814ec12c5875ac28706320a6fd7482b083a1ca6c))
+* **test:** increase timeout for shell-spawning tests ([b28263c](https://github.com/dungle-scrubs/tallow/commit/b28263cb56acdcc7ecf30954b36317c6801495af))
+* **tools:** add missing isError flag to error responses in lsp, read, and ask-user-question ([49bb21d](https://github.com/dungle-scrubs/tallow/commit/49bb21d5056f4042ddf75cc8a6f48373a5f18f31))
+
+
+### Changed
+
+* **subagent:** extract model resolver, router, and matrix to @dungle-scrubs/synapse ([61932f2](https://github.com/dungle-scrubs/tallow/commit/61932f25ec4ff6b050aef8e5db208992f7647fb2))
+* **web-fetch:** remove Firecrawl fallback and JS detection ([8fa22c7](https://github.com/dungle-scrubs/tallow/commit/8fa22c7e026e033ffc19803c324ab1f2d2b4001b))
+
+
+### Documentation
+
+* add demo mode changelog entry ([9a36522](https://github.com/dungle-scrubs/tallow/commit/9a36522ad667b23a5d29038aa83b43e5f8afc0bc))
+* update unreleased changelog for 0.7.7 ([6f7628f](https://github.com/dungle-scrubs/tallow/commit/6f7628f8d7996b9bc298b13db4f8bdb36fb28638))
+
+
+### Maintenance
+
+* **ci:** remove redundant publish.yml — release.yml handles OIDC publish ([07f7110](https://github.com/dungle-scrubs/tallow/commit/07f71109015bc37c090e7568adfceb179a8828dc))
+
 ## [Unreleased]
 
 ### Added
