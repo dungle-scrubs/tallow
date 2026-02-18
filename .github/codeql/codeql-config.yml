@@ -1,0 +1,8 @@
+name: "Tallow CodeQL config"
+
+paths-ignore:
+  - "**/node_modules"
+  - "**/dist"
+  - "**/__tests__"
+  - "**/test-utils"
+  - "tests/e2e-profiles"
