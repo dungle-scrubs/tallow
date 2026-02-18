@@ -327,7 +327,9 @@ describe("agent resolution", () => {
 	});
 
 	test("returns undefined when both skill and agent model are undefined", () => {
-		const resolved = resolveModel(undefined) ?? resolveModel(undefined);
+		const skillResolved = resolveModel(undefined);
+		const agentResolved = resolveModel(undefined);
+		const resolved = skillResolved ?? agentResolved;
 		expect(resolved).toBeUndefined();
 	});
 

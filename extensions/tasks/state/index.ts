@@ -264,7 +264,6 @@ export class TaskListStore {
 				if (ageMs > 5_000) {
 					rmdirSync(lockDir);
 					mkdirSync(lockDir);
-					acquired = true;
 				}
 			} catch {
 				// Proceed unlocked — best effort

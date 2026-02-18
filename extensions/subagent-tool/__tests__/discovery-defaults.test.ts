@@ -238,16 +238,16 @@ describe("resolveAgentForExecution", () => {
 describe("model precedence", () => {
 	it("per-call model beats agent model beats parent model", () => {
 		// Simulates the precedence logic in runSingleAgent
-		const agentModel = "agent-model";
-		const parentModelId = "parent-model";
-		const perCallModel = "per-call-model";
+		const agentModel: string | undefined = "agent-model";
+		const parentModelId: string | undefined = "parent-model";
+		const perCallModel: string | undefined = "per-call-model";
 		const effective = perCallModel ?? agentModel ?? parentModelId;
 		expect(effective).toBe("per-call-model");
 	});
 
 	it("agent model beats parent model when no per-call", () => {
-		const agentModel = "agent-model";
-		const parentModelId = "parent-model";
+		const agentModel: string | undefined = "agent-model";
+		const parentModelId: string | undefined = "parent-model";
 		const perCallModel: string | undefined = undefined;
 		const effective = perCallModel ?? agentModel ?? parentModelId;
 		expect(effective).toBe("agent-model");
@@ -255,7 +255,7 @@ describe("model precedence", () => {
 
 	it("parent model used when no explicit model exists", () => {
 		const agentModel: string | undefined = undefined;
-		const parentModelId = "parent-model";
+		const parentModelId: string | undefined = "parent-model";
 		const perCallModel: string | undefined = undefined;
 		const effective = perCallModel ?? agentModel ?? parentModelId;
 		expect(effective).toBe("parent-model");

@@ -14,11 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { createTallowSession, type TallowSession } from "../../src/sdk.js";
-import {
-	createEchoStreamFn,
-	createMockModel,
-	createScriptedStreamFn,
-} from "../../test-utils/mock-model.js";
+import { createMockModel, createScriptedStreamFn } from "../../test-utils/mock-model.js";
 import { resolveExtensionPaths, STANDARD_EXTENSIONS } from "./profiles.js";
 
 // ── EventBus capture ─────────────────────────────────────────────────────────

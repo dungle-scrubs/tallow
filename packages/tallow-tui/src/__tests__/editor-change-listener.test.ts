@@ -62,9 +62,9 @@ describe("Editor.addChangeListener", () => {
 
 		editor.addChangeListener((text) => listenerCalls.push(text));
 
-		// Simulate framework overwriting onChange
+		// Simulate framework overwriting onChange (second write overwrites first)
 		editor.onChange = () => {};
-		editor.onChange = () => {};
+		editor.onChange = () => {}; // intentional: tests that listener survives overwrites
 
 		typeText(editor, "x");
 		expect(listenerCalls).toEqual(["x"]);

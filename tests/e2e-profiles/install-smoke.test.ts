@@ -6,7 +6,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -35,7 +35,7 @@ describe("Install Smoke Test", () => {
 
 		// Run installer in headless mode with a mock provider.
 		// Use TALLOW_API_KEY_REF (op:// reference) to avoid macOS Keychain access.
-		execSync(`node ${INSTALL_SCRIPT} --yes --default-provider mock`, {
+		execFileSync("node", [INSTALL_SCRIPT, "--yes", "--default-provider", "mock"], {
 			env: {
 				...process.env,
 				HOME: tmpHome,
@@ -63,7 +63,7 @@ describe("Install Smoke Test", () => {
 	it("settings.json is valid JSON after install", () => {
 		tmpHome = mkdtempSync(join(tmpdir(), "tallow-install-e2e-"));
 
-		execSync(`node ${INSTALL_SCRIPT} --yes --default-provider mock`, {
+		execFileSync("node", [INSTALL_SCRIPT, "--yes", "--default-provider", "mock"], {
 			env: {
 				...process.env,
 				HOME: tmpHome,
@@ -86,7 +86,7 @@ describe("Install Smoke Test", () => {
 	it("installed home boots a session successfully", async () => {
 		tmpHome = mkdtempSync(join(tmpdir(), "tallow-install-e2e-"));
 
-		execSync(`node ${INSTALL_SCRIPT} --yes --default-provider mock`, {
+		execFileSync("node", [INSTALL_SCRIPT, "--yes", "--default-provider", "mock"], {
 			env: {
 				...process.env,
 				HOME: tmpHome,
