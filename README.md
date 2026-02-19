@@ -5,7 +5,7 @@
 <h1 align="center">Tallow</h1>
 
 <p align="center">
-  An opinionated coding agent. Built on <a href="https://github.com/nicobrinkkemper/pi-coding-agent">pi</a>.
+  An opt-in, fully featured coding agent for your terminal. Built on <a href="https://github.com/nicobrinkkemper/pi-coding-agent">pi</a>.
 </p>
 
 <p align="center">
@@ -26,22 +26,37 @@
   <img src="assets/screenshot.jpg" alt="Tallow multi-agent team coordinating a docs audit" />
 </p>
 
-49 extensions, 34 themes, 8 slash commands, and 10 specialized agents.
-Install only what you need — the interactive installer lets you pick.
+Tallow is opt-in by default: start minimal, then enable only what your project needs.
+It is drop-in compatible with Claude Code projects via `.claude/` bridging.
+Install extensions, themes, and agents in any combination.
+This is a personal project I build in my spare time, so please be patient with
+issue and PR response times.
 
 ## Features
 
-- **49 bundled extensions** — enhanced tools, hooks, tasks, teams, LSP, themes, permissions, context usage, and more
-- **34 terminal themes** — Tokyo Night, Catppuccin, Gruvbox, Rose Pine, Nord, and many others
-- **8 slash commands** — `/implement`, `/implement-and-review`, `/review`, `/fix`, `/test`, `/scout-and-plan`, `/scaffold`, `/question`
-- **9 specialized agents** — architect, debug, explore, planner, refactor, reviewer, scout, worker, tallow-expert
-- **Multi-agent teams** — coordinate multiple agents with task boards, messaging, and archive/resume
-- **Session naming** — auto-generated descriptive names for each session, shown in footer and `--list`
-- **Context fork** — run skills and commands in isolated subprocesses via `context: fork` frontmatter
+- **Most valuable capabilities (non-exhaustive):**
+  - **Multi-model routing** — route work by intent/cost (`auto-cheap`, `auto-balanced`,
+    `auto-premium`) across available providers
+  - **Multi-agent teams** — coordinate specialized agents with shared task boards,
+    dependencies, messaging, and archive/resume
+  - **Context fork** — run isolated subprocess workflows with separate tools/models and
+    merge results back cleanly
+  - **Workspace rewind snapshots** — roll file changes back to earlier conversation turns
+  - **Task primitives + background execution** — explicit task lifecycle tracking and
+    non-blocking long-running work
+  - **Built-in LSP navigation** — definitions, references, hover, and workspace symbol
+    lookup
+- **Opt-in and modular** — install only the pieces you need, skip the rest
+- **Claude Code compatible** — `.claude/` + `.tallow/` directories are bridged so existing
+  project workflows keep working
+- **Fully featured when you want it** — 49 bundled extensions, 34 themes, 8 slash commands,
+  and 10 specialized agents
+- **Session naming** — auto-generated descriptive names for each session, shown in footer
+  and `--list`
 - **Debug mode** — structured JSONL diagnostic logging with `/diag` command
-- **Claude Code compatible** — `.claude/` directory bridging for seamless use of Tallow skills, agents, and commands in Claude Code
 - **SDK** — embed Tallow in your own scripts and orchestrators
-- **User-owned config** — agents and commands are installed to `~/.tallow/` where you can edit, remove, or add your own
+- **User-owned config** — agents and commands are installed to `~/.tallow/` where you can
+  edit, remove, or add your own
 
 Read the full [documentation](https://tallow.dungle-scrubs.com).
 
@@ -298,7 +313,8 @@ If it shares a name with a bundled extension, yours takes precedence.
 
 - Requires Node.js 22+ (uses modern ESM features)
 - Session persistence is local — no cloud sync
-- The `web_fetch` extension works best with a [Firecrawl](https://firecrawl.dev) API key for JS-heavy pages
+- The `web_fetch` extension works best with a [Firecrawl](https://firecrawl.dev) API key
+  for JS-heavy pages
 
 ## Contributing
 
