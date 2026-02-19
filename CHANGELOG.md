@@ -111,6 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **subagent:** extract model resolver, router, and matrix to
   `@dungle-scrubs/synapse`
+- **subagent:** surface `routing` settings (`enabled`, `primaryType`,
+  `costPreference`) in schema/docs and support project-over-user
+  precedence for routing defaults
 - **web-fetch:** remove Firecrawl fallback and JS-detection — plain HTTP
   fetch with 50KB truncation only
 

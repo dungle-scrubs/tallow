@@ -207,6 +207,7 @@ export async function spawnBackgroundSubagent(
 	hints?: RoutingHints
 ): Promise<string | null> {
 	const resolved = resolveAgentForExecution(agentName, agents, defaults);
+	const effectiveCwd = cwd ?? defaultCwd;
 	// Route model via fuzzy resolution + auto-routing
 	const routing = await routeModel(
 		task,
@@ -214,12 +215,12 @@ export async function spawnBackgroundSubagent(
 		resolved.agent.model,
 		parentModelId,
 		resolved.agent.description,
-		hints
+		hints,
+		effectiveCwd
 	);
 	if (!routing.ok) return routing.error;
 	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
-	const effectiveCwd = cwd ?? defaultCwd;
 
 	const args: string[] = session
 		? ["--mode", "json", "-p", "--session", session]
@@ -504,6 +505,7 @@ export async function runSingleAgent(
 	hints?: RoutingHints
 ): Promise<SingleResult> {
 	const resolved = resolveAgentForExecution(agentName, agents, defaults);
+	const effectiveCwd = cwd ?? defaultCwd;
 	// Route model via fuzzy resolution + auto-routing
 	const routing = await routeModel(
 		task,
@@ -511,7 +513,8 @@ export async function runSingleAgent(
 		resolved.agent.model,
 		parentModelId,
 		resolved.agent.description,
-		hints
+		hints,
+		effectiveCwd
 	);
 	if (!routing.ok) {
 		// Return a failed SingleResult so the caller can surface the error
@@ -539,7 +542,6 @@ export async function runSingleAgent(
 	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const taskId = `fg_${generateId()}`;
-	const effectiveCwd = cwd ?? defaultCwd;
 
 	registerForegroundSubagent(taskId, agentName, task, Date.now(), piEvents);
 

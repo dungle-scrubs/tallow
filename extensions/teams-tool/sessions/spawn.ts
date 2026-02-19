@@ -52,7 +52,7 @@ export async function spawnTeammateSession(
 	hints?: RoutingHints,
 	parentModelId?: string
 ): Promise<Teammate> {
-	const routing = await routeModel(role, modelOverride, undefined, parentModelId, role, hints);
+	const routing = await routeModel(role, modelOverride, undefined, parentModelId, role, hints, cwd);
 	if (!routing.ok) {
 		const available = listAvailableModels().slice(0, 20).join(", ");
 		throw new Error(`Model not found: "${routing.query}". Available: ${available}`);

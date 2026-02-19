@@ -1,4 +1,7 @@
 import { describe, expect, it, mock } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 /**
  * Tests for auto-cheap/auto-premium routing keywords.
@@ -53,6 +56,18 @@ mock.module("../task-classifier.js", () => ({
 
 const { routeModel, parseRoutingKeyword } = await import("../model-router.js");
 
+/**
+ * Write a JSON file, creating parent directories when needed.
+ *
+ * @param filePath - Destination path
+ * @param value - JSON value to serialize
+ * @returns Nothing
+ */
+function writeJson(filePath: string, value: unknown): void {
+	mkdirSync(dirname(filePath), { recursive: true });
+	writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
 describe("parseRoutingKeyword", () => {
 	it("returns 'eco' for auto-cheap", () => {
 		expect(parseRoutingKeyword("auto-cheap")).toBe("eco");
@@ -95,6 +110,41 @@ describe("routeModel with auto-cheap", () => {
 		// Gemini 3 Flash: cheapest model with code >= 3
 		expect(result.model.id).toBe("gemini-3-flash");
 		expect(result.reason).toBe("auto-routed");
+	});
+
+	it("routing keyword still forces auto-routing when routing.enabled is false", async () => {
+		const testCwd = mkdtempSync(join(tmpdir(), "tallow-route-keyword-cwd-"));
+		const testHome = mkdtempSync(join(tmpdir(), "tallow-route-keyword-home-"));
+		const previousHome = process.env.HOME;
+		process.env.HOME = testHome;
+
+		try {
+			writeJson(join(testHome, ".tallow", "settings.json"), {
+				routing: { enabled: false },
+			});
+			const result = await routeModel(
+				"find all API routes in src/",
+				undefined,
+				"auto-cheap",
+				"claude-opus-4-6",
+				undefined,
+				undefined,
+				testCwd
+			);
+
+			expect(result.ok).toBe(true);
+			if (!result.ok) return;
+			expect(result.reason).toBe("auto-routed");
+			expect(result.model.id).toBe("gemini-3-flash");
+		} finally {
+			if (previousHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = previousHome;
+			}
+			rmSync(testCwd, { force: true, recursive: true });
+			rmSync(testHome, { force: true, recursive: true });
+		}
 	});
 
 	it("auto-premium routes to most expensive model", async () => {
