@@ -251,13 +251,22 @@ WHEN NOT TO USE:
 		const options = pendingCompact;
 		pendingCompact = null;
 
+		// Show explicit UI feedback while compaction runs. Without this,
+		// users only see the deferred tool message and no live progress signal.
+		ctx.ui?.setWorkingMessage?.("Compacting session…");
+		ctx.ui?.setStatus?.("compact", "🧹 compacting");
+
 		ctx.compact({
 			customInstructions: options.customInstructions,
 			onComplete: () => {
+				ctx.ui?.setWorkingMessage?.();
+				ctx.ui?.setStatus?.("compact", undefined);
 				// Framework's executeCompaction rebuilds the UI and
 				// shows the compaction summary. No extra action needed.
 			},
 			onError: () => {
+				ctx.ui?.setWorkingMessage?.();
+				ctx.ui?.setStatus?.("compact", undefined);
 				// Framework's executeCompaction handles error/cancel
 				// display. No extra handling needed.
 			},
