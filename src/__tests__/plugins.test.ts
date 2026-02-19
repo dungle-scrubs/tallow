@@ -2,14 +2,17 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { PluginSpec } from "../plugins.js";
 import {
 	detectPluginFormat,
 	extractClaudePluginResources,
 	getCachePath,
 	isCacheValid,
 	isImmutableRef,
+	normalizePluginSubpath,
 	parsePluginSpec,
 	readPluginManifest,
+	resolveContainedSubpath,
 	resolvePlugin,
 	resolvePlugins,
 } from "../plugins.js";
@@ -105,6 +108,24 @@ describe("parsePluginSpec", () => {
 		expect(spec.subpath).toBe("plugins/hookify");
 	});
 
+	it("should reject traversal subpaths in github specs", () => {
+		expect(() => parsePluginSpec("github:owner/repo/../../outside@main")).toThrow(
+			"path traversal is not allowed"
+		);
+	});
+
+	it("should reject normalized escape variants", () => {
+		expect(() => parsePluginSpec("github:owner/repo/plugins//..//../outside@main")).toThrow(
+			"path traversal is not allowed"
+		);
+	});
+
+	it("should reject absolute subpaths", () => {
+		expect(() => parsePluginSpec("github:owner/repo/C:\\windows\\system32@main")).toThrow(
+			"absolute paths are not allowed"
+		);
+	});
+
 	it("should throw on invalid spec", () => {
 		expect(() => parsePluginSpec("just-a-name")).toThrow("Invalid plugin spec");
 	});
@@ -117,6 +138,66 @@ describe("parsePluginSpec", () => {
 		const spec = parsePluginSpec("  github:owner/repo@v1.0.0  ");
 		expect(spec.owner).toBe("owner");
 		expect(spec.repo).toBe("repo");
+	});
+});
+
+// ─── normalizePluginSubpath ─────────────────────────────────────────────────
+
+describe("normalizePluginSubpath", () => {
+	it("should normalize nested subpaths", () => {
+		expect(normalizePluginSubpath("plugins/hookify")).toBe("plugins/hookify");
+		expect(normalizePluginSubpath("plugins\\hookify")).toBe("plugins/hookify");
+	});
+
+	it("should reject traversal segments after normalization", () => {
+		expect(() => normalizePluginSubpath("plugins/../../outside")).toThrow(
+			"path traversal is not allowed"
+		);
+	});
+
+	it("should reject absolute paths", () => {
+		expect(() => normalizePluginSubpath("/etc/passwd")).toThrow("absolute paths are not allowed");
+		expect(() => normalizePluginSubpath("C:\\Windows\\System32")).toThrow(
+			"absolute paths are not allowed"
+		);
+	});
+});
+
+// ─── resolveContainedSubpath ────────────────────────────────────────────────
+
+describe("resolveContainedSubpath", () => {
+	let tmpDir: string;
+	let cloneRoot: string;
+	let outsideDir: string;
+
+	beforeEach(() => {
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-subpath-containment-"));
+		cloneRoot = path.join(tmpDir, "clone");
+		outsideDir = path.join(tmpDir, "outside");
+		fs.mkdirSync(path.join(cloneRoot, "plugins", "hookify"), { recursive: true });
+		fs.mkdirSync(outsideDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("should resolve valid nested subpaths inside clone root", () => {
+		const resolved = resolveContainedSubpath(cloneRoot, "plugins/hookify");
+		expect(resolved).toBe(fs.realpathSync(path.join(cloneRoot, "plugins", "hookify")));
+	});
+
+	it("should reject lexical traversal escapes", () => {
+		expect(() => resolveContainedSubpath(cloneRoot, "../outside")).toThrow(
+			"path traversal is not allowed"
+		);
+	});
+
+	it("should reject symlink-based escapes", () => {
+		fs.symlinkSync(outsideDir, path.join(cloneRoot, "plugins", "escape"));
+		expect(() => resolveContainedSubpath(cloneRoot, "plugins/escape")).toThrow(
+			"escapes repository root"
+		);
 	});
 });
 
@@ -164,6 +245,19 @@ describe("getCachePath", () => {
 	it("should throw for local specs", () => {
 		const spec = parsePluginSpec("./local-plugin");
 		expect(() => getCachePath(spec)).toThrow("Local plugins are not cached");
+	});
+
+	it("should reject traversal in pre-parsed remote specs", () => {
+		const spec: PluginSpec = {
+			raw: "github:owner/repo/../../outside@main",
+			isLocal: false,
+			owner: "owner",
+			repo: "repo",
+			subpath: "../../outside",
+			ref: "main",
+		};
+
+		expect(() => getCachePath(spec)).toThrow("path traversal is not allowed");
 	});
 });
 
