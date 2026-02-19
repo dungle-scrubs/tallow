@@ -152,6 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and ask-user-question
 - **hooks:** translate Claude Code hook events and tool matchers from
   `.claude/settings.json` so PreToolUse/PostToolUse/Stop hooks run in tallow
+- **tui:** clear stale working and queued steering/follow-up UI state on
+  turn end via interactive-mode runtime patch
 
 ### Removed
 
