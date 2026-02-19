@@ -17,6 +17,15 @@ Hooks can be sync (blocking, can return accept/reject decisions)
 or async (fire-and-forget background tasks). Matchers filter which
 tools or events trigger each hook using regex patterns.
 
+Subprocess safety defaults:
+
+- command/agent hook subprocess output is bounded independently for
+  `stdout` and `stderr` (1 MiB each)
+- output beyond the cap is truncated with an `[output truncated]`
+  marker
+- timeout/abort termination escalates deterministically:
+  `SIGTERM` → grace period → `SIGKILL`
+
 Configure in `hooks.json` at the project root or in settings.
 Events prefixed with `before_` or `session_before_` support
 blocking (can cancel the operation). `tool_call` and `input`
