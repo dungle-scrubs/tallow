@@ -1216,10 +1216,15 @@ function renderParallelResult(
 					: theme.fg("error", getIcon("error"));
 			const displayItems = getDisplayItems(r.messages);
 			const finalOutput = getFinalOutput(r.messages);
+			const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
 
 			container.addChild(new Spacer(1));
 			container.addChild(
-				new Text(`${theme.fg("muted", "─── ") + theme.fg("accent", r.agent)} ${rIcon}`, 0, 0)
+				new Text(
+					`${theme.fg("muted", "─── ") + theme.fg("accent", r.agent)} ${rIcon}${modelTag}`,
+					0,
+					0
+				)
 			);
 			container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
 
@@ -1269,12 +1274,11 @@ function renderParallelResult(
 						? theme.fg("success", getIcon("success"))
 						: theme.fg("error", getIcon("error"));
 			const taskPreview = r.task.length > 40 ? `${r.task.slice(0, 37)}...` : r.task;
-			const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
 			const contChar = isLast ? "   " : `${theme.fg("muted", "│")}  `;
-			text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}${modelTag}`;
+			text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}`;
 			text += `\n${contChar}${theme.fg("dim", taskPreview)}`;
-			const agentUsage = formatUsageStats(r.usage);
-			if (agentUsage) text += `\n${contChar}${theme.fg("dim", agentUsage)}`;
+			const agentUsage = formatUsageStats(r.usage, r.model);
+			if (agentUsage) text += `\n${contChar}${theme.fg("muted", agentUsage)}`;
 		}
 		const liveTotal = formatUsageStats(aggregateUsage(details.results));
 		if (liveTotal) text += `\n${theme.fg("dim", `Total: ${liveTotal}`)}`;
