@@ -1,7 +1,7 @@
 {
 	"$schema": "http://json-schema.org/draft-07/schema#",
 	"title": "Pi Hooks Configuration",
-	"description": "Configuration for Pi agent hooks — shell commands, LLM prompts, or subagents triggered by lifecycle events.",
+	"description": "Configuration for Pi agent hooks - shell commands, LLM prompts, or subagents triggered by lifecycle events.",
 	"type": "object",
 	"properties": {
 		"$schema": {
@@ -41,7 +41,7 @@
 				},
 				"before_agent_start": {
 					"$ref": "#/$defs/eventHooks",
-					"description": "Before the agent starts — can inject context."
+					"description": "Before the agent starts - can inject context."
 				},
 				"setup": {
 					"$ref": "#/$defs/eventHooks",
@@ -61,7 +61,7 @@
 				},
 				"session_before_compact": {
 					"$ref": "#/$defs/eventHooks",
-					"description": "Before context compaction — can preserve data."
+					"description": "Before context compaction - can preserve data."
 				},
 				"session_fork": {
 					"$ref": "#/$defs/eventHooks",
@@ -89,7 +89,7 @@
 				},
 				"context": {
 					"$ref": "#/$defs/eventHooks",
-					"description": "Context filtering — can modify messages sent to the model."
+					"description": "Context filtering - can modify messages sent to the model."
 				},
 				"model_select": {
 					"$ref": "#/$defs/eventHooks",
@@ -118,6 +118,62 @@
 				"task_completed": {
 					"$ref": "#/$defs/eventHooks",
 					"description": "When a team task completes. Matcher filters on assignee."
+				},
+				"SessionStart": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for session_start."
+				},
+				"UserPromptSubmit": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for input."
+				},
+				"PreToolUse": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for tool_call. Matcher uses Claude names like Bash/Edit/Write and is translated automatically."
+				},
+				"PermissionRequest": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code event with no tallow equivalent. Parsed for compatibility and skipped with a warning."
+				},
+				"PostToolUse": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for successful tool_result (isError=false)."
+				},
+				"PostToolUseFailure": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for failed tool_result (isError=true)."
+				},
+				"Notification": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for notification."
+				},
+				"SubagentStart": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for subagent_start."
+				},
+				"SubagentStop": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for subagent_stop."
+				},
+				"Stop": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for agent_end."
+				},
+				"TeammateIdle": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for teammate_idle."
+				},
+				"TaskCompleted": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for task_completed."
+				},
+				"PreCompact": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for session_before_compact."
+				},
+				"SessionEnd": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for session_shutdown."
 				}
 			},
 			"additionalProperties": {
@@ -155,7 +211,7 @@
 		},
 		"hookHandler": {
 			"type": "object",
-			"description": "A single hook action — shell command, LLM prompt, or subagent.",
+			"description": "A single hook action - shell command, LLM prompt, or subagent.",
 			"properties": {
 				"type": {
 					"type": "string",

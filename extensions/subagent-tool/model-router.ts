@@ -17,6 +17,7 @@ import type {
 	ClassificationResult,
 	CostPreference,
 	ResolvedModel,
+	SelectionOptions,
 	TaskType,
 } from "@dungle-scrubs/synapse";
 import {
@@ -131,6 +132,29 @@ export function loadRoutingConfig(): RoutingConfig {
 		};
 	} catch {
 		return { ...DEFAULT_CONFIG };
+	}
+}
+
+// ─── Subscription Provider Detection ─────────────────────────────────────────
+
+/**
+ * Reads auth.json and returns provider names that use OAuth (subscription) auth.
+ *
+ * Subscription providers (e.g. openai-codex for ChatGPT Plus/Pro, github-copilot)
+ * are preferred over pay-per-token API providers when models tie on cost/rating.
+ *
+ * @returns Array of provider names with OAuth credentials, or empty if none
+ */
+function getSubscriptionProviders(): string[] {
+	try {
+		const authPath = path.join(os.homedir(), ".tallow", "auth.json");
+		const raw = fs.readFileSync(authPath, "utf-8");
+		const data = JSON.parse(raw) as Record<string, { type?: string }>;
+		return Object.entries(data)
+			.filter(([, cred]) => cred?.type === "oauth")
+			.map(([provider]) => provider);
+	} catch {
+		return [];
 	}
 }
 
@@ -284,7 +308,15 @@ export async function routeModel(
 	// Resolve model scope — constrains candidate pool to a model family
 	const scopePool = hints?.modelScope ? resolveModelCandidates(hints.modelScope) : undefined;
 
-	const ranked = selectModels(classification, effectiveCostPref, scopePool);
+	// Detect subscription providers for preferential tiebreaking
+	const preferredProviders = getSubscriptionProviders();
+
+	const selectionOptions: SelectionOptions = {
+		pool: scopePool,
+		preferredProviders: preferredProviders.length > 0 ? preferredProviders : undefined,
+	};
+
+	const ranked = selectModels(classification, effectiveCostPref, selectionOptions);
 	if (ranked.length > 0) {
 		return {
 			ok: true,

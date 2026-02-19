@@ -34,10 +34,10 @@ import { evaluateCommand } from "../_shared/shell-policy.js";
 import { createHookStateManager, type HookStateManager } from "./state-manager.js";
 
 /** Hook execution strategy: shell command, LLM prompt, or agent subprocess. */
-type HookType = "command" | "prompt" | "agent";
+export type HookType = "command" | "prompt" | "agent";
 
 /** Configuration for a single hook action triggered by an event. */
-interface HookHandler {
+export interface HookHandler {
 	type: HookType;
 	command?: string; // For type: "command"
 	agent?: string; // For type: "agent" - agent name from agents dir
@@ -47,21 +47,23 @@ interface HookHandler {
 	async?: boolean; // Run in background (command/agent only)
 	statusMessage?: string; // Custom spinner message
 	once?: boolean; // Run exactly once, then auto-disable (state persisted to hooks-state.json)
+	_claudeSource?: boolean; // Internal: this hook originated from Claude Code config
+	_claudeEventName?: string; // Internal: original Claude Code event name
 }
 
 /** Event matcher with associated hooks — runs hooks when matcher regex matches. */
-interface HookMatcher {
+export interface HookMatcher {
 	matcher?: string; // Regex pattern, empty = match all
 	hooks: HookHandler[];
 }
 
 /** Top-level hooks configuration keyed by event name. */
-interface HooksConfig {
+export interface HooksConfig {
 	[eventName: string]: HookMatcher[];
 }
 
 /** Result from executing a hook — may block, allow, or provide additional context. */
-interface HookResult {
+export interface HookResult {
 	ok: boolean;
 	reason?: string;
 	additionalContext?: string;
@@ -95,6 +97,240 @@ const MATCHER_FIELDS: Record<string, string> = {
 	user_bash: "command",
 	notification: "type",
 };
+
+/** Claude Code event names translated to tallow/pi event names. */
+export const CLAUDE_EVENT_MAP: Readonly<Record<string, string>> = {
+	SessionStart: "session_start",
+	UserPromptSubmit: "input",
+	PreToolUse: "tool_call",
+	PermissionRequest: "tool_call",
+	PostToolUse: "tool_result",
+	PostToolUseFailure: "tool_result",
+	Notification: "notification",
+	SubagentStart: "subagent_start",
+	SubagentStop: "subagent_stop",
+	Stop: "agent_end",
+	TeammateIdle: "teammate_idle",
+	TaskCompleted: "task_completed",
+	PreCompact: "session_before_compact",
+	SessionEnd: "session_shutdown",
+} as const;
+
+/** Claude Code tool names translated to tallow tool names for matchers. */
+export const CLAUDE_TOOL_MAP: Readonly<Record<string, string>> = {
+	Bash: "bash",
+	Edit: "edit",
+	Write: "write",
+	Read: "read",
+	Glob: "find",
+	Grep: "grep",
+	Task: "subagent",
+	WebFetch: "web_fetch",
+	WebSearch: "web_search",
+} as const;
+
+const CLAUDE_TOOL_EVENTS = new Set([
+	"PreToolUse",
+	"PermissionRequest",
+	"PostToolUse",
+	"PostToolUseFailure",
+]);
+
+/**
+ * Returns true when a plain object-like value is provided.
+ * @param value - Unknown value to check
+ * @returns True when value can be safely treated as key/value object
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Translates Claude Code tool matcher patterns to tallow tool names.
+ *
+ * Examples:
+ * - Bash -> bash
+ * - Edit|Write -> edit|write
+ * - mcp__github__.* -> unchanged
+ *
+ * @param matcher - Optional matcher regex/string
+ * @returns Matcher translated to tallow tool names
+ */
+export function translateClaudeToolMatcher(matcher?: string): string | undefined {
+	if (!matcher || matcher === "" || matcher === "*") return matcher;
+
+	return matcher
+		.split("|")
+		.map((part) => {
+			const trimmed = part.trim();
+			return CLAUDE_TOOL_MAP[trimmed] ?? trimmed;
+		})
+		.join("|");
+}
+
+/**
+ * Translates Claude Code hook config into native tallow hook config.
+ *
+ * The translated config keeps original event metadata on each hook handler so
+ * runtime input/output adapters can preserve Claude-compatible payload shapes.
+ *
+ * @param config - Hook config loaded from Claude settings
+ * @param sourceLabel - Human-readable source path for warning messages
+ * @returns Config keyed by tallow event names
+ */
+export function translateClaudeHooks(
+	config: HooksConfig,
+	sourceLabel = ".claude/settings.json"
+): HooksConfig {
+	const translated: HooksConfig = {};
+
+	for (const [eventName, matchers] of Object.entries(config)) {
+		if (eventName === "PermissionRequest") {
+			console.warn(
+				`[hooks] PermissionRequest in ${sourceLabel} has no tallow equivalent and will be skipped`
+			);
+			continue;
+		}
+
+		const mappedEventName = CLAUDE_EVENT_MAP[eventName] ?? eventName;
+		const shouldTranslateMatcher = CLAUDE_TOOL_EVENTS.has(eventName);
+		const normalizedMatchers = matchers.map((matcher) => ({
+			...matcher,
+			matcher: shouldTranslateMatcher
+				? translateClaudeToolMatcher(matcher.matcher)
+				: matcher.matcher,
+			hooks: matcher.hooks.map((handler) => ({
+				...handler,
+				_claudeEventName: eventName,
+				_claudeSource: true,
+			})),
+		}));
+
+		if (!translated[mappedEventName]) {
+			translated[mappedEventName] = [];
+		}
+		translated[mappedEventName].push(...normalizedMatchers);
+	}
+
+	return translated;
+}
+
+/**
+ * Adapts tallow event payloads to Claude Code-style hook stdin payloads.
+ *
+ * @param eventName - Native tallow event name currently being processed
+ * @param eventData - Native event payload
+ * @param handler - Hook handler metadata
+ * @param cwd - Current working directory
+ * @returns Payload sent to the hook command
+ */
+export function adaptEventDataForHook(
+	eventName: string,
+	eventData: Record<string, unknown>,
+	handler: HookHandler,
+	cwd: string
+): Record<string, unknown> {
+	if (!handler._claudeSource) return eventData;
+
+	const hookEventName = handler._claudeEventName ?? eventName;
+	const adapted: Record<string, unknown> = {
+		...eventData,
+		cwd,
+		hook_event_name: hookEventName,
+	};
+
+	if (hookEventName === "PreToolUse") {
+		adapted.tool_input = eventData.input;
+		adapted.tool_name = eventData.toolName;
+		return adapted;
+	}
+
+	if (hookEventName === "PostToolUse" || hookEventName === "PostToolUseFailure") {
+		adapted.tool_input = eventData.input;
+		adapted.tool_name = eventData.toolName;
+		adapted.tool_response = eventData.content;
+		return adapted;
+	}
+
+	if (hookEventName === "UserPromptSubmit") {
+		adapted.prompt = eventData.text;
+		return adapted;
+	}
+
+	return adapted;
+}
+
+/**
+ * Translates Claude Code hook JSON output into tallow hook result format.
+ *
+ * @param result - Parsed stdout JSON from hook command
+ * @returns Normalized tallow hook result
+ */
+export function translateClaudeOutput(result: Record<string, unknown>): HookResult {
+	const specific = isRecord(result.hookSpecificOutput) ? result.hookSpecificOutput : undefined;
+
+	if (specific?.permissionDecision === "deny") {
+		return {
+			ok: false,
+			decision: "block",
+			reason:
+				typeof specific.permissionDecisionReason === "string"
+					? specific.permissionDecisionReason
+					: "Blocked by Claude hook",
+		};
+	}
+
+	if (specific?.permissionDecision === "allow") {
+		return { ok: true };
+	}
+
+	if (typeof specific?.additionalContext === "string") {
+		return { ok: true, additionalContext: specific.additionalContext };
+	}
+
+	if (result.decision === "block") {
+		return {
+			ok: false,
+			decision: "block",
+			reason: typeof result.reason === "string" ? result.reason : "Blocked by hook",
+		};
+	}
+
+	if (result.continue === false) {
+		return {
+			ok: false,
+			reason: typeof result.stopReason === "string" ? result.stopReason : "Stopped by hook",
+		};
+	}
+
+	return {
+		ok: typeof result.ok === "boolean" ? result.ok : true,
+		additionalContext:
+			typeof result.additionalContext === "string" ? result.additionalContext : undefined,
+		reason: typeof result.reason === "string" ? result.reason : undefined,
+		decision:
+			result.decision === "allow" || result.decision === "block" ? result.decision : undefined,
+	};
+}
+
+/**
+ * Returns whether a Claude tool_result hook should be skipped for this event payload.
+ *
+ * @param eventName - Current tallow event name
+ * @param eventData - Event payload
+ * @param handler - Hook handler metadata
+ * @returns True when handler should not run
+ */
+export function shouldSkipClaudeToolResultHandler(
+	eventName: string,
+	eventData: Record<string, unknown>,
+	handler: HookHandler
+): boolean {
+	if (eventName !== "tool_result" || !handler._claudeSource) return false;
+	if (handler._claudeEventName === "PostToolUseFailure") return eventData.isError !== true;
+	if (handler._claudeEventName === "PostToolUse") return eventData.isError === true;
+	return false;
+}
 
 /**
  * Merges hooks from a source into the target config.
@@ -221,6 +457,8 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
  *   5. .tallow/settings.json                          (project settings)
  *   6. ~/.tallow/extensions/∗/hooks.json        (global extension hooks)
  *   7. .tallow/extensions/∗/hooks.json                (project extension hooks)
+ *   8. .claude/settings.json                    (project Claude hooks, translated)
+ *   9. ~/.claude/settings.json                  (global Claude hooks, translated)
  *
  * All sources are merged additively — matchers are concatenated per event.
  * Runtime hooks from other extensions are merged later via the hooks:merge
@@ -229,7 +467,7 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
  * @param cwd - Current working directory for project-local paths
  * @returns Merged hooks configuration
  */
-function loadHooksConfig(cwd: string): HooksConfig {
+export function loadHooksConfig(cwd: string): HooksConfig {
 	const home = process.env.HOME || "";
 	const merged: HooksConfig = {};
 
@@ -264,6 +502,20 @@ function loadHooksConfig(cwd: string): HooksConfig {
 	// 7. Project extension hooks
 	const projectExtHooks = scanExtensionHooks(path.join(cwd, ".tallow", "extensions"));
 	mergeHooks(merged, projectExtHooks);
+
+	// 8. Claude project settings hooks (translated)
+	const claudeProjectPath = path.join(cwd, ".claude", "settings.json");
+	const claudeProjectSettings = readHooksFile(claudeProjectPath);
+	if (claudeProjectSettings) {
+		mergeHooks(merged, translateClaudeHooks(claudeProjectSettings, claudeProjectPath));
+	}
+
+	// 9. Claude global settings hooks (translated)
+	const claudeGlobalPath = path.join(home, ".claude", "settings.json");
+	const claudeGlobalSettings = readHooksFile(claudeGlobalPath);
+	if (claudeGlobalSettings) {
+		mergeHooks(merged, translateClaudeHooks(claudeGlobalSettings, claudeGlobalPath));
+	}
 
 	return merged;
 }
@@ -329,6 +581,17 @@ async function runCommandHook(
 	}
 
 	const timeout = (handler.timeout ?? 600) * 1000;
+	const hookEventJson = JSON.stringify(eventData);
+	const commandEnv: Record<string, string> = {
+		...process.env,
+		PI_HOOK_EVENT: hookEventJson,
+	} as Record<string, string>;
+
+	if (handler._claudeSource) {
+		commandEnv.CLAUDE_CODE_REMOTE = process.env.CLAUDE_CODE_REMOTE ?? "false";
+		commandEnv.CLAUDE_PLUGIN_ROOT = path.join(os.homedir(), ".claude");
+		commandEnv.CLAUDE_PROJECT_DIR = cwd;
+	}
 
 	return new Promise((resolve) => {
 		if (!handler.command) {
@@ -342,7 +605,7 @@ async function runCommandHook(
 			cwd,
 			shell: true,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env, PI_HOOK_EVENT: JSON.stringify(eventData) },
+			env: commandEnv,
 		});
 
 		let stdout = "";
@@ -354,7 +617,7 @@ async function runCommandHook(
 			proc.kill("SIGTERM");
 		}, timeout);
 
-		proc.stdin.write(JSON.stringify(eventData));
+		proc.stdin.write(hookEventJson);
 		proc.stdin.end();
 
 		proc.stdout.on("data", (d) => {
@@ -388,14 +651,24 @@ async function runCommandHook(
 			// Exit code 0 = success, parse JSON output
 			if (code === 0 && stdout.trim()) {
 				try {
-					const result = JSON.parse(stdout.trim());
-					resolve({
-						ok: result.ok ?? true,
-						reason: result.reason,
-						additionalContext: result.additionalContext,
-						decision: result.decision,
-					});
-					return;
+					const parsed = JSON.parse(stdout.trim());
+					if (isRecord(parsed) && handler._claudeSource) {
+						resolve(translateClaudeOutput(parsed));
+						return;
+					}
+					if (isRecord(parsed)) {
+						resolve({
+							ok: parsed.ok !== false,
+							reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
+							additionalContext:
+								typeof parsed.additionalContext === "string" ? parsed.additionalContext : undefined,
+							decision:
+								parsed.decision === "allow" || parsed.decision === "block"
+									? parsed.decision
+									: undefined,
+						});
+						return;
+					}
 				} catch {
 					// Not JSON, treat as additional context
 					resolve({ ok: true, additionalContext: stdout.trim() });
@@ -718,6 +991,12 @@ export default function (pi: ExtensionAPI) {
 					}
 				}
 
+				if (shouldSkipClaudeToolResultHandler(eventName, eventData, handler)) {
+					continue;
+				}
+
+				const hookEventData = adaptEventDataForHook(eventName, eventData, handler, currentCwd);
+
 				// Async hooks run in background, cannot block
 				if (handler.async) {
 					// For async once-hooks, mark immediately to prevent race conditions.
@@ -732,9 +1011,9 @@ export default function (pi: ExtensionAPI) {
 					(async () => {
 						let result: HookResult;
 						if (handler.type === "command") {
-							result = await runCommandHook(handler, eventData, currentCwd);
+							result = await runCommandHook(handler, hookEventData, currentCwd);
 						} else if (handler.type === "agent") {
-							result = await runAgentHook(handler, eventData, currentCwd, agentsDir);
+							result = await runAgentHook(handler, hookEventData, currentCwd, agentsDir);
 						} else {
 							return; // prompt type not yet supported async
 						}
@@ -751,9 +1030,9 @@ export default function (pi: ExtensionAPI) {
 				let result: HookResult;
 
 				if (handler.type === "command") {
-					result = await runCommandHook(handler, eventData, currentCwd, signal);
+					result = await runCommandHook(handler, hookEventData, currentCwd, signal);
 				} else if (handler.type === "agent") {
-					result = await runAgentHook(handler, eventData, currentCwd, agentsDir, signal);
+					result = await runAgentHook(handler, hookEventData, currentCwd, agentsDir, signal);
 				} else if (handler.type === "prompt") {
 					// TODO: implement single LLM call for prompt-type hooks
 					if (!warnedPromptHooks.has(handler.command ?? "")) {

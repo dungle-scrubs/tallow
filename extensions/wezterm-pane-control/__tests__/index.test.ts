@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import weztermPaneControl, {
 	buildSplitCommandArgs,
+	buildWeztermPaneGuidance,
 	executeWeztermAction,
 	filterPanesToCurrentTab,
 	type WeztermCliResult,
@@ -86,6 +87,18 @@ describe("wezterm-pane-control registration", () => {
 
 		expect(mockPi.registerToolCalls.length).toBe(0);
 		expect(mockPi.onCalls.length).toBe(0);
+	});
+});
+
+describe("buildWeztermPaneGuidance", () => {
+	it("includes privacy and manual-monitoring guidance", () => {
+		const guidance = buildWeztermPaneGuidance(116);
+		expect(guidance).toContain("Do not run or read commands likely to reveal private secrets");
+		expect(guidance).toContain("Default behavior: if you prefill a command");
+		expect(guidance).toContain("Only leave a command unexecuted");
+		expect(guidance).toContain("user wants to monitor output themselves");
+		expect(guidance).toContain("newline (\\n) via send_text");
+		expect(guidance).toContain("WezTerm pane 116");
 	});
 });
 
