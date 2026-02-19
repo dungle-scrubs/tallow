@@ -23,6 +23,10 @@ dev:
 # Typecheck core + extensions + lint (same as pre-commit)
 check: typecheck typecheck-ext lint
 
+# Run the full pre-PR validation suite (mirrors CI)
+pre-pr:
+    bash scripts/pre-pr.sh
+
 # Typecheck core
 typecheck:
     bun run typecheck
