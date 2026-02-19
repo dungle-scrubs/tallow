@@ -23,8 +23,9 @@ blocking (can cancel the operation). `tool_call` and `input`
 also support blocking. All other events are observe-only.
 
 :::note
-Hook **event keys must use tallow names** (`tool_call`, `tool_result`, etc.).
-Claude-style names (`PreToolUse`, `PostToolUse`, `Stop`) are not auto-mapped.
+Hooks from `.claude/settings.json` support Claude event names (`PreToolUse`,
+`PostToolUse`, `Stop`, etc.) and are auto-translated to tallow events.
+`PermissionRequest` is detected but skipped because tallow has no permission dialog hook.
 :::
 
 ## All pi events
@@ -128,7 +129,9 @@ replaced. Every source participates:
 5. `.tallow/settings.json` → `hooks` key (project settings)
 6. `~/.tallow/extensions/*/hooks.json` (global extension hooks)
 7. `.tallow/extensions/*/hooks.json` (project extension hooks)
-8. Runtime: `hooks:merge` event bus (other extensions)
+8. `.claude/settings.json` → `hooks` key (project Claude hooks, translated)
+9. `~/.claude/settings.json` → `hooks` key (global Claude hooks, translated)
+10. Runtime: `hooks:merge` event bus (other extensions)
 
 This means any extension or package can ship a `hooks.json`
 alongside its code and it automatically participates in the
