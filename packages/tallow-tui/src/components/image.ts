@@ -1,7 +1,7 @@
 /**
  * Image component for the TUI.
  * Renders images via Kitty/iTerm2 protocols with optional border framing.
- * Caps portrait images to a sensible height and prevents small-image upscaling.
+ * Preserves aspect ratio and avoids small-image upscaling.
  *
  * @module
  */
@@ -54,18 +54,40 @@ export interface ImageOptions {
 	filePath?: string;
 }
 
-/** Default max image height in terminal rows (~half a typical 50-row terminal). */
-const DEFAULT_MAX_HEIGHT_CELLS = 25;
+/** Default fraction of terminal rows available for images when no explicit maxHeightCells is set. */
+const DEFAULT_MAX_HEIGHT_RATIO = 0.9;
+
+/** Minimum dynamic max height when terminal row count is available. */
+const MIN_DYNAMIC_MAX_HEIGHT_CELLS = 10;
 
 /** Border overhead: │ + space on each side = 4 columns. */
 const BORDER_OVERHEAD = 4;
+
+/**
+ * Calculate a dynamic default max image height from terminal size.
+ *
+ * Uses a high percentage of the current terminal height to avoid unnecessary
+ * downscaling while still preventing images from consuming the full viewport.
+ * Returns undefined when terminal row count is unavailable, which disables the
+ * height cap unless explicitly provided via options.maxHeightCells.
+ *
+ * @returns Dynamic max height in terminal rows, or undefined
+ */
+function getDefaultMaxHeightCells(): number | undefined {
+	const terminalRows = process.stdout.rows;
+	if (!terminalRows || terminalRows <= 0) return undefined;
+	return Math.max(
+		MIN_DYNAMIC_MAX_HEIGHT_CELLS,
+		Math.floor(terminalRows * DEFAULT_MAX_HEIGHT_RATIO)
+	);
+}
 
 /**
  * TUI component that renders an inline image using terminal graphics protocols.
  * Falls back to a text placeholder when the terminal lacks image support.
  *
  * Features:
- * - Portrait images capped to ~25 rows by default (configurable via maxHeightCells)
+ * - Dynamic height cap (~90% of terminal rows) by default (overridable via maxHeightCells)
  * - Small images not upscaled beyond native pixel width
  * - Rounded border frame by default (configurable or disableable)
  * - Kitty warping fix: omits r= param so terminal auto-calculates rows
@@ -136,7 +158,7 @@ export class Image implements Component {
 		// available terminal width instead; height capping and natural-width
 		// clamping in calculateImageLayout prevent oversized output.
 		const maxWidth = availableWidth;
-		const maxHeight = this.options.maxHeightCells ?? DEFAULT_MAX_HEIGHT_CELLS;
+		const maxHeight = this.options.maxHeightCells ?? getDefaultMaxHeightCells();
 
 		const caps = getCapabilities();
 		let lines: string[];
