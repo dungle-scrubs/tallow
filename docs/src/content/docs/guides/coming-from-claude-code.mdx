@@ -1,0 +1,104 @@
+---
+title: Using tallow in existing Claude Code projects
+description: Practical compatibility guide for running tallow in a Claude Code project without rewriting your setup.
+---
+
+tallow is designed to run in projects that already use Claude Code conventions.
+In most cases, you can start tallow and keep using your existing `.claude/`
+layout. This guide is about compatibility first, migration second.
+
+## What works without rewriting files
+
+| Claude Code resource | Works in tallow | Notes |
+|---|---|---|
+| `CLAUDE.md` | ✅ | Loaded by pi/context-files. Works at root, ancestors, and nested directories. |
+| `.claude/commands/` | ✅ | Loaded by `command-prompt` (project root + user home). |
+| `.claude/skills/` | ✅ | Loaded via `claude-bridge` + `skill-commands`. |
+| `.claude/agents/` | ✅ | Loaded by `subagent-tool`, `agent-commands-tool`, and `context-fork`. |
+| `.claude/rules/*.md` | ✅ | Loaded by `context-files` (root and nested `.claude/rules/`). |
+| Name collision behavior | ✅ | `.tallow/` wins over `.claude/` for commands/skills/agents with the same name. |
+
+## AGENTS.md vs CLAUDE.md
+
+Both can coexist.
+
+- pi prefers `AGENTS.md` when both exist in one directory.
+- `context-files` then adds the skipped file so both end up in context.
+- For subdirectories, `context-files` discovers both files directly.
+
+Practical result: keep `CLAUDE.md` for Claude Code, add `AGENTS.md` for tallow,
+run both tools in the same repo.
+
+## Frontmatter compatibility
+
+Shared frontmatter usually works. Unknown keys are generally ignored by the
+other tool.
+
+### Commonly compatible keys
+
+- `name`
+- `description`
+- `argument-hint`
+- standard YAML metadata used by skills/commands/agents
+
+### tallow-specific frontmatter (Claude Code may ignore)
+
+- Commands/skills: `context: fork`, `agent`, `model`
+- Agents: `disallowedTools`, `maxTurns`, `mcpServers`, routing keywords like
+  `model: auto-cheap`
+
+If you want one file to behave identically in both tools, avoid tallow-only
+keys in shared files.
+
+## Hooks compatibility: exact answer
+
+**No — tallow does not currently auto-map Claude hook event names to tallow
+hook event keys.**
+
+What is compatible:
+- Hook configuration shape (`matcher`, `hooks`, `type`, `command`, etc.)
+- Command/agent hook behavior model (sync/async, block vs observe)
+
+What is not automatic today:
+- Claude event names like `PreToolUse`, `PostToolUse`, `Stop`
+
+In tallow hook files, use tallow event keys directly:
+
+| Claude concept | Use in tallow hooks |
+|---|---|
+| Pre-tool hook | `tool_call` |
+| Post-tool hook | `tool_result` |
+| Prompt submit gate | `input` |
+| End-of-run hook | `agent_end` or `session_shutdown` (depends on intent) |
+
+Also note: tallow hooks are loaded from `.tallow/hooks.json`,
+`~/.tallow/hooks.json`, `settings.json` (`hooks` key), and extension/package
+`hooks.json` files. `.claude/settings.json` hook sections are not auto-imported
+into tallow hooks.
+
+See [hooks](/extensions/hooks/) for the exact event list.
+
+## Nested directory behavior (important)
+
+Compatibility is not identical for every resource type.
+
+| Resource | Nested subdirectory support |
+|---|---|
+| `CLAUDE.md` / `AGENTS.md` | ✅ yes |
+| `.claude/rules/` | ✅ yes |
+| `.claude/commands/` | ⚠️ project root + user home locations (not arbitrary nested `.claude/commands/`) |
+| `.claude/skills/` | ⚠️ project root + user home locations |
+| `.claude/agents/` | ⚠️ project root + user home locations |
+
+## Compatibility gaps to keep in mind
+
+- Hook event name mapping is manual (see section above).
+- MCP server config is read from `.tallow/settings.json` / `~/.tallow/settings.json` (`mcpServers`), not from Claude-specific config files.
+- Some advanced tallow frontmatter is intentionally tallow-only.
+
+## Optional migration (not required)
+
+You can keep `.claude/` permanently and still use tallow.
+
+If you want a tallow-native layout later, run `/init` and adopt `.tallow/`
+incrementally. Compatibility does not depend on doing this.
