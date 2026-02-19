@@ -167,6 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **plugins:** ignore `<cwd>/.pi/settings.json` plugin entries
 - **plan-mode:** enforce strict read-only tool allowlist and block
   non-allowlisted extension tools while plan mode is active
+- **pid-cleanup:** verify process start identity before signaling tracked PIDs
+  to prevent PID-reuse kills of unrelated processes
 
 ### Removed
 
