@@ -25,7 +25,7 @@
  * }
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -84,6 +84,175 @@ const BLOCKABLE_EVENTS = new Set([
 
 /** Track prompt-type hooks that have already been warned about (once per command) */
 const warnedPromptHooks = new Set<string>();
+
+/** Default maximum buffered output per subprocess stream (1 MiB). */
+const DEFAULT_HOOK_OUTPUT_MAX_BUFFER_BYTES = 1024 * 1024;
+
+/** Default grace window after SIGTERM before forcing SIGKILL. */
+const DEFAULT_HOOK_FORCE_KILL_GRACE_MS = 1000;
+
+/** Optional env override for hook subprocess output cap. */
+const HOOK_OUTPUT_MAX_BUFFER_BYTES_ENV = "TALLOW_HOOK_MAX_BUFFER_BYTES";
+
+/** Optional env override for hook subprocess SIGTERM→SIGKILL grace window. */
+const HOOK_FORCE_KILL_GRACE_MS_ENV = "TALLOW_HOOK_FORCE_KILL_GRACE_MS";
+
+/** Marker appended once when subprocess output is truncated due to buffer cap. */
+export const HOOK_OUTPUT_TRUNCATION_MARKER = "\n[output truncated]\n";
+
+/** Internal termination reasons for hook subprocesses. */
+type HookTerminationReason = "abort" | "timeout";
+
+/** Buffered output accumulator state for a single stream. */
+interface HookOutputBuffer {
+	bytes: number;
+	text: string;
+	truncated: boolean;
+}
+
+/** Controller returned by termination wiring for cleanup and status checks. */
+interface HookTerminationController {
+	cleanup: () => void;
+	getReason: () => HookTerminationReason | null;
+}
+
+/**
+ * Parse a positive integer from env with a safe fallback.
+ *
+ * @param envName - Environment variable name
+ * @param fallback - Fallback value when unset/invalid
+ * @returns Parsed positive integer value
+ */
+function getPositiveIntEnv(envName: string, fallback: number): number {
+	const raw = process.env[envName];
+	if (!raw) return fallback;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+	return parsed;
+}
+
+/**
+ * Resolve the hook subprocess output cap in bytes.
+ *
+ * @returns Max bytes retained per stream
+ */
+function getHookOutputMaxBufferBytes(): number {
+	return getPositiveIntEnv(HOOK_OUTPUT_MAX_BUFFER_BYTES_ENV, DEFAULT_HOOK_OUTPUT_MAX_BUFFER_BYTES);
+}
+
+/**
+ * Resolve the grace period after SIGTERM before SIGKILL.
+ *
+ * @returns Grace period in milliseconds
+ */
+function getHookForceKillGraceMs(): number {
+	return getPositiveIntEnv(HOOK_FORCE_KILL_GRACE_MS_ENV, DEFAULT_HOOK_FORCE_KILL_GRACE_MS);
+}
+
+/**
+ * Append chunk data to a bounded stream buffer.
+ *
+ * Once the cap is reached, further chunks are ignored and a truncation marker
+ * is appended exactly once.
+ *
+ * @param buffer - Mutable output buffer state
+ * @param chunk - Incoming stream chunk
+ * @param maxBytes - Maximum bytes retained for this stream
+ * @returns void
+ */
+function appendToHookBuffer(buffer: HookOutputBuffer, chunk: Buffer, maxBytes: number): void {
+	if (buffer.truncated) return;
+
+	const remainingBytes = maxBytes - buffer.bytes;
+	if (remainingBytes <= 0) {
+		buffer.truncated = true;
+		buffer.text += HOOK_OUTPUT_TRUNCATION_MARKER;
+		return;
+	}
+
+	if (chunk.byteLength <= remainingBytes) {
+		buffer.text += chunk.toString();
+		buffer.bytes += chunk.byteLength;
+		return;
+	}
+
+	buffer.text += chunk.subarray(0, remainingBytes).toString();
+	buffer.bytes = maxBytes;
+	buffer.truncated = true;
+	buffer.text += HOOK_OUTPUT_TRUNCATION_MARKER;
+}
+
+/**
+ * Wire timeout/abort handling with SIGTERM→SIGKILL escalation.
+ *
+ * @param proc - Child process to terminate on timeout/abort
+ * @param timeoutMs - Timeout window in milliseconds
+ * @param signal - Optional abort signal
+ * @returns Controller with cleanup and termination reason accessor
+ */
+function createHookTerminationController(
+	proc: ChildProcess,
+	timeoutMs: number,
+	signal?: AbortSignal
+): HookTerminationController {
+	const forceKillGraceMs = getHookForceKillGraceMs();
+	let terminatedBy: HookTerminationReason | null = null;
+	let timeoutId: NodeJS.Timeout | null = null;
+	let forceKillTimerId: NodeJS.Timeout | null = null;
+
+	/**
+	 * Start graceful termination and schedule forced kill.
+	 *
+	 * @param reason - Reason for termination
+	 * @returns void
+	 */
+	const terminate = (reason: HookTerminationReason): void => {
+		if (terminatedBy !== null) return;
+		terminatedBy = reason;
+		try {
+			proc.kill("SIGTERM");
+		} catch {
+			// Process may already be gone.
+		}
+		forceKillTimerId = setTimeout(() => {
+			try {
+				proc.kill("SIGKILL");
+			} catch {
+				// Process already exited after SIGTERM.
+			}
+		}, forceKillGraceMs);
+	};
+
+	if (timeoutMs > 0) {
+		timeoutId = setTimeout(() => terminate("timeout"), timeoutMs);
+	}
+
+	const onAbort = (): void => terminate("abort");
+	if (signal) {
+		if (signal.aborted) {
+			onAbort();
+		} else {
+			signal.addEventListener("abort", onAbort, { once: true });
+		}
+	}
+
+	return {
+		cleanup: () => {
+			if (timeoutId) {
+				clearTimeout(timeoutId);
+				timeoutId = null;
+			}
+			if (forceKillTimerId) {
+				clearTimeout(forceKillTimerId);
+				forceKillTimerId = null;
+			}
+			if (signal) {
+				signal.removeEventListener("abort", onAbort);
+			}
+		},
+		getReason: () => terminatedBy,
+	};
+}
 
 // Map Pi events to what field the matcher filters on
 const MATCHER_FIELDS: Record<string, string> = {
@@ -552,7 +721,7 @@ function matchesPattern(value: string | undefined, pattern: string | undefined):
  * @param signal - Optional abort signal
  * @returns Hook result with ok status and optional context
  */
-async function runCommandHook(
+export async function runCommandHook(
 	handler: HookHandler,
 	eventData: Record<string, unknown>,
 	cwd: string,
@@ -588,7 +757,8 @@ async function runCommandHook(
 		};
 	}
 
-	const timeout = (handler.timeout ?? 600) * 1000;
+	const timeoutMs = (handler.timeout ?? 600) * 1000;
+	const maxBufferBytes = getHookOutputMaxBufferBytes();
 	const hookEventJson = JSON.stringify(eventData);
 	const commandEnv: Record<string, string> = {
 		...process.env,
@@ -606,66 +776,79 @@ async function runCommandHook(
 			resolve({ ok: true });
 			return;
 		}
+
 		// shell: true is required for user-authored hook commands (pipes, redirects,
 		// env expansion). Commands come from settings.json, NOT from LLM input, so
 		// this is not an injection vector. Permission rules provide defense-in-depth.
 		const proc = spawn(handler.command, {
 			cwd,
+			env: commandEnv,
 			shell: true,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: commandEnv,
 		});
 
-		let stdout = "";
-		let stderr = "";
-		let killed = false;
+		const stdout: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
+		const stderr: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
+		const termination = createHookTerminationController(proc, timeoutMs, signal);
+		let settled = false;
 
-		const timeoutId = setTimeout(() => {
-			killed = true;
-			proc.kill("SIGTERM");
-		}, timeout);
+		/**
+		 * Resolve exactly once and clean up process listeners/timers.
+		 *
+		 * @param result - Hook execution result
+		 * @returns void
+		 */
+		const settle = (result: HookResult): void => {
+			if (settled) return;
+			settled = true;
+			termination.cleanup();
+			resolve(result);
+		};
 
-		proc.stdin.write(hookEventJson);
-		proc.stdin.end();
-
-		proc.stdout.on("data", (d) => {
-			stdout += d.toString();
+		proc.stdout.on("data", (chunk: Buffer) => {
+			appendToHookBuffer(stdout, chunk, maxBufferBytes);
 		});
-		proc.stderr.on("data", (d) => {
-			stderr += d.toString();
+		proc.stderr.on("data", (chunk: Buffer) => {
+			appendToHookBuffer(stderr, chunk, maxBufferBytes);
 		});
 
-		if (signal) {
-			signal.addEventListener("abort", () => {
-				killed = true;
-				proc.kill("SIGTERM");
-			});
+		try {
+			proc.stdin.write(hookEventJson);
+			proc.stdin.end();
+		} catch {
+			// Ignore stdin write errors (process may have already exited).
 		}
 
-		proc.on("close", (code) => {
-			clearTimeout(timeoutId);
+		proc.once("error", (error) => {
+			settle({ ok: false, reason: error.message || "Hook command failed to start" });
+		});
 
-			if (killed) {
-				resolve({ ok: false, reason: "Hook timed out or was aborted" });
+		proc.once("close", (code) => {
+			const terminatedBy = termination.getReason();
+			if (terminatedBy !== null) {
+				settle({ ok: false, reason: "Hook timed out or was aborted" });
 				return;
 			}
 
+			const stderrText = stderr.text.trim();
+			const stdoutText = stdout.text.trim();
+
 			// Exit code 2 = blocking error
 			if (code === 2) {
-				resolve({ ok: false, reason: stderr || "Blocked by hook", decision: "block" });
+				settle({ ok: false, reason: stderrText || "Blocked by hook", decision: "block" });
 				return;
 			}
 
 			// Exit code 0 = success, parse JSON output
-			if (code === 0 && stdout.trim()) {
+			if (code === 0 && stdoutText) {
 				try {
-					const parsed = JSON.parse(stdout.trim());
+					const parsed = JSON.parse(stdoutText);
 					if (isRecord(parsed) && handler._claudeSource) {
-						resolve(translateClaudeOutput(parsed));
+						settle(translateClaudeOutput(parsed));
 						return;
 					}
 					if (isRecord(parsed)) {
-						resolve({
+						settle({
 							ok: parsed.ok !== false,
 							reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
 							additionalContext:
@@ -679,12 +862,12 @@ async function runCommandHook(
 					}
 				} catch {
 					// Not JSON, treat as additional context
-					resolve({ ok: true, additionalContext: stdout.trim() });
+					settle({ ok: true, additionalContext: stdoutText });
 					return;
 				}
 			}
 
-			resolve({ ok: true });
+			settle({ ok: true });
 		});
 	});
 }
@@ -698,14 +881,15 @@ async function runCommandHook(
  * @param signal - Optional abort signal
  * @returns Hook result with ok status and optional context
  */
-async function runAgentHook(
+export async function runAgentHook(
 	handler: HookHandler,
 	eventData: Record<string, unknown>,
 	cwd: string,
 	agentsDir: string,
 	signal?: AbortSignal
 ): Promise<HookResult> {
-	const timeout = (handler.timeout ?? 60) * 1000;
+	const timeoutMs = (handler.timeout ?? 60) * 1000;
+	const maxBufferBytes = getHookOutputMaxBufferBytes();
 
 	// Build the prompt
 	let prompt =
@@ -733,72 +917,85 @@ async function runAgentHook(
 	return new Promise((resolve) => {
 		const proc = spawn("pi", args, {
 			cwd,
+			env: { ...process.env, PI_IS_HOOK_AGENT: "1" },
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
-			env: { ...process.env, PI_IS_HOOK_AGENT: "1" },
 		});
 
-		let output = "";
-		let killed = false;
+		const stdout: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
+		const stderr: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
+		const termination = createHookTerminationController(proc, timeoutMs, signal);
+		let settled = false;
 
-		const timeoutId = setTimeout(() => {
-			killed = true;
-			proc.kill("SIGTERM");
-		}, timeout);
+		/**
+		 * Resolve exactly once and clean up process listeners/timers.
+		 *
+		 * @param result - Hook execution result
+		 * @returns void
+		 */
+		const settle = (result: HookResult): void => {
+			if (settled) return;
+			settled = true;
+			termination.cleanup();
+			resolve(result);
+		};
 
-		proc.stdout.on("data", (d) => {
-			output += d.toString();
+		proc.stdout.on("data", (chunk: Buffer) => {
+			appendToHookBuffer(stdout, chunk, maxBufferBytes);
+		});
+		proc.stderr.on("data", (chunk: Buffer) => {
+			appendToHookBuffer(stderr, chunk, maxBufferBytes);
 		});
 
-		if (signal) {
-			signal.addEventListener("abort", () => {
-				killed = true;
-				proc.kill("SIGTERM");
-			});
-		}
+		proc.once("error", (error) => {
+			settle({ ok: false, reason: error.message || "Hook agent failed to start" });
+		});
 
-		proc.on("close", (code) => {
-			clearTimeout(timeoutId);
-
-			if (killed) {
-				resolve({ ok: false, reason: "Hook agent timed out or was aborted" });
+		proc.once("close", (code) => {
+			const terminatedBy = termination.getReason();
+			if (terminatedBy !== null) {
+				settle({ ok: false, reason: "Hook agent timed out or was aborted" });
 				return;
 			}
 
-			// Parse the last assistant message for the decision
-			const lines = output.trim().split("\n");
+			const output = stdout.text.trim();
+			const lines = output.split("\n");
 			for (let i = lines.length - 1; i >= 0; i--) {
 				try {
 					const event = JSON.parse(lines[i]);
 					if (event.type === "message_end" && event.message?.role === "assistant") {
-						// Look for JSON in the response
 						for (const part of event.message.content) {
-							if (part.type === "text") {
-								// Try to extract JSON from the text
-								const jsonMatch = part.text.match(/\{[\s\S]*"ok"\s*:\s*(true|false)[\s\S]*\}/);
-								if (jsonMatch) {
-									try {
-										const result = JSON.parse(jsonMatch[0]);
-										resolve({
-											ok: result.ok ?? true,
-											reason: result.reason,
-											additionalContext: result.additionalContext,
-										});
-										return;
-									} catch {
-										// Continue looking
-									}
-								}
+							if (part.type !== "text") continue;
+							const jsonMatch = part.text.match(/\{[\s\S]*"ok"\s*:\s*(true|false)[\s\S]*\}/);
+							if (!jsonMatch) continue;
+							try {
+								const result = JSON.parse(jsonMatch[0]);
+								settle({
+									additionalContext: result.additionalContext,
+									ok: result.ok ?? true,
+									reason: result.reason,
+								});
+								return;
+							} catch {
+								// Continue searching for parseable hook result JSON.
 							}
 						}
 					}
 				} catch {
-					// Not JSON, continue
+					// Not JSON, continue.
 				}
 			}
 
-			// Default to ok if no clear decision
-			resolve({ ok: code === 0 });
+			if (code !== 0) {
+				const stderrText = stderr.text.trim();
+				if (stderrText) {
+					settle({ ok: false, reason: stderrText });
+					return;
+				}
+			}
+
+			// Preserve existing semantics: no parsed decision -> map process exit code.
+			settle({ ok: code === 0 });
 		});
 	});
 }
