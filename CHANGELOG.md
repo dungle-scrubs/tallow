@@ -166,6 +166,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mcpServers`, `packages`, `permissions`, shell interpolation, project extensions)
 - **mcp-adapter:** always load global `mcpServers`, gate project servers on trust,
   and warn when project MCP config is skipped
+- **mcp-adapter:** abort timed-out and stopped SSE requests at the network layer
+  and clear pending request bookkeeping
 - **plugins:** ignore `<cwd>/.pi/settings.json` plugin entries
 - **plan-mode:** enforce strict read-only tool allowlist and block
   non-allowlisted extension tools while plan mode is active
