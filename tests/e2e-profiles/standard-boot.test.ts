@@ -108,7 +108,7 @@ describe("Standard Profile", () => {
 		const events = await session.run("hello");
 		// Prompt completed without throwing — verify we got text back
 		const textUpdates = events.filter(
-			(e) => e.type === "message_update" && (e as any).assistantMessageEvent?.type === "text_delta"
+			(e) => e.type === "message_update" && e.assistantMessageEvent.type === "text_delta"
 		);
 		expect(textUpdates.length).toBeGreaterThan(0);
 	});

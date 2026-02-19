@@ -304,7 +304,7 @@ WHEN NOT TO USE SUBAGENTS:
 
 			if (params.agent && params.task) {
 				return executeSingle(
-					params,
+					{ ...params, agent: params.agent, task: params.task },
 					ctx,
 					agents,
 					defaults,
@@ -710,8 +710,8 @@ async function executeParallel(
  */
 async function executeSingle(
 	params: {
-		agent?: string;
-		task?: string;
+		agent: string;
+		task: string;
 		cwd?: string;
 		session?: string;
 		model?: string;
@@ -729,8 +729,8 @@ async function executeSingle(
 	parentModelId: string | undefined,
 	routingHints: RoutingHints | undefined
 ) {
-	const agentName = params.agent!;
-	const task = params.task!;
+	const agentName = params.agent;
+	const task = params.task;
 
 	// Background mode for single agent: spawn without awaiting
 	if (params.background) {

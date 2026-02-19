@@ -38,7 +38,6 @@ function eventBusCaptureExtension(pi: ExtensionAPI): void {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 let tmpHome: string | undefined;
-let lastSession: TallowSession | undefined;
 
 /**
  * Create a session with standard extensions + our capture extension.
@@ -65,7 +64,6 @@ async function createInteropSession(): Promise<TallowSession> {
 		});
 
 		tallow.session.agent.streamFn = createScriptedStreamFn([{ text: "ok" }]);
-		lastSession = tallow;
 		return tallow;
 	} finally {
 		if (originalHome !== undefined) {
@@ -76,8 +74,20 @@ async function createInteropSession(): Promise<TallowSession> {
 	}
 }
 
+/**
+ * Return the captured EventBus or throw a deterministic test error.
+ *
+ * @returns Captured EventBus reference
+ * @throws Error when EventBus was not captured
+ */
+function getCapturedEventBus(): EventBusRef {
+	if (!capturedEventBus) {
+		throw new Error("Expected EventBus to be captured before test assertion.");
+	}
+	return capturedEventBus;
+}
+
 afterEach(() => {
-	lastSession = undefined;
 	if (tmpHome) {
 		try {
 			rmSync(tmpHome, { recursive: true, force: true });
@@ -101,8 +111,9 @@ describe("Interop Event Wiring", () => {
 	it("captures EventBus from extension API", async () => {
 		await createInteropSession();
 		expect(capturedEventBus).toBeDefined();
-		expect(typeof capturedEventBus!.on).toBe("function");
-		expect(typeof capturedEventBus!.emit).toBe("function");
+		const bus = getCapturedEventBus();
+		expect(typeof bus.on).toBe("function");
+		expect(typeof bus.emit).toBe("function");
 	});
 
 	it("state request triggers snapshot responses", async () => {
@@ -116,7 +127,7 @@ describe("Interop Event Wiring", () => {
 
 		// Collect snapshots emitted in response to a state request
 		const received: string[] = [];
-		const bus = capturedEventBus!;
+		const bus = getCapturedEventBus();
 
 		const busUnsubs = [
 			bus.on(INTEROP.backgroundTasksSnapshot, () => received.push("background-tasks")),
@@ -136,7 +147,7 @@ describe("Interop Event Wiring", () => {
 	it("emitting on unknown channel does not crash", async () => {
 		await createInteropSession();
 		// Should not throw
-		capturedEventBus!.emit("interop.v99.does-not-exist", { garbage: true });
+		getCapturedEventBus().emit("interop.v99.does-not-exist", { garbage: true });
 	});
 
 	it("snapshot payloads contain expected schema version", async () => {
@@ -148,7 +159,7 @@ describe("Interop Event Wiring", () => {
 		unsub();
 
 		const payloads: unknown[] = [];
-		const bus = capturedEventBus!;
+		const bus = getCapturedEventBus();
 
 		const busUnsubs = [
 			bus.on(INTEROP.backgroundTasksSnapshot, (data: unknown) => payloads.push(data)),
