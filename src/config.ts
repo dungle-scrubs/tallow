@@ -72,6 +72,12 @@ export const TEMPLATES = {
 	commands: join(PACKAGE_DIR, "templates", "commands"),
 } as const;
 
+/** Directory for trust metadata (per-project trust entries). */
+export const TRUST_DIR = join(TALLOW_HOME, "trust");
+
+/** Path to the project trust store (~/.tallow/trust/projects.json). */
+export const PROJECT_TRUST_STORE_PATH = join(TRUST_DIR, "projects.json");
+
 // ─── Demo Mode ───────────────────────────────────────────────────────────────
 
 /**
