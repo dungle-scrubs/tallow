@@ -134,6 +134,80 @@ describe("DebugLogger.log()", () => {
 		expect(entry.data.args.command).toContain("…[800 chars]");
 	});
 
+	it("redacts top-level sensitive keys", () => {
+		const logger = new DebugLogger("test-redact-top-level", tmpDir);
+		logger.log("tool", "call", {
+			apiKey: "sk-test-123",
+			requestId: "req_abc",
+			token: "secret-token",
+		});
+		logger.close();
+
+		const lines = readFileSync(join(tmpDir, "debug.log"), "utf-8").trim().split("\n");
+		const entry = JSON.parse(lines[1]);
+		expect(entry.data.apiKey).toBe("[REDACTED]");
+		expect(entry.data.token).toBe("[REDACTED]");
+		expect(entry.data.requestId).toBe("req_abc");
+	});
+
+	it("redacts nested sensitive fields in objects and arrays", () => {
+		const logger = new DebugLogger("test-redact-nested", tmpDir);
+		logger.log("tool", "call", {
+			args: {
+				headers: {
+					authorization: "Bearer abc123",
+					xRequestId: "req_nested",
+				},
+				payload: [
+					{ cookie: "session-cookie" },
+					{ nested: { clientSecret: "super-secret", visible: "ok" } },
+				],
+			},
+		});
+		logger.close();
+
+		const lines = readFileSync(join(tmpDir, "debug.log"), "utf-8").trim().split("\n");
+		const entry = JSON.parse(lines[1]);
+		expect(entry.data.args.headers.authorization).toBe("[REDACTED]");
+		expect(entry.data.args.headers.xRequestId).toBe("req_nested");
+		expect(entry.data.args.payload[0].cookie).toBe("[REDACTED]");
+		expect(entry.data.args.payload[1].nested.clientSecret).toBe("[REDACTED]");
+		expect(entry.data.args.payload[1].nested.visible).toBe("ok");
+	});
+
+	it("never persists known secret fixtures in log output", () => {
+		const logger = new DebugLogger("test-secret-fixtures", tmpDir);
+		const fixtures = {
+			apiKey: "sk_live_1234567890",
+			authorization: "Bearer very-secret-token",
+			cookie: "sessionid=super-secret-cookie",
+		};
+		logger.log("tool", "call", fixtures);
+		logger.close();
+
+		const rawLog = readFileSync(join(tmpDir, "debug.log"), "utf-8");
+		expect(rawLog).not.toContain(fixtures.apiKey);
+		expect(rawLog).not.toContain(fixtures.authorization);
+		expect(rawLog).not.toContain(fixtures.cookie);
+		expect(rawLog).toContain("[REDACTED]");
+	});
+
+	it("redacts sensitive values instead of truncating them", () => {
+		const logger = new DebugLogger("test-redaction-before-truncation", tmpDir);
+		const longToken = `tok_${"z".repeat(1200)}`;
+		logger.log("tool", "call", {
+			authToken: longToken,
+			nonSensitiveLongValue: "a".repeat(800),
+		});
+		logger.close();
+
+		const lines = readFileSync(join(tmpDir, "debug.log"), "utf-8").trim().split("\n");
+		const entry = JSON.parse(lines[1]);
+		expect(entry.data.authToken).toBe("[REDACTED]");
+		expect(entry.data.authToken).not.toContain("…[");
+		expect(entry.data.nonSensitiveLongValue).toContain("…[800 chars]");
+	});
+
 	it("preserves short string values intact", () => {
 		const logger = new DebugLogger("test-short", tmpDir);
 		logger.log("session", "start", { cwd: "/dev/project" });

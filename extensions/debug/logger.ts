@@ -43,6 +43,35 @@ export interface LogEntry {
 /** Maximum string length for values in log data before truncation. */
 const MAX_STRING_LENGTH = 500;
 
+/** Placeholder value used when sensitive fields are redacted. */
+const REDACTED_VALUE = "[REDACTED]";
+
+/** Sensitive key segments that should always be redacted. */
+const SENSITIVE_KEY_SEGMENTS = new Set([
+	"auth",
+	"authorization",
+	"bearer",
+	"cookie",
+	"cookies",
+	"credential",
+	"credentials",
+	"key",
+	"password",
+	"passwd",
+	"passphrase",
+	"secret",
+	"token",
+]);
+
+/** Compact key patterns that may appear without separators (e.g. apiKey). */
+const SENSITIVE_COMPACT_PATTERNS = [
+	"accesskey",
+	"apikey",
+	"clientsecret",
+	"privatekey",
+	"setcookie",
+] as const;
+
 /** Cached debug mode result — resolved once per process. */
 let debugCached: boolean | undefined;
 
@@ -88,24 +117,104 @@ export function resetDebugCache(): void {
 }
 
 /**
+ * Splits a key into normalized lowercase segments for pattern matching.
+ *
+ * @param key - Raw object key from a log payload
+ * @returns Normalized key segments (e.g. "apiKey" → ["api", "key"])
+ */
+function normalizeKeySegments(key: string): string[] {
+	const normalized = key
+		.replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+		.replace(/[^a-zA-Z0-9]+/g, "_")
+		.toLowerCase();
+	return normalized.split("_").filter(Boolean);
+}
+
+/**
+ * Checks whether a key name should be treated as sensitive.
+ *
+ * @param key - Object key to evaluate
+ * @returns True when the key matches the redaction policy
+ */
+function isSensitiveKey(key: string): boolean {
+	const segments = normalizeKeySegments(key);
+	if (segments.length === 0) return false;
+
+	if (segments.some((segment) => SENSITIVE_KEY_SEGMENTS.has(segment))) {
+		return true;
+	}
+
+	const compact = segments.join("");
+	return SENSITIVE_COMPACT_PATTERNS.some((pattern) => compact.includes(pattern));
+}
+
+/**
+ * Recursively redacts sensitive fields from an unknown value.
+ *
+ * @param value - Value to redact
+ * @returns A deep-cloned value with sensitive keys replaced by [REDACTED]
+ */
+function redactValue(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map((item) => redactValue(item));
+	}
+
+	if (value !== null && typeof value === "object") {
+		const result: Record<string, unknown> = {};
+		for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+			result[key] = isSensitiveKey(key) ? REDACTED_VALUE : redactValue(nestedValue);
+		}
+		return result;
+	}
+
+	return value;
+}
+
+/**
+ * Redacts sensitive fields in a log payload.
+ *
+ * @param data - Log payload object
+ * @returns Redacted payload object
+ */
+function redactData(data: Record<string, unknown>): Record<string, unknown> {
+	return redactValue(data) as Record<string, unknown>;
+}
+
+/**
+ * Recursively truncates long string values in a payload value.
+ *
+ * @param value - Value to truncate
+ * @returns Deep-cloned value with long strings shortened for log safety
+ */
+function truncateValue(value: unknown): unknown {
+	if (typeof value === "string" && value.length > MAX_STRING_LENGTH) {
+		return `${value.slice(0, MAX_STRING_LENGTH)}…[${value.length} chars]`;
+	}
+
+	if (Array.isArray(value)) {
+		return value.map((item) => truncateValue(item));
+	}
+
+	if (value !== null && typeof value === "object") {
+		const result: Record<string, unknown> = {};
+		for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+			result[key] = truncateValue(nestedValue);
+		}
+		return result;
+	}
+
+	return value;
+}
+
+/**
  * Truncates string values in an object to MAX_STRING_LENGTH.
- * Recurses into nested objects but not arrays (arrays are serialized as-is).
+ * Recurses into nested objects and arrays.
  *
  * @param data - Object whose string values may need truncation
  * @returns New object with truncated strings
  */
 function truncateData(data: Record<string, unknown>): Record<string, unknown> {
-	const result: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(data)) {
-		if (typeof value === "string" && value.length > MAX_STRING_LENGTH) {
-			result[key] = `${value.slice(0, MAX_STRING_LENGTH)}…[${value.length} chars]`;
-		} else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-			result[key] = truncateData(value as Record<string, unknown>);
-		} else {
-			result[key] = value;
-		}
-	}
-	return result;
+	return truncateValue(data) as Record<string, unknown>;
 }
 
 /**
@@ -155,7 +264,7 @@ export class DebugLogger {
 	 *
 	 * @param cat - Log category (session, tool, model, etc.)
 	 * @param evt - Event name within the category
-	 * @param data - Arbitrary data payload (string values truncated at 500 chars)
+	 * @param data - Arbitrary data payload (sensitive keys redacted, long strings truncated)
 	 */
 	log(cat: LogCategory, evt: string, data: Record<string, unknown>): void {
 		if (this.closed) return;
@@ -164,7 +273,7 @@ export class DebugLogger {
 			ts: new Date().toISOString(),
 			cat,
 			evt,
-			data: truncateData(data),
+			data: truncateData(redactData(data)),
 		};
 
 		const line = `${JSON.stringify(entry)}\n`;
