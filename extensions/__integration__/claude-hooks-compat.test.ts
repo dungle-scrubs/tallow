@@ -7,6 +7,7 @@ import { loadHooksConfig } from "../hooks/index.js";
 let cwd: string;
 let homeDir: string;
 let originalHome: string | undefined;
+let originalTrustStatus: string | undefined;
 
 /**
  * Writes JSON with pretty formatting, creating parent directories as needed.
@@ -24,7 +25,9 @@ beforeEach(() => {
 	cwd = mkdtempSync(join(tmpdir(), "tallow-claude-hooks-cwd-"));
 	homeDir = mkdtempSync(join(tmpdir(), "tallow-claude-hooks-home-"));
 	originalHome = process.env.HOME;
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 	process.env.HOME = homeDir;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 });
 
 afterEach(() => {
@@ -32,6 +35,12 @@ afterEach(() => {
 		process.env.HOME = originalHome;
 	} else {
 		delete process.env.HOME;
+	}
+
+	if (originalTrustStatus !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
 	}
 
 	rmSync(cwd, { recursive: true, force: true });
@@ -114,5 +123,34 @@ describe("Claude hooks compatibility integration", () => {
 		expect(config.tool_call).toHaveLength(2);
 		expect(config.tool_call?.[0]?.matcher).toBe("edit|write");
 		expect(config.tool_call?.[1]?.matcher).toBe("bash");
+	});
+
+	it("blocks project .tallow hooks when project is untrusted", () => {
+		writeJson(join(homeDir, ".tallow", "hooks.json"), {
+			tool_call: [{ matcher: "bash", hooks: [{ type: "command", command: "echo global" }] }],
+		});
+		writeJson(join(cwd, ".tallow", "hooks.json"), {
+			tool_call: [{ matcher: "bash", hooks: [{ type: "command", command: "echo project" }] }],
+		});
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+		const config = loadHooksConfig(cwd);
+		const handlers = config.tool_call?.map((entry) => entry.hooks[0]?.command);
+		expect(handlers).toEqual(["echo global"]);
+	});
+
+	it("blocks project extension hooks when project is untrusted", () => {
+		writeJson(join(homeDir, ".tallow", "extensions", "global-ext", "hooks.json"), {
+			tool_call: [{ matcher: "read", hooks: [{ type: "command", command: "echo global-ext" }] }],
+		});
+		writeJson(join(cwd, ".tallow", "extensions", "project-ext", "hooks.json"), {
+			tool_call: [{ matcher: "read", hooks: [{ type: "command", command: "echo project-ext" }] }],
+		});
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "stale_fingerprint";
+		const config = loadHooksConfig(cwd);
+		const handlers = config.tool_call?.map((entry) => entry.hooks[0]?.command);
+		expect(handlers).toContain("echo global-ext");
+		expect(handlers).not.toContain("echo project-ext");
 	});
 });

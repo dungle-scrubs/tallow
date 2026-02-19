@@ -26,6 +26,7 @@ import {
 	type PermissionConfig,
 	parseRules,
 } from "./permissions.js";
+import { isProjectTrusted } from "./project-trust.js";
 
 /** Trust classification for shell/process execution sources. */
 export type ShellTrustLevel = "explicit" | "implicit" | "internal";
@@ -441,6 +442,9 @@ export function isHighRisk(command: string): boolean {
  * - settings.json: { "shellInterpolation": true }
  * - settings.json: { "shellInterpolation": { "enabled": true } }
  *
+ * Project `.tallow/settings.json` values are honored only when the project
+ * trust status is `trusted`.
+ *
  * @param cwd - Current working directory (used for project settings lookup)
  * @returns True when interpolation is explicitly enabled
  */
@@ -448,10 +452,12 @@ export function isShellInterpolationEnabled(cwd: string = process.cwd()): boolea
 	if (process.env.TALLOW_ENABLE_SHELL_INTERPOLATION === "1") return true;
 	if (process.env.TALLOW_SHELL_INTERPOLATION === "1") return true;
 
-	const projectSettingsPath = join(cwd, ".tallow", "settings.json");
 	const globalSettingsPath = join(homedir(), ".tallow", "settings.json");
+	const settingsPaths = isProjectTrusted()
+		? [join(cwd, ".tallow", "settings.json"), globalSettingsPath]
+		: [globalSettingsPath];
 
-	for (const settingsPath of [projectSettingsPath, globalSettingsPath]) {
+	for (const settingsPath of settingsPaths) {
 		const value = readShellInterpolationSetting(settingsPath);
 		if (value !== null) return value;
 	}

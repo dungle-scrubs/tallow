@@ -32,6 +32,9 @@ let rawTempDir: string;
 /** Canonicalized temp dir (resolves /var → /private/var on macOS). */
 let tempDir: string;
 
+/** Original trust status env var restored after each test. */
+let originalTrustStatus: string | undefined;
+
 const defaultVars: ExpansionVars = {
 	cwd: "/project",
 	home: "/Users/kevin",
@@ -57,9 +60,16 @@ beforeEach(() => {
 	rawTempDir = mkdtempSync(join(tmpdir(), "perm-test-"));
 	// Canonicalize to resolve macOS /var → /private/var symlink
 	tempDir = realpathSync(rawTempDir);
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 });
 
 afterEach(() => {
+	if (originalTrustStatus !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	}
 	rmSync(rawTempDir, { recursive: true, force: true });
 });
 
@@ -693,6 +703,32 @@ describe("loadPermissionConfig", () => {
 		const { loaded, warnings } = loadPermissionConfig(tempDir);
 		expect(loaded.merged.allow).toHaveLength(0);
 		expect(warnings.length).toBeGreaterThan(0);
+	});
+
+	test("untrusted projects ignore .tallow permission sources", () => {
+		mkdirSync(join(tempDir, ".tallow"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".tallow", "settings.json"),
+			JSON.stringify({ permissions: { deny: ["Bash(ssh *)"] } })
+		);
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+		const { loaded } = loadPermissionConfig(tempDir);
+		expect(loaded.merged.deny).toHaveLength(0);
+		expect(loaded.sources.some((s) => s.path.includes(".tallow/settings.json"))).toBe(false);
+	});
+
+	test("stale trust blocks project-local .tallow permissions", () => {
+		mkdirSync(join(tempDir, ".tallow"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".tallow", "settings.local.json"),
+			JSON.stringify({ permissions: { deny: ["Bash(ssh *)"] } })
+		);
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "stale_fingerprint";
+		const { loaded } = loadPermissionConfig(tempDir);
+		expect(loaded.merged.deny).toHaveLength(0);
+		expect(loaded.sources.some((s) => s.path.includes(".tallow/settings.local.json"))).toBe(false);
 	});
 
 	test("CLI config takes precedence", () => {

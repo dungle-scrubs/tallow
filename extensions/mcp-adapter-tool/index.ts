@@ -36,6 +36,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -913,17 +914,22 @@ export function validateMcpConfig(
 }
 
 /**
- * Loads mcpServers config from project-local or global settings.
+ * Loads mcpServers config from trusted project settings or global settings.
  * Validates each server config and skips invalid entries.
+ *
+ * When project trust is not `trusted`, project `.tallow/settings.json` is
+ * ignored and only `~/.tallow/settings.json` is considered.
  *
  * @param cwd - Current working directory
  * @returns Map of server name to validated config
  */
-function loadMcpConfig(cwd: string): Record<string, McpServerConfig> {
-	const locations = [
-		path.join(cwd, ".tallow", "settings.json"),
-		path.join(process.env.HOME || "", ".tallow", "settings.json"),
-	];
+export function loadMcpConfig(cwd: string): Record<string, McpServerConfig> {
+	const locations = isProjectTrusted()
+		? [
+				path.join(cwd, ".tallow", "settings.json"),
+				path.join(process.env.HOME || "", ".tallow", "settings.json"),
+			]
+		: [path.join(process.env.HOME || "", ".tallow", "settings.json")];
 
 	for (const loc of locations) {
 		try {

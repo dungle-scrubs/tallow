@@ -1,5 +1,48 @@
-import { describe, expect, test } from "bun:test";
-import { createTransport, validateMcpConfig } from "../index.js";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { createTransport, loadMcpConfig, validateMcpConfig } from "../index.js";
+
+let cwd: string;
+let homeDir: string;
+let originalHome: string | undefined;
+let originalTrustStatus: string | undefined;
+
+/**
+ * Write JSON content to disk, creating parent directories as needed.
+ *
+ * @param filePath - Target JSON file path
+ * @param value - JSON-serializable payload
+ * @returns void
+ */
+function writeJson(filePath: string, value: unknown): void {
+	mkdirSync(dirname(filePath), { recursive: true });
+	writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+beforeEach(() => {
+	cwd = mkdtempSync(join(tmpdir(), "tallow-mcp-cwd-"));
+	homeDir = mkdtempSync(join(tmpdir(), "tallow-mcp-home-"));
+	originalHome = process.env.HOME;
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+	process.env.HOME = homeDir;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+});
+
+afterEach(() => {
+	if (originalHome !== undefined) process.env.HOME = originalHome;
+	else delete process.env.HOME;
+
+	if (originalTrustStatus !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	}
+
+	rmSync(cwd, { recursive: true, force: true });
+	rmSync(homeDir, { recursive: true, force: true });
+});
 
 describe("validateMcpConfig", () => {
 	test("STDIO config without type field (backward compat)", () => {
@@ -70,6 +113,44 @@ describe("validateMcpConfig", () => {
 
 		const sse = validateMcpConfig("s", { type: "sse", url: "http://x", env: { BAR: "2" } });
 		expect((sse as { env: Record<string, string> }).env?.BAR).toBe("2");
+	});
+});
+
+describe("loadMcpConfig trust gating", () => {
+	test("trusted projects read project mcpServers first", () => {
+		writeJson(join(homeDir, ".tallow", "settings.json"), {
+			mcpServers: {
+				global: { command: "global-cmd" },
+			},
+		});
+		writeJson(join(cwd, ".tallow", "settings.json"), {
+			mcpServers: {
+				project: { command: "project-cmd" },
+			},
+		});
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+		const config = loadMcpConfig(cwd);
+		expect(Object.keys(config)).toEqual(["project"]);
+		expect((config.project as { command?: string }).command).toBe("project-cmd");
+	});
+
+	test("untrusted projects ignore project mcpServers", () => {
+		writeJson(join(homeDir, ".tallow", "settings.json"), {
+			mcpServers: {
+				global: { command: "global-cmd" },
+			},
+		});
+		writeJson(join(cwd, ".tallow", "settings.json"), {
+			mcpServers: {
+				project: { command: "project-cmd" },
+			},
+		});
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+		const config = loadMcpConfig(cwd);
+		expect(Object.keys(config)).toEqual(["global"]);
+		expect((config.global as { command?: string }).command).toBe("global-cmd");
 	});
 });
 
