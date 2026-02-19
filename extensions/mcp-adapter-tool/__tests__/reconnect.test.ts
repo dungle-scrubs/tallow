@@ -1,5 +1,26 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTransport } from "../index.js";
+
+/**
+ * Builds an open-ended SSE response stream with optional initial events.
+ *
+ * @param events - Preloaded SSE event payloads to enqueue
+ * @returns Response with text/event-stream content type
+ */
+function createSseResponse(events: string[] = []): Response {
+	const encoder = new TextEncoder();
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			for (const event of events) {
+				controller.enqueue(encoder.encode(event));
+			}
+		},
+	});
+	return new Response(stream, {
+		status: 200,
+		headers: { "Content-Type": "text/event-stream" },
+	});
+}
 
 describe("reconnect behavior", () => {
 	test("STDIO: onDisconnect fires on process crash, no auto-reconnect", async () => {
@@ -120,4 +141,50 @@ describe("reconnect behavior", () => {
 		expect(disconnected).toBe(true);
 		expect(transport.connected).toBe(false);
 	}, 15_000);
+});
+
+describe("SSE reconnect stability", () => {
+	let originalFetch: typeof fetch;
+
+	beforeEach(() => {
+		originalFetch = globalThis.fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
+	test("intentional stop does not emit disconnect", async () => {
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			if (url.endsWith("/sse")) {
+				return createSseResponse(["event: endpoint\ndata: /mcp\n\n"]);
+			}
+			if (url.endsWith("/mcp")) {
+				init?.signal?.addEventListener("abort", () => {}, { once: true });
+				return new Promise<Response>(() => {});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as typeof fetch;
+
+		const transport = createTransport("remote", {
+			type: "sse",
+			url: "http://localhost:9999/sse",
+		});
+
+		let disconnectCount = 0;
+		transport.onDisconnect(() => {
+			disconnectCount++;
+		});
+
+		await transport.start();
+		const requestPromise = transport.send({ jsonrpc: "2.0", id: 88, method: "tools/call" }, 10_000);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		transport.stop();
+
+		await expect(requestPromise).rejects.toThrow(/Transport stopped/);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(disconnectCount).toBe(0);
+	});
 });
