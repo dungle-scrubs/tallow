@@ -100,12 +100,15 @@ Command substitution (`` ` `` and `$()`) is fail-closed for allow rules.
 From highest to lowest:
 
 1. CLI flags (`--allowedTools`, `--disallowedTools`)
-2. Project local (`.tallow/settings.local.json`)
-3. Project shared (`.tallow/settings.json`)
+2. Project local (`.tallow/settings.local.json`, trusted projects only)
+3. Project shared (`.tallow/settings.json`, trusted projects only)
 4. User (`~/.tallow/settings.json`)
 
 `.claude/settings.json` and `.claude/settings.local.json` are also
 read at their respective project tiers for full Claude Code compatibility.
+
+When project trust is untrusted or stale, `.tallow` project permission
+files are ignored until you run `/trust-project`.
 
 ## CLI flags
 
