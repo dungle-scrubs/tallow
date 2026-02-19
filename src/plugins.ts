@@ -20,12 +20,14 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	realpathSync,
+	renameSync,
 	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { TALLOW_HOME } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -152,7 +154,7 @@ export function parsePluginSpec(spec: string): PluginSpec {
 				let subpath = "";
 				if (parts[2] === "tree" && parts.length >= 4) {
 					ref = parts[3];
-					subpath = parts.slice(4).join("/");
+					subpath = normalizePluginSubpath(parts.slice(4).join("/"), spec);
 				}
 				return {
 					raw: spec,
@@ -204,9 +206,91 @@ function parseGitHubSpec(raw: string, rest: string): PluginSpec {
 		isLocal: false,
 		owner,
 		repo,
-		subpath: subpathParts.join("/"),
+		subpath: normalizePluginSubpath(subpathParts.join("/"), raw),
 		ref,
 	};
+}
+
+/** Windows-style absolute path prefix (e.g. C:\\path). */
+const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/;
+
+/**
+ * Normalize and validate a remote plugin subpath.
+ *
+ * Rejects:
+ * - absolute paths
+ * - traversal segments (`..`) after normalization
+ *
+ * @param subpath - Raw subpath from plugin spec
+ * @param specForError - Original spec string used for error context
+ * @returns Normalized relative subpath (POSIX separators), or empty string
+ * @throws Error when the subpath is absolute or attempts traversal
+ */
+export function normalizePluginSubpath(subpath: string, specForError = "plugin spec"): string {
+	const trimmed = subpath.trim();
+	if (!trimmed) return "";
+
+	if (trimmed.startsWith("/") || trimmed.startsWith("\\") || WINDOWS_ABSOLUTE_PATH.test(trimmed)) {
+		throw new Error(`Invalid plugin subpath in "${specForError}": absolute paths are not allowed.`);
+	}
+
+	const normalized = posix.normalize(trimmed.replaceAll("\\", "/"));
+	if (normalized === "" || normalized === ".") return "";
+
+	if (normalized === ".." || normalized.startsWith("../") || normalized.includes("/../")) {
+		throw new Error(`Invalid plugin subpath in "${specForError}": path traversal is not allowed.`);
+	}
+
+	const segments = normalized.split("/").filter(Boolean);
+	if (segments.some((segment) => segment === "..")) {
+		throw new Error(`Invalid plugin subpath in "${specForError}": path traversal is not allowed.`);
+	}
+
+	return segments.join("/");
+}
+
+/**
+ * Check whether a target path is contained within a root path.
+ *
+ * @param rootPath - Canonical root path
+ * @param targetPath - Candidate absolute path
+ * @returns True when target is within root (or equal to root)
+ */
+function isPathContained(rootPath: string, targetPath: string): boolean {
+	const rel = relative(rootPath, targetPath);
+	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Resolve a plugin subpath against a clone root and enforce containment.
+ *
+ * Performs both lexical and canonical checks so symlink-based escapes are
+ * rejected even when the joined path appears to be inside the repository.
+ *
+ * @param cloneRoot - Absolute path to the cloned repository root
+ * @param subpath - Plugin subpath to resolve
+ * @returns Canonical absolute path contained in cloneRoot
+ * @throws Error when the resolved subpath escapes cloneRoot or is missing
+ */
+export function resolveContainedSubpath(cloneRoot: string, subpath: string): string {
+	const canonicalRoot = realpathSync(cloneRoot);
+	const normalizedSubpath = normalizePluginSubpath(subpath);
+	const candidatePath = resolve(canonicalRoot, normalizedSubpath);
+
+	if (!isPathContained(canonicalRoot, candidatePath)) {
+		throw new Error("Invalid plugin subpath: resolved path escapes repository root.");
+	}
+
+	if (!existsSync(candidatePath)) {
+		throw new Error(`Plugin subpath "${normalizedSubpath}" not found in repository.`);
+	}
+
+	const canonicalCandidate = realpathSync(candidatePath);
+	if (!isPathContained(canonicalRoot, canonicalCandidate)) {
+		throw new Error("Invalid plugin subpath: resolved path escapes repository root.");
+	}
+
+	return canonicalCandidate;
 }
 
 // ─── Version Detection ──────────────────────────────────────────────────────
@@ -251,7 +335,8 @@ export function getCachePath(spec: PluginSpec): string {
 	}
 
 	const repoSlug = `${spec.owner}--${spec.repo}`;
-	const subSlug = spec.subpath ? `--${spec.subpath.replace(/\//g, "--")}` : "";
+	const normalizedSubpath = spec.subpath ? normalizePluginSubpath(spec.subpath, spec.raw) : "";
+	const subSlug = normalizedSubpath ? `--${normalizedSubpath.replace(/\//g, "--")}` : "";
 	const refSlug = spec.ref ? `@${spec.ref}` : "@default";
 
 	return join(CACHE_DIR, `${repoSlug}${subSlug}${refSlug}`);
@@ -356,24 +441,30 @@ export function fetchPlugin(spec: PluginSpec, cachePath: string): void {
 
 		// If subpath, move only that directory to the cache location
 		if (spec.subpath) {
-			const subDir = join(tmpClone, spec.subpath);
-			if (!existsSync(subDir)) {
-				throw new Error(
-					`Subpath "${spec.subpath}" not found in ${spec.owner}/${spec.repo}. ` +
-						`Available top-level entries: ${readdirSync(tmpClone)
-							.filter((e) => !e.startsWith("."))
-							.join(", ")}`
-				);
+			const normalizedSubpath = normalizePluginSubpath(spec.subpath, spec.raw);
+			let subDir: string;
+			try {
+				subDir = resolveContainedSubpath(tmpClone, normalizedSubpath);
+			} catch (error) {
+				if (error instanceof Error && error.message.includes("not found in repository")) {
+					throw new Error(
+						`Subpath "${normalizedSubpath}" not found in ${spec.owner}/${spec.repo}. ` +
+							`Available top-level entries: ${readdirSync(tmpClone)
+								.filter((e) => !e.startsWith("."))
+								.join(", ")}`
+					);
+				}
+				throw error;
 			}
 
-			// Remove the target and rename the subdir into place
+			// Remove the target and rename the validated subdir into place
 			rmSync(cachePath, { recursive: true, force: true });
-			execFileSync("mv", [subDir, cachePath], { stdio: "pipe" });
+			renameSync(subDir, cachePath);
 		} else {
 			// No subpath — move entire clone (minus .git) to cache
 			rmSync(join(tmpClone, ".git"), { recursive: true, force: true });
 			rmSync(cachePath, { recursive: true, force: true });
-			execFileSync("mv", [tmpClone, cachePath], { stdio: "pipe" });
+			renameSync(tmpClone, cachePath);
 		}
 
 		writeCacheMeta(cachePath, spec, commitSha);
