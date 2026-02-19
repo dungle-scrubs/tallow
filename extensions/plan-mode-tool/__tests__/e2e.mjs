@@ -5,8 +5,9 @@
  *
  * Proves:
  *   1. plan_mode tool remains available after toggling modes
- *   2. Extension tools survive setActiveTools transitions
- *   3. Base tools are correctly restricted in plan mode
+ *   2. Plan mode enforces a strict read-only allowlist
+ *   3. Non-allowlisted extension tools are blocked in plan mode
+ *   4. Disabling plan mode restores normal access
  *
  * Uses the SDK to load ONLY the plan-mode extension (isolated).
  * Costs ~$0.01 per run.
@@ -28,6 +29,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -87,6 +89,26 @@ function hasToolNotFoundError(session, toolName) {
 	return false;
 }
 
+/**
+ * Check if a tool call was blocked by plan-mode policy.
+ * @param {import("@mariozechner/pi-coding-agent").AgentSession} session
+ * @param {string} toolName
+ * @returns {boolean}
+ */
+function hasPlanModeToolBlockedError(session, toolName) {
+	const msgs = session.messages;
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		const m = msgs[i];
+		if (m.role !== "toolResult") continue;
+		for (const part of m.content) {
+			if (part.type === "text" && part.text.includes(`Plan mode: tool "${toolName}" blocked`)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 // ── Isolated extension loading ───────────────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -113,11 +135,70 @@ if (!model) {
 
 const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false } });
 
+/**
+ * Register mock tools used to validate strict plan-mode allowlisting.
+ * @param {import("@mariozechner/pi-coding-agent").ExtensionAPI} pi
+ */
+function registerMockTools(pi) {
+	pi.registerTool({
+		name: "bg_bash",
+		label: "bg_bash",
+		description: "Mock background bash tool",
+		parameters: Type.Object({ command: Type.String() }),
+		async execute(_toolCallId, params) {
+			return {
+				content: [{ type: "text", text: `mock-bg-bash-ok:${params.command}` }],
+				details: {},
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "subagent",
+		label: "subagent",
+		description: "Mock subagent tool",
+		parameters: Type.Object({ task: Type.String() }),
+		async execute(_toolCallId, params) {
+			return {
+				content: [{ type: "text", text: `mock-subagent-ok:${params.task}` }],
+				details: {},
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "mcp__mock__ping",
+		label: "mcp__mock__ping",
+		description: "Mock MCP-style tool",
+		parameters: Type.Object({}),
+		async execute() {
+			return {
+				content: [{ type: "text", text: "mock-mcp-ok" }],
+				details: {},
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "questionnaire",
+		label: "questionnaire",
+		description: "Mock read-only questionnaire tool",
+		parameters: Type.Object({}),
+		async execute() {
+			return {
+				content: [{ type: "text", text: "mock-questionnaire-ok" }],
+				details: {},
+			};
+		},
+	});
+}
+
 console.log("Loading extension (isolated)...");
 const loader = new DefaultResourceLoader({
 	cwd: os.tmpdir(),
 	agentDir: testAgentDir,
 	settingsManager,
+	extensionFactories: [registerMockTools],
 	skillsOverride: () => ({ skills: [], diagnostics: [] }),
 	promptsOverride: () => ({ prompts: [], diagnostics: [] }),
 	agentsFilesOverride: () => ({ agentsFiles: [] }),
@@ -199,44 +280,55 @@ const noFinalError = !hasToolNotFoundError(session, "plan_mode");
 check("plan_mode callable after round-trip", noFinalError, finalStatusText);
 check("back to normal mode", finalStatusText.includes("normal"), finalStatusText);
 
-// ── Test 4: Base tools restricted in plan mode ───────────────
+// ── Test 4: Strict allowlist enforcement in plan mode ────────
 
-console.log("\n\x1b[1mTest 4: Write tools blocked in plan mode\x1b[0m");
+console.log("\n\x1b[1mTest 4: Strict allowlist blocks non-read-only tools\x1b[0m");
 await session.prompt(
 	'Call the plan_mode tool with action "enable". Only call this one tool, nothing else.'
 );
 
-// Try to use edit tool — should fail since it's not in the active set
 await session.prompt(
-	'Call the edit tool to edit file "/tmp/test.txt" replacing "a" with "b". Only call edit, nothing else. If the edit tool is not available, say "EDIT_UNAVAILABLE" in your response.'
+	'Call the edit tool to edit file "/tmp/test.txt" replacing "a" with "b". Only call edit, nothing else.'
 );
-
-// Check if edit was blocked (tool not found or model reported unavailable)
-const lastMsgs = session.messages;
-let editBlocked = false;
-for (let i = lastMsgs.length - 1; i >= 0; i--) {
-	const m = lastMsgs[i];
-	if (m.role === "toolResult") {
-		for (const part of m.content) {
-			if (part.type === "text" && part.text.includes("Tool edit not found")) {
-				editBlocked = true;
-			}
-		}
-	}
-	if (m.role === "assistant") {
-		for (const part of m.content) {
-			if (part.type === "text" && part.text.includes("EDIT_UNAVAILABLE")) {
-				editBlocked = true;
-			}
-		}
-	}
-}
+const editBlocked =
+	hasToolNotFoundError(session, "edit") || hasPlanModeToolBlockedError(session, "edit");
 check("edit tool blocked in plan mode", editBlocked, "edit should not be available in plan mode");
 
-// Clean up — disable plan mode
+await session.prompt(
+	'Call the bg_bash tool with command "echo blocked". Only call bg_bash, nothing else.'
+);
+const bgBashBlocked =
+	hasToolNotFoundError(session, "bg_bash") || hasPlanModeToolBlockedError(session, "bg_bash");
+check("bg_bash blocked in plan mode", bgBashBlocked, "bg_bash should be blocked in plan mode");
+
+await session.prompt('Call the subagent tool with task "ping". Only call subagent, nothing else.');
+const subagentBlocked =
+	hasToolNotFoundError(session, "subagent") || hasPlanModeToolBlockedError(session, "subagent");
+check("subagent blocked in plan mode", subagentBlocked, "subagent should be blocked in plan mode");
+
+await session.prompt("Call the mcp__mock__ping tool. Only call this one tool, nothing else.");
+const mcpBlocked =
+	hasToolNotFoundError(session, "mcp__mock__ping") ||
+	hasPlanModeToolBlockedError(session, "mcp__mock__ping");
+check("mcp__* tools blocked in plan mode", mcpBlocked, "MCP tools should be blocked in plan mode");
+
+await session.prompt("Call the questionnaire tool. Only call this one tool, nothing else.");
+const questionnaireText = lastToolResultText(session, "questionnaire");
+const questionnaireAllowed = questionnaireText.includes("mock-questionnaire-ok");
+check("allowlisted questionnaire tool still works", questionnaireAllowed, questionnaireText);
+
+// ── Test 5: Disabling plan mode restores normal access ───────
+
+console.log("\n\x1b[1mTest 5: Disable restores normal tool access\x1b[0m");
 await session.prompt(
 	'Call the plan_mode tool with action "disable". Only call this one tool, nothing else.'
 );
+await session.prompt(
+	'Call the subagent tool with task "after-disable". Only call subagent, nothing else.'
+);
+const subagentAfterDisableText = lastToolResultText(session, "subagent");
+const subagentRestored = subagentAfterDisableText.includes("mock-subagent-ok:after-disable");
+check("subagent restored after disabling plan mode", subagentRestored, subagentAfterDisableText);
 
 // ── Cleanup & Summary ────────────────────────────────────────
 

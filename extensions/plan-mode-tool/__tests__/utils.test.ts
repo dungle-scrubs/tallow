@@ -3,10 +3,30 @@ import {
 	cleanStepText,
 	extractDoneSteps,
 	extractTodoItems,
+	isPlanModeToolAllowed,
 	isSafeCommand,
 	markCompletedSteps,
+	PLAN_MODE_ALLOWED_TOOLS,
 	type TodoItem,
 } from "../utils.js";
+
+describe("isPlanModeToolAllowed", () => {
+	test("allows explicitly allowlisted tools", () => {
+		expect(PLAN_MODE_ALLOWED_TOOLS.length).toBeGreaterThan(0);
+		expect(isPlanModeToolAllowed("read")).toBe(true);
+		expect(isPlanModeToolAllowed("bash")).toBe(true);
+		expect(isPlanModeToolAllowed("plan_mode")).toBe(true);
+	});
+
+	test("blocks non-allowlisted tools fail-closed", () => {
+		expect(isPlanModeToolAllowed("edit")).toBe(false);
+		expect(isPlanModeToolAllowed("write")).toBe(false);
+		expect(isPlanModeToolAllowed("bg_bash")).toBe(false);
+		expect(isPlanModeToolAllowed("subagent")).toBe(false);
+		expect(isPlanModeToolAllowed("mcp__github__create_issue")).toBe(false);
+		expect(isPlanModeToolAllowed("totally_unknown_tool")).toBe(false);
+	});
+});
 
 describe("isSafeCommand", () => {
 	test("allows read-only file inspection commands", () => {
