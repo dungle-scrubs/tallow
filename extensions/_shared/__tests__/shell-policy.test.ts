@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	clampTimeout,
 	clearAuditTrail,
@@ -25,6 +28,7 @@ setDefaultTimeout(15_000);
 const ORIG_ENABLE = process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
 const ORIG_LEGACY_ENABLE = process.env.TALLOW_SHELL_INTERPOLATION;
 const ORIG_BYPASS = process.env.TALLOW_ALLOW_UNSAFE_SHELL;
+const ORIG_TRUST_STATUS = process.env.TALLOW_PROJECT_TRUST_STATUS;
 
 /**
  * Restore policy-related environment variables.
@@ -48,6 +52,12 @@ function restoreEnv(): void {
 		delete process.env.TALLOW_ALLOW_UNSAFE_SHELL;
 	} else {
 		process.env.TALLOW_ALLOW_UNSAFE_SHELL = ORIG_BYPASS;
+	}
+
+	if (ORIG_TRUST_STATUS === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = ORIG_TRUST_STATUS;
 	}
 }
 
@@ -106,6 +116,37 @@ describe("environment flags", () => {
 		delete process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
 		process.env.TALLOW_SHELL_INTERPOLATION = "1";
 		expect(isShellInterpolationEnabled(process.cwd())).toBe(true);
+	});
+
+	test("untrusted projects ignore project shellInterpolation setting", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "tallow-shell-cwd-"));
+		const home = mkdtempSync(join(tmpdir(), "tallow-shell-home-"));
+		const originalHome = process.env.HOME;
+
+		try {
+			mkdirSync(join(cwd, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".tallow", "settings.json"),
+				JSON.stringify({ shellInterpolation: true })
+			);
+			mkdirSync(join(home, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(home, ".tallow", "settings.json"),
+				JSON.stringify({ shellInterpolation: false })
+			);
+
+			process.env.HOME = home;
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+			expect(isShellInterpolationEnabled(cwd)).toBe(false);
+
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+			expect(isShellInterpolationEnabled(cwd)).toBe(true);
+		} finally {
+			if (originalHome !== undefined) process.env.HOME = originalHome;
+			else delete process.env.HOME;
+			rmSync(cwd, { recursive: true, force: true });
+			rmSync(home, { recursive: true, force: true });
+		}
 	});
 
 	test("non-interactive bypass disabled by default", () => {

@@ -14,6 +14,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, normalize, resolve } from "node:path";
+import { isProjectTrusted } from "./project-trust.js";
 import { stripQuotedContent } from "./shell-policy.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -991,8 +992,8 @@ export const EMPTY_CONFIG: PermissionConfig = {
  *
  * Scan order (highest to lowest precedence):
  * 1. CLI flags (passed in, not loaded from file)
- * 2. Project local (`.tallow/settings.local.json`)
- * 3. Project shared (`.tallow/settings.json`)
+ * 2. Project local (`.tallow/settings.local.json`, trusted projects only)
+ * 3. Project shared (`.tallow/settings.json`, trusted projects only)
  * 4. User (`~/.tallow/settings.json`)
  *
  * Also reads `.claude/settings.json` and `.claude/settings.local.json` at
@@ -1010,6 +1011,7 @@ export function loadPermissionConfig(
 	const sources: PermissionSource[] = [];
 	const home = homedir();
 	const tallowHome = process.env.PI_CODING_AGENT_DIR ?? join(home, ".tallow");
+	const allowProjectSettings = isProjectTrusted();
 
 	// CLI tier
 	if (
@@ -1020,11 +1022,13 @@ export function loadPermissionConfig(
 	}
 
 	// Project local: .tallow/settings.local.json
-	const projectLocalPath = join(cwd, ".tallow", "settings.local.json");
-	const projectLocalRaw = readPermissionsFromFile(projectLocalPath, warnings);
-	if (projectLocalRaw) {
-		const config = parsePermissionsObject(projectLocalRaw, warnings);
-		sources.push({ path: projectLocalPath, tier: "project-local", config });
+	if (allowProjectSettings) {
+		const projectLocalPath = join(cwd, ".tallow", "settings.local.json");
+		const projectLocalRaw = readPermissionsFromFile(projectLocalPath, warnings);
+		if (projectLocalRaw) {
+			const config = parsePermissionsObject(projectLocalRaw, warnings);
+			sources.push({ path: projectLocalPath, tier: "project-local", config });
+		}
 	}
 
 	// Claude local: .claude/settings.local.json (same precedence tier as project-local)
@@ -1036,11 +1040,13 @@ export function loadPermissionConfig(
 	}
 
 	// Project shared: .tallow/settings.json
-	const projectSharedPath = join(cwd, ".tallow", "settings.json");
-	const projectSharedRaw = readPermissionsFromFile(projectSharedPath, warnings);
-	if (projectSharedRaw) {
-		const config = parsePermissionsObject(projectSharedRaw, warnings);
-		sources.push({ path: projectSharedPath, tier: "project-shared", config });
+	if (allowProjectSettings) {
+		const projectSharedPath = join(cwd, ".tallow", "settings.json");
+		const projectSharedRaw = readPermissionsFromFile(projectSharedPath, warnings);
+		if (projectSharedRaw) {
+			const config = parsePermissionsObject(projectSharedRaw, warnings);
+			sources.push({ path: projectSharedPath, tier: "project-shared", config });
+		}
 	}
 
 	// Claude shared: .claude/settings.json (same tier as project-shared)

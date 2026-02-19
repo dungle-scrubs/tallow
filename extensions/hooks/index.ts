@@ -30,6 +30,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { evaluateCommand } from "../_shared/shell-policy.js";
 import { createHookStateManager, type HookStateManager } from "./state-manager.js";
 
@@ -450,13 +451,13 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
  * Loads and merges hooks from all sources.
  *
  * Scan order:
- *   1. hooks.json from packages in settings.json  (lowest priority)
+ *   1. hooks.json from packages in settings.json (global, always)
  *   2. ~/.tallow/hooks.json                     (global standalone)
  *   3. ~/.tallow/settings.json                  (global settings)
- *   4. .tallow/hooks.json                             (project standalone)
- *   5. .tallow/settings.json                          (project settings)
+ *   4. .tallow/hooks.json                       (project standalone, trusted only)
+ *   5. .tallow/settings.json                    (project settings, trusted only)
  *   6. ~/.tallow/extensions/∗/hooks.json        (global extension hooks)
- *   7. .tallow/extensions/∗/hooks.json                (project extension hooks)
+ *   7. .tallow/extensions/∗/hooks.json          (project extension hooks, trusted only)
  *   8. .claude/settings.json                    (project Claude hooks, translated)
  *   9. ~/.claude/settings.json                  (global Claude hooks, translated)
  *
@@ -470,6 +471,7 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
 export function loadHooksConfig(cwd: string): HooksConfig {
 	const home = process.env.HOME || "";
 	const merged: HooksConfig = {};
+	const allowProjectSources = isProjectTrusted();
 
 	// 1. Package hooks (lowest priority)
 	const globalSettingsPath = path.join(home, ".tallow", "settings.json");
@@ -477,8 +479,10 @@ export function loadHooksConfig(cwd: string): HooksConfig {
 	for (const hooks of getPackageHooks(globalSettingsPath)) {
 		mergeHooks(merged, hooks);
 	}
-	for (const hooks of getPackageHooks(projectSettingsPath)) {
-		mergeHooks(merged, hooks);
+	if (allowProjectSources) {
+		for (const hooks of getPackageHooks(projectSettingsPath)) {
+			mergeHooks(merged, hooks);
+		}
 	}
 
 	// 2–3. Global hooks (standalone + settings)
@@ -489,19 +493,23 @@ export function loadHooksConfig(cwd: string): HooksConfig {
 	if (globalSettings) mergeHooks(merged, globalSettings);
 
 	// 4–5. Project hooks (standalone + settings)
-	const projectHooks = readHooksFile(path.join(cwd, ".tallow", "hooks.json"));
-	if (projectHooks) mergeHooks(merged, projectHooks);
+	if (allowProjectSources) {
+		const projectHooks = readHooksFile(path.join(cwd, ".tallow", "hooks.json"));
+		if (projectHooks) mergeHooks(merged, projectHooks);
 
-	const projectSettings = readHooksFile(projectSettingsPath);
-	if (projectSettings) mergeHooks(merged, projectSettings);
+		const projectSettings = readHooksFile(projectSettingsPath);
+		if (projectSettings) mergeHooks(merged, projectSettings);
+	}
 
 	// 6. Global extension hooks
 	const globalExtHooks = scanExtensionHooks(path.join(home, ".tallow", "extensions"));
 	mergeHooks(merged, globalExtHooks);
 
 	// 7. Project extension hooks
-	const projectExtHooks = scanExtensionHooks(path.join(cwd, ".tallow", "extensions"));
-	mergeHooks(merged, projectExtHooks);
+	if (allowProjectSources) {
+		const projectExtHooks = scanExtensionHooks(path.join(cwd, ".tallow", "extensions"));
+		mergeHooks(merged, projectExtHooks);
+	}
 
 	// 8. Claude project settings hooks (translated)
 	const claudeProjectPath = path.join(cwd, ".claude", "settings.json");
