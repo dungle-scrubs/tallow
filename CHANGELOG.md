@@ -160,6 +160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turn end via interactive-mode runtime patch
 - **trust:** block untrusted project execution surfaces (`plugins`, hooks,
   `mcpServers`, `packages`, `permissions`, shell interpolation, project extensions)
+- **mcp-adapter:** always load global `mcpServers`, gate project servers on trust,
+  and warn when project MCP config is skipped
 - **plugins:** ignore `<cwd>/.pi/settings.json` plugin entries
 
 ### Removed
