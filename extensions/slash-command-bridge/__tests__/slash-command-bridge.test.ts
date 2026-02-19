@@ -185,6 +185,38 @@ describe("compact", () => {
 		expect(typeof compactOptions?.onError).toBe("function");
 	});
 
+	test("agent_end hook shows and clears compacting UI feedback", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const workingMessages: Array<string | undefined> = [];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: (message?: string) => {
+					workingMessages.push(message);
+				},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		expect(workingMessages[0]).toBe("Compacting session…");
+		expect(statusUpdates[0]).toEqual({ key: "compact", text: "🧹 compacting" });
+
+		compactOptions?.onComplete?.();
+
+		expect(workingMessages.at(-1)).toBeUndefined();
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+	});
+
 	test("agent_end hook is a no-op when no compact is pending", async () => {
 		let compactCalled = false;
 		const ctx = buildContext({
