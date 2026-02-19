@@ -86,7 +86,7 @@ Spawn parallel agents with isolated contexts. Assign different models, roles, an
 
 ### Packages & Claude Code compatibility
 
-A package system for distributing commands, agents, skills, and hooks. Compatible with Claude Code plugins out of the box — hooks, MCP servers, slash commands, agents, and CLAUDE.md context files all work. Commands and prompts are interchangeable — put a markdown file in either directory and it becomes a `/slash` command.
+A package system for distributing commands, agents, skills, and hooks. tallow reads key Claude Code project resources directly (commands, agents, skills, and `CLAUDE.md`) so existing repos usually run without restructuring. Commands and prompts are interchangeable — put a markdown file in either directory and it becomes a `/slash` command.
 
 </div>
 
@@ -94,7 +94,7 @@ A package system for distributing commands, agents, skills, and hooks. Compatibl
 
 ### Lifecycle hooks
 
-Intercept any point in the agent lifecycle — before/after tool execution, on turn completion, on errors. Run shell commands, validate outputs, enforce policies, or trigger notifications. Claude Code hook format supported.
+Intercept any point in the agent lifecycle — before/after tool execution, on turn completion, on errors. Run shell commands, validate outputs, enforce policies, or trigger notifications. Hook config shape is Claude-style, with tallow event keys.
 
 </div>
 

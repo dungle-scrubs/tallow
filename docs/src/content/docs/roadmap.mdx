@@ -83,10 +83,12 @@ in `.claude/commands/` or `.tallow/commands/` and it works.
 
 **Claude Code compatibility** maps CC config locations
 (`~/.claude/.claude.json`, `.claude/commands/`, `CLAUDE.md`)
-into tallow's runtime. CC lifecycle hooks (`PreToolUse`,
-`PostToolUse`, `Stop`) map to tallow events. MCP servers
-declared in CC config register through the mcp-adapter.
-Slash commands merge into tallow's command system.
+into tallow's runtime. Lifecycle hook behavior is supported,
+but hook config keys use tallow event names (`tool_call`,
+`tool_result`, etc.) rather than automatic `PreToolUse`/
+`PostToolUse` key translation. MCP servers declared in tallow
+settings register through the mcp-adapter. Slash commands merge
+into tallow's command system.
 
 **pi-native paths** add what CC doesn't have: extensions,
 typed prompts with subcommands, skills, and agents at the

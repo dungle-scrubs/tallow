@@ -22,6 +22,11 @@ Events prefixed with `before_` or `session_before_` support
 blocking (can cancel the operation). `tool_call` and `input`
 also support blocking. All other events are observe-only.
 
+:::note
+Hook **event keys must use tallow names** (`tool_call`, `tool_result`, etc.).
+Claude-style names (`PreToolUse`, `PostToolUse`, `Stop`) are not auto-mapped.
+:::
+
 ## All pi events
 
 Every event you can hook into:
