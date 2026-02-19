@@ -630,6 +630,9 @@ export async function runSingleAgent(
 		});
 	};
 
+	// Surface selected model immediately, before first assistant/tool event arrives.
+	emitUpdate(true);
+
 	try {
 		// Inject maxTurns budget hint into system prompt
 		let fgSystemPrompt = agent.systemPrompt;
