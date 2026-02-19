@@ -13,10 +13,24 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { trustProject } from "../../src/project-trust.js";
 import { createTallowSession, type TallowSession } from "../../src/sdk.js";
 import { createMockModel } from "../../test-utils/mock-model.js";
 
 const cleanupDirs: string[] = [];
+const originalProjectTrustStorePath = process.env.TALLOW_PROJECT_TRUST_STORE_PATH;
+
+/**
+ * Ensure project trust metadata is isolated to a temporary store for this test file.
+ *
+ * @returns void
+ */
+function ensureTestTrustStorePath(): void {
+	if (process.env.TALLOW_PROJECT_TRUST_STORE_PATH) return;
+	const trustDir = mkdtempSync(join(tmpdir(), "tallow-trust-store-"));
+	cleanupDirs.push(trustDir);
+	process.env.TALLOW_PROJECT_TRUST_STORE_PATH = join(trustDir, "projects.json");
+}
 
 /** Create a fake package directory with optional AGENTS.md content. */
 function createFakePackage(name: string, options: { agentsContent?: string } = {}): string {
@@ -53,6 +67,9 @@ async function createTestSession(
 	const tmpCwd = cwd ?? mkdtempSync(join(tmpdir(), "tallow-cwd-"));
 	if (!cwd) cleanupDirs.push(tmpCwd);
 
+	ensureTestTrustStorePath();
+	trustProject(tmpCwd);
+
 	return createTallowSession({
 		cwd: tmpCwd,
 		model: createMockModel(),
@@ -74,6 +91,12 @@ afterEach(() => {
 		}
 	}
 	cleanupDirs.length = 0;
+
+	if (originalProjectTrustStorePath !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_STORE_PATH = originalProjectTrustStorePath;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_STORE_PATH;
+	}
 });
 
 describe("Package AGENTS.md injection", () => {

@@ -615,17 +615,19 @@ export async function createTallowSession(
  * @param cwd - Current working directory (for project settings)
  * @param cliPlugins - Additional plugin specs from CLI --plugin-dir or options.plugins
  * @param trustStatus - Current project trust status
+ * @param tallowHome - Optional tallow home override for settings lookup (defaults to TALLOW_HOME)
  * @returns Deduplicated array of plugin spec strings
  */
 export function collectPluginSpecs(
 	cwd: string,
 	cliPlugins: string[] | undefined,
-	trustStatus: ProjectTrustStatus
+	trustStatus: ProjectTrustStatus,
+	tallowHome = TALLOW_HOME
 ): string[] {
 	const specs = new Set<string>();
 
 	// Read plugins from global settings and trusted project settings.
-	const settingsFiles = [join(TALLOW_HOME, "settings.json")];
+	const settingsFiles = [join(tallowHome, "settings.json")];
 	if (trustStatus === "trusted") {
 		settingsFiles.push(join(cwd, ".tallow", "settings.json"));
 	}
