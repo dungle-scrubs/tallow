@@ -3,15 +3,27 @@ title: plan-mode-tool
 description: Read-only exploration mode for safe code analysis and planning.
 ---
 
-Toggle with `/plan` or `ctrl+alt+p` to enter a restricted mode
-where only read-only tools are available. The agent can explore
-the codebase, analyze architecture, and formulate a plan, but
-cannot modify any files or run destructive commands.
+Toggle with `/plan-mode` or `ctrl+alt+p` to enter a strict read-only mode.
 
-Plan mode extracts numbered steps from "Plan:" sections in the
-agent's response. During execution (after exiting plan mode),
-a progress tracking widget shows which steps are complete.
-`[DONE:n]` markers in the conversation advance the progress.
+In plan mode, tool access is fail-closed and allowlisted:
+
+- `read`
+- `bash` (read-only command allowlist enforced)
+- `grep`
+- `find`
+- `ls`
+- `questionnaire` (when available)
+- `plan_mode`
+
+All other tools are blocked while plan mode is enabled, including write tools
+(`edit`, `write`) and non-read-only extension tools (`bg_bash`, `subagent`,
+`mcp__*`, etc.).
+
+Plan mode extracts numbered steps from `Plan:` sections in the assistant
+response. During execution (after exiting plan mode), a progress widget tracks
+completed steps via `[DONE:n]` markers.
+
+Disabling plan mode restores the pre-plan tool set.
 
 ## Commands
 
