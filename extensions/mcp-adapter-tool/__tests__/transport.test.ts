@@ -1,5 +1,35 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createTransport, type McpTransport } from "../index.js";
+
+/**
+ * Builds an open-ended SSE response stream with optional initial events.
+ *
+ * @param events - Preloaded SSE event payloads to enqueue
+ * @returns Response with text/event-stream content type
+ */
+function createSseResponse(events: string[] = []): Response {
+	const encoder = new TextEncoder();
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			for (const event of events) {
+				controller.enqueue(encoder.encode(event));
+			}
+		},
+	});
+	return new Response(stream, {
+		status: 200,
+		headers: { "Content-Type": "text/event-stream" },
+	});
+}
+
+/**
+ * Waits one macrotask turn to allow async callbacks to run.
+ *
+ * @returns Promise resolved on next tick
+ */
+async function nextTick(): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 describe("StdioTransport", () => {
 	let transport: McpTransport;
@@ -177,6 +207,16 @@ describe("StreamableHttpTransport", () => {
 });
 
 describe("SseTransport", () => {
+	let originalFetch: typeof fetch;
+
+	beforeEach(() => {
+		originalFetch = globalThis.fetch;
+	});
+
+	afterEach(() => {
+		globalThis.fetch = originalFetch;
+	});
+
 	test("send rejects when not connected", async () => {
 		const transport = createTransport("remote", {
 			type: "sse",
@@ -197,5 +237,169 @@ describe("SseTransport", () => {
 		// Should not throw
 		transport.stop();
 		expect(transport.connected).toBe(false);
+	});
+
+	test("timed-out request aborts in-flight SSE POST and clears pending state", async () => {
+		let postAborted = false;
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			if (url.endsWith("/sse")) {
+				return createSseResponse(["event: endpoint\ndata: /mcp\n\n"]);
+			}
+			if (url.endsWith("/mcp")) {
+				const signal = init?.signal;
+				signal?.addEventListener(
+					"abort",
+					() => {
+						postAborted = true;
+					},
+					{ once: true }
+				);
+				return new Promise<Response>(() => {});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as typeof fetch;
+
+		const transport = createTransport("remote", {
+			type: "sse",
+			url: "http://localhost:9999/sse",
+		});
+		await transport.start();
+
+		await expect(
+			transport.send({ jsonrpc: "2.0", id: 7, method: "tools/call", params: {} }, 25)
+		).rejects.toThrow(/timed out/);
+
+		expect(postAborted).toBe(true);
+		expect(
+			(transport as unknown as { pendingRequests: Map<number, unknown> }).pendingRequests.size
+		).toBe(0);
+		transport.stop();
+	});
+
+	test("stop aborts stream fetch and all in-flight requests", async () => {
+		let streamAborted = false;
+		let postAbortCount = 0;
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			if (url.endsWith("/sse")) {
+				init?.signal?.addEventListener(
+					"abort",
+					() => {
+						streamAborted = true;
+					},
+					{ once: true }
+				);
+				return createSseResponse(["event: endpoint\ndata: /mcp\n\n"]);
+			}
+			if (url.endsWith("/mcp")) {
+				init?.signal?.addEventListener(
+					"abort",
+					() => {
+						postAbortCount++;
+					},
+					{ once: true }
+				);
+				return new Promise<Response>(() => {});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as typeof fetch;
+
+		const transport = createTransport("remote", {
+			type: "sse",
+			url: "http://localhost:9999/sse",
+		});
+		await transport.start();
+
+		const req1 = transport.send({ jsonrpc: "2.0", id: 11, method: "tools/call" }, 10_000);
+		const req2 = transport.send({ jsonrpc: "2.0", id: 12, method: "tools/call" }, 10_000);
+		await nextTick();
+
+		expect(
+			(transport as unknown as { pendingRequests: Map<number, unknown> }).pendingRequests.size
+		).toBe(2);
+
+		transport.stop();
+		const results = await Promise.allSettled([req1, req2]);
+
+		for (const result of results) {
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(String(result.reason)).toContain("Transport stopped");
+			}
+		}
+
+		expect(streamAborted).toBe(true);
+		expect(postAbortCount).toBe(2);
+		expect(
+			(transport as unknown as { pendingRequests: Map<number, unknown> }).pendingRequests.size
+		).toBe(0);
+		expect(
+			(transport as unknown as { pendingRequestControllers: Map<number, AbortController> })
+				.pendingRequestControllers.size
+		).toBe(0);
+	});
+
+	test("endpoint wait timeout aborts connection setup", async () => {
+		let streamAborted = false;
+		globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			if (url.endsWith("/sse")) {
+				init?.signal?.addEventListener(
+					"abort",
+					() => {
+						streamAborted = true;
+					},
+					{ once: true }
+				);
+				return createSseResponse();
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as typeof fetch;
+
+		const transport = createTransport("remote", {
+			type: "sse",
+			url: "http://localhost:9999/sse",
+		});
+		(transport as unknown as { endpointWaitTimeoutMs: number }).endpointWaitTimeoutMs = 25;
+
+		await expect(transport.start()).rejects.toThrow(/timeout waiting for SSE endpoint event/);
+		expect(streamAborted).toBe(true);
+		expect(transport.connected).toBe(false);
+		transport.stop();
+	});
+
+	test("successful request/response flow still works", async () => {
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+			if (url.endsWith("/sse")) {
+				return createSseResponse(["event: endpoint\ndata: /mcp\n\n"]);
+			}
+			if (url.endsWith("/mcp")) {
+				return new Response(JSON.stringify({ jsonrpc: "2.0", id: 42, result: { ok: true } }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		}) as typeof fetch;
+
+		const transport = createTransport("remote", {
+			type: "sse",
+			url: "http://localhost:9999/sse",
+		});
+		await transport.start();
+
+		const response = await transport.send({ jsonrpc: "2.0", id: 42, method: "tools/list" }, 1_000);
+		expect(response.id).toBe(42);
+		expect(response.result).toEqual({ ok: true });
+		expect(
+			(transport as unknown as { pendingRequests: Map<number, unknown> }).pendingRequests.size
+		).toBe(0);
+		transport.stop();
 	});
 });

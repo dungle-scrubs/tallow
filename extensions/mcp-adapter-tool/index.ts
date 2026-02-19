@@ -43,6 +43,16 @@ import {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Converts an unknown thrown value into an Error instance.
+ *
+ * @param value - Unknown thrown value
+ * @returns Error instance with best-effort message
+ */
+function toError(value: unknown): Error {
+	return value instanceof Error ? value : new Error(String(value));
+}
+
 // ── Config Types ─────────────────────────────────────────────────────────────
 
 /** STDIO MCP server config. No `type` field or `type: "stdio"`. */
@@ -361,9 +371,14 @@ class SseTransport implements McpTransport {
 	private postUrl: string | null = null;
 	private abortController: AbortController | null = null;
 	private pendingRequests = new Map<number, PendingRequest>();
+	private pendingRequestControllers = new Map<number, AbortController>();
 	private _connected = false;
 	private stopping = false;
 	private endpointResolver?: (url: string) => void;
+	private endpointRejecter?: (reason: Error) => void;
+	private endpointWaitTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Endpoint wait timeout. Mutable for tests. */
+	private endpointWaitTimeoutMs = 10_000;
 	private disconnectHandler?: () => void;
 	private notificationHandler?: (method: string, params?: unknown) => void;
 
@@ -381,6 +396,82 @@ class SseTransport implements McpTransport {
 	}
 
 	/**
+	 * Clears endpoint-wait timeout and resolver/rejecter handlers.
+	 *
+	 * @returns void
+	 */
+	private clearEndpointWaitState(): void {
+		if (this.endpointWaitTimer) {
+			clearTimeout(this.endpointWaitTimer);
+			this.endpointWaitTimer = null;
+		}
+		this.endpointResolver = undefined;
+		this.endpointRejecter = undefined;
+	}
+
+	/**
+	 * Rejects the pending endpoint wait promise, if one exists.
+	 *
+	 * @param reason - Rejection reason for the endpoint wait promise
+	 * @returns void
+	 */
+	private rejectEndpointWait(reason: Error): void {
+		const rejecter = this.endpointRejecter;
+		this.clearEndpointWaitState();
+		rejecter?.(reason);
+	}
+
+	/**
+	 * Resolves a pending request and removes all request bookkeeping.
+	 *
+	 * @param requestId - JSON-RPC request ID
+	 * @param response - JSON-RPC response payload
+	 * @returns True if a pending request was resolved
+	 */
+	private resolvePendingRequest(requestId: number, response: JsonRpcResponse): boolean {
+		const pending = this.pendingRequests.get(requestId);
+		if (!pending) return false;
+		this.pendingRequests.delete(requestId);
+		this.pendingRequestControllers.delete(requestId);
+		pending.resolve(response);
+		return true;
+	}
+
+	/**
+	 * Rejects a pending request, optionally aborting the underlying network request.
+	 *
+	 * @param requestId - JSON-RPC request ID
+	 * @param reason - Rejection reason
+	 * @param abortRequest - Whether to abort the associated fetch request
+	 * @returns True if a pending request was rejected
+	 */
+	private rejectPendingRequest(requestId: number, reason: Error, abortRequest = false): boolean {
+		const pending = this.pendingRequests.get(requestId);
+		if (!pending) return false;
+		this.pendingRequests.delete(requestId);
+		const controller = this.pendingRequestControllers.get(requestId);
+		this.pendingRequestControllers.delete(requestId);
+		if (abortRequest) {
+			controller?.abort();
+		}
+		pending.reject(reason);
+		return true;
+	}
+
+	/**
+	 * Rejects all in-flight requests and clears request bookkeeping.
+	 *
+	 * @param reason - Shared rejection reason for each pending request
+	 * @param abortRequests - Whether to abort all in-flight POST requests
+	 * @returns void
+	 */
+	private rejectAllPendingRequests(reason: Error, abortRequests = false): void {
+		for (const requestId of [...this.pendingRequests.keys()]) {
+			this.rejectPendingRequest(requestId, reason, abortRequests);
+		}
+	}
+
+	/**
 	 * Opens the SSE connection and waits for the `endpoint` event.
 	 * Starts background stream reading for JSON-RPC responses.
 	 * @throws Error if connection fails or endpoint event not received within 10s
@@ -390,7 +481,9 @@ class SseTransport implements McpTransport {
 		this.postUrl = null;
 		this._connected = false;
 		this.abortController?.abort();
-		this.pendingRequests.clear();
+		this.clearEndpointWaitState();
+		this.rejectAllPendingRequests(new Error("SSE transport reset"), true);
+		this.pendingRequestControllers.clear();
 
 		this.abortController = new AbortController();
 		const response = await fetch(this.config.url, {
@@ -405,13 +498,17 @@ class SseTransport implements McpTransport {
 			throw new Error(`SSE response from ${this.name} has no body`);
 		}
 
-		// Wait for endpoint event (10s timeout)
+		// Wait for endpoint event with timeout, and abort stream fetch if it never arrives.
 		const endpointReceived = new Promise<void>((resolve, reject) => {
-			const timer = setTimeout(() => {
+			this.endpointRejecter = reject;
+			this.endpointWaitTimer = setTimeout(() => {
+				this.clearEndpointWaitState();
+				this.abortController?.abort();
 				reject(new Error(`${this.name}: timeout waiting for SSE endpoint event`));
-			}, 10_000);
+			}, this.endpointWaitTimeoutMs);
+
 			this.endpointResolver = (url: string) => {
-				clearTimeout(timer);
+				this.clearEndpointWaitState();
 				this.postUrl = url;
 				this._connected = true;
 				resolve();
@@ -422,19 +519,26 @@ class SseTransport implements McpTransport {
 		const reader = response.body.getReader();
 		this.readStream(reader).catch(() => {});
 
-		await endpointReceived;
+		try {
+			await endpointReceived;
+		} catch (error) {
+			this._connected = false;
+			this.postUrl = null;
+			throw toError(error);
+		}
 	}
 
 	/** Aborts the SSE connection and rejects all pending requests. */
 	stop(): void {
 		this.stopping = true;
 		this.abortController?.abort();
+		this.rejectEndpointWait(
+			new Error(`SSE transport to ${this.name} stopped before endpoint setup`)
+		);
 		this._connected = false;
 		this.postUrl = null;
-		for (const [, pending] of this.pendingRequests) {
-			pending.reject(new Error("Transport stopped"));
-		}
-		this.pendingRequests.clear();
+		this.rejectAllPendingRequests(new Error("Transport stopped"), true);
+		this.pendingRequestControllers.clear();
 	}
 
 	/**
@@ -452,15 +556,15 @@ class SseTransport implements McpTransport {
 				return;
 			}
 
+			const requestController = new AbortController();
+			const timeoutError = new Error(
+				`MCP server "${this.name}" — ${request.method} timed out after ${Math.round(timeoutMs / 1000)}s`
+			);
 			const timer = setTimeout(() => {
-				this.pendingRequests.delete(request.id);
-				reject(
-					new Error(
-						`MCP server "${this.name}" — ${request.method} timed out after ${Math.round(timeoutMs / 1000)}s`
-					)
-				);
+				this.rejectPendingRequest(request.id, timeoutError, true);
 			}, timeoutMs);
 
+			this.pendingRequestControllers.set(request.id, requestController);
 			this.pendingRequests.set(request.id, {
 				resolve: (res) => {
 					clearTimeout(timer);
@@ -479,12 +583,15 @@ class SseTransport implements McpTransport {
 					...(this.config.headers || {}),
 				},
 				body: JSON.stringify(request),
+				signal: requestController.signal,
 			})
 				.then(async (resp) => {
 					if (!resp.ok) {
-						this.pendingRequests.delete(request.id);
-						clearTimeout(timer);
-						reject(new Error(`SSE POST to ${this.name} failed: ${resp.status}`));
+						this.rejectPendingRequest(
+							request.id,
+							new Error(`SSE POST to ${this.name} failed: ${resp.status}`),
+							false
+						);
 						return;
 					}
 					// Some servers return JSON-RPC response directly.
@@ -494,10 +601,8 @@ class SseTransport implements McpTransport {
 					if (ct.includes("application/json")) {
 						try {
 							const body = (await resp.json()) as JsonRpcResponse;
-							if (body.id === request.id && this.pendingRequests.has(request.id)) {
-								this.pendingRequests.delete(request.id);
-								clearTimeout(timer);
-								resolve(body);
+							if (body.id === request.id) {
+								this.resolvePendingRequest(request.id, body);
 							}
 						} catch {
 							// JSON parse failed — fall through to SSE stream delivery.
@@ -506,12 +611,17 @@ class SseTransport implements McpTransport {
 						}
 					}
 				})
-				.catch((err) => {
-					if (this.pendingRequests.has(request.id)) {
-						this.pendingRequests.delete(request.id);
-						clearTimeout(timer);
-						reject(err);
+				.catch((error) => {
+					if (!this.pendingRequests.has(request.id)) {
+						return;
 					}
+
+					if (requestController.signal.aborted) {
+						// Timer/stop/disconnect path already rejected this request.
+						return;
+					}
+
+					this.rejectPendingRequest(request.id, toError(error), false);
 				});
 		});
 	}
@@ -586,10 +696,11 @@ class SseTransport implements McpTransport {
 			reader.releaseLock();
 			if (!this.stopping) {
 				this._connected = false;
-				for (const [, pending] of this.pendingRequests) {
-					pending.reject(new Error(`SSE connection to ${this.name} lost`));
-				}
-				this.pendingRequests.clear();
+				this.postUrl = null;
+				this.rejectEndpointWait(
+					new Error(`${this.name}: SSE connection closed before endpoint event`)
+				);
+				this.rejectAllPendingRequests(new Error(`SSE connection to ${this.name} lost`), true);
 				this.disconnectHandler?.();
 			}
 		}
@@ -608,14 +719,10 @@ class SseTransport implements McpTransport {
 		}
 		if (type === "message") {
 			try {
-				const msg = JSON.parse(data);
-				if (msg.id != null && this.pendingRequests.has(msg.id)) {
-					const pending = this.pendingRequests.get(msg.id);
-					if (pending) {
-						this.pendingRequests.delete(msg.id);
-						pending.resolve(msg);
-					}
-				} else if (msg.method && msg.id == null) {
+				const msg = JSON.parse(data) as JsonRpcResponse | JsonRpcNotification;
+				if ("id" in msg && msg.id != null) {
+					this.resolvePendingRequest(msg.id, msg as JsonRpcResponse);
+				} else if ("method" in msg) {
 					this.notificationHandler?.(msg.method, msg.params);
 				}
 			} catch {
