@@ -48,6 +48,13 @@ Each line in the log is a self-contained JSON object:
 | `subagent` | start/stop (agent type, task, exit code) |
 | `error` | uncaught\_exception, unhandled\_rejection (with full stack traces) |
 
+Sensitive-looking fields are automatically redacted before persistence.
+
+- Key matching is case-insensitive and pattern-based (`token`, `key`,
+  `secret`, `authorization`, `cookie`, `password`, etc.)
+- Redaction is recursive for nested objects and arrays
+- Redaction runs before string truncation to avoid partial secret leakage
+
 String values longer than 500 characters are automatically truncated.
 
 ## Commands

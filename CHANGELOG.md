@@ -152,6 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **tools:** add missing `isError` flag to error responses in lsp, read,
   and ask-user-question
+- **debug:** redact secret-like fields in debug log payloads before
+  truncation
 - **lsp:** bound startup and request operations with timeout + abort cleanup
   so hung language servers do not block tool calls
 - **hooks:** translate Claude Code hook events and tool matchers from
