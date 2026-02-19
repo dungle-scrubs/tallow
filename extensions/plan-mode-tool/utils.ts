@@ -94,6 +94,32 @@ const SAFE_PATTERNS = [
 	/^\s*exa\b/,
 ];
 
+/** Strict allowlist of tool names permitted while plan mode is enabled. */
+export const PLAN_MODE_ALLOWED_TOOLS = [
+	"bash",
+	"find",
+	"grep",
+	"ls",
+	"plan_mode",
+	"questionnaire",
+	"read",
+] as const;
+
+/** Lookup set for plan-mode allowlisted tools. */
+const PLAN_MODE_ALLOWED_TOOL_SET = new Set<string>(PLAN_MODE_ALLOWED_TOOLS);
+
+/**
+ * Checks whether a tool is allowlisted for plan mode.
+ *
+ * Plan mode is fail-closed: unknown tools are blocked by default.
+ *
+ * @param toolName - Tool name to evaluate
+ * @returns True when the tool is explicitly allowlisted
+ */
+export function isPlanModeToolAllowed(toolName: string): boolean {
+	return PLAN_MODE_ALLOWED_TOOL_SET.has(toolName);
+}
+
 /**
  * Checks if a bash command is safe to run in plan mode.
  * @param command - The bash command to check

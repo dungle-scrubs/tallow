@@ -6,6 +6,7 @@
  *
  * Features:
  * - /plan-mode command or Ctrl+Alt+P to toggle
+ * - Strict fail-closed tool allowlist while plan mode is active
  * - Bash restricted to allowlisted read-only commands
  * - Extracts numbered plan steps from "Plan:" sections
  * - [DONE:n] markers to complete steps during execution
@@ -29,13 +30,14 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
-import { extractTodoItems, isSafeCommand, markCompletedSteps, type TodoItem } from "./utils.js";
-
-/** Base tools available in plan mode (read-only) */
-const PLAN_MODE_BASE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-
-/** Base tools available in normal mode (full access) */
-const NORMAL_MODE_BASE_TOOLS = ["read", "bash", "edit", "write"];
+import {
+	extractTodoItems,
+	isPlanModeToolAllowed,
+	isSafeCommand,
+	markCompletedSteps,
+	PLAN_MODE_ALLOWED_TOOLS,
+	type TodoItem,
+} from "./utils.js";
 
 /**
  * Type guard to check if a message is an assistant message.
@@ -99,21 +101,52 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
+	let normalModeTools: string[] = [];
 
 	/**
-	 * Builds the full tool list by merging base tools with all non-base
-	 * (extension-registered) tools. This ensures extension tools like
-	 * plan_mode itself and MCP adapter tools are never dropped.
-	 * @param baseTools - The base tool names to include
-	 * @returns Full list of tool names including extension tools
+	 * Capture the active tools used outside plan mode.
+	 *
+	 * @returns Snapshot of normal-mode tools
 	 */
-	function buildToolList(baseTools: string[]): string[] {
-		const knownBaseTools = new Set([...NORMAL_MODE_BASE_TOOLS, ...PLAN_MODE_BASE_TOOLS]);
-		const extensionTools = pi
-			.getAllTools()
-			.map((t) => t.name)
-			.filter((name) => !knownBaseTools.has(name));
-		return [...baseTools, ...extensionTools];
+	function captureNormalModeTools(): string[] {
+		const activeTools = pi.getActiveTools();
+		normalModeTools =
+			activeTools.length > 0 ? [...activeTools] : pi.getAllTools().map((t) => t.name);
+		return normalModeTools;
+	}
+
+	/**
+	 * Resolve allowlisted tools that exist in the current session.
+	 *
+	 * @returns Plan-mode tool list constrained to the strict allowlist
+	 */
+	function getPlanModeTools(): string[] {
+		const availableTools = new Set(pi.getAllTools().map((t) => t.name));
+		return PLAN_MODE_ALLOWED_TOOLS.filter((name) => availableTools.has(name));
+	}
+
+	/**
+	 * Apply strict read-only tool policy for plan mode.
+	 *
+	 * @returns The active allowlisted tool names
+	 */
+	function applyPlanModeTools(): string[] {
+		const tools = getPlanModeTools();
+		pi.setActiveTools(tools);
+		return tools;
+	}
+
+	/**
+	 * Restore the normal tool set captured before plan mode was enabled.
+	 *
+	 * @returns Restored normal-mode tool names
+	 */
+	function restoreNormalModeTools(): string[] {
+		if (normalModeTools.length === 0) {
+			captureNormalModeTools();
+		}
+		pi.setActiveTools(normalModeTools);
+		return normalModeTools;
 	}
 
 	pi.registerFlag("plan", {
@@ -196,13 +229,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		todoItems = [];
 
 		if (planModeEnabled) {
-			pi.setActiveTools(buildToolList(PLAN_MODE_BASE_TOOLS));
-			ctx.ui.notify(`Plan mode enabled. Tools: ${PLAN_MODE_BASE_TOOLS.join(", ")}`);
+			captureNormalModeTools();
+			const tools = applyPlanModeTools();
+			ctx.ui.notify(`Plan mode enabled. Strict read-only tools: ${tools.join(", ")}`);
 		} else {
-			pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
-			ctx.ui.notify("Plan mode disabled. Full access restored.");
+			restoreNormalModeTools();
+			ctx.ui.notify("Plan mode disabled. Previous tool access restored.");
 		}
 		updateStatus(ctx);
+		persistState();
 	}
 
 	/**
@@ -211,8 +246,9 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	function persistState(): void {
 		pi.appendEntry("plan-mode", {
 			enabled: planModeEnabled,
-			todos: todoItems,
 			executing: executionMode,
+			normalTools: normalModeTools,
+			todos: todoItems,
 		});
 	}
 
@@ -247,12 +283,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "plan_mode",
 		label: "plan_mode",
-		description: `Toggle plan mode on or off. Plan mode is a read-only exploration mode for safe code analysis.
+		description: `Toggle plan mode on or off. Plan mode is a strict read-only exploration mode for safe code analysis.
 
 When enabled:
-- Only read-only tools are available (read, bash, grep, find, ls)
-- Bash is restricted to safe read-only commands
-- edit and write tools are disabled
+- Only allowlisted read-only tools are available (read, bash, grep, find, ls, questionnaire, plan_mode)
+- All other tools are blocked fail-closed (including extension tools)
+- Bash is additionally restricted to safe read-only commands
 
 Use action "enable" to enter plan mode, "disable" to exit, or "status" to check current state.`,
 		parameters: Type.Object({
@@ -278,7 +314,7 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 
 			if (action === "status") {
 				const mode = executionMode ? "executing" : planModeEnabled ? "planning" : "normal";
-				const tools = planModeEnabled ? PLAN_MODE_BASE_TOOLS : NORMAL_MODE_BASE_TOOLS;
+				const tools = planModeEnabled ? getPlanModeTools() : pi.getActiveTools();
 				return {
 					content: [
 						{
@@ -312,10 +348,12 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 			executionMode = false;
 			todoItems = [];
 
+			let activeTools: string[];
 			if (planModeEnabled) {
-				pi.setActiveTools(buildToolList(PLAN_MODE_BASE_TOOLS));
+				captureNormalModeTools();
+				activeTools = applyPlanModeTools();
 			} else {
-				pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
+				activeTools = restoreNormalModeTools();
 			}
 
 			if (ctx.hasUI) {
@@ -328,8 +366,8 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 					{
 						type: "text",
 						text: planModeEnabled
-							? `Plan mode enabled. Tools restricted to: ${PLAN_MODE_BASE_TOOLS.join(", ")}. Write operations are blocked.`
-							: "Plan mode disabled. Full tool access restored.",
+							? `Plan mode enabled. Strict allowlist active: ${activeTools.join(", ")}. All other tools are blocked.`
+							: "Plan mode disabled. Previous tool access restored.",
 					},
 				],
 				details: {},
@@ -337,13 +375,26 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 		},
 	});
 
-	// Block destructive bash commands in plan mode
+	// Enforce strict plan-mode allowlist and safe bash commands
 	pi.on("tool_call", async (event, ctx) => {
-		if (!planModeEnabled || event.toolName !== "bash") return;
+		if (!planModeEnabled) return;
 
-		const command = event.input.command as string;
+		if (!isPlanModeToolAllowed(event.toolName)) {
+			const reason =
+				`Plan mode: tool "${event.toolName}" blocked (not in strict read-only allowlist). ` +
+				"Disable plan mode first to use this tool.";
+			ctx.ui?.notify(`⛔ ${reason}`, "error");
+			return { block: true, reason };
+		}
+
+		if (event.toolName !== "bash") return;
+
+		const command =
+			typeof event.input.command === "string" ? event.input.command : String(event.input.command);
 		if (!isSafeCommand(command)) {
-			const reason = `Plan mode: command blocked (not allowlisted). Use /plan-mode to disable plan mode first.\nCommand: ${command}`;
+			const reason =
+				"Plan mode: bash command blocked (not in read-only command allowlist). " +
+				`Disable plan mode first to run it.\nCommand: ${command}`;
 			ctx.ui?.notify(`⛔ ${reason}`, "error");
 			return { block: true, reason };
 		}
@@ -383,12 +434,12 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 You are in plan mode - a read-only exploration mode for safe code analysis.
 
 Restrictions:
-- You can only use: read, bash, grep, find, ls, questionnaire
-- You CANNOT use: edit, write (file modifications are disabled)
-- Bash is restricted to an allowlist of read-only commands
+- You can only use strict allowlisted read-only tools: read, bash, grep, find, ls, questionnaire, plan_mode
+- All other tools are blocked fail-closed (including edit, write, bg_bash, subagent, and mcp__* tools)
+- Bash is additionally restricted to an allowlist of read-only commands
 
 Ask clarifying questions using the questionnaire tool.
-Use brave-search skill via bash for web research.
+Use bash only for safe inspection commands.
 
 Create a detailed numbered plan under a "Plan:" header:
 
@@ -450,7 +501,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				);
 				executionMode = false;
 				todoItems = [];
-				pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
+				restoreNormalModeTools();
 				updateStatus(ctx);
 				persistState(); // Save cleared state so resume doesn't restore old execution mode
 			}
@@ -492,7 +543,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
 			executionMode = todoItems.length > 0;
-			pi.setActiveTools(buildToolList(NORMAL_MODE_BASE_TOOLS));
+			restoreNormalModeTools();
 			updateStatus(ctx);
 
 			const execMessage =
@@ -530,13 +581,21 @@ After completing a step, include a [DONE:n] tag in your response.`,
 					e.type === "custom" && e.customType === "plan-mode"
 			)
 			.pop() as
-			| { data?: { enabled: boolean; todos?: TodoItem[]; executing?: boolean } }
+			| {
+					data?: {
+						enabled?: boolean;
+						executing?: boolean;
+						normalTools?: string[];
+						todos?: TodoItem[];
+					};
+			  }
 			| undefined;
 
 		if (planModeEntry?.data) {
 			planModeEnabled = planModeEntry.data.enabled ?? planModeEnabled;
-			todoItems = planModeEntry.data.todos ?? todoItems;
 			executionMode = planModeEntry.data.executing ?? executionMode;
+			normalModeTools = planModeEntry.data.normalTools ?? normalModeTools;
+			todoItems = planModeEntry.data.todos ?? todoItems;
 		}
 
 		// On resume: re-scan messages to rebuild completion state
@@ -569,8 +628,13 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			markCompletedSteps(allText, todoItems);
 		}
 
+		if (normalModeTools.length === 0) {
+			captureNormalModeTools();
+		}
 		if (planModeEnabled) {
-			pi.setActiveTools(buildToolList(PLAN_MODE_BASE_TOOLS));
+			applyPlanModeTools();
+		} else {
+			restoreNormalModeTools();
 		}
 		updateStatus(ctx);
 	});
