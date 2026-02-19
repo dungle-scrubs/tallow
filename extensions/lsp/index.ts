@@ -29,6 +29,7 @@ import {
 	InitializedNotification,
 	type InitializeParams,
 	InitializeRequest,
+	type InitializeResult,
 	type Location,
 	type LocationLink,
 	type ProtocolConnection,
@@ -117,6 +118,203 @@ const connections = new Map<string, LSPConnection>();
 /** Track languages where no server was found, to log once per language */
 const failedLanguages = new Set<string>();
 
+/** Milliseconds to wait for language server startup (which + initialize). */
+const LSP_STARTUP_TIMEOUT_MS = 10_000;
+/** Milliseconds to wait for individual LSP requests (definition, hover, etc.). */
+const LSP_REQUEST_TIMEOUT_MS = 8_000;
+
+/** Active startup timeout. Test hooks can temporarily override this value. */
+let lspStartupTimeoutMs = LSP_STARTUP_TIMEOUT_MS;
+/** Active request timeout. Test hooks can temporarily override this value. */
+let lspRequestTimeoutMs = LSP_REQUEST_TIMEOUT_MS;
+
+/**
+ * Overrides LSP timeout values for deterministic tests.
+ *
+ * @internal
+ * @param overrides - Optional startup/request timeout overrides in milliseconds
+ * @returns Nothing
+ */
+export function setLspTimeoutsForTests(overrides: {
+	requestMs?: number;
+	startupMs?: number;
+}): void {
+	if (typeof overrides.startupMs === "number" && Number.isFinite(overrides.startupMs)) {
+		lspStartupTimeoutMs = Math.max(1, overrides.startupMs);
+	}
+	if (typeof overrides.requestMs === "number" && Number.isFinite(overrides.requestMs)) {
+		lspRequestTimeoutMs = Math.max(1, overrides.requestMs);
+	}
+}
+
+/**
+ * Resets LSP timeout overrides and clears all connection state for tests.
+ *
+ * @internal
+ * @returns Nothing
+ */
+export function resetLspStateForTests(): void {
+	for (const conn of [...connections.values()]) {
+		disposeConnection(conn);
+	}
+	connections.clear();
+	failedLanguages.clear();
+	lspStartupTimeoutMs = LSP_STARTUP_TIMEOUT_MS;
+	lspRequestTimeoutMs = LSP_REQUEST_TIMEOUT_MS;
+}
+
+/**
+ * Determines whether a thrown error represents a canceled operation.
+ * @param error - Unknown error to inspect
+ * @returns True when the error is an AbortError
+ */
+function isAbortError(error: unknown): boolean {
+	if (!error || typeof error !== "object") {
+		return false;
+	}
+
+	const err = error as { name?: string; code?: string };
+	return err.name === "AbortError" || err.code === "ABORT_ERR";
+}
+
+/**
+ * Determines whether a thrown error represents an operation timeout.
+ * @param error - Unknown error to inspect
+ * @returns True when the error is a timeout created by this module
+ */
+function isTimeoutError(error: unknown): boolean {
+	if (!error || typeof error !== "object") {
+		return false;
+	}
+
+	const err = error as { name?: string; code?: string };
+	return err.name === "TimeoutError" || err.code === "LSP_TIMEOUT";
+}
+
+/**
+ * Runs an asynchronous operation with a timeout and optional AbortSignal.
+ * Invokes the provided callbacks before rejecting on timeout or abort.
+ *
+ * @param operation - Factory that starts the asynchronous work
+ * @param options - Configuration with timeout, signal, description, and hooks
+ * @returns Promise resolving with the operation result
+ */
+async function raceWithTimeout<T>(
+	operation: () => Promise<T>,
+	options: {
+		timeoutMs: number;
+		signal?: AbortSignal;
+		description?: string;
+		onTimeout?: () => void;
+		onAbort?: () => void;
+	}
+): Promise<T> {
+	const { timeoutMs, signal, description, onTimeout, onAbort } = options;
+
+	if (signal?.aborted) {
+		if (onAbort) onAbort();
+		const reason = (signal as { reason?: unknown }).reason;
+		if (reason instanceof Error) {
+			throw reason;
+		}
+		const abortError = new Error("The operation was aborted");
+		abortError.name = "AbortError";
+		throw abortError;
+	}
+
+	let timeoutId: NodeJS.Timeout | undefined;
+	let abortHandler: (() => void) | undefined;
+
+	try {
+		const operationPromise = operation();
+
+		const timeoutPromise =
+			timeoutMs > 0
+				? new Promise<never>((_, reject) => {
+						timeoutId = setTimeout(() => {
+							if (onTimeout) onTimeout();
+							const timeoutError = new Error(
+								description
+									? `${description} timed out after ${timeoutMs}ms`
+									: `Operation timed out after ${timeoutMs}ms`
+							);
+							timeoutError.name = "TimeoutError";
+							(timeoutError as { code?: string }).code = "LSP_TIMEOUT";
+							reject(timeoutError);
+						}, timeoutMs);
+					})
+				: null;
+
+		const abortPromise =
+			signal != null
+				? new Promise<never>((_, reject) => {
+						abortHandler = () => {
+							if (onAbort) onAbort();
+							const reason = (signal as { reason?: unknown }).reason;
+							if (reason instanceof Error) {
+								reject(reason);
+								return;
+							}
+							const abortError = new Error("The operation was aborted");
+							abortError.name = "AbortError";
+							reject(abortError);
+						};
+
+						if (signal.aborted) {
+							abortHandler();
+							return;
+						}
+
+						signal.addEventListener("abort", abortHandler);
+					})
+				: null;
+
+		const winner = await Promise.race(
+			[operationPromise, timeoutPromise, abortPromise].filter(Boolean) as [
+				Promise<T>,
+				...Promise<never>[],
+			]
+		);
+
+		return winner as T;
+	} finally {
+		if (timeoutId) {
+			clearTimeout(timeoutId);
+		}
+		if (signal && abortHandler) {
+			signal.removeEventListener("abort", abortHandler);
+		}
+	}
+}
+
+/**
+ * Disposes an LSP connection and removes it from the shared registry.
+ * Safe to call multiple times.
+ *
+ * @param conn - Connection instance to dispose
+ * @returns Nothing
+ */
+function disposeConnection(conn: LSPConnection): void {
+	for (const [key, value] of connections.entries()) {
+		if (value === conn) {
+			connections.delete(key);
+			break;
+		}
+	}
+
+	try {
+		conn.connection.dispose();
+	} catch {
+		// Ignore disposal errors
+	}
+
+	try {
+		conn.process.kill();
+	} catch {
+		// Ignore process kill errors
+	}
+}
+
 /**
  * Determines the language type for a file based on its extension.
  * @param filePath - Path to the file
@@ -189,35 +387,40 @@ function uriToFilePath(uri: string): string {
  * Gets or creates an LSP connection for a file, auto-detecting project root.
  * @param language - Language identifier
  * @param filePath - File path to find project root from
- * @param onStarting - Optional callback invoked when a new server is being launched
+ * @param options - Optional callbacks and cancellation signal
  * @returns LSP connection or null if server unavailable
  */
 async function getOrCreateConnectionForFile(
 	language: string,
 	filePath: string,
-	onStarting?: (language: string) => void
+	options?: {
+		onStarting?: (language: string) => void;
+		signal?: AbortSignal;
+	}
 ): Promise<LSPConnection | null> {
 	const absolutePath = path.resolve(filePath);
 	const projectRoot = findProjectRoot(absolutePath, language);
 	const key = `${language}:${projectRoot}`;
 
 	// Only notify when actually launching a new server
-	if (!connections.has(key) && onStarting) {
-		onStarting(language);
+	if (!connections.has(key) && options?.onStarting) {
+		options.onStarting(language);
 	}
 
-	return getOrCreateConnection(language, projectRoot);
+	return getOrCreateConnection(language, projectRoot, { signal: options?.signal });
 }
 
 /**
  * Gets or creates an LSP connection for a language and project root.
  * @param language - Language identifier
  * @param rootPath - Project root directory
+ * @param options - Optional cancellation signal
  * @returns LSP connection or null if server unavailable
  */
 async function getOrCreateConnection(
 	language: string,
-	rootPath: string
+	rootPath: string,
+	options?: { signal?: AbortSignal }
 ): Promise<LSPConnection | null> {
 	const key = `${language}:${rootPath}`;
 
@@ -225,6 +428,8 @@ async function getOrCreateConnection(
 	if (existing) {
 		return existing;
 	}
+
+	const signal = options?.signal;
 
 	// Try primary config first, then fallback
 	const configsToTry = [language];
@@ -242,14 +447,42 @@ async function getOrCreateConnection(
 		// Check if server is available
 		try {
 			const which = spawn("which", [c.command]);
-			await new Promise<void>((resolve, reject) => {
-				which.on("close", (code) => (code === 0 ? resolve() : reject()));
-				which.on("error", reject);
-			});
+			await raceWithTimeout(
+				() =>
+					new Promise<void>((resolve, reject) => {
+						which.on("close", (code) => (code === 0 ? resolve() : reject()));
+						which.on("error", reject);
+					}),
+				{
+					timeoutMs: lspStartupTimeoutMs,
+					signal,
+					description: `Checking availability of ${c.command}`,
+					onTimeout: () => {
+						try {
+							which.kill();
+						} catch {
+							// Ignore kill errors
+						}
+					},
+					onAbort: () => {
+						try {
+							which.kill();
+						} catch {
+							// Ignore kill errors
+						}
+					},
+				}
+			);
 			config = c;
 			actualLanguage = lang;
 			break;
-		} catch {}
+		} catch (error) {
+			// On timeout or abort, surface the error to caller so tools can react.
+			if (isAbortError(error) || isTimeoutError(error)) {
+				throw error;
+			}
+			// Otherwise treat as "not installed" and continue to next candidate.
+		}
 	}
 
 	if (!config) {
@@ -309,7 +542,18 @@ async function getOrCreateConnection(
 	};
 
 	try {
-		const initResult = await connection.sendRequest(InitializeRequest.type, initParams);
+		const initResult = (await raceWithTimeout(
+			() =>
+				connection.sendRequest(
+					InitializeRequest.type as never,
+					initParams as never
+				) as Promise<unknown>,
+			{
+				timeoutMs: lspStartupTimeoutMs,
+				signal,
+				description: `${actualLanguage} language server initialization`,
+			}
+		)) as InitializeResult;
 		await connection.sendNotification(InitializedNotification.type, {});
 
 		const lspConnection: LSPConnection = {
@@ -336,8 +580,30 @@ async function getOrCreateConnection(
 		});
 
 		return lspConnection;
-	} catch (_error) {
-		serverProcess.kill();
+	} catch (error) {
+		try {
+			connection.dispose();
+		} catch {
+			// Ignore cleanup errors
+		}
+		try {
+			serverProcess.kill();
+		} catch {
+			// Ignore cleanup errors
+		}
+
+		if (isAbortError(error)) {
+			throw error;
+		}
+
+		if (isTimeoutError(error)) {
+			if (!failedLanguages.has(language)) {
+				failedLanguages.add(language);
+				console.error(`LSP: ${actualLanguage} server initialization timed out for ${rootPath}`);
+			}
+			throw error;
+		}
+
 		return null;
 	}
 }
@@ -494,6 +760,40 @@ function formatHover(hover: Hover | null): string {
 }
 
 /**
+ * Sends an LSP request with timeout and abort handling.
+ * On timeout or abort the underlying connection is disposed and removed from the cache.
+ *
+ * @param conn - Active LSP connection to send the request through
+ * @param requestType - LSP request type descriptor
+ * @param params - Request parameters
+ * @param signal - Optional cancellation signal from the tool executor
+ * @param description - Human-readable description for error messages
+ * @returns Promise resolving with the raw LSP response
+ */
+async function sendRequestWithTimeout(
+	conn: LSPConnection,
+	requestType: { method: string },
+	params: unknown,
+	signal: AbortSignal | undefined,
+	description: string
+): Promise<unknown> {
+	return raceWithTimeout(
+		() => conn.connection.sendRequest(requestType as never, params as never) as Promise<unknown>,
+		{
+			timeoutMs: lspRequestTimeoutMs,
+			signal,
+			description,
+			onTimeout: () => {
+				disposeConnection(conn);
+			},
+			onAbort: () => {
+				disposeConnection(conn);
+			},
+		}
+	);
+}
+
+/**
  * Registers LSP tools for definition, references, hover, and symbol search.
  * @param pi - Extension API for registering tools and event handlers
  */
@@ -515,7 +815,7 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 			line: Type.Number({ description: "Line number (1-indexed)" }),
 			character: Type.Number({ description: "Character/column position (1-indexed)" }),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const filePath = path.isAbsolute(params.file)
 				? params.file
 				: path.resolve(ctx.cwd, params.file);
@@ -528,10 +828,44 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 				};
 			}
 
-			const conn = await getOrCreateConnectionForFile(language, filePath, (lang) =>
-				ctx.ui.setWorkingMessage(`Starting ${lang} language server`)
-			);
-			ctx.ui.setWorkingMessage();
+			let conn: LSPConnection | null = null;
+			try {
+				conn = await getOrCreateConnectionForFile(language, filePath, {
+					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					signal,
+				});
+			} catch (error) {
+				if (isAbortError(error)) {
+					// Propagate cancellation so the tool runner can stop cleanly
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						details: {},
+						content: [
+							{
+								type: "text",
+								text: `Language server startup timed out for ${language}`,
+							},
+						],
+						isError: true,
+					};
+				}
+				return {
+					details: {},
+					content: [
+						{
+							type: "text",
+							text: `Error starting language server: ${error}`,
+						},
+					],
+					isError: true,
+				};
+			} finally {
+				// Always clear working message, even on error or cancellation
+				ctx.ui.setWorkingMessage();
+			}
+
 			if (!conn) {
 				return {
 					details: {},
@@ -556,16 +890,32 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 			await openDocument(conn, filePath);
 
 			try {
-				const result = await conn.connection.sendRequest(DefinitionRequest.type, {
-					textDocument: { uri: filePathToUri(filePath) },
-					position: { line: params.line - 1, character: params.character - 1 },
-				});
+				const result = (await sendRequestWithTimeout(
+					conn,
+					DefinitionRequest.type,
+					{
+						textDocument: { uri: filePathToUri(filePath) },
+						position: { line: params.line - 1, character: params.character - 1 },
+					},
+					signal,
+					"LSP definition request"
+				)) as Location | Location[] | LocationLink | LocationLink[] | null;
 
 				return {
 					details: {},
 					content: [{ type: "text", text: formatLocations(result) }],
 				};
 			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						content: [{ type: "text", text: "Definition request timed out" }],
+						details: {},
+						isError: true,
+					};
+				}
 				return {
 					content: [{ type: "text", text: `Error: ${error}` }],
 					details: {},
@@ -593,7 +943,7 @@ WHEN TO USE:
 				Type.Boolean({ description: "Include the declaration in results (default: true)" })
 			),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const filePath = path.isAbsolute(params.file)
 				? params.file
 				: path.resolve(ctx.cwd, params.file);
@@ -606,10 +956,42 @@ WHEN TO USE:
 				};
 			}
 
-			const conn = await getOrCreateConnectionForFile(language, filePath, (lang) =>
-				ctx.ui.setWorkingMessage(`Starting ${lang} language server`)
-			);
-			ctx.ui.setWorkingMessage();
+			let conn: LSPConnection | null = null;
+			try {
+				conn = await getOrCreateConnectionForFile(language, filePath, {
+					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					signal,
+				});
+			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						details: {},
+						content: [
+							{
+								type: "text",
+								text: `Language server startup timed out for ${language}`,
+							},
+						],
+						isError: true,
+					};
+				}
+				return {
+					details: {},
+					content: [
+						{
+							type: "text",
+							text: `Error starting language server: ${error}`,
+						},
+					],
+					isError: true,
+				};
+			} finally {
+				ctx.ui.setWorkingMessage();
+			}
+
 			if (!conn) {
 				return {
 					details: {},
@@ -627,11 +1009,17 @@ WHEN TO USE:
 			await openDocument(conn, filePath);
 
 			try {
-				const result = await conn.connection.sendRequest(ReferencesRequest.type, {
-					textDocument: { uri: filePathToUri(filePath) },
-					position: { line: params.line - 1, character: params.character - 1 },
-					context: { includeDeclaration: params.includeDeclaration ?? true },
-				});
+				const result = (await sendRequestWithTimeout(
+					conn,
+					ReferencesRequest.type,
+					{
+						textDocument: { uri: filePathToUri(filePath) },
+						position: { line: params.line - 1, character: params.character - 1 },
+						context: { includeDeclaration: params.includeDeclaration ?? true },
+					},
+					signal,
+					"LSP references request"
+				)) as Location[] | null;
 
 				const locations = result || [];
 				return {
@@ -644,6 +1032,16 @@ WHEN TO USE:
 					],
 				};
 			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						content: [{ type: "text", text: "References request timed out" }],
+						details: {},
+						isError: true,
+					};
+				}
 				return {
 					content: [{ type: "text", text: `Error: ${error}` }],
 					details: {},
@@ -668,7 +1066,7 @@ WHEN TO USE:
 			line: Type.Number({ description: "Line number (1-indexed)" }),
 			character: Type.Number({ description: "Character/column position (1-indexed)" }),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const filePath = path.isAbsolute(params.file)
 				? params.file
 				: path.resolve(ctx.cwd, params.file);
@@ -681,10 +1079,42 @@ WHEN TO USE:
 				};
 			}
 
-			const conn = await getOrCreateConnectionForFile(language, filePath, (lang) =>
-				ctx.ui.setWorkingMessage(`Starting ${lang} language server`)
-			);
-			ctx.ui.setWorkingMessage();
+			let conn: LSPConnection | null = null;
+			try {
+				conn = await getOrCreateConnectionForFile(language, filePath, {
+					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					signal,
+				});
+			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						details: {},
+						content: [
+							{
+								type: "text",
+								text: `Language server startup timed out for ${language}`,
+							},
+						],
+						isError: true,
+					};
+				}
+				return {
+					details: {},
+					content: [
+						{
+							type: "text",
+							text: `Error starting language server: ${error}`,
+						},
+					],
+					isError: true,
+				};
+			} finally {
+				ctx.ui.setWorkingMessage();
+			}
+
 			if (!conn) {
 				return {
 					details: {},
@@ -702,16 +1132,32 @@ WHEN TO USE:
 			await openDocument(conn, filePath);
 
 			try {
-				const result = await conn.connection.sendRequest(HoverRequest.type, {
-					textDocument: { uri: filePathToUri(filePath) },
-					position: { line: params.line - 1, character: params.character - 1 },
-				});
+				const result = (await sendRequestWithTimeout(
+					conn,
+					HoverRequest.type,
+					{
+						textDocument: { uri: filePathToUri(filePath) },
+						position: { line: params.line - 1, character: params.character - 1 },
+					},
+					signal,
+					"LSP hover request"
+				)) as Hover | null;
 
 				return {
 					details: {},
 					content: [{ type: "text", text: formatHover(result) }],
 				};
 			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						content: [{ type: "text", text: "Hover request timed out" }],
+						details: {},
+						isError: true,
+					};
+				}
 				return {
 					content: [{ type: "text", text: `Error: ${error}` }],
 					details: {},
@@ -734,7 +1180,7 @@ WHEN TO USE:
 		parameters: Type.Object({
 			file: Type.String({ description: "Path to the file" }),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const filePath = path.isAbsolute(params.file)
 				? params.file
 				: path.resolve(ctx.cwd, params.file);
@@ -747,10 +1193,42 @@ WHEN TO USE:
 				};
 			}
 
-			const conn = await getOrCreateConnectionForFile(language, filePath, (lang) =>
-				ctx.ui.setWorkingMessage(`Starting ${lang} language server`)
-			);
-			ctx.ui.setWorkingMessage();
+			let conn: LSPConnection | null = null;
+			try {
+				conn = await getOrCreateConnectionForFile(language, filePath, {
+					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					signal,
+				});
+			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						details: {},
+						content: [
+							{
+								type: "text",
+								text: `Language server startup timed out for ${language}`,
+							},
+						],
+						isError: true,
+					};
+				}
+				return {
+					details: {},
+					content: [
+						{
+							type: "text",
+							text: `Error starting language server: ${error}`,
+						},
+					],
+					isError: true,
+				};
+			} finally {
+				ctx.ui.setWorkingMessage();
+			}
+
 			if (!conn) {
 				return {
 					details: {},
@@ -768,15 +1246,31 @@ WHEN TO USE:
 			await openDocument(conn, filePath);
 
 			try {
-				const result = await conn.connection.sendRequest(DocumentSymbolRequest.type, {
-					textDocument: { uri: filePathToUri(filePath) },
-				});
+				const result = (await sendRequestWithTimeout(
+					conn,
+					DocumentSymbolRequest.type,
+					{
+						textDocument: { uri: filePathToUri(filePath) },
+					},
+					signal,
+					"LSP document symbols request"
+				)) as (SymbolInformation | DocumentSymbol)[] | null;
 
 				return {
 					details: {},
 					content: [{ type: "text", text: formatSymbols(result) }],
 				};
 			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						content: [{ type: "text", text: "Document symbols request timed out" }],
+						details: {},
+						isError: true,
+					};
+				}
 				return {
 					content: [{ type: "text", text: `Error: ${error}` }],
 					details: {},
@@ -804,7 +1298,7 @@ WHEN TO USE:
 				})
 			),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
 			const language = params.language || "typescript";
 
 			// For workspace symbols, we need an active connection
@@ -843,9 +1337,15 @@ WHEN TO USE:
 			}
 
 			try {
-				const result = await conn.connection.sendRequest(WorkspaceSymbolRequest.type, {
-					query: params.query,
-				});
+				const result = (await sendRequestWithTimeout(
+					conn,
+					WorkspaceSymbolRequest.type,
+					{
+						query: params.query,
+					},
+					signal,
+					"LSP workspace symbols request"
+				)) as (SymbolInformation | WorkspaceSymbol)[] | null;
 
 				const symbols = result || [];
 				return {
@@ -858,6 +1358,16 @@ WHEN TO USE:
 					],
 				};
 			} catch (error) {
+				if (isAbortError(error)) {
+					throw error;
+				}
+				if (isTimeoutError(error)) {
+					return {
+						content: [{ type: "text", text: "Workspace symbols request timed out" }],
+						details: {},
+						isError: true,
+					};
+				}
 				return {
 					content: [{ type: "text", text: `Error: ${error}` }],
 					details: {},
@@ -873,7 +1383,7 @@ WHEN TO USE:
 		label: "lsp_status",
 		description: "Check which language servers are running and their capabilities.",
 		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+		async execute(_toolCallId, _params, signal, _onUpdate, _ctx) {
 			const lines: string[] = ["LSP Server Status:"];
 
 			// Show running connections
@@ -914,10 +1424,32 @@ WHEN TO USE:
 
 				try {
 					const which = spawn("which", [config.command]);
-					const available = await new Promise<boolean>((resolve) => {
-						which.on("close", (code) => resolve(code === 0));
-						which.on("error", () => resolve(false));
-					});
+					const available = await raceWithTimeout(
+						() =>
+							new Promise<boolean>((resolve) => {
+								which.on("close", (code) => resolve(code === 0));
+								which.on("error", () => resolve(false));
+							}),
+						{
+							timeoutMs: lspStartupTimeoutMs,
+							signal,
+							description: `Checking availability of ${config.command}`,
+							onTimeout: () => {
+								try {
+									which.kill();
+								} catch {
+									// Ignore kill errors
+								}
+							},
+							onAbort: () => {
+								try {
+									which.kill();
+								} catch {
+									// Ignore kill errors
+								}
+							},
+						}
+					);
 
 					if (available) {
 						lines.push(`${lang}: ${getIcon("success")} ${config.command}`);
@@ -935,8 +1467,15 @@ WHEN TO USE:
 							lines.push(`  Install: npm i -g ${config.command}`);
 						}
 					}
-				} catch {
-					lines.push(`${lang}: ? error checking`);
+				} catch (error) {
+					if (isAbortError(error)) {
+						throw error;
+					}
+					if (isTimeoutError(error)) {
+						lines.push(`${lang}: ? timeout checking availability`);
+					} else {
+						lines.push(`${lang}: ? error checking`);
+					}
 				}
 			}
 
