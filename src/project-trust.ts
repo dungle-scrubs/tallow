@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { PROJECT_TRUST_STORE_PATH, TRUST_DIR } from "./config.js";
 
@@ -39,7 +39,43 @@ interface ProjectTrustStoreEntry {
 /** Parsed trust store keyed by canonical project path. */
 type ProjectTrustStore = Record<string, ProjectTrustStoreEntry>;
 
+// ─── Environment Keys ───────────────────────────────────────────────────────
+
+/** Environment key for current project trust status. */
+export const PROJECT_TRUST_STATUS_ENV = "TALLOW_PROJECT_TRUST_STATUS";
+
+/** Environment key for canonical cwd tied to trust status. */
+export const PROJECT_TRUST_CWD_ENV = "TALLOW_PROJECT_TRUST_CWD";
+
+/** Environment key for current trust fingerprint. */
+export const PROJECT_TRUST_FINGERPRINT_ENV = "TALLOW_PROJECT_TRUST_FINGERPRINT";
+
+/** Environment key for stored trust fingerprint (if any). */
+export const PROJECT_TRUST_STORED_FINGERPRINT_ENV = "TALLOW_PROJECT_TRUST_STORED_FINGERPRINT";
+
+/** Optional test override for trust store path. */
+const PROJECT_TRUST_STORE_OVERRIDE_ENV = "TALLOW_PROJECT_TRUST_STORE_PATH";
+
 // ─── Trust Store I/O ────────────────────────────────────────────────────────
+
+/**
+ * Resolve the trust store path, honoring a test override env var.
+ *
+ * @returns Absolute path to the project trust store JSON file
+ */
+function getTrustStorePath(): string {
+	return process.env[PROJECT_TRUST_STORE_OVERRIDE_ENV] ?? PROJECT_TRUST_STORE_PATH;
+}
+
+/**
+ * Resolve the directory containing the trust store.
+ *
+ * @returns Absolute directory path for trust metadata
+ */
+function getTrustStoreDir(): string {
+	const storePath = getTrustStorePath();
+	return dirname(storePath || TRUST_DIR);
+}
 
 /**
  * Load the project trust store from disk.
@@ -49,10 +85,11 @@ type ProjectTrustStore = Record<string, ProjectTrustStoreEntry>;
  * @returns Parsed trust store object (possibly empty)
  */
 function loadTrustStore(): ProjectTrustStore {
-	if (!existsSync(PROJECT_TRUST_STORE_PATH)) return {};
+	const storePath = getTrustStorePath();
+	if (!existsSync(storePath)) return {};
 
 	try {
-		const raw = readFileSync(PROJECT_TRUST_STORE_PATH, "utf-8");
+		const raw = readFileSync(storePath, "utf-8");
 		const parsed = JSON.parse(raw) as Record<string, unknown>;
 		if (!parsed || typeof parsed !== "object") return {};
 
@@ -80,11 +117,12 @@ function loadTrustStore(): ProjectTrustStore {
  */
 function saveTrustStore(store: ProjectTrustStore): void {
 	try {
-		if (!existsSync(TRUST_DIR)) {
-			mkdirSync(TRUST_DIR, { recursive: true });
+		const trustDir = getTrustStoreDir();
+		if (!existsSync(trustDir)) {
+			mkdirSync(trustDir, { recursive: true });
 		}
 		const json = JSON.stringify(store, null, "\t");
-		atomicWriteFileSync(PROJECT_TRUST_STORE_PATH, `${json}\n`);
+		atomicWriteFileSync(getTrustStorePath(), `${json}\n`);
 	} catch {
 		// Persist failures leave trust ephemeral for this process but do not
 		// compromise safety — the session still treats the project as trusted
@@ -255,6 +293,59 @@ export function computeProjectFingerprint(canonicalCwd: string): string {
 	}
 
 	return hash.digest("hex");
+}
+
+// ─── Env Projection ─────────────────────────────────────────────────────────
+
+/**
+ * Project trust statuses that are accepted from environment variables.
+ */
+const VALID_TRUST_STATUSES = new Set<ProjectTrustStatus>([
+	"trusted",
+	"untrusted",
+	"stale_fingerprint",
+]);
+
+/**
+ * Read the current project trust status from environment variables.
+ *
+ * Invalid or missing values fail closed to `untrusted`.
+ *
+ * @returns Trust status from process environment
+ */
+export function getProjectTrustStatusFromEnv(): ProjectTrustStatus {
+	const raw = process.env[PROJECT_TRUST_STATUS_ENV];
+	if (raw && VALID_TRUST_STATUSES.has(raw as ProjectTrustStatus)) {
+		return raw as ProjectTrustStatus;
+	}
+	return "untrusted";
+}
+
+/**
+ * Return whether the current process environment marks the project as trusted.
+ *
+ * @returns True when trust status is `trusted`
+ */
+export function isProjectTrustedFromEnv(): boolean {
+	return getProjectTrustStatusFromEnv() === "trusted";
+}
+
+/**
+ * Apply a project trust context to process environment variables so
+ * extensions can enforce trust-gated behavior without importing core modules.
+ *
+ * @param context - Resolved project trust context
+ * @returns void
+ */
+export function applyProjectTrustContextToEnv(context: ProjectTrustContext): void {
+	process.env[PROJECT_TRUST_STATUS_ENV] = context.status;
+	process.env[PROJECT_TRUST_CWD_ENV] = context.canonicalCwd;
+	process.env[PROJECT_TRUST_FINGERPRINT_ENV] = context.fingerprint;
+	if (context.storedFingerprint) {
+		process.env[PROJECT_TRUST_STORED_FINGERPRINT_ENV] = context.storedFingerprint;
+	} else {
+		delete process.env[PROJECT_TRUST_STORED_FINGERPRINT_ENV];
+	}
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

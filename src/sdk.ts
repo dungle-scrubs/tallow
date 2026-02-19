@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import {
 	bashTool,
 	type CreateAgentSessionOptions,
@@ -31,6 +31,14 @@ import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } fro
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
 import { extractClaudePluginResources, type ResolvedPlugin, resolvePlugins } from "./plugins.js";
+import {
+	applyProjectTrustContextToEnv,
+	type ProjectTrustContext,
+	type ProjectTrustStatus,
+	resolveProjectTrust,
+	trustProject,
+	untrustProject,
+} from "./project-trust.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 
@@ -265,6 +273,8 @@ export async function createTallowSession(
 	await resolveOpSecrets();
 
 	const cwd = options.cwd ?? process.cwd();
+	const projectTrust = resolveProjectTrust(cwd);
+	applyProjectTrustContextToEnv(projectTrust);
 	const eventBus = createEventBus();
 
 	// ── Auth & Models ────────────────────────────────────────────────────────
@@ -300,6 +310,15 @@ export async function createTallowSession(
 	const settingsManager = SettingsManager.create(cwd, TALLOW_HOME);
 	if (options.settings) {
 		settingsManager.applyOverrides(options.settings);
+	}
+
+	if (projectTrust.status !== "trusted") {
+		const globalPackages = settingsManager.getGlobalSettings().packages;
+		settingsManager.applyOverrides({
+			packages: (Array.isArray(globalPackages) ? globalPackages : []) as Array<
+				string | { source: string }
+			>,
+		});
 	}
 
 	// ── Resource Loader ──────────────────────────────────────────────────────
@@ -352,7 +371,7 @@ export async function createTallowSession(
 	// Resolve plugins from settings + CLI options. Remote plugins are fetched
 	// and cached; local plugins are loaded live from disk.
 
-	const pluginSpecs = collectPluginSpecs(cwd, options.plugins);
+	const pluginSpecs = collectPluginSpecs(cwd, options.plugins, projectTrust.status);
 	const pluginResult = resolvePlugins(pluginSpecs);
 
 	// Report plugin errors (non-fatal — one bad plugin doesn't block startup)
@@ -416,6 +435,14 @@ export async function createTallowSession(
 	// doesn't load AGENTS.md from packages. Use agentsFilesOverride to inject them.
 
 	const packageAgentsFiles = loadAgentsFilesFromPackages(settingsManager, cwd);
+	const projectExtensionsDir = resolve(cwd, ".tallow", "extensions");
+	const shouldBlockProjectExtensions = projectTrust.status !== "trusted";
+
+	if (projectTrust.status !== "trusted") {
+		console.error(
+			"\x1b[33m⚠ Project is untrusted — repo-controlled execution surfaces are blocked until /trust-project\x1b[0m"
+		);
+	}
 
 	const loader = new DefaultResourceLoader({
 		cwd,
@@ -430,8 +457,24 @@ export async function createTallowSession(
 			rebrandSystemPrompt,
 			injectImageFilePaths,
 			detectOutputTruncation,
+			createProjectTrustExtension(cwd, projectTrust),
 			...(options.extensionFactories ?? []),
 		],
+		extensionsOverride: shouldBlockProjectExtensions
+			? (base) => {
+					const filtered = base.extensions.filter((ext) => {
+						const normalizedPath = resolve(ext.path);
+						return !(
+							normalizedPath === projectExtensionsDir ||
+							normalizedPath.startsWith(`${projectExtensionsDir}${sep}`)
+						);
+					});
+					return {
+						...base,
+						extensions: filtered,
+					};
+				}
+			: undefined,
 		systemPromptOverride: options.systemPrompt ? () => options.systemPrompt : undefined,
 		appendSystemPromptOverride: options.appendSystemPrompt
 			? (base) => {
@@ -563,25 +606,29 @@ export async function createTallowSession(
 /**
  * Collect plugin specs from settings files and CLI options.
  *
- * Reads the `plugins` array from settings.json files (global + project),
- * then merges in any CLI-provided specs. Deduplicates by raw spec string.
+ * Reads the `plugins` array from global settings and, when trusted, from
+ * project `.tallow/settings.json`, then merges in any CLI-provided specs.
+ * Deduplicates by raw spec string.
  *
- * The pi framework's SettingsManager doesn't know about `plugins` — it's
- * a tallow-specific field. We read it directly from the JSON files.
+ * Project `.pi/settings.json` plugin entries are intentionally ignored.
  *
  * @param cwd - Current working directory (for project settings)
  * @param cliPlugins - Additional plugin specs from CLI --plugin-dir or options.plugins
+ * @param trustStatus - Current project trust status
  * @returns Deduplicated array of plugin spec strings
  */
-function collectPluginSpecs(cwd: string, cliPlugins?: string[]): string[] {
+export function collectPluginSpecs(
+	cwd: string,
+	cliPlugins: string[] | undefined,
+	trustStatus: ProjectTrustStatus
+): string[] {
 	const specs = new Set<string>();
 
-	// Read plugins from settings files (global, project .tallow/, project .pi/)
-	const settingsFiles = [
-		join(TALLOW_HOME, "settings.json"),
-		join(cwd, ".tallow", "settings.json"),
-		join(cwd, ".pi", "settings.json"),
-	];
+	// Read plugins from global settings and trusted project settings.
+	const settingsFiles = [join(TALLOW_HOME, "settings.json")];
+	if (trustStatus === "trusted") {
+		settingsFiles.push(join(cwd, ".tallow", "settings.json"));
+	}
 
 	for (const settingsPath of settingsFiles) {
 		try {
@@ -694,6 +741,108 @@ function discoverExtensionDirs(baseDir: string): string[] {
 		// Directory doesn't exist or isn't readable
 	}
 	return paths;
+}
+
+/**
+ * Build a trust warning banner shown when repo-controlled surfaces are blocked.
+ *
+ * @param trust - Current project trust context
+ * @returns Human-readable trust warning message
+ */
+function formatProjectTrustBanner(trust: ProjectTrustContext): string {
+	const blocked =
+		"plugins, hooks, mcpServers, packages, permissions, shellInterpolation, and project extensions";
+	const base =
+		trust.status === "stale_fingerprint"
+			? "Project trust is stale (config fingerprint changed)."
+			: "Project is untrusted.";
+	return (
+		`${base} Repo-controlled execution surfaces are blocked: ${blocked}.\n` +
+		"Run /trust-project to trust this project, /trust-status to inspect trust state, " +
+		"or /untrust-project to revoke trust.\n" +
+		"Trust auto-invalidates when trust-scoped project config changes."
+	);
+}
+
+/**
+ * Register trust commands and startup banner for project trust UX.
+ *
+ * @param cwd - Session working directory
+ * @param initialTrust - Trust context resolved at startup
+ * @returns Extension factory
+ */
+function createProjectTrustExtension(
+	cwd: string,
+	initialTrust: ProjectTrustContext
+): ExtensionFactory {
+	return (pi) => {
+		let trustContext = initialTrust;
+
+		pi.on("session_start", async (_event, ctx) => {
+			if (!ctx.hasUI) return;
+			if (trustContext.status === "trusted") return;
+
+			const banner = formatProjectTrustBanner(trustContext);
+			ctx.ui.notify(banner, "warning");
+			pi.sendMessage(
+				{
+					customType: "project-trust-banner",
+					content: banner,
+					display: true,
+					details: {
+						status: trustContext.status,
+						canonicalCwd: trustContext.canonicalCwd,
+						fingerprint: trustContext.fingerprint,
+					},
+				},
+				{ deliverAs: "nextTurn" }
+			);
+		});
+
+		pi.registerCommand("trust-project", {
+			description: "Trust this project and enable repo-controlled execution surfaces",
+			handler: async (_args, ctx) => {
+				trustContext = trustProject(cwd);
+				applyProjectTrustContextToEnv(trustContext);
+				ctx.ui.notify(
+					`Trusted project: ${trustContext.canonicalCwd}\n` +
+						"Restart this session to apply blocked project surfaces.",
+					"info"
+				);
+			},
+		});
+
+		pi.registerCommand("untrust-project", {
+			description: "Remove trust for this project and block repo-controlled execution surfaces",
+			handler: async (_args, ctx) => {
+				trustContext = untrustProject(cwd);
+				applyProjectTrustContextToEnv(trustContext);
+				ctx.ui.notify(
+					`Removed trust for project: ${trustContext.canonicalCwd}\n` +
+						"Restart this session to enforce trust-gated blocking.",
+					"warning"
+				);
+			},
+		});
+
+		pi.registerCommand("trust-status", {
+			description: "Show trust status and fingerprint details for this project",
+			handler: async (_args, ctx) => {
+				trustContext = resolveProjectTrust(cwd);
+				applyProjectTrustContextToEnv(trustContext);
+				const lines = [
+					`status: ${trustContext.status}`,
+					`project: ${trustContext.canonicalCwd}`,
+					`current fingerprint: ${trustContext.fingerprint}`,
+					`stored fingerprint: ${trustContext.storedFingerprint ?? "(none)"}`,
+				];
+				if (trustContext.status !== "trusted") {
+					lines.push("repo-controlled project surfaces are currently blocked");
+				}
+				ctx.ui.notify(lines.join("\n"), "info");
+			},
+		});
+	};
 }
 
 /**
