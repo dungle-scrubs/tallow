@@ -390,6 +390,29 @@ function runOrThrow(runCli: WeztermCliRunner, args: readonly string[]): string {
 }
 
 /**
+ * Build system-prompt guidance for WezTerm pane control behavior.
+ *
+ * @param currentPaneId - Current WezTerm pane ID
+ * @returns Guidance block appended to the system prompt
+ */
+export function buildWeztermPaneGuidance(currentPaneId: number): string {
+	return [
+		"# WezTerm Pane Control",
+		"",
+		`You are running in WezTerm pane ${currentPaneId}.`,
+		"Use the wezterm_pane tool to manage panes: split, close, focus, zoom, resize, send/read text, or spawn new tabs.",
+		'Use action "list" to see panes in the current tab.',
+		"",
+		"Use best judgment before controlling panes:",
+		"- Do not run or read commands likely to reveal private secrets (keys, tokens, credentials) unless the user explicitly asks.",
+		"- Default behavior: if you prefill a command for the user, execute it automatically by sending Enter (newline, \\n).",
+		"- Only leave a command unexecuted when the user explicitly asks to review/edit it before running.",
+		"- If the user wants to monitor output themselves, you can still execute the command and let them watch the pane output directly.",
+		"- Enter can be pressed by sending a newline (\\n) via send_text (either appended to the command or as a second send_text call).",
+	].join("\n");
+}
+
+/**
  * Execute one wezterm pane action.
  *
  * @param params - Tool parameters
@@ -581,6 +604,7 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 		description: [
 			"Manage WezTerm panes and tabs from prompts.",
 			"Use action='list' to inspect panes in the current tab, then split/focus/close/zoom/resize/send_text/read_text/spawn_tab/move_to_tab.",
+			"Use best judgment around secrets and self-monitored commands: avoid auto-running or reading sensitive output unless explicitly requested.",
 		].join(" "),
 		parameters: Type.Object({
 			action: StringEnum(ACTIONS, { description: "Pane control action" }),
@@ -601,7 +625,11 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 				})
 			),
 			cwd: Type.Optional(Type.String({ description: "Working directory for split/spawn_tab" })),
-			text: Type.Optional(Type.String({ description: "Text payload for action='send_text'" })),
+			text: Type.Optional(
+				Type.String({
+					description: "Text payload for action='send_text'. Include \\n to press Enter.",
+				})
+			),
 			state: Type.Optional(
 				StringEnum(ZOOM_STATES, {
 					description: "Zoom state for action='zoom' (default: toggle)",
@@ -621,11 +649,7 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (event) => {
 		return {
-			systemPrompt:
-				`${event.systemPrompt}\n\n# WezTerm Pane Control\n\n` +
-				`You are running in WezTerm pane ${currentPaneId}. ` +
-				"Use the wezterm_pane tool to manage panes: split, close, focus, zoom, resize, " +
-				'send/read text, or spawn new tabs. Use action "list" to see panes in the current tab.',
+			systemPrompt: `${event.systemPrompt}\n\n${buildWeztermPaneGuidance(currentPaneId)}`,
 		};
 	});
 }
