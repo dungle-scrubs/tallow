@@ -29,54 +29,58 @@ Both can coexist.
 Practical result: keep `CLAUDE.md` for Claude Code, add `AGENTS.md` for tallow,
 run both tools in the same repo.
 
-## Frontmatter compatibility
+## Frontmatter compatibility (important corrections)
 
-Shared frontmatter usually works. Unknown keys are generally ignored by the
-other tool.
+Claude Code's official skill frontmatter includes fields like:
+`allowed-tools`, `context`, `agent`, `model`, `hooks`,
+`disable-model-invocation`, and `user-invocable`.
 
-### Commonly compatible keys
+So to be explicit: `allowed-tools` and `context: fork` are **not**
+tallow-only ideas. They are first-class Claude Code features.
 
-- `name`
-- `description`
-- `argument-hint`
-- standard YAML metadata used by skills/commands/agents
+Where behavior diverges in tallow today:
 
-### tallow-specific frontmatter (Claude Code may ignore)
+- `context: fork` is supported in tallow's forked-execution flow.
+- `allowed-tools` is parsed in tallow fork metadata, but is currently not
+  enforced there as a permission gate.
+- Claude's `hooks` frontmatter on skills/agents is a Claude feature; tallow's
+  hook system is configured via hook files/settings (see below).
 
-- Commands/skills: `context: fork`, `agent`, `model`
-- Agents: `disallowedTools`, `maxTurns`, `mcpServers`, routing keywords like
-  `model: auto-cheap`
+If you want cross-tool files to behave the same, keep shared frontmatter
+minimal and test the behavior in both CLIs.
 
-If you want one file to behave identically in both tools, avoid tallow-only
-keys in shared files.
+## Hooks: compatible shape, different event keys
 
-## Hooks compatibility: exact answer
+If you already use Claude hooks, the overall structure carries over well
+(`matcher`, `hooks`, `type`, `command`), but event keys are not 1:1.
 
-**No — tallow does not currently auto-map Claude hook event names to tallow
-hook event keys.**
+tallow does **not** currently auto-translate Claude hook event names such as
+`PreToolUse`, `PostToolUse`, or `Stop`.
 
-What is compatible:
-- Hook configuration shape (`matcher`, `hooks`, `type`, `command`, etc.)
-- Command/agent hook behavior model (sync/async, block vs observe)
+Use tallow event keys directly:
 
-What is not automatic today:
-- Claude event names like `PreToolUse`, `PostToolUse`, `Stop`
-
-In tallow hook files, use tallow event keys directly:
-
-| Claude concept | Use in tallow hooks |
+| Claude Code event | Closest tallow hook event |
 |---|---|
-| Pre-tool hook | `tool_call` |
-| Post-tool hook | `tool_result` |
-| Prompt submit gate | `input` |
-| End-of-run hook | `agent_end` or `session_shutdown` (depends on intent) |
+| `SessionStart` | `session_start` |
+| `UserPromptSubmit` | `input` |
+| `PreToolUse` | `tool_call` |
+| `PostToolUse` | `tool_result` |
+| `SubagentStart` | `subagent_start` |
+| `SubagentStop` | `subagent_stop` |
+| `Notification` | `notification` |
+| `TeammateIdle` | `teammate_idle` |
+| `TaskCompleted` | `task_completed` |
+| `PreCompact` | `session_before_compact` / `session_compact` |
+| `SessionEnd` | `session_shutdown` |
+| `Stop` | `agent_end` (closest, not identical semantics) |
 
-Also note: tallow hooks are loaded from `.tallow/hooks.json`,
-`~/.tallow/hooks.json`, `settings.json` (`hooks` key), and extension/package
-`hooks.json` files. `.claude/settings.json` hook sections are not auto-imported
-into tallow hooks.
+Known gaps vs Claude hook events:
 
-See [hooks](/extensions/hooks/) for the exact event list.
+- No dedicated `PermissionRequest` hook event in tallow.
+- No dedicated `PostToolUseFailure` event (use `tool_result` and inspect error state).
+- `.claude/settings.json` hook sections are not auto-imported into tallow hooks.
+
+See [hooks](/extensions/hooks/) for tallow's native event list.
 
 ## Nested directory behavior (important)
 
