@@ -3,12 +3,14 @@
  *
  * Reads and writes `~/.tallow/run/pids.json` — the same file managed
  * by `src/pid-manager.ts` on the core side. The JSON schema (version 1,
- * entries with pid/command/startedAt) is the shared contract.
+ * entries with pid/command/startedAt plus optional processStartedAt)
+ * is the shared contract.
  *
  * Extensions call {@link registerPid} after spawning a detached child
  * and {@link unregisterPid} when the child exits or is killed.
  */
 
+import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { atomicWriteFileSync } from "./atomic-write.js";
@@ -19,6 +21,7 @@ import { atomicWriteFileSync } from "./atomic-write.js";
 interface PidEntry {
 	pid: number;
 	command: string;
+	processStartedAt?: string;
 	startedAt: number;
 }
 
@@ -45,6 +48,44 @@ function getPidFilePath(): string {
 }
 
 /**
+ * Check whether a value matches the PID entry schema.
+ *
+ * Supports legacy entries without `processStartedAt` for migration safety.
+ *
+ * @param value - Unknown JSON value to validate
+ * @returns True when the value is a supported PID entry
+ */
+function isPidEntry(value: unknown): value is PidEntry {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Record<string, unknown>;
+	if (typeof candidate.pid !== "number") return false;
+	if (typeof candidate.command !== "string") return false;
+	if (typeof candidate.startedAt !== "number") return false;
+	if (candidate.processStartedAt != null && typeof candidate.processStartedAt !== "string") {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Validate and normalize raw PID file JSON.
+ *
+ * @param value - Parsed JSON value
+ * @returns Normalized PID file, or null when invalid
+ */
+function normalizePidFile(value: unknown): PidFile | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as Record<string, unknown>;
+	if (candidate.version !== 1) return null;
+	if (!Array.isArray(candidate.entries)) return null;
+	const entries = candidate.entries.filter(isPidEntry);
+	return {
+		version: 1,
+		entries,
+	};
+}
+
+/**
  * Read and parse the PID file. Returns empty entries on any error.
  *
  * @returns Parsed PID file contents
@@ -52,8 +93,8 @@ function getPidFilePath(): string {
 function readPidFile(): PidFile {
 	try {
 		const raw = readFileSync(getPidFilePath(), "utf-8");
-		const parsed = JSON.parse(raw) as PidFile;
-		if (parsed.version === 1 && Array.isArray(parsed.entries)) {
+		const parsed = normalizePidFile(JSON.parse(raw) as unknown);
+		if (parsed) {
 			return parsed;
 		}
 	} catch {
@@ -74,6 +115,24 @@ function writePidFile(file: PidFile): void {
 		mkdirSync(dir, { recursive: true });
 	}
 	atomicWriteFileSync(path, `${JSON.stringify(file, null, "\t")}\n`);
+}
+
+/**
+ * Read process start time from `ps` so PID reuse can be detected later.
+ *
+ * @param pid - Process ID to inspect
+ * @returns Process start string from `ps`, or null when unavailable
+ */
+function readProcessStartedAt(pid: number): string | null {
+	const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	if (result.error || result.status !== 0) {
+		return null;
+	}
+	const startedAt = result.stdout.trim();
+	return startedAt.length > 0 ? startedAt : null;
 }
 
 // ─── Locking ─────────────────────────────────────────────────────────────────
@@ -137,8 +196,15 @@ export function registerPid(pid: number, command: string): void {
 	const unlock = acquirePidLock();
 	try {
 		const file = readPidFile();
-		if (file.entries.some((e) => e.pid === pid)) return;
-		file.entries.push({ pid, command, startedAt: Date.now() });
+		if (file.entries.some((entry) => entry.pid === pid)) return;
+
+		const processStartedAt = readProcessStartedAt(pid);
+		file.entries.push({
+			command,
+			pid,
+			processStartedAt: processStartedAt ?? undefined,
+			startedAt: Date.now(),
+		});
 		writePidFile(file);
 	} finally {
 		unlock();
@@ -159,7 +225,7 @@ export function unregisterPid(pid: number): void {
 	try {
 		const file = readPidFile();
 		const before = file.entries.length;
-		file.entries = file.entries.filter((e) => e.pid !== pid);
+		file.entries = file.entries.filter((entry) => entry.pid !== pid);
 		if (file.entries.length < before) {
 			writePidFile(file);
 		}

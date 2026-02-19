@@ -10,6 +10,7 @@
  * same JSON file independently — the file schema is the contract.
  */
 
+import { spawnSync } from "node:child_process";
 import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { TALLOW_HOME } from "./config.js";
@@ -20,6 +21,7 @@ import { TALLOW_HOME } from "./config.js";
 export interface PidEntry {
 	pid: number;
 	command: string;
+	processStartedAt?: string;
 	startedAt: number;
 }
 
@@ -37,6 +39,44 @@ const PID_FILE_PATH = join(TALLOW_HOME, "run", "pids.json");
 // ─── File I/O ────────────────────────────────────────────────────────────────
 
 /**
+ * Check whether a value matches the PID entry schema.
+ *
+ * Supports legacy entries without `processStartedAt` for migration safety.
+ *
+ * @param value - Unknown JSON value to validate
+ * @returns True when the value is a supported PID entry
+ */
+function isPidEntry(value: unknown): value is PidEntry {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Record<string, unknown>;
+	if (typeof candidate.pid !== "number") return false;
+	if (typeof candidate.command !== "string") return false;
+	if (typeof candidate.startedAt !== "number") return false;
+	if (candidate.processStartedAt != null && typeof candidate.processStartedAt !== "string") {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Validate and normalize raw PID file JSON.
+ *
+ * @param value - Parsed JSON value
+ * @returns Normalized PID file, or null when invalid
+ */
+function normalizePidFile(value: unknown): PidFile | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as Record<string, unknown>;
+	if (candidate.version !== 1) return null;
+	if (!Array.isArray(candidate.entries)) return null;
+	const entries = candidate.entries.filter(isPidEntry);
+	return {
+		version: 1,
+		entries,
+	};
+}
+
+/**
  * Read and parse the PID file. Returns empty entries on any error.
  *
  * @returns Parsed PID file contents
@@ -44,8 +84,8 @@ const PID_FILE_PATH = join(TALLOW_HOME, "run", "pids.json");
 function readPidFile(): PidFile {
 	try {
 		const raw = readFileSync(PID_FILE_PATH, "utf-8");
-		const parsed = JSON.parse(raw) as PidFile;
-		if (parsed.version === 1 && Array.isArray(parsed.entries)) {
+		const parsed = normalizePidFile(JSON.parse(raw) as unknown);
+		if (parsed) {
 			return parsed;
 		}
 	} catch {
@@ -71,15 +111,49 @@ function isProcessAlive(pid: number): boolean {
 	}
 }
 
+/**
+ * Read process start time from `ps` for PID-reuse-safe identity checks.
+ *
+ * @param pid - Process ID to inspect
+ * @returns Process start string from `ps`, or null when unavailable
+ */
+function readProcessStartedAt(pid: number): string | null {
+	const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	if (result.error || result.status !== 0) {
+		return null;
+	}
+	const startedAt = result.stdout.trim();
+	return startedAt.length > 0 ? startedAt : null;
+}
+
+/**
+ * Verify that a PID entry still points to the originally tracked process.
+ *
+ * @param entry - Tracked PID entry
+ * @returns True when start-time identity matches
+ */
+function hasMatchingProcessIdentity(entry: PidEntry): boolean {
+	if (!entry.processStartedAt) {
+		return false;
+	}
+	const currentStartedAt = readProcessStartedAt(entry.pid);
+	if (!currentStartedAt) {
+		return false;
+	}
+	return currentStartedAt === entry.processStartedAt;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
  * Clean up orphaned child processes left over from a previous session.
  *
- * Reads the PID file, probes each entry with `kill -0`, sends SIGTERM
- * to the process group of any that are still alive (negative PID targets
- * the group since children are spawned with `detached: true`), then
- * clears the file.
+ * Reads the PID file, probes each entry with `kill -0`, validates identity
+ * via process start time, then sends SIGTERM to the process group of entries
+ * that are still alive and verifiably match the originally tracked process.
  *
  * Called once at startup inside `createTallowSession()`.
  *
@@ -92,14 +166,19 @@ export function cleanupOrphanPids(): number {
 	let killed = 0;
 
 	for (const entry of file.entries) {
-		if (isProcessAlive(entry.pid)) {
-			try {
-				// Negative PID → send to the process group (detached children are group leaders)
-				process.kill(-entry.pid, "SIGTERM");
-				killed++;
-			} catch {
-				// Process may have exited between probe and kill — harmless
-			}
+		if (!isProcessAlive(entry.pid)) {
+			continue;
+		}
+		if (!hasMatchingProcessIdentity(entry)) {
+			// Missing/mismatched identity is treated as unsafe — skip signaling.
+			continue;
+		}
+		try {
+			// Negative PID → send to the process group (detached children are group leaders)
+			process.kill(-entry.pid, "SIGTERM");
+			killed++;
+		} catch {
+			// Process may have exited between probe and kill — harmless
 		}
 	}
 
@@ -117,8 +196,8 @@ export function cleanupOrphanPids(): number {
  * Kill all tracked child processes and remove the PID file.
  *
  * Called during process shutdown (SIGTERM / SIGINT) as a safety net after
- * `session_shutdown` fires. If extensions already killed and unregistered
- * their processes, this is a no-op.
+ * `session_shutdown` fires. Entries are only signaled when identity checks
+ * confirm they still refer to the originally tracked processes.
  *
  * @returns Number of processes signalled
  */
@@ -128,6 +207,12 @@ export function cleanupAllTrackedPids(): number {
 
 	let killed = 0;
 	for (const entry of file.entries) {
+		if (!isProcessAlive(entry.pid)) {
+			continue;
+		}
+		if (!hasMatchingProcessIdentity(entry)) {
+			continue;
+		}
 		try {
 			process.kill(-entry.pid, "SIGTERM");
 			killed++;
