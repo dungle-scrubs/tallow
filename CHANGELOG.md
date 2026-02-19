@@ -156,6 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so hung language servers do not block tool calls
 - **hooks:** translate Claude Code hook events and tool matchers from
   `.claude/settings.json` so PreToolUse/PostToolUse/Stop hooks run in tallow
+- **hooks:** bound hook subprocess output buffers and enforce SIGTERM→SIGKILL
+  timeout/abort escalation for command and agent hooks
 - **tui:** clear stale working and queued steering/follow-up UI state on
   turn end via interactive-mode runtime patch
 - **trust:** block untrusted project execution surfaces (`plugins`, hooks,
