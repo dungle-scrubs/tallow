@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.3...tallow-v0.8.4) (2026-02-19)
+
+
+### Added
+
+* **subagent:** surface routing defaults in settings ([ddbfc68](https://github.com/dungle-scrubs/tallow/commit/ddbfc68792b4df81ed871fe2c47f2febf24f3370))
+* **wezterm-pane:** auto-run prefilled commands by default ([4d6b9bd](https://github.com/dungle-scrubs/tallow/commit/4d6b9bd68927f8d516c0814aa180a83892b0420c))
+
+
+### Fixed
+
+* **hooks:** add Claude Code hook compatibility layer ([d14dba8](https://github.com/dungle-scrubs/tallow/commit/d14dba8e41da32a26b0bc9d581e75fb25cfc1277))
+* **slash-command-bridge:** show compacting progress feedback ([f368a64](https://github.com/dungle-scrubs/tallow/commit/f368a646b2eb15fe657dc50e79cb6fb9d5bde14d))
+* **tui:** relax default image height clamp ([8f2b191](https://github.com/dungle-scrubs/tallow/commit/8f2b191c61c8f38ffbfd923283282fcc330c6b1d))
+
+
+### Documentation
+
+* **compat:** clarify hook event key expectations ([55dc312](https://github.com/dungle-scrubs/tallow/commit/55dc3124682954ff1546636caa87c71004f9ba2c))
+* **guides:** add Claude Code compatibility guide ([1802f17](https://github.com/dungle-scrubs/tallow/commit/1802f173593f252a89838bc812846cb70f3a0103))
+* **guides:** correct Claude compatibility details for hooks and frontmatter ([59d2003](https://github.com/dungle-scrubs/tallow/commit/59d2003a6bbfed2cada6fa8fda9ace93214efd29))
+* **readme:** emphasize core differentiators and spare-time support ([ca06d98](https://github.com/dungle-scrubs/tallow/commit/ca06d98e81f7beea9a3993f0c2f66125ebccb2f9))
+
+
+### Maintenance
+
+* **deps:** bump synapse to 0.1.2 ([df65b9f](https://github.com/dungle-scrubs/tallow/commit/df65b9feb5805d480c133ba4968e1007c88b20de))
+* **deps:** bump synapse to 0.1.3 ([269cb2f](https://github.com/dungle-scrubs/tallow/commit/269cb2fae0743d1c407413f6308439fdb2473386))
+
 ## [0.8.3](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.2...tallow-v0.8.3) (2026-02-18)
 
 
