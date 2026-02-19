@@ -38,6 +38,18 @@ other tool.
 5. Routes tool calls to the right server
 6. Kills all servers on session end
 
+## Project trust gate
+
+Project MCP config in `.tallow/settings.json` is only loaded when the
+project is trusted. For untrusted or stale projects, the adapter ignores
+project `mcpServers` and only reads `~/.tallow/settings.json`.
+
+Use:
+
+- `/trust-project` to trust the current project
+- `/trust-status` to inspect trust state/fingerprint
+- `/untrust-project` to revoke trust
+
 ## Crash handling
 
 If a server process dies mid-session, the adapter attempts one

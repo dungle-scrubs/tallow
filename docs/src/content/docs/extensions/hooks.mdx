@@ -122,16 +122,20 @@ Hooks are loaded from all sources and merged additively at
 session start. Matchers are concatenated per event, nothing is
 replaced. Every source participates:
 
-1. `hooks.json` from local paths in `settings.json` `packages` (lowest priority)
+1. `hooks.json` from local paths in `~/.tallow/settings.json` `packages` (lowest priority)
 2. `~/.tallow/hooks.json` (global standalone)
 3. `~/.tallow/settings.json` → `hooks` key (global settings)
-4. `.tallow/hooks.json` (project standalone)
-5. `.tallow/settings.json` → `hooks` key (project settings)
+4. `.tallow/hooks.json` (project standalone, **trusted projects only**)
+5. `.tallow/settings.json` → `hooks` key (project settings, **trusted projects only**)
 6. `~/.tallow/extensions/*/hooks.json` (global extension hooks)
-7. `.tallow/extensions/*/hooks.json` (project extension hooks)
+7. `.tallow/extensions/*/hooks.json` (project extension hooks, **trusted projects only**)
 8. `.claude/settings.json` → `hooks` key (project Claude hooks, translated)
 9. `~/.claude/settings.json` → `hooks` key (global Claude hooks, translated)
 10. Runtime: `hooks:merge` event bus (other extensions)
+
+When a project is untrusted (or trust is stale), project `.tallow` hook
+sources are blocked. Trust with `/trust-project`, inspect with
+`/trust-status`, and revoke with `/untrust-project`.
 
 This means any extension or package can ship a `hooks.json`
 alongside its code and it automatically participates in the

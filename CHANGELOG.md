@@ -135,6 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.tallow/rules/` and `.claude/rules/`
 - **init:** nested `.claude/` → `.tallow/` directory rename and nested
   `CLAUDE.md` → `AGENTS.md` migration in `/init`
+- **trust:** per-project trust store with config fingerprinting and
+  `/trust-project`, `/untrust-project`, `/trust-status` commands
 
 ### Changed
 
@@ -154,6 +156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.claude/settings.json` so PreToolUse/PostToolUse/Stop hooks run in tallow
 - **tui:** clear stale working and queued steering/follow-up UI state on
   turn end via interactive-mode runtime patch
+- **trust:** block untrusted project execution surfaces (`plugins`, hooks,
+  `mcpServers`, `packages`, `permissions`, shell interpolation, project extensions)
+- **plugins:** ignore `<cwd>/.pi/settings.json` plugin entries
 
 ### Removed
 

@@ -19,10 +19,13 @@ Shell interpolation must be opted into. Choose one:
 | Method | Scope |
 |--------|-------|
 | `TALLOW_ENABLE_SHELL_INTERPOLATION=1` (or `TALLOW_SHELL_INTERPOLATION=1`) | Process/session |
-| `"shellInterpolation": true` in `.tallow/settings.json` or `~/.tallow/settings.json` | Persistent |
+| `"shellInterpolation": true` in `.tallow/settings.json` or `~/.tallow/settings.json` | Persistent (`.tallow` value requires trusted project) |
 
 When disabled, `` !`command` `` patterns pass through to the agent
 as literal text.
+
+Project `.tallow/settings.json` toggles are only honored when the project
+is trusted. Use `/trust-project` and `/trust-status` for trust management.
 
 ## Usage
 
