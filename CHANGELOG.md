@@ -152,6 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **tools:** add missing `isError` flag to error responses in lsp, read,
   and ask-user-question
+- **lsp:** bound startup and request operations with timeout + abort cleanup
+  so hung language servers do not block tool calls
 - **hooks:** translate Claude Code hook events and tool matchers from
   `.claude/settings.json` so PreToolUse/PostToolUse/Stop hooks run in tallow
 - **tui:** clear stale working and queued steering/follow-up UI state on

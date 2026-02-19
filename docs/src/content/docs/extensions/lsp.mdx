@@ -10,3 +10,6 @@ TypeScript, Python (ty/pyright), Rust, and Swift.
 
 After edits, diagnostics are automatically reported so the agent
 can catch type errors and lint issues without you asking.
+
+Startup and request operations are time-bounded with automatic cleanup,
+so stalled language servers fail fast instead of hanging a tool call.
