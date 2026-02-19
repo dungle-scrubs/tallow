@@ -1,72 +1,103 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/**
- * pid-manager.ts reads TALLOW_HOME from config.ts at module scope.
- * We can't override it per-test, so we test the core logic by manipulating
- * the PID file directly and verifying behavior against real processes.
- *
- * For the file I/O edge cases (corrupt files, missing dirs), the
- * pid-registry tests cover the shared format. These tests focus on
- * the process-lifecycle logic: detecting alive PIDs and killing orphans.
- */
+interface TestPidEntry {
+	pid: number;
+	command: string;
+	processStartedAt?: string;
+	startedAt: number;
+}
 
-let tmpDir: string;
-let pidFilePath: string;
+let tmpDir = "";
+let pidFilePath = "";
+let cleanupAllTrackedPidsFn: () => number;
+let cleanupOrphanPidsFn: () => number;
+const spawnedPids = new Set<number>();
+
+beforeAll(async () => {
+	tmpDir = join(tmpdir(), `pid-manager-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+	pidFilePath = join(tmpDir, "run", "pids.json");
+	mkdirSync(join(tmpDir, "run"), { recursive: true });
+	process.env.TALLOW_HOME = tmpDir;
+
+	const mod = await import(`../pid-manager.js?t=${Date.now()}`);
+	cleanupAllTrackedPidsFn = mod.cleanupAllTrackedPids;
+	cleanupOrphanPidsFn = mod.cleanupOrphanPids;
+});
 
 beforeEach(() => {
-	tmpDir = join(tmpdir(), `pid-manager-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(join(tmpDir, "run"), { recursive: true });
-	pidFilePath = join(tmpDir, "run", "pids.json");
+	try {
+		unlinkSync(pidFilePath);
+	} catch {
+		// File already absent
+	}
 });
 
 afterEach(() => {
+	for (const pid of spawnedPids) {
+		killProcessGroup(pid, "SIGKILL");
+	}
+	spawnedPids.clear();
+});
+
+afterAll(() => {
 	rmSync(tmpDir, { recursive: true, force: true });
+	delete process.env.TALLOW_HOME;
 });
 
 /**
  * Write a PID file in the expected format.
  *
  * @param entries - PID entries to write
+ * @returns Nothing
  */
-function writePidFile(entries: Array<{ pid: number; command: string; startedAt: number }>): void {
+function writePidFile(entries: TestPidEntry[]): void {
 	writeFileSync(pidFilePath, JSON.stringify({ version: 1, entries }, null, "\t"));
 }
 
 /**
- * Spawn a real sleep process (detached) that we can use as a target.
- * Returns the child and a cleanup function.
+ * Spawn a detached `sleep` process we can target in cleanup tests.
  *
- * @returns Object with child process and cleanup function
+ * @returns PID of the spawned child process
+ * @throws {Error} When spawning fails
  */
-function spawnSleeper(): { pid: number; cleanup: () => void } {
+function spawnSleeper(): number {
 	const child = spawn("sleep", ["60"], {
 		detached: true,
 		stdio: "ignore",
 	});
 	child.unref();
-	if (!child.pid) throw new Error("Failed to spawn sleep process");
-	const pid = child.pid;
-	return {
-		pid,
-		cleanup: () => {
-			try {
-				process.kill(-pid, "SIGKILL");
-			} catch {
-				// Already dead
-			}
-		},
-	};
+	if (!child.pid) {
+		throw new Error("Failed to spawn sleep process");
+	}
+	spawnedPids.add(child.pid);
+	return child.pid;
+}
+
+/**
+ * Signal the process group for a detached child.
+ *
+ * @param pid - Group leader PID
+ * @param signal - Signal to deliver
+ * @returns Nothing
+ */
+function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
+	try {
+		process.kill(-pid, signal);
+	} catch {
+		// Already dead
+	}
 }
 
 /**
  * Check if a process is alive.
  *
- * @param pid - Process ID to check
- * @returns True if the process is still running
+ * @param pid - Process ID to probe
+ * @returns True when the process is alive
  */
 function isAlive(pid: number): boolean {
 	try {
@@ -77,75 +108,140 @@ function isAlive(pid: number): boolean {
 	}
 }
 
-describe("pid-manager logic", () => {
-	describe("PID file format", () => {
-		test("version 1 with entries array is the canonical format", () => {
-			writePidFile([{ pid: 1, command: "test", startedAt: Date.now() }]);
-			const raw = JSON.parse(readFileSync(pidFilePath, "utf-8"));
-			expect(raw.version).toBe(1);
-			expect(Array.isArray(raw.entries)).toBe(true);
-			expect(raw.entries[0]).toHaveProperty("pid");
-			expect(raw.entries[0]).toHaveProperty("command");
-			expect(raw.entries[0]).toHaveProperty("startedAt");
-		});
+/**
+ * Read process start metadata from `ps`.
+ *
+ * @param pid - Process ID to inspect
+ * @returns Start-time string, or null when unavailable
+ */
+function readProcessStartedAt(pid: number): string | null {
+	const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "ignore"],
+	});
+	if (result.error || result.status !== 0) {
+		return null;
+	}
+	const startedAt = result.stdout.trim();
+	return startedAt.length > 0 ? startedAt : null;
+}
+
+/**
+ * Poll until a process start identity becomes readable.
+ *
+ * @param pid - Process ID to inspect
+ * @returns Start-time identity string
+ * @throws {Error} When metadata cannot be read before timeout
+ */
+async function requireProcessStartedAt(pid: number): Promise<string> {
+	const timeoutMs = 1_000;
+	const startedAt = Date.now();
+
+	while (Date.now() - startedAt < timeoutMs) {
+		const identity = readProcessStartedAt(pid);
+		if (identity) {
+			return identity;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+
+	throw new Error(`Failed to read process start metadata for PID ${pid}`);
+}
+
+/**
+ * Wait until a process exits.
+ *
+ * @param pid - Process ID to observe
+ * @returns True when the process exited before timeout
+ */
+async function waitForExit(pid: number): Promise<boolean> {
+	const timeoutMs = 1_000;
+	const startedAt = Date.now();
+
+	while (Date.now() - startedAt < timeoutMs) {
+		if (!isAlive(pid)) {
+			return true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+
+	return false;
+}
+
+describe("pid-manager", () => {
+	test("cleanupOrphanPids signals matching PID + identity entries", async () => {
+		const pid = spawnSleeper();
+		const processStartedAt = await requireProcessStartedAt(pid);
+
+		writePidFile([
+			{
+				command: "sleep 60",
+				pid,
+				processStartedAt,
+				startedAt: Date.now(),
+			},
+		]);
+
+		const killed = cleanupOrphanPidsFn();
+		expect(killed).toBe(1);
+		expect(await waitForExit(pid)).toBe(true);
+		expect(existsSync(pidFilePath)).toBe(false);
 	});
 
-	describe("process detection", () => {
-		test("kill -0 detects a live process", () => {
-			const { pid, cleanup } = spawnSleeper();
-			try {
-				expect(isAlive(pid)).toBe(true);
-			} finally {
-				cleanup();
-			}
-		});
+	test("cleanupOrphanPids skips signaling when identity mismatches", () => {
+		const pid = spawnSleeper();
 
-		test("kill -0 returns false for a dead PID", () => {
-			// PID 0 is special (kernel), use a very high PID unlikely to exist
-			expect(isAlive(2_147_483_647)).toBe(false);
-		});
+		writePidFile([
+			{
+				command: "sleep 60",
+				pid,
+				processStartedAt: "Mon Jan  1 00:00:00 2001",
+				startedAt: Date.now(),
+			},
+		]);
+
+		const killed = cleanupOrphanPidsFn();
+		expect(killed).toBe(0);
+		expect(isAlive(pid)).toBe(true);
+		expect(existsSync(pidFilePath)).toBe(false);
 	});
 
-	describe("process group signalling", () => {
-		test("negative PID targets process group (detached children are group leaders)", () => {
-			const { pid, cleanup } = spawnSleeper();
-			try {
-				// Verify the process is alive
-				expect(isAlive(pid)).toBe(true);
+	test("cleanupOrphanPids skips signaling when identity metadata is missing", () => {
+		const pid = spawnSleeper();
 
-				// Verify negative PID (process group) signal doesn't throw for a live process
-				expect(() => process.kill(-pid, 0)).not.toThrow();
-			} finally {
-				cleanup();
-			}
-		});
+		writePidFile([
+			{
+				command: "sleep 60",
+				pid,
+				startedAt: Date.now(),
+			},
+		]);
 
-		test("SIGTERM to negative PID of dead process throws (caught by cleanup)", () => {
-			expect(() => process.kill(-2_147_483_647, "SIGTERM")).toThrow();
-		});
+		const killed = cleanupOrphanPidsFn();
+		expect(killed).toBe(0);
+		expect(isAlive(pid)).toBe(true);
+		expect(existsSync(pidFilePath)).toBe(false);
 	});
 
-	describe("PID file cleanup", () => {
-		test("empty entries array means nothing to clean", () => {
-			writePidFile([]);
-			const raw = JSON.parse(readFileSync(pidFilePath, "utf-8"));
-			expect(raw.entries).toHaveLength(0);
-		});
+	test("cleanupAllTrackedPids uses the same identity safety check", () => {
+		const pid = spawnSleeper();
 
-		test("stale entries with dead PIDs are safe to process", () => {
-			// Write entries with PIDs that don't exist
-			writePidFile([
-				{ pid: 2_147_483_647, command: "ghost-1", startedAt: Date.now() - 3600_000 },
-				{ pid: 2_147_483_646, command: "ghost-2", startedAt: Date.now() - 7200_000 },
-			]);
+		writePidFile([
+			{
+				command: "sleep 60",
+				pid,
+				startedAt: Date.now(),
+			},
+		]);
 
-			const raw = JSON.parse(readFileSync(pidFilePath, "utf-8"));
-			expect(raw.entries).toHaveLength(2);
+		const killed = cleanupAllTrackedPidsFn();
+		expect(killed).toBe(0);
+		expect(isAlive(pid)).toBe(true);
+		expect(existsSync(pidFilePath)).toBe(false);
+	});
 
-			// Verify these PIDs are indeed dead
-			for (const entry of raw.entries) {
-				expect(isAlive(entry.pid)).toBe(false);
-			}
-		});
+	test("cleanupOrphanPids handles corrupt PID files safely", () => {
+		writeFileSync(pidFilePath, "NOT VALID JSON{{{");
+		expect(cleanupOrphanPidsFn()).toBe(0);
 	});
 });
