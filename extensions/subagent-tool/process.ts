@@ -224,7 +224,9 @@ export async function spawnBackgroundSubagent(
 	const args: string[] = session
 		? ["--mode", "json", "-p", "--session", session]
 		: ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--models", agent.model);
+	// Use provider-qualified name (e.g. "openai-codex/gpt-5.1") so the child process
+	// resolves to the exact provider the router selected, not just the first match.
+	if (agent.model) args.push("--models", routing.model.displayName);
 	const effectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
 	if (effectiveTools && effectiveTools.length > 0) args.push("--tools", effectiveTools.join(","));
 	if (agent.skills && agent.skills.length > 0) {
@@ -553,7 +555,8 @@ export async function runSingleAgent(
 	const args: string[] = session
 		? ["--mode", "json", "-p", "--session", session]
 		: ["--mode", "json", "-p", "--no-session"];
-	if (agent.model) args.push("--models", agent.model);
+	// Use provider-qualified name so the child process resolves to the exact provider.
+	if (agent.model) args.push("--models", routing.model.displayName);
 	const fgEffectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
 	if (fgEffectiveTools && fgEffectiveTools.length > 0)
 		args.push("--tools", fgEffectiveTools.join(","));
