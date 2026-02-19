@@ -31,18 +31,20 @@ other tool.
 
 ## How it works
 
-1. On session start, reads `mcpServers` from settings.json
-2. Spawns each server as a child process (STDIO transport)
-3. Sends the MCP initialize handshake and `tools/list` request
-4. Registers every discovered tool with tallow
-5. Routes tool calls to the right server
-6. Kills all servers on session end
+1. On session start, reads `mcpServers` from `~/.tallow/settings.json`
+2. If the project is trusted, merges in `.tallow/settings.json` (project entries override name conflicts)
+3. Spawns each server as a child process (STDIO transport)
+4. Sends the MCP initialize handshake and `tools/list` request
+5. Registers every discovered tool with tallow
+6. Routes tool calls to the right server
+7. Kills all servers on session end
 
 ## Project trust gate
 
 Project MCP config in `.tallow/settings.json` is only loaded when the
 project is trusted. For untrusted or stale projects, the adapter ignores
-project `mcpServers` and only reads `~/.tallow/settings.json`.
+project `mcpServers`, still loads `~/.tallow/settings.json`, and emits a
+startup warning that project MCP servers were skipped.
 
 Use:
 
