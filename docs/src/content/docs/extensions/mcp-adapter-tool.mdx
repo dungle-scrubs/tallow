@@ -59,6 +59,16 @@ automatic restart on the next tool call. If the restart fails,
 the server's tools are marked unavailable and a notification is
 shown. No retry loops.
 
+## SSE cancellation behavior
+
+For `type: "sse"` servers, request cancellation is fail-fast:
+
+- each POST request has its own `AbortController`
+- request timeouts abort the underlying network POST (not just the Promise)
+- `stop()` aborts the SSE stream and all in-flight POST requests
+- endpoint-wait timeout aborts connection setup resources
+- timed-out/stopped requests are removed from pending bookkeeping to avoid stale late resolution
+
 ## Agent-scoped MCP servers
 
 Agents can restrict which MCP servers connect in their subprocess by declaring
