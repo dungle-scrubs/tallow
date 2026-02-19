@@ -97,6 +97,10 @@ Skills have frontmatter metadata including `name`,
 - **Packages** — a plugin system for distributing commands,
   agents, skills, and hooks. Local paths only — remote
   repositories are not yet supported.
+- **Claude Code compatibility** — tallow reads `.claude/`
+  resources directly. See
+  [Using tallow in existing Claude Code projects](/guides/coming-from-claude-code/)
+  for the exact compatibility matrix and caveats.
 - **Commands and prompts are interchangeable** — the
   `commands/` and `prompts/` directories are treated as
   synonyms. Files from either directory are merged into a

@@ -91,6 +91,15 @@ export default defineConfig({
 					],
 				},
 				{
+					label: "Guides",
+					items: [
+						{
+							label: "Using tallow in Claude Code projects",
+							slug: "guides/coming-from-claude-code",
+						},
+					],
+				},
+				{
 					label: "Extensions",
 					items: [
 						{ label: "Overview", slug: "extensions/overview" },
