@@ -34,15 +34,25 @@ export function resolveModel(input: string | undefined): string | undefined {
  * @param modelOverride - Explicit model (fuzzy matched), skips auto-routing
  * @param parentModelId - Parent model ID for fallback inheritance
  * @param hints - Optional routing hints (modelScope, costPreference, etc.)
+ * @param cwd - Working directory used for project-local routing settings
  * @returns Resolved model ID, or undefined on failure
  */
 export async function routeForkedModel(
 	task: string,
 	modelOverride?: string,
 	parentModelId?: string,
-	hints?: RoutingHints
+	hints?: RoutingHints,
+	cwd?: string
 ): Promise<string | undefined> {
-	const routing = await routeModel(task, modelOverride, undefined, parentModelId, undefined, hints);
+	const routing = await routeModel(
+		task,
+		modelOverride,
+		undefined,
+		parentModelId,
+		undefined,
+		hints,
+		cwd
+	);
 	if (!routing.ok) return modelOverride; // fallback to raw string
 	return routing.model.id;
 }

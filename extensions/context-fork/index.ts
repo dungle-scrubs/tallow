@@ -407,7 +407,7 @@ export default function (pi: ExtensionAPI): void {
 		const explicitModel = fm.model ?? agentConfig?.model;
 		const resolvedModel = explicitModel
 			? resolveModel(explicitModel)
-			: await routeForkedModel(content, undefined, ctx.model?.id);
+			: await routeForkedModel(content, undefined, ctx.model?.id, undefined, ctx.cwd);
 
 		// Show working indicator
 		const workingParts = [`🔀 forking: /${commandName}`];

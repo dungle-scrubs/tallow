@@ -136,6 +136,41 @@ Routing keywords integrate with the existing model routing system:
 
 Keywords are case-insensitive (`AUTO-CHEAP` works).
 
+### Global routing defaults (settings.json)
+
+You can set default auto-routing behavior in `settings.json`:
+
+```json
+{
+  "routing": {
+    "enabled": true,
+    "primaryType": "code",
+    "costPreference": "balanced"
+  }
+}
+```
+
+Supported values:
+
+- `routing.enabled`: `true` or `false`
+- `routing.primaryType`: `"code" | "vision" | "text"`
+- `routing.costPreference`: `"eco" | "balanced" | "premium"`
+
+Settings precedence is:
+
+1. `<project>/.tallow/settings.json`
+2. `~/.tallow/settings.json`
+3. built-in defaults (`enabled: true`, `primaryType: "code"`,
+   `costPreference: "balanced"`)
+
+Model selection precedence is:
+
+1. explicit `model` parameter
+2. per-call routing hints (`costPreference`, `taskType`, `complexity`,
+   `modelScope`)
+3. routing keyword from agent frontmatter (`auto-cheap`, etc.)
+4. `routing` defaults from settings
+
 ### Missing agent recovery
 
 When a requested agent name doesn't match any discovered agent, the tool

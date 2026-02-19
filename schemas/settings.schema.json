@@ -25,6 +25,30 @@
 			"enum": ["off", "minimal", "low", "medium", "high", "xhigh"],
 			"description": "Default thinking level for the agent."
 		},
+		"routing": {
+			"type": "object",
+			"description": "Global model-routing defaults used by subagent and context-fork auto-routing.",
+			"properties": {
+				"enabled": {
+					"type": "boolean",
+					"description": "Enable automatic model routing when no explicit model override is provided.",
+					"default": true
+				},
+				"primaryType": {
+					"type": "string",
+					"enum": ["code", "vision", "text"],
+					"description": "Default task type hint used by the classifier when task intent is ambiguous.",
+					"default": "code"
+				},
+				"costPreference": {
+					"type": "string",
+					"enum": ["eco", "balanced", "premium"],
+					"description": "Default routing cost preference when no per-call costPreference is provided.",
+					"default": "balanced"
+				}
+			},
+			"additionalProperties": false
+		},
 		"steeringMode": {
 			"type": "string",
 			"enum": ["all", "one-at-a-time"],

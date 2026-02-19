@@ -105,34 +105,112 @@ const DEFAULT_CONFIG: RoutingConfig = {
 const VALID_COST_PREFS = new Set<CostPreference>(["eco", "balanced", "premium"]);
 const VALID_TASK_TYPES = new Set<TaskType>(["code", "vision", "text"]);
 
+interface RawRoutingConfig {
+	enabled?: unknown;
+	primaryType?: unknown;
+	costPreference?: unknown;
+}
+
 /**
- * Loads routing configuration from ~/.tallow/settings.json.
+ * Reads the raw `routing` object from a settings file.
  *
- * Reads the `routing` key from settings. Falls back to defaults
- * for any missing fields.
+ * @param settingsPath - Absolute path to settings.json
+ * @returns Raw routing object, or undefined when absent/unreadable
+ */
+function readRawRoutingConfig(settingsPath: string): RawRoutingConfig | undefined {
+	try {
+		const raw = fs.readFileSync(settingsPath, "utf-8");
+		const parsed = JSON.parse(raw) as { routing?: unknown };
+		if (typeof parsed.routing !== "object" || parsed.routing === null) {
+			return undefined;
+		}
+		return parsed.routing as RawRoutingConfig;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Resolve a boolean routing field with project > user > default precedence.
  *
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @param fallback - Default fallback value
+ * @returns Resolved boolean value
+ */
+function resolveBooleanField(
+	projectValue: unknown,
+	userValue: unknown,
+	fallback: boolean
+): boolean {
+	if (typeof projectValue === "boolean") return projectValue;
+	if (typeof userValue === "boolean") return userValue;
+	return fallback;
+}
+
+/**
+ * Resolve a typed enum routing field with project > user > default precedence.
+ *
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @param validValues - Set of accepted enum values
+ * @param fallback - Default fallback value
+ * @returns Resolved enum value
+ */
+function resolveEnumField<T extends string>(
+	projectValue: unknown,
+	userValue: unknown,
+	validValues: Set<T>,
+	fallback: T
+): T {
+	if (typeof projectValue === "string" && validValues.has(projectValue as T)) {
+		return projectValue as T;
+	}
+	if (typeof userValue === "string" && validValues.has(userValue as T)) {
+		return userValue as T;
+	}
+	return fallback;
+}
+
+/**
+ * Loads routing configuration from settings files.
+ *
+ * Reads from:
+ * 1) `~/.tallow/settings.json` (user-level)
+ * 2) `<cwd>/.tallow/settings.json` (project-level, overrides user-level)
+ *
+ * Invalid values fall back to lower-precedence values, then defaults.
+ *
+ * @param cwd - Working directory used for project-local settings
  * @returns Merged routing config
  */
-export function loadRoutingConfig(): RoutingConfig {
-	try {
-		const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
-		const raw = fs.readFileSync(settingsPath, "utf-8");
-		const parsed = JSON.parse(raw);
-		const routing = parsed?.routing;
-		if (!routing || typeof routing !== "object") return { ...DEFAULT_CONFIG };
+export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
+	const home = process.env.HOME || os.homedir();
+	const userSettingsPath = path.join(home, ".tallow", "settings.json");
+	const projectSettingsPath = path.join(cwd, ".tallow", "settings.json");
 
-		return {
-			enabled: typeof routing.enabled === "boolean" ? routing.enabled : DEFAULT_CONFIG.enabled,
-			primaryType: VALID_TASK_TYPES.has(routing.primaryType)
-				? routing.primaryType
-				: DEFAULT_CONFIG.primaryType,
-			costPreference: VALID_COST_PREFS.has(routing.costPreference)
-				? routing.costPreference
-				: DEFAULT_CONFIG.costPreference,
-		};
-	} catch {
-		return { ...DEFAULT_CONFIG };
-	}
+	const userRouting = readRawRoutingConfig(userSettingsPath);
+	const projectRouting = readRawRoutingConfig(projectSettingsPath);
+
+	return {
+		enabled: resolveBooleanField(
+			projectRouting?.enabled,
+			userRouting?.enabled,
+			DEFAULT_CONFIG.enabled
+		),
+		primaryType: resolveEnumField(
+			projectRouting?.primaryType,
+			userRouting?.primaryType,
+			VALID_TASK_TYPES,
+			DEFAULT_CONFIG.primaryType
+		),
+		costPreference: resolveEnumField(
+			projectRouting?.costPreference,
+			userRouting?.costPreference,
+			VALID_COST_PREFS,
+			DEFAULT_CONFIG.costPreference
+		),
+	};
 }
 
 // ─── Subscription Provider Detection ─────────────────────────────────────────
@@ -222,6 +300,7 @@ function resolveFallback(parentModelId: string): ResolvedModel {
  * @param parentModelId - Parent session's model ID (inheritance fallback)
  * @param agentRole - Optional agent role for classifier context
  * @param hints - Optional per-call routing hints from parent LLM
+ * @param cwd - Working directory used for project-local routing settings
  * @returns Routing result with model, fallbacks, and reason
  */
 export async function routeModel(
@@ -230,7 +309,8 @@ export async function routeModel(
 	agentModel?: string,
 	parentModelId?: string,
 	agentRole?: string,
-	hints?: RoutingHints
+	hints?: RoutingHints,
+	cwd?: string
 ): Promise<RoutingResult> {
 	// 1. Explicit per-call model override — fuzzy resolve to best match
 	if (modelOverride) {
@@ -259,7 +339,7 @@ export async function routeModel(
 		}
 	}
 
-	const config = loadRoutingConfig();
+	const config = loadRoutingConfig(cwd);
 	const fallback = parentModelId
 		? resolveFallback(parentModelId)
 		: { provider: "unknown", id: "unknown", displayName: "unknown" };
