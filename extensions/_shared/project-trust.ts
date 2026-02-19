@@ -27,13 +27,32 @@ export function getProjectTrustStatus(): ProjectTrustStatus {
 	return "untrusted";
 }
 
+/** Shared trust decision for loading project-scoped settings. */
+export interface ProjectSettingsTrustDecision {
+	readonly allowProjectSettings: boolean;
+	readonly trustStatus: ProjectTrustStatus;
+}
+
+/**
+ * Resolve whether project-scoped settings should be honored.
+ *
+ * @returns Trust decision with status and project-settings gate
+ */
+export function getProjectSettingsTrustDecision(): ProjectSettingsTrustDecision {
+	const trustStatus = getProjectTrustStatus();
+	return {
+		allowProjectSettings: trustStatus === "trusted",
+		trustStatus,
+	};
+}
+
 /**
  * Check whether repo-controlled project surfaces should be allowed.
  *
  * @returns True only when trust status is `trusted`
  */
 export function isProjectTrusted(): boolean {
-	return getProjectTrustStatus() === "trusted";
+	return getProjectSettingsTrustDecision().allowProjectSettings;
 }
 
 /**

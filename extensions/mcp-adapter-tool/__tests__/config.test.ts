@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createTransport, loadMcpConfig, validateMcpConfig } from "../index.js";
+import {
+	createTransport,
+	loadMcpConfig,
+	loadMcpConfigWithMetadata,
+	validateMcpConfig,
+} from "../index.js";
 
 let cwd: string;
 let homeDir: string;
@@ -117,25 +122,30 @@ describe("validateMcpConfig", () => {
 });
 
 describe("loadMcpConfig trust gating", () => {
-	test("trusted projects read project mcpServers first", () => {
+	test("trusted projects merge global and project mcpServers", () => {
 		writeJson(join(homeDir, ".tallow", "settings.json"), {
 			mcpServers: {
 				global: { command: "global-cmd" },
+				shared: { command: "global-shared" },
 			},
 		});
 		writeJson(join(cwd, ".tallow", "settings.json"), {
 			mcpServers: {
 				project: { command: "project-cmd" },
+				shared: { command: "project-shared" },
 			},
 		});
 
 		process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 		const config = loadMcpConfig(cwd);
-		expect(Object.keys(config)).toEqual(["project"]);
+
+		expect(Object.keys(config)).toEqual(["global", "shared", "project"]);
+		expect((config.global as { command?: string }).command).toBe("global-cmd");
 		expect((config.project as { command?: string }).command).toBe("project-cmd");
+		expect((config.shared as { command?: string }).command).toBe("project-shared");
 	});
 
-	test("untrusted projects ignore project mcpServers", () => {
+	test("untrusted projects ignore project mcpServers and report skipped source", () => {
 		writeJson(join(homeDir, ".tallow", "settings.json"), {
 			mcpServers: {
 				global: { command: "global-cmd" },
@@ -148,6 +158,24 @@ describe("loadMcpConfig trust gating", () => {
 		});
 
 		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+		const result = loadMcpConfigWithMetadata(cwd);
+		expect(Object.keys(result.config)).toEqual(["global"]);
+		expect((result.config.global as { command?: string }).command).toBe("global-cmd");
+		expect(result.skippedProjectConfig).not.toBeNull();
+		expect(result.skippedProjectConfig?.path).toBe(join(cwd, ".tallow", "settings.json"));
+		expect(result.skippedProjectConfig?.trustStatus).toBe("untrusted");
+	});
+
+	test("invalid project mcp config is ignored without blocking global config", () => {
+		writeJson(join(homeDir, ".tallow", "settings.json"), {
+			mcpServers: {
+				global: { command: "global-cmd" },
+			},
+		});
+		mkdirSync(join(cwd, ".tallow"), { recursive: true });
+		writeFileSync(join(cwd, ".tallow", "settings.json"), "{ invalid-json");
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 		const config = loadMcpConfig(cwd);
 		expect(Object.keys(config)).toEqual(["global"]);
 		expect((config.global as { command?: string }).command).toBe("global-cmd");

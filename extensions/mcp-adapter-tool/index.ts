@@ -36,7 +36,10 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
-import { isProjectTrusted } from "../_shared/project-trust.js";
+import {
+	getProjectSettingsTrustDecision,
+	type ProjectTrustStatus,
+} from "../_shared/project-trust.js";
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -913,43 +916,144 @@ export function validateMcpConfig(
 	};
 }
 
+/** Metadata describing why project MCP config was skipped. */
+export interface SkippedProjectMcpConfig {
+	readonly path: string;
+	readonly trustStatus: ProjectTrustStatus;
+}
+
+/** Result payload for MCP config loading with diagnostics. */
+export interface McpConfigLoadResult {
+	readonly config: Record<string, McpServerConfig>;
+	readonly skippedProjectConfig: SkippedProjectMcpConfig | null;
+}
+
 /**
- * Loads mcpServers config from trusted project settings or global settings.
- * Validates each server config and skips invalid entries.
+ * Read and validate `mcpServers` from a settings file.
  *
- * When project trust is not `trusted`, project `.tallow/settings.json` is
- * ignored and only `~/.tallow/settings.json` is considered.
+ * @param settingsPath - Absolute settings.json path
+ * @returns Map of server name to validated config
+ */
+function readMcpConfigFromSettings(settingsPath: string): Record<string, McpServerConfig> {
+	if (!fs.existsSync(settingsPath)) return {};
+
+	try {
+		const content = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as {
+			mcpServers?: Record<string, unknown>;
+		};
+		if (
+			!content.mcpServers ||
+			typeof content.mcpServers !== "object" ||
+			Array.isArray(content.mcpServers)
+		) {
+			return {};
+		}
+
+		const result: Record<string, McpServerConfig> = {};
+		for (const [name, raw] of Object.entries(content.mcpServers)) {
+			if (typeof raw !== "object" || raw === null) continue;
+			const validated = validateMcpConfig(name, raw as Record<string, unknown>);
+			if (validated) result[name] = validated;
+		}
+		return result;
+	} catch {
+		// Invalid settings should not block startup.
+		return {};
+	}
+}
+
+/**
+ * Check whether a settings file contains at least one project MCP server.
+ *
+ * @param settingsPath - Absolute settings.json path
+ * @returns True when `mcpServers` has one or more entries
+ */
+function hasConfiguredMcpServers(settingsPath: string): boolean {
+	if (!fs.existsSync(settingsPath)) return false;
+
+	try {
+		const content = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as {
+			mcpServers?: Record<string, unknown>;
+		};
+		if (
+			!content.mcpServers ||
+			typeof content.mcpServers !== "object" ||
+			Array.isArray(content.mcpServers)
+		) {
+			return false;
+		}
+		return Object.keys(content.mcpServers).length > 0;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Build a user-visible startup notice when project MCP config is skipped.
+ *
+ * @param projectSettingsPath - Project settings path that was blocked
+ * @param trustStatus - Current trust status used for gating
+ * @returns Warning text suitable for UI notifications
+ */
+function formatSkippedProjectMcpNotice(
+	projectSettingsPath: string,
+	trustStatus: ProjectTrustStatus
+): string {
+	const reason =
+		trustStatus === "stale_fingerprint" ? "project trust is stale" : "project is untrusted";
+	return (
+		`MCP: skipped project mcpServers in ${projectSettingsPath} (${reason}). ` +
+		"Run /trust-project to enable project MCP servers."
+	);
+}
+
+/**
+ * Loads mcpServers config from global settings and, when trusted, project
+ * settings. Validates each server config and skips invalid entries.
+ *
+ * Global `~/.tallow/settings.json` is always loaded. Project
+ * `.tallow/settings.json` is merged only when the trust status is `trusted`.
+ * If both sources define the same server name, project config wins.
+ *
+ * @param cwd - Current working directory
+ * @returns MCP config plus trust-gate diagnostics
+ */
+export function loadMcpConfigWithMetadata(cwd: string): McpConfigLoadResult {
+	const homeDir = process.env.HOME || "";
+	const globalSettingsPath = path.join(homeDir, ".tallow", "settings.json");
+	const projectSettingsPath = path.join(cwd, ".tallow", "settings.json");
+	const trustDecision = getProjectSettingsTrustDecision();
+
+	const globalConfig = readMcpConfigFromSettings(globalSettingsPath);
+	const projectConfig = trustDecision.allowProjectSettings
+		? readMcpConfigFromSettings(projectSettingsPath)
+		: {};
+
+	const skippedProjectConfig =
+		trustDecision.allowProjectSettings || !hasConfiguredMcpServers(projectSettingsPath)
+			? null
+			: {
+					path: projectSettingsPath,
+					trustStatus: trustDecision.trustStatus,
+				};
+
+	return {
+		config: {
+			...globalConfig,
+			...projectConfig,
+		},
+		skippedProjectConfig,
+	};
+}
+
+/**
+ * Loads merged MCP server config for runtime connection setup.
  *
  * @param cwd - Current working directory
  * @returns Map of server name to validated config
  */
 export function loadMcpConfig(cwd: string): Record<string, McpServerConfig> {
-	const locations = isProjectTrusted()
-		? [
-				path.join(cwd, ".tallow", "settings.json"),
-				path.join(process.env.HOME || "", ".tallow", "settings.json"),
-			]
-		: [path.join(process.env.HOME || "", ".tallow", "settings.json")];
-
-	for (const loc of locations) {
-		try {
-			if (fs.existsSync(loc)) {
-				const content = JSON.parse(fs.readFileSync(loc, "utf-8"));
-				if (content.mcpServers) {
-					const result: Record<string, McpServerConfig> = {};
-					for (const [name, raw] of Object.entries(content.mcpServers)) {
-						const validated = validateMcpConfig(name, raw as Record<string, unknown>);
-						if (validated) result[name] = validated;
-					}
-					return result;
-				}
-			}
-		} catch {
-			// Ignore parse errors
-		}
-	}
-
-	return {};
+	return loadMcpConfigWithMetadata(cwd).config;
 }
 
 // ── Server Types ─────────────────────────────────────────────────────────────
@@ -1321,7 +1425,18 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 	// ── Lifecycle ────────────────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
-		const mcpConfig = loadMcpConfig(ctx.cwd);
+		const configResult = loadMcpConfigWithMetadata(ctx.cwd);
+		if (configResult.skippedProjectConfig) {
+			ctx.ui.notify(
+				formatSkippedProjectMcpNotice(
+					configResult.skippedProjectConfig.path,
+					configResult.skippedProjectConfig.trustStatus
+				),
+				"warning"
+			);
+		}
+
+		const mcpConfig = configResult.config;
 		let serverNames = Object.keys(mcpConfig);
 		if (serverNames.length === 0) return;
 
