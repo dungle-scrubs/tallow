@@ -100,8 +100,18 @@ const HOOK_FORCE_KILL_GRACE_MS_ENV = "TALLOW_HOOK_FORCE_KILL_GRACE_MS";
 /** Marker appended once when subprocess output is truncated due to buffer cap. */
 export const HOOK_OUTPUT_TRUNCATION_MARKER = "\n[output truncated]\n";
 
+/** Optional env override for hook-agent runner binary/path. */
+const HOOK_AGENT_RUNNER_ENV = "TALLOW_HOOK_AGENT_RUNNER";
+
 /** Internal termination reasons for hook subprocesses. */
 type HookTerminationReason = "abort" | "timeout";
+
+/** Runner descriptor for agent hook subprocesses. */
+interface HookAgentRunner {
+	command: string;
+	preArgs: string[];
+	source: string;
+}
 
 /** Buffered output accumulator state for a single stream. */
 interface HookOutputBuffer {
@@ -147,6 +157,109 @@ function getHookOutputMaxBufferBytes(): number {
  */
 function getHookForceKillGraceMs(): number {
 	return getPositiveIntEnv(HOOK_FORCE_KILL_GRACE_MS_ENV, DEFAULT_HOOK_FORCE_KILL_GRACE_MS);
+}
+
+/**
+ * Build the runner descriptor for the currently running tallow executable.
+ *
+ * @returns Runner descriptor when argv looks like tallow entrypoint, else null
+ */
+function getCurrentTallowRunner(): HookAgentRunner | null {
+	const entrypoint = process.argv[1];
+	if (!entrypoint) {
+		return null;
+	}
+
+	const normalized = entrypoint.replace(/\\/g, "/").toLowerCase();
+	const looksLikeTallow =
+		normalized.includes("/tallow") ||
+		normalized.endsWith("/dist/cli.js") ||
+		normalized === "tallow";
+	if (!looksLikeTallow) {
+		return null;
+	}
+
+	if (/\.(c|m)?js$/i.test(entrypoint)) {
+		return {
+			command: process.execPath,
+			preArgs: [entrypoint],
+			source: "current process",
+		};
+	}
+
+	return {
+		command: entrypoint,
+		preArgs: [],
+		source: "current process",
+	};
+}
+
+/**
+ * Resolve hook-agent runner candidates in priority order.
+ *
+ * Order:
+ * 1. TALLOW_HOOK_AGENT_RUNNER override
+ * 2. current tallow executable (when detectable)
+ * 3. `tallow` on PATH
+ * 4. `pi` on PATH (legacy fallback)
+ *
+ * @returns Deduplicated runner candidates
+ */
+export function resolveHookAgentRunnerCandidates(): HookAgentRunner[] {
+	const candidates: HookAgentRunner[] = [];
+	const override = process.env[HOOK_AGENT_RUNNER_ENV]?.trim();
+	if (override) {
+		candidates.push({
+			command: override,
+			preArgs: [],
+			source: HOOK_AGENT_RUNNER_ENV,
+		});
+	}
+
+	const currentRunner = getCurrentTallowRunner();
+	if (currentRunner) {
+		candidates.push(currentRunner);
+	}
+
+	candidates.push({ command: "tallow", preArgs: [], source: "PATH" });
+	candidates.push({ command: "pi", preArgs: [], source: "PATH" });
+
+	const deduped: HookAgentRunner[] = [];
+	const seen = new Set<string>();
+	for (const candidate of candidates) {
+		const key = `${candidate.command}\u0000${candidate.preArgs.join("\u0000")}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		deduped.push(candidate);
+	}
+	return deduped;
+}
+
+/** Runner resolver used by runAgentHook (overridable in tests). */
+let hookAgentRunnerResolver = resolveHookAgentRunnerCandidates;
+/** Spawn implementation used by runAgentHook (overridable in tests). */
+let spawnHookAgentProcess: typeof spawn = spawn;
+
+/**
+ * Override hook-agent runner candidate resolution for tests.
+ *
+ * @param resolver - Optional resolver override (reset when omitted)
+ * @returns Nothing
+ */
+export function setHookAgentRunnerResolverForTests(
+	resolver?: typeof resolveHookAgentRunnerCandidates
+): void {
+	hookAgentRunnerResolver = resolver ?? resolveHookAgentRunnerCandidates;
+}
+
+/**
+ * Override hook-agent spawn implementation for tests.
+ *
+ * @param implementation - Optional spawn override (reset when omitted)
+ * @returns Nothing
+ */
+export function setHookAgentSpawnForTests(implementation?: typeof spawn): void {
+	spawnHookAgentProcess = implementation ?? spawn;
 }
 
 /**
@@ -873,7 +986,7 @@ export async function runCommandHook(
 }
 
 /**
- * Runs an agent-type hook by spawning a pi subprocess.
+ * Runs an agent-type hook by spawning a resolved tallow-compatible subprocess.
  * @param handler - Hook handler configuration
  * @param eventData - Event data to include in prompt
  * @param cwd - Working directory for the agent
@@ -897,14 +1010,13 @@ export async function runAgentHook(
 		"Evaluate the following event and return JSON: { ok: true/false, reason: '...' }";
 	prompt = prompt.replace(/\$ARGUMENTS/g, JSON.stringify(eventData, null, 2));
 
-	// Build pi args
+	// Build CLI args
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 
 	if (handler.model) {
 		args.push("--model", handler.model);
 	}
 
-	// If agent is specified, load its config
 	if (handler.agent) {
 		const agentPath = path.join(agentsDir, `${handler.agent}.md`);
 		if (fs.existsSync(agentPath)) {
@@ -915,20 +1027,22 @@ export async function runAgentHook(
 	args.push(prompt);
 
 	return new Promise((resolve) => {
-		const proc = spawn("pi", args, {
-			cwd,
-			env: { ...process.env, PI_IS_HOOK_AGENT: "1" },
-			shell: false,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		const runners = hookAgentRunnerResolver();
+		if (runners.length === 0) {
+			resolve({
+				ok: false,
+				reason: `No hook agent runner candidates available. Set ${HOOK_AGENT_RUNNER_ENV}.`,
+			});
+			return;
+		}
 
 		const stdout: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
 		const stderr: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
-		const termination = createHookTerminationController(proc, timeoutMs, signal);
 		let settled = false;
+		let lastSpawnError: NodeJS.ErrnoException | null = null;
 
 		/**
-		 * Resolve exactly once and clean up process listeners/timers.
+		 * Resolve exactly once.
 		 *
 		 * @param result - Hook execution result
 		 * @returns void
@@ -936,67 +1050,115 @@ export async function runAgentHook(
 		const settle = (result: HookResult): void => {
 			if (settled) return;
 			settled = true;
-			termination.cleanup();
 			resolve(result);
 		};
 
-		proc.stdout.on("data", (chunk: Buffer) => {
-			appendToHookBuffer(stdout, chunk, maxBufferBytes);
-		});
-		proc.stderr.on("data", (chunk: Buffer) => {
-			appendToHookBuffer(stderr, chunk, maxBufferBytes);
-		});
-
-		proc.once("error", (error) => {
-			settle({ ok: false, reason: error.message || "Hook agent failed to start" });
-		});
-
-		proc.once("close", (code) => {
-			const terminatedBy = termination.getReason();
-			if (terminatedBy !== null) {
-				settle({ ok: false, reason: "Hook agent timed out or was aborted" });
+		/**
+		 * Spawn the next runner candidate until one starts or all fail.
+		 *
+		 * @param index - Candidate index
+		 * @returns void
+		 */
+		const spawnWithRunner = (index: number): void => {
+			const runner = runners[index];
+			if (!runner) {
+				const attempted = runners.map((candidate) => candidate.command).join(", ");
+				const cause = lastSpawnError?.message ? ` Last error: ${lastSpawnError.message}` : "";
+				settle({
+					ok: false,
+					reason: `Hook agent runner not found. Tried: ${attempted}. Set ${HOOK_AGENT_RUNNER_ENV} to a valid tallow binary.${cause}`,
+				});
 				return;
 			}
 
-			const output = stdout.text.trim();
-			const lines = output.split("\n");
-			for (let i = lines.length - 1; i >= 0; i--) {
-				try {
-					const event = JSON.parse(lines[i]);
-					if (event.type === "message_end" && event.message?.role === "assistant") {
-						for (const part of event.message.content) {
-							if (part.type !== "text") continue;
-							const jsonMatch = part.text.match(/\{[\s\S]*"ok"\s*:\s*(true|false)[\s\S]*\}/);
-							if (!jsonMatch) continue;
-							try {
-								const result = JSON.parse(jsonMatch[0]);
-								settle({
-									additionalContext: result.additionalContext,
-									ok: result.ok ?? true,
-									reason: result.reason,
-								});
-								return;
-							} catch {
-								// Continue searching for parseable hook result JSON.
-							}
-						}
-					}
-				} catch {
-					// Not JSON, continue.
-				}
-			}
+			const launchArgs = [...runner.preArgs, ...args];
+			const proc = spawnHookAgentProcess(runner.command, launchArgs, {
+				cwd,
+				env: { ...process.env, PI_IS_HOOK_AGENT: "1" },
+				shell: false,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
 
-			if (code !== 0) {
-				const stderrText = stderr.text.trim();
-				if (stderrText) {
-					settle({ ok: false, reason: stderrText });
+			const termination = createHookTerminationController(proc, timeoutMs, signal);
+			let startupFailed = false;
+
+			proc.stdout.on("data", (chunk: Buffer) => {
+				appendToHookBuffer(stdout, chunk, maxBufferBytes);
+			});
+			proc.stderr.on("data", (chunk: Buffer) => {
+				appendToHookBuffer(stderr, chunk, maxBufferBytes);
+			});
+
+			proc.once("error", (error) => {
+				startupFailed = true;
+				termination.cleanup();
+				const spawnError = error as NodeJS.ErrnoException;
+				if (spawnError.code === "ENOENT") {
+					lastSpawnError = spawnError;
+					spawnWithRunner(index + 1);
 					return;
 				}
-			}
+				settle({
+					ok: false,
+					reason:
+						spawnError.message ||
+						`Hook agent failed to start with runner ${runner.command} (${runner.source})`,
+				});
+			});
 
-			// Preserve existing semantics: no parsed decision -> map process exit code.
-			settle({ ok: code === 0 });
-		});
+			proc.once("close", (code) => {
+				if (startupFailed) {
+					return;
+				}
+				termination.cleanup();
+				const terminatedBy = termination.getReason();
+				if (terminatedBy !== null) {
+					settle({ ok: false, reason: "Hook agent timed out or was aborted" });
+					return;
+				}
+
+				const output = stdout.text.trim();
+				const lines = output.split("\n");
+				for (let i = lines.length - 1; i >= 0; i--) {
+					try {
+						const event = JSON.parse(lines[i]);
+						if (event.type === "message_end" && event.message?.role === "assistant") {
+							for (const part of event.message.content) {
+								if (part.type !== "text") continue;
+								const jsonMatch = part.text.match(/\{[\s\S]*"ok"\s*:\s*(true|false)[\s\S]*\}/);
+								if (!jsonMatch) continue;
+								try {
+									const result = JSON.parse(jsonMatch[0]);
+									settle({
+										additionalContext: result.additionalContext,
+										ok: result.ok ?? true,
+										reason: result.reason,
+									});
+									return;
+								} catch {
+									// Continue searching for parseable hook result JSON.
+								}
+							}
+						}
+					} catch {
+						// Not JSON, continue.
+					}
+				}
+
+				if (code !== 0) {
+					const stderrText = stderr.text.trim();
+					if (stderrText) {
+						settle({ ok: false, reason: stderrText });
+						return;
+					}
+				}
+
+				// Preserve existing semantics: no parsed decision -> map process exit code.
+				settle({ ok: code === 0 });
+			});
+		};
+
+		spawnWithRunner(0);
 	});
 }
 
