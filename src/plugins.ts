@@ -15,6 +15,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
@@ -48,6 +49,29 @@ export interface PluginSpec {
 	readonly ref?: string;
 	/** For local: resolved absolute path */
 	readonly localPath?: string;
+}
+
+/**
+ * Normalized remote plugin spec used by fetch/cache operations.
+ *
+ * This shape is produced after validation and normalization, and is the only
+ * form accepted by security-sensitive path/cache helpers.
+ */
+export interface NormalizedRemotePluginSpec {
+	/** Original spec string */
+	readonly raw: string;
+	/** Always false for remote specs */
+	readonly isLocal: false;
+	/** Normalized cache key (filesystem-safe) */
+	readonly cacheKey: string;
+	/** Normalized GitHub owner */
+	readonly owner: string;
+	/** Optional normalized git ref */
+	readonly ref?: string;
+	/** Normalized GitHub repo */
+	readonly repo: string;
+	/** Normalized safe subpath (empty string for repo root) */
+	readonly subpath: string;
 }
 
 /** Detected plugin format after inspecting a directory. */
@@ -249,6 +273,117 @@ export function normalizePluginSubpath(subpath: string, specForError = "plugin s
 	return segments.join("/");
 }
 
+/** Valid owner/repo token pattern used by github: specs. */
+const SAFE_REMOTE_TOKEN = /^[A-Za-z0-9._-]+$/;
+
+/** Input parts used to build a normalized plugin cache key. */
+interface CacheKeyParts {
+	readonly owner: string;
+	readonly ref?: string;
+	readonly repo: string;
+	readonly subpath: string;
+}
+
+/**
+ * Normalize and validate a GitHub owner/repo token.
+ *
+ * @param value - Token to validate
+ * @param field - Human-readable field name for error messages
+ * @param rawSpec - Original plugin spec string
+ * @returns Normalized token
+ * @throws Error if the token is missing or contains unsupported characters
+ */
+function normalizeRemoteToken(value: string | undefined, field: string, rawSpec: string): string {
+	const normalized = (value ?? "").trim();
+	if (!normalized) {
+		throw new Error(`Invalid GitHub plugin spec: "${rawSpec}". Missing ${field}.`);
+	}
+	if (!SAFE_REMOTE_TOKEN.test(normalized)) {
+		throw new Error(
+			`Invalid GitHub plugin spec: "${rawSpec}". ${field} contains unsupported characters.`
+		);
+	}
+	return normalized;
+}
+
+/**
+ * Convert an arbitrary string into a filesystem-safe cache-key segment.
+ *
+ * @param value - Raw value to convert
+ * @returns Cache-key-safe segment containing only `[A-Za-z0-9._-]` and `--`
+ */
+function toSafeCacheSegment(value: string): string {
+	const normalized = value
+		.trim()
+		.replaceAll("\\", "/")
+		.split("/")
+		.filter(Boolean)
+		.map((segment) => {
+			const safe = segment
+				.normalize("NFKC")
+				.replace(/[^A-Za-z0-9._-]+/g, "-")
+				.replace(/^-+|-+$/g, "");
+			return safe || "x";
+		})
+		.join("--");
+
+	return normalized || "default";
+}
+
+/**
+ * Build a deterministic, filesystem-safe cache key for a remote plugin.
+ *
+ * The key includes a human-readable slug and a short hash suffix so values
+ * that normalize to the same slug still remain distinct.
+ *
+ * @param parts - Normalized cache-key parts
+ * @returns Filesystem-safe cache key
+ */
+export function buildPluginCacheKey(parts: CacheKeyParts): string {
+	const ownerSlug = toSafeCacheSegment(parts.owner);
+	const repoSlug = toSafeCacheSegment(parts.repo);
+	const subpathSlug = parts.subpath ? `--${toSafeCacheSegment(parts.subpath)}` : "";
+	const refSlug = toSafeCacheSegment(parts.ref ?? "default");
+	const canonical = JSON.stringify({
+		owner: parts.owner,
+		ref: parts.ref ?? "",
+		repo: parts.repo,
+		subpath: parts.subpath,
+	});
+	const digest = createHash("sha256").update(canonical).digest("hex").slice(0, 12);
+
+	return `${ownerSlug}--${repoSlug}${subpathSlug}@${refSlug}~${digest}`;
+}
+
+/**
+ * Normalize and validate a parsed remote plugin spec.
+ *
+ * @param spec - Parsed plugin spec
+ * @returns Normalized remote spec safe for fetch/cache operations
+ * @throws Error if the spec is local or contains invalid remote fields
+ */
+export function normalizeRemotePluginSpec(spec: PluginSpec): NormalizedRemotePluginSpec {
+	if (spec.isLocal) {
+		throw new Error("Local plugins cannot be normalized as remote specs");
+	}
+
+	const owner = normalizeRemoteToken(spec.owner, "owner", spec.raw);
+	const repo = normalizeRemoteToken(spec.repo, "repo", spec.raw);
+	const subpath = normalizePluginSubpath(spec.subpath ?? "", spec.raw);
+	const trimmedRef = spec.ref?.trim();
+	const ref = trimmedRef ? trimmedRef : undefined;
+
+	return {
+		raw: spec.raw,
+		isLocal: false,
+		cacheKey: buildPluginCacheKey({ owner, repo, subpath, ref }),
+		owner,
+		repo,
+		subpath,
+		ref,
+	};
+}
+
 /**
  * Check whether a target path is contained within a root path.
  *
@@ -259,6 +394,45 @@ export function normalizePluginSubpath(subpath: string, specForError = "plugin s
 function isPathContained(rootPath: string, targetPath: string): boolean {
 	const rel = relative(rootPath, targetPath);
 	return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Assert that a path is contained within a trusted root.
+ *
+ * Performs lexical containment checks first, then canonical checks when both
+ * paths exist. This catches symlink-based escapes while allowing checks for
+ * paths that do not exist yet (e.g. future cache directories).
+ *
+ * @param rootPath - Trusted root directory
+ * @param targetPath - Candidate path to validate
+ * @param label - Human-readable label used in error messages
+ * @returns Absolute validated target path
+ * @throws Error when the target escapes the trusted root
+ */
+function assertPathContained(
+	rootPath: string,
+	targetPath: string,
+	label: string,
+	escapeMessage = `Invalid ${label}: resolved path escapes trusted root.`
+): string {
+	const absoluteRoot = resolve(rootPath);
+	const absoluteTarget = resolve(targetPath);
+
+	if (!isPathContained(absoluteRoot, absoluteTarget)) {
+		throw new Error(escapeMessage);
+	}
+
+	if (!existsSync(absoluteRoot) || !existsSync(absoluteTarget)) {
+		return absoluteTarget;
+	}
+
+	const canonicalRoot = realpathSync(absoluteRoot);
+	const canonicalTarget = realpathSync(absoluteTarget);
+	if (!isPathContained(canonicalRoot, canonicalTarget)) {
+		throw new Error(escapeMessage);
+	}
+
+	return canonicalTarget;
 }
 
 /**
@@ -276,20 +450,24 @@ export function resolveContainedSubpath(cloneRoot: string, subpath: string): str
 	const canonicalRoot = realpathSync(cloneRoot);
 	const normalizedSubpath = normalizePluginSubpath(subpath);
 	const candidatePath = resolve(canonicalRoot, normalizedSubpath);
+	const checkedPath = assertPathContained(
+		canonicalRoot,
+		candidatePath,
+		"plugin subpath",
+		"Invalid plugin subpath: resolved path escapes repository root."
+	);
 
-	if (!isPathContained(canonicalRoot, candidatePath)) {
-		throw new Error("Invalid plugin subpath: resolved path escapes repository root.");
-	}
-
-	if (!existsSync(candidatePath)) {
+	if (!existsSync(checkedPath)) {
 		throw new Error(`Plugin subpath "${normalizedSubpath}" not found in repository.`);
 	}
 
-	const canonicalCandidate = realpathSync(candidatePath);
-	if (!isPathContained(canonicalRoot, canonicalCandidate)) {
-		throw new Error("Invalid plugin subpath: resolved path escapes repository root.");
-	}
-
+	const canonicalCandidate = realpathSync(checkedPath);
+	assertPathContained(
+		canonicalRoot,
+		canonicalCandidate,
+		"plugin subpath",
+		"Invalid plugin subpath: resolved path escapes repository root."
+	);
 	return canonicalCandidate;
 }
 
@@ -326,20 +504,16 @@ interface CacheMeta {
 /**
  * Get the cache directory path for a given plugin spec.
  *
- * @param spec - Parsed plugin spec
+ * @param spec - Parsed or normalized remote plugin spec
  * @returns Absolute path to the cache directory
  */
-export function getCachePath(spec: PluginSpec): string {
+export function getCachePath(spec: PluginSpec | NormalizedRemotePluginSpec): string {
 	if (spec.isLocal) {
 		throw new Error("Local plugins are not cached");
 	}
-
-	const repoSlug = `${spec.owner}--${spec.repo}`;
-	const normalizedSubpath = spec.subpath ? normalizePluginSubpath(spec.subpath, spec.raw) : "";
-	const subSlug = normalizedSubpath ? `--${normalizedSubpath.replace(/\//g, "--")}` : "";
-	const refSlug = spec.ref ? `@${spec.ref}` : "@default";
-
-	return join(CACHE_DIR, `${repoSlug}${subSlug}${refSlug}`);
+	const normalized = "cacheKey" in spec ? spec : normalizeRemotePluginSpec(spec);
+	const candidatePath = join(CACHE_DIR, normalized.cacheKey);
+	return assertPathContained(CACHE_DIR, candidatePath, "plugin cache path");
 }
 
 /**
@@ -395,26 +569,24 @@ function writeCacheMeta(cachePath: string, spec: PluginSpec, commitSha?: string)
  * Uses `git clone --depth 1` for efficiency. If a subpath is specified,
  * the full repo is cloned then only the subpath is preserved.
  *
- * @param spec - Parsed plugin spec (must be remote)
+ * @param spec - Normalized remote plugin spec
  * @param cachePath - Target cache directory
  * @throws Error if git clone fails
  */
-export function fetchPlugin(spec: PluginSpec, cachePath: string): void {
-	if (spec.isLocal) {
-		throw new Error("Cannot fetch a local plugin");
-	}
-
+export function fetchPlugin(spec: NormalizedRemotePluginSpec, cachePath: string): void {
+	mkdirSync(CACHE_DIR, { recursive: true });
+	const safeCachePath = assertPathContained(CACHE_DIR, cachePath, "plugin cache path");
 	const repoUrl = `https://github.com/${spec.owner}/${spec.repo}.git`;
 
 	// Clean up any partial previous fetch
-	if (existsSync(cachePath)) {
-		rmSync(cachePath, { recursive: true, force: true });
+	if (existsSync(safeCachePath)) {
+		rmSync(safeCachePath, { recursive: true, force: true });
 	}
 
-	mkdirSync(cachePath, { recursive: true });
+	mkdirSync(safeCachePath, { recursive: true });
 
 	// Clone into a temp dir, then extract the subpath
-	const tmpClone = join(dirname(cachePath), `.tmp-clone-${Date.now()}`);
+	const tmpClone = join(dirname(safeCachePath), `.tmp-clone-${Date.now()}`);
 
 	try {
 		const cloneArgs = ["clone", "--depth", "1"];
@@ -441,14 +613,13 @@ export function fetchPlugin(spec: PluginSpec, cachePath: string): void {
 
 		// If subpath, move only that directory to the cache location
 		if (spec.subpath) {
-			const normalizedSubpath = normalizePluginSubpath(spec.subpath, spec.raw);
 			let subDir: string;
 			try {
-				subDir = resolveContainedSubpath(tmpClone, normalizedSubpath);
+				subDir = resolveContainedSubpath(tmpClone, spec.subpath);
 			} catch (error) {
 				if (error instanceof Error && error.message.includes("not found in repository")) {
 					throw new Error(
-						`Subpath "${normalizedSubpath}" not found in ${spec.owner}/${spec.repo}. ` +
+						`Subpath "${spec.subpath}" not found in ${spec.owner}/${spec.repo}. ` +
 							`Available top-level entries: ${readdirSync(tmpClone)
 								.filter((e) => !e.startsWith("."))
 								.join(", ")}`
@@ -458,16 +629,16 @@ export function fetchPlugin(spec: PluginSpec, cachePath: string): void {
 			}
 
 			// Remove the target and rename the validated subdir into place
-			rmSync(cachePath, { recursive: true, force: true });
-			renameSync(subDir, cachePath);
+			rmSync(safeCachePath, { recursive: true, force: true });
+			renameSync(subDir, safeCachePath);
 		} else {
 			// No subpath — move entire clone (minus .git) to cache
 			rmSync(join(tmpClone, ".git"), { recursive: true, force: true });
-			rmSync(cachePath, { recursive: true, force: true });
-			renameSync(tmpClone, cachePath);
+			rmSync(safeCachePath, { recursive: true, force: true });
+			renameSync(tmpClone, safeCachePath);
 		}
 
-		writeCacheMeta(cachePath, spec, commitSha);
+		writeCacheMeta(safeCachePath, spec, commitSha);
 	} finally {
 		// Clean up temp clone dir if it still exists
 		if (existsSync(tmpClone)) {
@@ -625,10 +796,11 @@ function resolveLocalPlugin(spec: PluginSpec): ResolvedPlugin {
  * @returns Resolved plugin
  */
 function resolveRemotePlugin(spec: PluginSpec): ResolvedPlugin {
-	const cachePath = getCachePath(spec);
+	const normalizedSpec = normalizeRemotePluginSpec(spec);
+	const cachePath = getCachePath(normalizedSpec);
 
 	if (!isCacheValid(cachePath, spec)) {
-		fetchPlugin(spec, cachePath);
+		fetchPlugin(normalizedSpec, cachePath);
 	}
 
 	const format = detectPluginFormat(cachePath);
@@ -689,14 +861,15 @@ export function refreshPlugin(spec: string): ResolvedPlugin {
 		throw new Error("Cannot refresh a local plugin — local plugins are never cached.");
 	}
 
-	const cachePath = getCachePath(parsed);
+	const normalizedSpec = normalizeRemotePluginSpec(parsed);
+	const cachePath = getCachePath(normalizedSpec);
 
 	// Force re-fetch by removing existing cache
 	if (existsSync(cachePath)) {
 		rmSync(cachePath, { recursive: true, force: true });
 	}
 
-	fetchPlugin(parsed, cachePath);
+	fetchPlugin(normalizedSpec, cachePath);
 
 	const format = detectPluginFormat(cachePath);
 	const manifest = readPluginManifest(cachePath, format);
