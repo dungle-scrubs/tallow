@@ -5,6 +5,72 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.4...tallow-v0.8.5) (2026-02-20)
+
+
+### Added
+
+* **core:** add project trust store and fingerprinting primitives ([27429aa](https://github.com/dungle-scrubs/tallow/commit/27429aada21e2ccc322b4dd2e5d673cdf06ebd33))
+* **trust:** enforce project trust gate across extension surfaces ([07e0618](https://github.com/dungle-scrubs/tallow/commit/07e0618009b003ef1c605ff94ae040ab17786c40))
+* **trust:** resolve project trust state and startup controls ([4e501b0](https://github.com/dungle-scrubs/tallow/commit/4e501b0dbcb0c22306042d72b154c80e64bba289))
+
+
+### Fixed
+
+* **core:** clear stale interactive UI state between turns ([31dbd29](https://github.com/dungle-scrubs/tallow/commit/31dbd29156949ca6f4e9e10b8f2f130b5a11b2e6))
+* **debug:** redact sensitive fields in debug logger ([43d6c59](https://github.com/dungle-scrubs/tallow/commit/43d6c5939aa00121d334696187954adce8712e76))
+* **deps:** remediate advisory paths with targeted overrides ([1ff39e9](https://github.com/dungle-scrubs/tallow/commit/1ff39e907736ad87bacabd7f6c2481d1c23b1f66))
+* guard bg_bash unref for nonstandard child processes ([3e91c98](https://github.com/dungle-scrubs/tallow/commit/3e91c9873ad76142302fbcaa7146894a3c4215a8))
+* harden plugin ref parsing and cache path safety ([d49c01a](https://github.com/dungle-scrubs/tallow/commit/d49c01a5bd8c5c6ef45e0fa2814b35edebbb7989))
+* **hooks:** harden subprocess timeout and output buffering ([116ff7e](https://github.com/dungle-scrubs/tallow/commit/116ff7e0cd0e14940febfa6ca3edbd17c67e5d3c))
+* isolate lsp test mocks across suites ([4c703dd](https://github.com/dungle-scrubs/tallow/commit/4c703ddd73c05525ab68c7e66ab532d796a4253b))
+* **lint:** resolve biome warnings in docs, tests, and subagent ([1c9674d](https://github.com/dungle-scrubs/tallow/commit/1c9674d4c6bc3d908aebdfe8ff39a8271d732622))
+* **lsp:** add timeout and abort guards ([04dc838](https://github.com/dungle-scrubs/tallow/commit/04dc83814d702e1c112942010e9a8d00eedfabc0))
+* make pid registry lock contention fail-safe ([690ffb5](https://github.com/dungle-scrubs/tallow/commit/690ffb59c46a67ffc2a2218ea2af4dd8cb502e10))
+* **mcp-adapter:** abort timed-out SSE requests ([83d68e7](https://github.com/dungle-scrubs/tallow/commit/83d68e74b5b25da346a50aa0ceb3e9d634f714b9))
+* **mcp-adapter:** gate project MCP servers by trust ([a0f7130](https://github.com/dungle-scrubs/tallow/commit/a0f713033129e82da3a4269e5c256f6ea4a688f5))
+* **pid-cleanup:** verify process identity before signaling ([5989864](https://github.com/dungle-scrubs/tallow/commit/5989864d2290928f1c93a449f4dfc1bf1ae0741c))
+* **plan-mode:** enforce strict readonly tool allowlist ([c58a50e](https://github.com/dungle-scrubs/tallow/commit/c58a50e0c8a48f14af84c0ace9f00bdb6edd081c))
+* **plugins:** contain github plugin subpaths to clone root ([e58b206](https://github.com/dungle-scrubs/tallow/commit/e58b206eec35f6e1b19b98be9da9db021347cac7))
+* prevent cross-session pid cleanup termination ([3f56f37](https://github.com/dungle-scrubs/tallow/commit/3f56f376c7c4d9d7b860f73af3c44bfdb17fec75))
+* resolve hook agent runner without hardcoded pi binary ([8805e9f](https://github.com/dungle-scrubs/tallow/commit/8805e9fb5ca970ad816d3631f0415e9d8676c47a))
+* resolve pid manager paths from runtime TALLOW_HOME ([9e24032](https://github.com/dungle-scrubs/tallow/commit/9e240326198c1aa6879719527411ac18c9bb4eb6))
+* **subagent-tool:** show routed model during parallel execution ([7045ef4](https://github.com/dungle-scrubs/tallow/commit/7045ef42f5ebf07b6f0ced31bf0716d73e4bc802))
+* **tests:** make trust-gated package/plugin specs deterministic ([b96ce22](https://github.com/dungle-scrubs/tallow/commit/b96ce22c9146e56476c4c60d11493d555263a853))
+
+
+### Changed
+
+* add runtime path provider with pid injection hooks ([9de6745](https://github.com/dungle-scrubs/tallow/commit/9de6745946ff40b1c5b61b67f8a9360f6061ad7b))
+* add shared mock-scope harness for isolated tests ([357aa6d](https://github.com/dungle-scrubs/tallow/commit/357aa6dafdc927eeb6586de7543fd36555f4e9df))
+* centralize agent runner resolution policy ([86cf33a](https://github.com/dungle-scrubs/tallow/commit/86cf33a758d03a3f68475e3a6f881956b836c153))
+* extract background task process lifecycle manager ([8be74d7](https://github.com/dungle-scrubs/tallow/commit/8be74d77f1fe33db4f898f8a9afda95682d984e4))
+* extract shared file lock utility for pid registry ([e4e3d3b](https://github.com/dungle-scrubs/tallow/commit/e4e3d3bcc34be2c842118bf7ff64f686d2903896))
+* move pid tracking to session-scoped files ([93e150b](https://github.com/dungle-scrubs/tallow/commit/93e150b3426927fbef994dbb9d53f51d9a94b0a3))
+* normalize plugin specs and harden cache keys ([3b57b5c](https://github.com/dungle-scrubs/tallow/commit/3b57b5c5586909872b4de7dcde5a759b201ac0c1))
+
+
+### Documentation
+
+* **changelog:** note dependency advisory remediation ([6dbe154](https://github.com/dungle-scrubs/tallow/commit/6dbe1548bbca577e3075e310ddf93e0cfe2bd7a1))
+* **changelog:** note PID reuse safety cleanup guard ([b664614](https://github.com/dungle-scrubs/tallow/commit/b66461495d17c3c07ac0dd9203f99788288071fd))
+* **debug:** document redaction behavior and changelog ([317b2a3](https://github.com/dungle-scrubs/tallow/commit/317b2a392593cfd797cc4979948a27e8c71ec416))
+* **hooks:** document subprocess safety defaults ([aae3825](https://github.com/dungle-scrubs/tallow/commit/aae3825155d20db168c86f57668322b3455bff17))
+* **lsp:** note fail-fast timeout behavior ([6023157](https://github.com/dungle-scrubs/tallow/commit/602315732fd411ce099cb21006ba7c8d64869bd6))
+* **mcp-adapter:** clarify trust-gated config loading ([06b9401](https://github.com/dungle-scrubs/tallow/commit/06b940162f249290f64324d13804b69b5043e416))
+* **mcp-adapter:** document SSE cancellation semantics ([7835871](https://github.com/dungle-scrubs/tallow/commit/7835871a38cb7abd0296e909514b64a7cb85585d))
+* **plan-mode:** document strict readonly behavior ([6767926](https://github.com/dungle-scrubs/tallow/commit/6767926975bac9038f40025ae166365282fa621f))
+* **trust:** document trust-gated project execution surfaces ([75b22c4](https://github.com/dungle-scrubs/tallow/commit/75b22c4cdda113a76fe160425f6f29881d84181a))
+
+
+### Maintenance
+
+* **dev:** add pre-pr script that mirrors CI ([4a07276](https://github.com/dungle-scrubs/tallow/commit/4a0727621df29ff3a5e5277522224d93663a927c))
+* **hooks:** cover timeout escalation and output truncation ([0bb3490](https://github.com/dungle-scrubs/tallow/commit/0bb3490d2c747897194f3a0e5cf88b3e71f3b8ff))
+* **lsp:** add timeout and abort coverage ([18728a5](https://github.com/dungle-scrubs/tallow/commit/18728a569b8f1f89bef6d93ec08bf2a4e0804e6f))
+* **pid-cleanup:** cover PID reuse safety and metadata fallback ([57fe0fc](https://github.com/dungle-scrubs/tallow/commit/57fe0fc4f587874cbde8dbfff78b5959bd0dd241))
+* **plan-mode:** add strict gating coverage ([e1bb73e](https://github.com/dungle-scrubs/tallow/commit/e1bb73eb09c9c0ba4412bb1515f3b0ea2e3f4dcd))
+
 ## [0.8.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.3...tallow-v0.8.4) (2026-02-19)
 
 
