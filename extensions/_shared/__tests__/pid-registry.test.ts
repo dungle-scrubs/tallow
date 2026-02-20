@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 // Set env before importing the module under test (it reads TALLOW_CODING_AGENT_DIR at call time)
 let tmpDir: string;
@@ -31,12 +31,31 @@ async function loadModule() {
 }
 
 /**
- * Read the raw PID file from the temp directory.
+ * List all session-scoped PID files in the temp directory.
+ *
+ * @returns Absolute paths to session PID files
+ */
+function listSessionPidFiles(): string[] {
+	const dir = join(tmpDir, "run", "pids");
+	if (!existsSync(dir)) {
+		return [];
+	}
+	return readdirSync(dir)
+		.filter((entry) => entry.endsWith(".json"))
+		.map((entry) => join(dir, entry));
+}
+
+/**
+ * Read the single session PID file used by this process.
  *
  * @returns Parsed JSON contents
  */
 function readRawPidFile(): {
 	version: number;
+	owner: {
+		pid: number;
+		startedAt?: string;
+	};
 	entries: Array<{
 		pid: number;
 		command: string;
@@ -46,8 +65,11 @@ function readRawPidFile(): {
 		startedAt: number;
 	}>;
 } {
-	const path = join(tmpDir, "run", "pids.json");
-	return JSON.parse(readFileSync(path, "utf-8"));
+	const files = listSessionPidFiles();
+	if (files.length !== 1) {
+		throw new Error(`Expected exactly one session PID file, got ${files.length}`);
+	}
+	return JSON.parse(readFileSync(files[0], "utf-8"));
 }
 
 /**
@@ -102,6 +124,21 @@ function readProcessStartedAt(pid: number): string | null {
 	return startedAt.length > 0 ? startedAt : null;
 }
 
+/**
+ * Resolve the expected session PID file path for the current process.
+ *
+ * @returns Session PID file path
+ */
+function getCurrentSessionPidFilePath(): string {
+	const startedAt = readProcessStartedAt(process.pid) ?? "unknown";
+	const startedAtSlug = startedAt
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	const normalizedStartedAt = startedAtSlug.length > 0 ? startedAtSlug : "unknown";
+	return join(tmpDir, "run", "pids", `${process.pid}-${normalizedStartedAt}.json`);
+}
+
 describe("pid-registry", () => {
 	describe("registerPid", () => {
 		test("creates run directory and PID file on first call", async () => {
@@ -109,7 +146,8 @@ describe("pid-registry", () => {
 			registerPid(12345, "npm test");
 
 			const file = readRawPidFile();
-			expect(file.version).toBe(1);
+			expect(file.version).toBe(2);
+			expect(file.owner.pid).toBe(process.pid);
 			expect(file.entries).toHaveLength(1);
 			expect(file.entries[0].pid).toBe(12345);
 			expect(file.entries[0].command).toBe("npm test");
@@ -161,11 +199,12 @@ describe("pid-registry", () => {
 			expect(file.entries[0].command).toBe("cmd-a");
 		});
 
-		test("preserves legacy entries without processStartedAt metadata", async () => {
+		test("writes session-scoped files without mutating legacy global file", async () => {
 			const runDir = join(tmpDir, "run");
 			mkdirSync(runDir, { recursive: true });
+			const legacyPath = join(runDir, "pids.json");
 			writeFileSync(
-				join(runDir, "pids.json"),
+				legacyPath,
 				JSON.stringify({
 					version: 1,
 					entries: [{ pid: 999, command: "legacy", startedAt: Date.now() - 1_000 }],
@@ -176,10 +215,12 @@ describe("pid-registry", () => {
 			registerPid(123, "new-process");
 
 			const file = readRawPidFile();
-			const legacy = file.entries.find((entry) => entry.pid === 999);
-			expect(legacy).toBeDefined();
-			expect(legacy?.processStartedAt).toBeUndefined();
 			expect(file.entries.find((entry) => entry.pid === 123)).toBeDefined();
+
+			const legacy = JSON.parse(readFileSync(legacyPath, "utf-8")) as {
+				entries?: Array<{ pid: number }>;
+			};
+			expect(legacy.entries?.[0]?.pid).toBe(999);
 		});
 	});
 
@@ -193,6 +234,13 @@ describe("pid-registry", () => {
 			const file = readRawPidFile();
 			expect(file.entries).toHaveLength(1);
 			expect(file.entries[0].pid).toBe(200);
+		});
+
+		test("removes the session file when the last PID is unregistered", async () => {
+			const { registerPid, unregisterPid } = await loadModule();
+			registerPid(100, "cmd-a");
+			unregisterPid(100);
+			expect(listSessionPidFiles()).toHaveLength(0);
 		});
 
 		test("no-ops when PID is not in file", async () => {
@@ -213,35 +261,35 @@ describe("pid-registry", () => {
 
 	describe("corrupt/missing file handling", () => {
 		test("handles corrupt JSON gracefully", async () => {
-			const runDir = join(tmpDir, "run");
-			mkdirSync(runDir, { recursive: true });
-			writeFileSync(join(runDir, "pids.json"), "NOT VALID JSON{{{");
+			const sessionPath = getCurrentSessionPidFilePath();
+			mkdirSync(dirname(sessionPath), { recursive: true });
+			writeFileSync(sessionPath, "NOT VALID JSON{{{");
 
 			const { registerPid } = await loadModule();
 			registerPid(100, "cmd-a");
 
 			const file = readRawPidFile();
-			expect(file.version).toBe(1);
+			expect(file.version).toBe(2);
 			expect(file.entries).toHaveLength(1);
 		});
 
 		test("handles wrong version gracefully", async () => {
-			const runDir = join(tmpDir, "run");
-			mkdirSync(runDir, { recursive: true });
-			writeFileSync(join(runDir, "pids.json"), JSON.stringify({ version: 99, entries: [] }));
+			const sessionPath = getCurrentSessionPidFilePath();
+			mkdirSync(dirname(sessionPath), { recursive: true });
+			writeFileSync(sessionPath, JSON.stringify({ version: 99, entries: [] }));
 
 			const { registerPid } = await loadModule();
 			registerPid(100, "cmd-a");
 
 			const file = readRawPidFile();
-			expect(file.version).toBe(1);
+			expect(file.version).toBe(2);
 			expect(file.entries).toHaveLength(1);
 		});
 
 		test("handles missing entries array gracefully", async () => {
-			const runDir = join(tmpDir, "run");
-			mkdirSync(runDir, { recursive: true });
-			writeFileSync(join(runDir, "pids.json"), JSON.stringify({ version: 1 }));
+			const sessionPath = getCurrentSessionPidFilePath();
+			mkdirSync(dirname(sessionPath), { recursive: true });
+			writeFileSync(sessionPath, JSON.stringify({ version: 2, owner: { pid: process.pid } }));
 
 			const { registerPid } = await loadModule();
 			registerPid(100, "cmd-a");
