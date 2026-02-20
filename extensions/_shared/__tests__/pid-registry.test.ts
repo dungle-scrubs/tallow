@@ -40,6 +40,8 @@ function readRawPidFile(): {
 	entries: Array<{
 		pid: number;
 		command: string;
+		ownerPid?: number;
+		ownerStartedAt?: string;
 		processStartedAt?: string;
 		startedAt: number;
 	}>;
@@ -111,7 +113,11 @@ describe("pid-registry", () => {
 			expect(file.entries).toHaveLength(1);
 			expect(file.entries[0].pid).toBe(12345);
 			expect(file.entries[0].command).toBe("npm test");
+			expect(file.entries[0].ownerPid).toBe(process.pid);
 			expect(typeof file.entries[0].startedAt).toBe("number");
+			if (file.entries[0].ownerStartedAt !== undefined) {
+				expect(typeof file.entries[0].ownerStartedAt).toBe("string");
+			}
 			if (file.entries[0].processStartedAt !== undefined) {
 				expect(typeof file.entries[0].processStartedAt).toBe("string");
 			}

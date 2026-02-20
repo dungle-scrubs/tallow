@@ -1,12 +1,14 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 interface TestPidEntry {
 	pid: number;
 	command: string;
+	ownerPid?: number;
+	ownerStartedAt?: string;
 	processStartedAt?: string;
 	startedAt: number;
 }
@@ -57,6 +59,21 @@ afterAll(() => {
  */
 function writePidFile(entries: TestPidEntry[]): void {
 	writeFileSync(pidFilePath, JSON.stringify({ version: 1, entries }, null, "\t"));
+}
+
+/**
+ * Read PID entries from disk for assertions.
+ *
+ * @returns Parsed entries, or an empty array if the file is missing
+ */
+function readPidEntries(): TestPidEntry[] {
+	if (!existsSync(pidFilePath)) {
+		return [];
+	}
+	const parsed = JSON.parse(readFileSync(pidFilePath, "utf-8")) as {
+		entries?: TestPidEntry[];
+	};
+	return parsed.entries ?? [];
 }
 
 /**
@@ -169,13 +186,15 @@ async function waitForExit(pid: number): Promise<boolean> {
 }
 
 describe("pid-manager", () => {
-	test("cleanupOrphanPids signals matching PID + identity entries", async () => {
+	test("cleanupOrphanPids signals orphan entries with matching child identity", async () => {
 		const pid = spawnSleeper();
 		const processStartedAt = await requireProcessStartedAt(pid);
 
 		writePidFile([
 			{
 				command: "sleep 60",
+				ownerPid: 999_999,
+				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
 				pid,
 				processStartedAt,
 				startedAt: Date.now(),
@@ -188,12 +207,38 @@ describe("pid-manager", () => {
 		expect(existsSync(pidFilePath)).toBe(false);
 	});
 
-	test("cleanupOrphanPids skips signaling when identity mismatches", () => {
+	test("cleanupOrphanPids preserves entries owned by live sessions", async () => {
+		const ownerPid = spawnSleeper();
+		const ownerStartedAt = await requireProcessStartedAt(ownerPid);
+		const childPid = spawnSleeper();
+		const childStartedAt = await requireProcessStartedAt(childPid);
+
+		writePidFile([
+			{
+				command: "sleep 60",
+				ownerPid,
+				ownerStartedAt,
+				pid: childPid,
+				processStartedAt: childStartedAt,
+				startedAt: Date.now(),
+			},
+		]);
+
+		const killed = cleanupOrphanPidsFn();
+		expect(killed).toBe(0);
+		expect(isAlive(childPid)).toBe(true);
+		expect(readPidEntries()).toHaveLength(1);
+		expect(readPidEntries()[0]?.pid).toBe(childPid);
+	});
+
+	test("cleanupOrphanPids skips signaling when child identity mismatches", () => {
 		const pid = spawnSleeper();
 
 		writePidFile([
 			{
 				command: "sleep 60",
+				ownerPid: 999_999,
+				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
 				pid,
 				processStartedAt: "Mon Jan  1 00:00:00 2001",
 				startedAt: Date.now(),
@@ -203,10 +248,10 @@ describe("pid-manager", () => {
 		const killed = cleanupOrphanPidsFn();
 		expect(killed).toBe(0);
 		expect(isAlive(pid)).toBe(true);
-		expect(existsSync(pidFilePath)).toBe(false);
+		expect(readPidEntries()).toHaveLength(1);
 	});
 
-	test("cleanupOrphanPids skips signaling when identity metadata is missing", () => {
+	test("cleanupOrphanPids skips signaling when owner metadata is missing", () => {
 		const pid = spawnSleeper();
 
 		writePidFile([
@@ -220,7 +265,43 @@ describe("pid-manager", () => {
 		const killed = cleanupOrphanPidsFn();
 		expect(killed).toBe(0);
 		expect(isAlive(pid)).toBe(true);
-		expect(existsSync(pidFilePath)).toBe(false);
+		expect(readPidEntries()).toHaveLength(1);
+	});
+
+	test("cleanupOrphanPids prunes only targeted entries", async () => {
+		const ownerPid = spawnSleeper();
+		const ownerStartedAt = await requireProcessStartedAt(ownerPid);
+		const retainedPid = spawnSleeper();
+		const retainedStartedAt = await requireProcessStartedAt(retainedPid);
+		const orphanPid = spawnSleeper();
+		const orphanStartedAt = await requireProcessStartedAt(orphanPid);
+
+		writePidFile([
+			{
+				command: "sleep retained",
+				ownerPid,
+				ownerStartedAt,
+				pid: retainedPid,
+				processStartedAt: retainedStartedAt,
+				startedAt: Date.now(),
+			},
+			{
+				command: "sleep orphan",
+				ownerPid: 999_999,
+				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
+				pid: orphanPid,
+				processStartedAt: orphanStartedAt,
+				startedAt: Date.now(),
+			},
+		]);
+
+		const killed = cleanupOrphanPidsFn();
+		expect(killed).toBe(1);
+		expect(await waitForExit(orphanPid)).toBe(true);
+		const entries = readPidEntries();
+		expect(entries).toHaveLength(1);
+		expect(entries[0]?.pid).toBe(retainedPid);
+		expect(isAlive(retainedPid)).toBe(true);
 	});
 
 	test("cleanupAllTrackedPids uses the same identity safety check", () => {

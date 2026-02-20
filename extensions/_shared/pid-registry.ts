@@ -3,8 +3,8 @@
  *
  * Reads and writes `~/.tallow/run/pids.json` — the same file managed
  * by `src/pid-manager.ts` on the core side. The JSON schema (version 1,
- * entries with pid/command/startedAt plus optional processStartedAt)
- * is the shared contract.
+ * entries with pid/command/startedAt plus optional owner identity and
+ * process-start metadata) is the shared contract.
  *
  * Extensions call {@link registerPid} after spawning a detached child
  * and {@link unregisterPid} when the child exits or is killed.
@@ -21,6 +21,8 @@ import { atomicWriteFileSync } from "./atomic-write.js";
 interface PidEntry {
 	pid: number;
 	command: string;
+	ownerPid?: number;
+	ownerStartedAt?: string;
 	processStartedAt?: string;
 	startedAt: number;
 }
@@ -61,6 +63,12 @@ function isPidEntry(value: unknown): value is PidEntry {
 	if (typeof candidate.pid !== "number") return false;
 	if (typeof candidate.command !== "string") return false;
 	if (typeof candidate.startedAt !== "number") return false;
+	if (candidate.ownerPid != null && typeof candidate.ownerPid !== "number") {
+		return false;
+	}
+	if (candidate.ownerStartedAt != null && typeof candidate.ownerStartedAt !== "string") {
+		return false;
+	}
 	if (candidate.processStartedAt != null && typeof candidate.processStartedAt !== "string") {
 		return false;
 	}
@@ -198,9 +206,12 @@ export function registerPid(pid: number, command: string): void {
 		const file = readPidFile();
 		if (file.entries.some((entry) => entry.pid === pid)) return;
 
+		const ownerStartedAt = readProcessStartedAt(process.pid);
 		const processStartedAt = readProcessStartedAt(pid);
 		file.entries.push({
 			command,
+			ownerPid: process.pid,
+			ownerStartedAt: ownerStartedAt ?? undefined,
 			pid,
 			processStartedAt: processStartedAt ?? undefined,
 			startedAt: Date.now(),
