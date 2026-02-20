@@ -1,8 +1,9 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRuntimePathProvider, type RuntimePathProvider } from "../runtime-path-provider.js";
 
 interface TestPidEntry {
 	pid: number;
@@ -24,6 +25,7 @@ let legacyPidFilePath = "";
 let sessionPidDir = "";
 let cleanupAllTrackedPidsFn: () => number;
 let cleanupOrphanPidsFn: () => number;
+let setPidManagerPathProviderForTestsFn: (provider?: RuntimePathProvider) => void;
 const spawnedPids = new Set<number>();
 
 beforeAll(async () => {
@@ -34,14 +36,13 @@ beforeAll(async () => {
 	mkdirSync(sessionPidDir, { recursive: true });
 	process.env.TALLOW_HOME = tmpDir;
 
-	mock.module("../config.js", () => ({
-		TALLOW_HOME: tmpDir,
-		getRuntimeTallowHome: () => process.env.TALLOW_HOME ?? tmpDir,
-	}));
-
 	const mod = await import(`../pid-manager.js?t=${Date.now()}`);
 	cleanupAllTrackedPidsFn = mod.cleanupAllTrackedPids;
 	cleanupOrphanPidsFn = mod.cleanupOrphanPids;
+	setPidManagerPathProviderForTestsFn = mod.setPidManagerPathProviderForTests;
+	setPidManagerPathProviderForTestsFn(
+		createRuntimePathProvider(() => process.env.TALLOW_HOME ?? tmpDir)
+	);
 });
 
 beforeEach(() => {
@@ -57,10 +58,9 @@ afterEach(() => {
 });
 
 afterAll(() => {
+	setPidManagerPathProviderForTestsFn();
 	rmSync(tmpDir, { recursive: true, force: true });
 	delete process.env.TALLOW_HOME;
-	mock.restore();
-	mock.clearAllMocks();
 });
 
 /**
@@ -415,6 +415,36 @@ describe("pid-manager", () => {
 		expect(existsSync(getSessionPidFilePath(currentOwner))).toBe(false);
 		expect(isAlive(otherChildPid)).toBe(true);
 		expect(readSessionPidEntries(otherOwner)).toHaveLength(1);
+	});
+
+	test("cleanupOrphanPids supports injected runtime path providers", () => {
+		const injectedHome = join(
+			tmpdir(),
+			`pid-manager-injected-home-${Date.now()}-${Math.random().toString(36).slice(2)}`
+		);
+		const injectedSessionDir = join(injectedHome, "run", "pids");
+		const injectedCorruptPath = join(injectedSessionDir, "corrupt.json");
+		mkdirSync(injectedSessionDir, { recursive: true });
+		writeFileSync(injectedCorruptPath, "NOT VALID JSON{{{");
+
+		setPidManagerPathProviderForTestsFn(createRuntimePathProvider(() => injectedHome));
+		const previousHome = process.env.TALLOW_HOME;
+		delete process.env.TALLOW_HOME;
+
+		try {
+			expect(cleanupOrphanPidsFn()).toBe(0);
+			expect(existsSync(injectedCorruptPath)).toBe(false);
+		} finally {
+			if (previousHome === undefined) {
+				delete process.env.TALLOW_HOME;
+			} else {
+				process.env.TALLOW_HOME = previousHome;
+			}
+			setPidManagerPathProviderForTestsFn(
+				createRuntimePathProvider(() => process.env.TALLOW_HOME ?? tmpDir)
+			);
+			rmSync(injectedHome, { recursive: true, force: true });
+		}
 	});
 
 	test("cleanupOrphanPids honors TALLOW_HOME changes after module import", () => {
