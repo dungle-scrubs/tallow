@@ -7,6 +7,7 @@ import {
 	buildPluginCacheKey,
 	detectPluginFormat,
 	extractClaudePluginResources,
+	fetchPlugin,
 	getCachePath,
 	isCacheValid,
 	isImmutableRef,
@@ -128,6 +129,31 @@ describe("parsePluginSpec", () => {
 		);
 	});
 
+	it("should reject refs with path separators", () => {
+		expect(() => parsePluginSpec("github:owner/repo@feature/new-ui")).toThrow(
+			"path separators are not allowed"
+		);
+	});
+
+	it("should reject refs with traversal markers", () => {
+		expect(() => parsePluginSpec("github:owner/repo@..evil")).toThrow(
+			"path traversal is not allowed"
+		);
+	});
+
+	it("should reject empty refs", () => {
+		expect(() => parsePluginSpec("github:owner/repo@")).toThrow("ref cannot be empty");
+	});
+
+	it("should reject absolute refs", () => {
+		expect(() => parsePluginSpec("github:owner/repo@/tmp/evil")).toThrow(
+			"absolute refs are not allowed"
+		);
+		expect(() => parsePluginSpec("github:owner/repo@C:\\temp")).toThrow(
+			"absolute refs are not allowed"
+		);
+	});
+
 	it("should throw on invalid spec", () => {
 		expect(() => parsePluginSpec("just-a-name")).toThrow("Invalid plugin spec");
 	});
@@ -175,6 +201,19 @@ describe("normalizeRemotePluginSpec", () => {
 		};
 
 		expect(() => normalizeRemotePluginSpec(spec)).toThrow("unsupported characters");
+	});
+
+	it("should reject pre-parsed refs with traversal patterns", () => {
+		const spec: PluginSpec = {
+			raw: "github:owner/repo@..",
+			isLocal: false,
+			owner: "owner",
+			repo: "repo",
+			subpath: "",
+			ref: "..",
+		};
+
+		expect(() => normalizeRemotePluginSpec(spec)).toThrow("path traversal is not allowed");
 	});
 });
 
@@ -309,11 +348,17 @@ describe("getCachePath", () => {
 		expect(cachePath).toContain("@default");
 	});
 
-	it("should sanitize cache keys for refs containing path separators", () => {
-		const spec = parsePluginSpec("github:owner/repo/plugins/foo@feature/new-ui");
-		const cachePath = getCachePath(spec);
-		expect(cachePath).not.toContain("/feature/new-ui");
-		expect(cachePath).toContain("@feature--new-ui");
+	it("should reject pre-parsed refs containing path separators", () => {
+		const spec: PluginSpec = {
+			raw: "github:owner/repo@feature/new-ui",
+			isLocal: false,
+			owner: "owner",
+			repo: "repo",
+			subpath: "",
+			ref: "feature/new-ui",
+		};
+
+		expect(() => getCachePath(spec)).toThrow("path separators are not allowed");
 	});
 
 	it("should throw for local specs", () => {
@@ -332,6 +377,17 @@ describe("getCachePath", () => {
 		};
 
 		expect(() => getCachePath(spec)).toThrow("path traversal is not allowed");
+	});
+});
+
+// ─── fetchPlugin containment guards ─────────────────────────────────────────
+
+describe("fetchPlugin", () => {
+	it("should block out-of-bounds cache paths before deletion", () => {
+		const spec = normalizeRemotePluginSpec(parsePluginSpec("github:owner/repo@main"));
+		const escapePath = path.resolve(os.tmpdir(), `plugin-cache-escape-${Date.now()}`);
+
+		expect(() => fetchPlugin(spec, escapePath)).toThrow("escapes trusted root");
 	});
 });
 

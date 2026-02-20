@@ -177,7 +177,7 @@ export function parsePluginSpec(spec: string): PluginSpec {
 				let ref: string | undefined;
 				let subpath = "";
 				if (parts[2] === "tree" && parts.length >= 4) {
-					ref = parts[3];
+					ref = normalizePluginRef(parts[3], spec);
 					subpath = normalizePluginSubpath(parts.slice(4).join("/"), spec);
 				}
 				return {
@@ -231,12 +231,55 @@ function parseGitHubSpec(raw: string, rest: string): PluginSpec {
 		owner,
 		repo,
 		subpath: normalizePluginSubpath(subpathParts.join("/"), raw),
-		ref,
+		ref: normalizePluginRef(ref, raw),
 	};
 }
 
 /** Windows-style absolute path prefix (e.g. C:\\path). */
 const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:[\\/]/;
+
+/**
+ * Normalize and validate a remote plugin ref.
+ *
+ * Rejects:
+ * - empty refs
+ * - path separators (`/` or `\\`)
+ * - traversal markers (`..`)
+ * - absolute-path prefixes
+ *
+ * @param ref - Raw ref from plugin spec
+ * @param specForError - Original spec string used for error context
+ * @returns Normalized ref, or undefined when absent
+ * @throws Error when the ref is malformed or unsafe
+ */
+export function normalizePluginRef(
+	ref: string | undefined,
+	specForError = "plugin spec"
+): string | undefined {
+	if (ref == null) {
+		return undefined;
+	}
+
+	const trimmed = ref.trim();
+	if (!trimmed) {
+		throw new Error(`Invalid plugin ref in "${specForError}": ref cannot be empty.`);
+	}
+
+	const normalized = trimmed.replaceAll("\\", "/");
+	if (normalized.startsWith("/") || WINDOWS_ABSOLUTE_PATH.test(trimmed)) {
+		throw new Error(`Invalid plugin ref in "${specForError}": absolute refs are not allowed.`);
+	}
+
+	if (normalized.includes("/")) {
+		throw new Error(`Invalid plugin ref in "${specForError}": path separators are not allowed.`);
+	}
+
+	if (normalized.includes("..")) {
+		throw new Error(`Invalid plugin ref in "${specForError}": path traversal is not allowed.`);
+	}
+
+	return trimmed;
+}
 
 /**
  * Normalize and validate a remote plugin subpath.
@@ -370,8 +413,7 @@ export function normalizeRemotePluginSpec(spec: PluginSpec): NormalizedRemotePlu
 	const owner = normalizeRemoteToken(spec.owner, "owner", spec.raw);
 	const repo = normalizeRemoteToken(spec.repo, "repo", spec.raw);
 	const subpath = normalizePluginSubpath(spec.subpath ?? "", spec.raw);
-	const trimmedRef = spec.ref?.trim();
-	const ref = trimmedRef ? trimmedRef : undefined;
+	const ref = normalizePluginRef(spec.ref, spec.raw);
 
 	return {
 		raw: spec.raw,
