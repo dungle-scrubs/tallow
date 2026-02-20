@@ -12,6 +12,10 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+	createRuntimePathProvider,
+	type RuntimePathProvider,
+} from "../../src/runtime-path-provider.js";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { acquireFileLock } from "./file-lock.js";
 
@@ -46,17 +50,34 @@ interface SessionPidFile {
 let cachedOwnerIdentity: SessionOwner | null = null;
 
 /**
- * Resolve the tallow home directory from env.
+ * Resolve the default home directory used by extension PID tracking.
  *
- * @returns Absolute path to TALLOW_CODING_AGENT_DIR
- * @throws {Error} When TALLOW_CODING_AGENT_DIR is not set
+ * @returns Absolute home directory path
+ * @throws {Error} When no runtime home env var is available
  */
-function getAgentDir(): string {
-	const agentDir = process.env.TALLOW_CODING_AGENT_DIR;
-	if (!agentDir) {
-		throw new Error("TALLOW_CODING_AGENT_DIR not set — cannot locate PID registry");
+function resolvePidRegistryHomeDir(): string {
+	const homeDir = process.env.TALLOW_CODING_AGENT_DIR ?? process.env.TALLOW_HOME;
+	if (!homeDir) {
+		throw new Error("TALLOW_CODING_AGENT_DIR/TALLOW_HOME not set — cannot locate PID registry");
 	}
-	return agentDir;
+	return homeDir;
+}
+
+/** Runtime path provider used by extension PID registry lookups. */
+let pidRegistryPathProvider: RuntimePathProvider = createRuntimePathProvider(() =>
+	resolvePidRegistryHomeDir()
+);
+
+/**
+ * Override runtime path provider for PID-registry tests.
+ *
+ * @param provider - Optional provider override (reset when omitted)
+ * @returns Nothing
+ */
+export function setPidRegistryPathProviderForTests(provider?: RuntimePathProvider): void {
+	pidRegistryPathProvider =
+		provider ?? createRuntimePathProvider(() => resolvePidRegistryHomeDir());
+	cachedOwnerIdentity = null;
 }
 
 /**
@@ -65,7 +86,7 @@ function getAgentDir(): string {
  * @returns Absolute path to run/pids
  */
 function getSessionPidDir(): string {
-	return join(getAgentDir(), "run", "pids");
+	return pidRegistryPathProvider.getSessionPidDir();
 }
 
 /**

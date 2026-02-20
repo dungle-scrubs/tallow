@@ -33,9 +33,11 @@ export {
 	BUNDLED,
 	bootstrap,
 	CONFIG_DIR,
+	getRuntimePathProvider,
 	getRuntimeTallowHome,
 	isDemoMode,
 	sanitizePath,
+	setRuntimePathProviderForTests,
 	TALLOW_HOME,
 	TALLOW_VERSION,
 } from "./config.js";
@@ -56,6 +58,12 @@ export {
 	resolvePlugins,
 	type TallowExtensionManifest,
 } from "./plugins.js";
+export {
+	createRuntimePathProvider,
+	createStaticRuntimePathProvider,
+	type RuntimeHomeResolver,
+	type RuntimePathProvider,
+} from "./runtime-path-provider.js";
 export { createTallowSession, type TallowSession, type TallowSessionOptions } from "./sdk.js";
 export { createSessionWithId, findSessionById } from "./session-utils.js";
 

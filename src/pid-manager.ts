@@ -19,7 +19,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { getRuntimeTallowHome } from "./config.js";
+import { getRuntimePathProvider } from "./config.js";
+import type { RuntimePathProvider } from "./runtime-path-provider.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,13 +55,17 @@ interface SessionPidFile {
 
 // ─── Runtime path helpers ───────────────────────────────────────────────────
 
+/** Runtime path provider used by PID manager lookups. */
+let pidManagerPathProvider: RuntimePathProvider = getRuntimePathProvider();
+
 /**
- * Resolve the runtime `run/` directory from the current home configuration.
+ * Override PID-manager runtime paths for tests.
  *
- * @returns Absolute path to the runtime directory
+ * @param provider - Optional provider override (reset when omitted)
+ * @returns Nothing
  */
-function getRunDirPath(): string {
-	return join(getRuntimeTallowHome(), "run");
+export function setPidManagerPathProviderForTests(provider?: RuntimePathProvider): void {
+	pidManagerPathProvider = provider ?? getRuntimePathProvider();
 }
 
 /**
@@ -69,7 +74,7 @@ function getRunDirPath(): string {
  * @returns Absolute path to run/pids.json
  */
 function getLegacyPidFilePath(): string {
-	return join(getRunDirPath(), "pids.json");
+	return pidManagerPathProvider.getLegacyPidFilePath();
 }
 
 /**
@@ -78,7 +83,7 @@ function getLegacyPidFilePath(): string {
  * @returns Absolute path to run/pids/
  */
 function getSessionPidDirPath(): string {
-	return join(getRunDirPath(), "pids");
+	return pidManagerPathProvider.getSessionPidDir();
 }
 
 // ─── Validation ──────────────────────────────────────────────────────────────

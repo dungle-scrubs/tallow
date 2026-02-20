@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createStaticRuntimePathProvider } from "../../../src/runtime-path-provider.js";
 
 // Set env before importing the module under test (it reads TALLOW_CODING_AGENT_DIR at call time)
 let tmpDir: string;
@@ -34,8 +35,11 @@ afterEach(() => {
 // Dynamic import so each test gets the env var set above
 async function loadModule() {
 	// Bust the module cache by using a unique query string
-	const mod = await import(`../pid-registry.js?t=${Date.now()}`);
-	return mod as typeof import("../pid-registry.js");
+	const mod = (await import(
+		`../pid-registry.js?t=${Date.now()}`
+	)) as typeof import("../pid-registry.js");
+	mod.setPidRegistryPathProviderForTests(createStaticRuntimePathProvider(tmpDir));
+	return mod;
 }
 
 /**

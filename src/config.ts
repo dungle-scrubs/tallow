@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRuntimePathProvider, type RuntimePathProvider } from "./runtime-path-provider.js";
 
 // ─── Identity ────────────────────────────────────────────────────────────────
 
@@ -26,6 +27,31 @@ export const TALLOW_HOME = resolveTallowHome();
  */
 export function getRuntimeTallowHome(): string {
 	return process.env.TALLOW_HOME || TALLOW_HOME;
+}
+
+/** Default runtime path provider bound to runtime home lookups. */
+const defaultRuntimePathProvider = createRuntimePathProvider(() => getRuntimeTallowHome());
+
+/** Optional runtime path provider override for tests and embedded SDK hosts. */
+let runtimePathProviderOverride: RuntimePathProvider | null = null;
+
+/**
+ * Resolve the active runtime path provider.
+ *
+ * @returns Runtime path provider for home-scoped directories/files
+ */
+export function getRuntimePathProvider(): RuntimePathProvider {
+	return runtimePathProviderOverride ?? defaultRuntimePathProvider;
+}
+
+/**
+ * Override the runtime path provider for tests.
+ *
+ * @param provider - Optional provider override (reset when omitted)
+ * @returns Nothing
+ */
+export function setRuntimePathProviderForTests(provider?: RuntimePathProvider): void {
+	runtimePathProviderOverride = provider ?? null;
 }
 
 /**
