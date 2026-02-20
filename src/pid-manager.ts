@@ -19,7 +19,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { TALLOW_HOME } from "./config.js";
+import { getRuntimeTallowHome } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -52,16 +52,34 @@ interface SessionPidFile {
 	entries: PidEntry[];
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// ─── Runtime path helpers ───────────────────────────────────────────────────
 
-/** Runtime directory under TALLOW_HOME. */
-const RUN_DIR = join(TALLOW_HOME, "run");
+/**
+ * Resolve the runtime `run/` directory from the current home configuration.
+ *
+ * @returns Absolute path to the runtime directory
+ */
+function getRunDirPath(): string {
+	return join(getRuntimeTallowHome(), "run");
+}
 
-/** Legacy global PID file path. */
-const LEGACY_PID_FILE_PATH = join(RUN_DIR, "pids.json");
+/**
+ * Resolve the legacy global PID file path.
+ *
+ * @returns Absolute path to run/pids.json
+ */
+function getLegacyPidFilePath(): string {
+	return join(getRunDirPath(), "pids.json");
+}
 
-/** Session-scoped PID directory. */
-const SESSION_PID_DIR = join(RUN_DIR, "pids");
+/**
+ * Resolve the session-scoped PID directory path.
+ *
+ * @returns Absolute path to run/pids/
+ */
+function getSessionPidDirPath(): string {
+	return join(getRunDirPath(), "pids");
+}
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -165,7 +183,7 @@ function toOwnerKey(owner: SessionOwner): string {
  * @returns Absolute path to the owner-scoped PID file
  */
 function getSessionPidFilePath(owner: SessionOwner): string {
-	return join(SESSION_PID_DIR, `${toOwnerKey(owner)}.json`);
+	return join(getSessionPidDirPath(), `${toOwnerKey(owner)}.json`);
 }
 
 /**
@@ -187,7 +205,7 @@ function hasOwnerIdentity(owner: SessionOwner): owner is { pid: number; startedA
  */
 function readLegacyPidFile(): LegacyPidFile | null {
 	try {
-		const raw = readFileSync(LEGACY_PID_FILE_PATH, "utf-8");
+		const raw = readFileSync(getLegacyPidFilePath(), "utf-8");
 		return normalizeLegacyPidFile(JSON.parse(raw) as unknown);
 	} catch {
 		return null;
@@ -244,14 +262,15 @@ function removeFile(filePath: string): void {
  * @returns Absolute paths to all session PID files
  */
 function listSessionPidFiles(): string[] {
-	if (!existsSync(SESSION_PID_DIR)) {
+	const sessionPidDir = getSessionPidDirPath();
+	if (!existsSync(sessionPidDir)) {
 		return [];
 	}
 
 	try {
-		return readdirSync(SESSION_PID_DIR)
+		return readdirSync(sessionPidDir)
 			.filter((entry) => entry.endsWith(".json") && !entry.startsWith("."))
-			.map((entry) => join(SESSION_PID_DIR, entry));
+			.map((entry) => join(sessionPidDir, entry));
 	} catch {
 		return [];
 	}
@@ -286,13 +305,16 @@ function migrateLegacyPidFile(): void {
 		return;
 	}
 
+	const legacyPidFilePath = getLegacyPidFilePath();
+	const sessionPidDir = getSessionPidDirPath();
+
 	if (legacy.entries.length === 0) {
-		removeFile(LEGACY_PID_FILE_PATH);
+		removeFile(legacyPidFilePath);
 		return;
 	}
 
-	if (!existsSync(SESSION_PID_DIR)) {
-		mkdirSync(SESSION_PID_DIR, { recursive: true });
+	if (!existsSync(sessionPidDir)) {
+		mkdirSync(sessionPidDir, { recursive: true });
 	}
 
 	const grouped = new Map<string, SessionPidFile>();
@@ -315,7 +337,7 @@ function migrateLegacyPidFile(): void {
 		writeSessionPidFile(filePath, { version: 2, owner, entries: merged });
 	}
 
-	removeFile(LEGACY_PID_FILE_PATH);
+	removeFile(legacyPidFilePath);
 }
 
 // ─── Process checks ─────────────────────────────────────────────────────────

@@ -16,6 +16,19 @@ export const CONFIG_DIR = ".tallow";
 export const TALLOW_HOME = resolveTallowHome();
 
 /**
+ * Resolve tallow home dynamically for runtime-sensitive consumers.
+ *
+ * Some modules are imported before tests/embedded callers set env overrides.
+ * This accessor lets call sites re-read the current `TALLOW_HOME` env var
+ * without discarding the default module-level resolution behavior.
+ *
+ * @returns Current tallow home path
+ */
+export function getRuntimeTallowHome(): string {
+	return process.env.TALLOW_HOME || TALLOW_HOME;
+}
+
+/**
  * Resolve TALLOW_HOME from ~/.config/tallow-work-dirs.
  *
  * File format (one mapping per line, comments start with #):

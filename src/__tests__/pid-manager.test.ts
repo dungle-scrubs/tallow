@@ -36,6 +36,7 @@ beforeAll(async () => {
 
 	mock.module("../config.js", () => ({
 		TALLOW_HOME: tmpDir,
+		getRuntimeTallowHome: () => process.env.TALLOW_HOME ?? tmpDir,
 	}));
 
 	const mod = await import(`../pid-manager.js?t=${Date.now()}`);
@@ -414,6 +415,32 @@ describe("pid-manager", () => {
 		expect(existsSync(getSessionPidFilePath(currentOwner))).toBe(false);
 		expect(isAlive(otherChildPid)).toBe(true);
 		expect(readSessionPidEntries(otherOwner)).toHaveLength(1);
+	});
+
+	test("cleanupOrphanPids honors TALLOW_HOME changes after module import", () => {
+		const runtimeHome = join(
+			tmpdir(),
+			`pid-manager-runtime-home-${Date.now()}-${Math.random().toString(36).slice(2)}`
+		);
+		const runtimeSessionDir = join(runtimeHome, "run", "pids");
+		const runtimeCorruptPath = join(runtimeSessionDir, "corrupt.json");
+		mkdirSync(runtimeSessionDir, { recursive: true });
+		writeFileSync(runtimeCorruptPath, "NOT VALID JSON{{{");
+
+		const previousHome = process.env.TALLOW_HOME;
+		process.env.TALLOW_HOME = runtimeHome;
+
+		try {
+			expect(cleanupOrphanPidsFn()).toBe(0);
+			expect(existsSync(runtimeCorruptPath)).toBe(false);
+		} finally {
+			if (previousHome === undefined) {
+				delete process.env.TALLOW_HOME;
+			} else {
+				process.env.TALLOW_HOME = previousHome;
+			}
+			rmSync(runtimeHome, { recursive: true, force: true });
+		}
 	});
 
 	test("cleanupOrphanPids tolerates corrupt session files", () => {

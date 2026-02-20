@@ -33,6 +33,7 @@ export {
 	BUNDLED,
 	bootstrap,
 	CONFIG_DIR,
+	getRuntimeTallowHome,
 	isDemoMode,
 	sanitizePath,
 	TALLOW_HOME,
