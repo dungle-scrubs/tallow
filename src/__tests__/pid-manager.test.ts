@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,16 +13,25 @@ interface TestPidEntry {
 	startedAt: number;
 }
 
+interface TestSessionOwner {
+	pid: number;
+	startedAt?: string;
+}
+
 let tmpDir = "";
-let pidFilePath = "";
+let runDir = "";
+let legacyPidFilePath = "";
+let sessionPidDir = "";
 let cleanupAllTrackedPidsFn: () => number;
 let cleanupOrphanPidsFn: () => number;
 const spawnedPids = new Set<number>();
 
 beforeAll(async () => {
 	tmpDir = join(tmpdir(), `pid-manager-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-	pidFilePath = join(tmpDir, "run", "pids.json");
-	mkdirSync(join(tmpDir, "run"), { recursive: true });
+	runDir = join(tmpDir, "run");
+	legacyPidFilePath = join(runDir, "pids.json");
+	sessionPidDir = join(runDir, "pids");
+	mkdirSync(sessionPidDir, { recursive: true });
 	process.env.TALLOW_HOME = tmpDir;
 
 	const mod = await import(`../pid-manager.js?t=${Date.now()}`);
@@ -31,12 +40,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-	mkdirSync(join(tmpDir, "run"), { recursive: true });
-	try {
-		unlinkSync(pidFilePath);
-	} catch {
-		// File already absent
-	}
+	rmSync(runDir, { recursive: true, force: true });
+	mkdirSync(sessionPidDir, { recursive: true });
 });
 
 afterEach(() => {
@@ -52,28 +57,81 @@ afterAll(() => {
 });
 
 /**
- * Write a PID file in the expected format.
+ * Convert owner metadata into a filesystem-safe key.
  *
- * @param entries - PID entries to write
- * @returns Nothing
+ * @param owner - Session owner identity
+ * @returns Filename-safe owner key
  */
-function writePidFile(entries: TestPidEntry[]): void {
-	writeFileSync(pidFilePath, JSON.stringify({ version: 1, entries }, null, "\t"));
+function toOwnerKey(owner: TestSessionOwner): string {
+	const startedAtSlug = (owner.startedAt ?? "unknown")
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	const normalizedStartedAt = startedAtSlug.length > 0 ? startedAtSlug : "unknown";
+	return `${owner.pid}-${normalizedStartedAt}`;
 }
 
 /**
- * Read PID entries from disk for assertions.
+ * Resolve a session PID file path for an owner.
  *
- * @returns Parsed entries, or an empty array if the file is missing
+ * @param owner - Session owner identity
+ * @returns Session PID file path
  */
-function readPidEntries(): TestPidEntry[] {
-	if (!existsSync(pidFilePath)) {
+function getSessionPidFilePath(owner: TestSessionOwner): string {
+	return join(sessionPidDir, `${toOwnerKey(owner)}.json`);
+}
+
+/**
+ * Write a session-scoped PID file.
+ *
+ * @param owner - Session owner identity
+ * @param entries - PID entries to persist
+ * @returns Nothing
+ */
+function writeSessionPidFile(owner: TestSessionOwner, entries: TestPidEntry[]): void {
+	const path = getSessionPidFilePath(owner);
+	writeFileSync(path, JSON.stringify({ version: 2, owner, entries }, null, "\t"));
+}
+
+/**
+ * Write a legacy global PID file.
+ *
+ * @param entries - Legacy PID entries
+ * @returns Nothing
+ */
+function writeLegacyPidFile(entries: TestPidEntry[]): void {
+	writeFileSync(legacyPidFilePath, JSON.stringify({ version: 1, entries }, null, "\t"));
+}
+
+/**
+ * Read session PID entries for a given owner.
+ *
+ * @param owner - Session owner identity
+ * @returns Parsed entries (empty when file missing)
+ */
+function readSessionPidEntries(owner: TestSessionOwner): TestPidEntry[] {
+	const path = getSessionPidFilePath(owner);
+	if (!existsSync(path)) {
 		return [];
 	}
-	const parsed = JSON.parse(readFileSync(pidFilePath, "utf-8")) as {
+	const parsed = JSON.parse(readFileSync(path, "utf-8")) as {
 		entries?: TestPidEntry[];
 	};
 	return parsed.entries ?? [];
+}
+
+/**
+ * List all session PID files.
+ *
+ * @returns Absolute paths to session files
+ */
+function listSessionPidFiles(): string[] {
+	if (!existsSync(sessionPidDir)) {
+		return [];
+	}
+	return readdirSync(sessionPidDir)
+		.filter((entry) => entry.endsWith(".json"))
+		.map((entry) => join(sessionPidDir, entry));
 }
 
 /**
@@ -186,38 +244,40 @@ async function waitForExit(pid: number): Promise<boolean> {
 }
 
 describe("pid-manager", () => {
-	test("cleanupOrphanPids signals orphan entries with matching child identity", async () => {
-		const pid = spawnSleeper();
-		const processStartedAt = await requireProcessStartedAt(pid);
+	test("cleanupOrphanPids signals stale-owner entries with matching child identity", async () => {
+		const childPid = spawnSleeper();
+		const childStartedAt = await requireProcessStartedAt(childPid);
+		const staleOwner = { pid: 999_999, startedAt: "Mon Jan  1 00:00:00 2001" };
 
-		writePidFile([
+		writeSessionPidFile(staleOwner, [
 			{
 				command: "sleep 60",
-				ownerPid: 999_999,
-				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
-				pid,
-				processStartedAt,
+				ownerPid: staleOwner.pid,
+				ownerStartedAt: staleOwner.startedAt,
+				pid: childPid,
+				processStartedAt: childStartedAt,
 				startedAt: Date.now(),
 			},
 		]);
 
 		const killed = cleanupOrphanPidsFn();
 		expect(killed).toBe(1);
-		expect(await waitForExit(pid)).toBe(true);
-		expect(existsSync(pidFilePath)).toBe(false);
+		expect(await waitForExit(childPid)).toBe(true);
+		expect(existsSync(getSessionPidFilePath(staleOwner))).toBe(false);
 	});
 
-	test("cleanupOrphanPids preserves entries owned by live sessions", async () => {
+	test("cleanupOrphanPids preserves files owned by live sessions", async () => {
 		const ownerPid = spawnSleeper();
 		const ownerStartedAt = await requireProcessStartedAt(ownerPid);
 		const childPid = spawnSleeper();
 		const childStartedAt = await requireProcessStartedAt(childPid);
+		const owner = { pid: ownerPid, startedAt: ownerStartedAt };
 
-		writePidFile([
+		writeSessionPidFile(owner, [
 			{
 				command: "sleep 60",
-				ownerPid,
-				ownerStartedAt,
+				ownerPid: owner.pid,
+				ownerStartedAt: owner.startedAt,
 				pid: childPid,
 				processStartedAt: childStartedAt,
 				startedAt: Date.now(),
@@ -227,102 +287,134 @@ describe("pid-manager", () => {
 		const killed = cleanupOrphanPidsFn();
 		expect(killed).toBe(0);
 		expect(isAlive(childPid)).toBe(true);
-		expect(readPidEntries()).toHaveLength(1);
-		expect(readPidEntries()[0]?.pid).toBe(childPid);
+		expect(readSessionPidEntries(owner)).toHaveLength(1);
 	});
 
-	test("cleanupOrphanPids skips signaling when child identity mismatches", () => {
-		const pid = spawnSleeper();
+	test("cleanupOrphanPids skips files with unknown owner identity", () => {
+		const childPid = spawnSleeper();
+		const unknownOwner = { pid: -1 };
 
-		writePidFile([
+		writeSessionPidFile(unknownOwner, [
 			{
 				command: "sleep 60",
-				ownerPid: 999_999,
-				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
-				pid,
-				processStartedAt: "Mon Jan  1 00:00:00 2001",
+				pid: childPid,
 				startedAt: Date.now(),
 			},
 		]);
 
 		const killed = cleanupOrphanPidsFn();
 		expect(killed).toBe(0);
-		expect(isAlive(pid)).toBe(true);
-		expect(readPidEntries()).toHaveLength(1);
+		expect(isAlive(childPid)).toBe(true);
+		expect(readSessionPidEntries(unknownOwner)).toHaveLength(1);
 	});
 
-	test("cleanupOrphanPids skips signaling when owner metadata is missing", () => {
-		const pid = spawnSleeper();
+	test("cleanupOrphanPids prunes only stale-owner files", async () => {
+		const liveOwnerPid = spawnSleeper();
+		const liveOwnerStartedAt = await requireProcessStartedAt(liveOwnerPid);
+		const liveChildPid = spawnSleeper();
+		const liveChildStartedAt = await requireProcessStartedAt(liveChildPid);
+		const staleChildPid = spawnSleeper();
+		const staleChildStartedAt = await requireProcessStartedAt(staleChildPid);
 
-		writePidFile([
+		const liveOwner = { pid: liveOwnerPid, startedAt: liveOwnerStartedAt };
+		const staleOwner = { pid: 999_999, startedAt: "Mon Jan  1 00:00:00 2001" };
+
+		writeSessionPidFile(liveOwner, [
 			{
-				command: "sleep 60",
-				pid,
+				command: "live child",
+				ownerPid: liveOwner.pid,
+				ownerStartedAt: liveOwner.startedAt,
+				pid: liveChildPid,
+				processStartedAt: liveChildStartedAt,
 				startedAt: Date.now(),
 			},
 		]);
-
-		const killed = cleanupOrphanPidsFn();
-		expect(killed).toBe(0);
-		expect(isAlive(pid)).toBe(true);
-		expect(readPidEntries()).toHaveLength(1);
-	});
-
-	test("cleanupOrphanPids prunes only targeted entries", async () => {
-		const ownerPid = spawnSleeper();
-		const ownerStartedAt = await requireProcessStartedAt(ownerPid);
-		const retainedPid = spawnSleeper();
-		const retainedStartedAt = await requireProcessStartedAt(retainedPid);
-		const orphanPid = spawnSleeper();
-		const orphanStartedAt = await requireProcessStartedAt(orphanPid);
-
-		writePidFile([
+		writeSessionPidFile(staleOwner, [
 			{
-				command: "sleep retained",
-				ownerPid,
-				ownerStartedAt,
-				pid: retainedPid,
-				processStartedAt: retainedStartedAt,
-				startedAt: Date.now(),
-			},
-			{
-				command: "sleep orphan",
-				ownerPid: 999_999,
-				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
-				pid: orphanPid,
-				processStartedAt: orphanStartedAt,
+				command: "stale child",
+				ownerPid: staleOwner.pid,
+				ownerStartedAt: staleOwner.startedAt,
+				pid: staleChildPid,
+				processStartedAt: staleChildStartedAt,
 				startedAt: Date.now(),
 			},
 		]);
 
 		const killed = cleanupOrphanPidsFn();
 		expect(killed).toBe(1);
-		expect(await waitForExit(orphanPid)).toBe(true);
-		const entries = readPidEntries();
-		expect(entries).toHaveLength(1);
-		expect(entries[0]?.pid).toBe(retainedPid);
-		expect(isAlive(retainedPid)).toBe(true);
+		expect(await waitForExit(staleChildPid)).toBe(true);
+		expect(readSessionPidEntries(liveOwner)).toHaveLength(1);
+		expect(existsSync(getSessionPidFilePath(staleOwner))).toBe(false);
 	});
 
-	test("cleanupAllTrackedPids uses the same identity safety check", () => {
-		const pid = spawnSleeper();
+	test("cleanupOrphanPids migrates and sweeps legacy global PID files", async () => {
+		const childPid = spawnSleeper();
+		const childStartedAt = await requireProcessStartedAt(childPid);
 
-		writePidFile([
+		writeLegacyPidFile([
 			{
-				command: "sleep 60",
-				pid,
+				command: "legacy child",
+				ownerPid: 999_999,
+				ownerStartedAt: "Mon Jan  1 00:00:00 2001",
+				pid: childPid,
+				processStartedAt: childStartedAt,
+				startedAt: Date.now(),
+			},
+		]);
+
+		const killed = cleanupOrphanPidsFn();
+		expect(killed).toBe(1);
+		expect(await waitForExit(childPid)).toBe(true);
+		expect(existsSync(legacyPidFilePath)).toBe(false);
+		expect(listSessionPidFiles()).toHaveLength(0);
+	});
+
+	test("cleanupAllTrackedPids only cleans the current session file", async () => {
+		const currentStartedAt = await requireProcessStartedAt(process.pid);
+		const currentOwner = { pid: process.pid, startedAt: currentStartedAt };
+
+		const ownChildPid = spawnSleeper();
+		const ownChildStartedAt = await requireProcessStartedAt(ownChildPid);
+		writeSessionPidFile(currentOwner, [
+			{
+				command: "own child",
+				ownerPid: currentOwner.pid,
+				ownerStartedAt: currentOwner.startedAt,
+				pid: ownChildPid,
+				processStartedAt: ownChildStartedAt,
+				startedAt: Date.now(),
+			},
+		]);
+
+		const otherOwnerPid = spawnSleeper();
+		const otherOwnerStartedAt = await requireProcessStartedAt(otherOwnerPid);
+		const otherChildPid = spawnSleeper();
+		const otherChildStartedAt = await requireProcessStartedAt(otherChildPid);
+		const otherOwner = { pid: otherOwnerPid, startedAt: otherOwnerStartedAt };
+		writeSessionPidFile(otherOwner, [
+			{
+				command: "other child",
+				ownerPid: otherOwner.pid,
+				ownerStartedAt: otherOwner.startedAt,
+				pid: otherChildPid,
+				processStartedAt: otherChildStartedAt,
 				startedAt: Date.now(),
 			},
 		]);
 
 		const killed = cleanupAllTrackedPidsFn();
-		expect(killed).toBe(0);
-		expect(isAlive(pid)).toBe(true);
-		expect(existsSync(pidFilePath)).toBe(false);
+		expect(killed).toBe(1);
+		expect(await waitForExit(ownChildPid)).toBe(true);
+		expect(existsSync(getSessionPidFilePath(currentOwner))).toBe(false);
+		expect(isAlive(otherChildPid)).toBe(true);
+		expect(readSessionPidEntries(otherOwner)).toHaveLength(1);
 	});
 
-	test("cleanupOrphanPids handles corrupt PID files safely", () => {
-		writeFileSync(pidFilePath, "NOT VALID JSON{{{");
+	test("cleanupOrphanPids tolerates corrupt session files", () => {
+		const corruptPath = join(sessionPidDir, "corrupt.json");
+		writeFileSync(corruptPath, "NOT VALID JSON{{{");
+
 		expect(cleanupOrphanPidsFn()).toBe(0);
+		expect(existsSync(corruptPath)).toBe(false);
 	});
 });

@@ -1,21 +1,23 @@
 /**
- * PID file manager for tracking background child processes.
+ * Session-scoped PID cleanup for detached subprocesses.
  *
- * Writes spawned PIDs to `~/.tallow/run/pids.json` so orphaned processes
- * can be cleaned up on next startup when the parent was killed (SIGKILL,
- * OOM, terminal crash) and the normal `session_shutdown` path didn't run.
+ * Runtime extensions register child PIDs in per-session files under
+ * `~/.tallow/run/pids/`. Startup orphan cleanup sweeps only stale owner files,
+ * while shutdown cleanup only touches the current session's file.
  *
- * The file format is shared with `extensions/_shared/pid-registry.ts`
- * which handles extension-side registration. Both modules operate on the
- * same JSON file independently — the file schema is the contract.
- *
- * Current schema extends legacy entries with optional owner identity
- * (`ownerPid`, `ownerStartedAt`) so startup cleanup can avoid terminating
- * processes owned by live sessions.
+ * Legacy global state in `~/.tallow/run/pids.json` is migrated lazily on
+ * startup so existing installations continue to work.
  */
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { TALLOW_HOME } from "./config.js";
 
@@ -31,23 +33,40 @@ export interface PidEntry {
 	startedAt: number;
 }
 
-/** On-disk PID file schema (version 1). */
-interface PidFile {
+/** Owner identity for a session-scoped PID file. */
+interface SessionOwner {
+	pid: number;
+	startedAt?: string;
+}
+
+/** Legacy global PID file schema (version 1). */
+interface LegacyPidFile {
 	version: 1;
+	entries: PidEntry[];
+}
+
+/** Session-scoped PID file schema (version 2). */
+interface SessionPidFile {
+	version: 2;
+	owner: SessionOwner;
 	entries: PidEntry[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/** Path to the PID tracking file. */
-const PID_FILE_PATH = join(TALLOW_HOME, "run", "pids.json");
+/** Runtime directory under TALLOW_HOME. */
+const RUN_DIR = join(TALLOW_HOME, "run");
 
-// ─── File I/O ────────────────────────────────────────────────────────────────
+/** Legacy global PID file path. */
+const LEGACY_PID_FILE_PATH = join(RUN_DIR, "pids.json");
+
+/** Session-scoped PID directory. */
+const SESSION_PID_DIR = join(RUN_DIR, "pids");
+
+// ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
  * Check whether a value matches the PID entry schema.
- *
- * Supports legacy entries without `processStartedAt` for migration safety.
  *
  * @param value - Unknown JSON value to validate
  * @returns True when the value is a supported PID entry
@@ -71,62 +90,232 @@ function isPidEntry(value: unknown): value is PidEntry {
 }
 
 /**
- * Validate and normalize raw PID file JSON.
+ * Check whether a value matches the session-owner schema.
+ *
+ * @param value - Unknown JSON value to validate
+ * @returns True when the value is a valid session owner
+ */
+function isSessionOwner(value: unknown): value is SessionOwner {
+	if (!value || typeof value !== "object") return false;
+	const candidate = value as Record<string, unknown>;
+	if (typeof candidate.pid !== "number") return false;
+	if (candidate.startedAt != null && typeof candidate.startedAt !== "string") {
+		return false;
+	}
+	return true;
+}
+
+/**
+ * Validate and normalize raw legacy PID file JSON.
  *
  * @param value - Parsed JSON value
- * @returns Normalized PID file, or null when invalid
+ * @returns Normalized legacy PID file, or null when invalid
  */
-function normalizePidFile(value: unknown): PidFile | null {
+function normalizeLegacyPidFile(value: unknown): LegacyPidFile | null {
 	if (!value || typeof value !== "object") return null;
 	const candidate = value as Record<string, unknown>;
 	if (candidate.version !== 1) return null;
 	if (!Array.isArray(candidate.entries)) return null;
-	const entries = candidate.entries.filter(isPidEntry);
 	return {
 		version: 1,
-		entries,
+		entries: candidate.entries.filter(isPidEntry),
 	};
 }
 
 /**
- * Read and parse the PID file. Returns empty entries on any error.
+ * Validate and normalize raw session PID file JSON.
  *
- * @returns Parsed PID file contents
+ * @param value - Parsed JSON value
+ * @returns Normalized session PID file, or null when invalid
  */
-function readPidFile(): PidFile {
-	try {
-		const raw = readFileSync(PID_FILE_PATH, "utf-8");
-		const parsed = normalizePidFile(JSON.parse(raw) as unknown);
-		if (parsed) {
-			return parsed;
-		}
-	} catch {
-		// File missing, corrupt, or unparseable — start fresh
-	}
-	return { version: 1, entries: [] };
+function normalizeSessionPidFile(value: unknown): SessionPidFile | null {
+	if (!value || typeof value !== "object") return null;
+	const candidate = value as Record<string, unknown>;
+	if (candidate.version !== 2) return null;
+	if (!isSessionOwner(candidate.owner)) return null;
+	if (!Array.isArray(candidate.entries)) return null;
+	return {
+		version: 2,
+		owner: candidate.owner,
+		entries: candidate.entries.filter(isPidEntry),
+	};
+}
+
+// ─── Path helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Convert owner metadata into a filesystem-safe key.
+ *
+ * @param owner - Session owner identity
+ * @returns Filename-safe owner key
+ */
+function toOwnerKey(owner: SessionOwner): string {
+	const startedAtSlug = (owner.startedAt ?? "unknown")
+		.replace(/[^A-Za-z0-9._-]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	const normalizedStartedAt = startedAtSlug.length > 0 ? startedAtSlug : "unknown";
+	return `${owner.pid}-${normalizedStartedAt}`;
 }
 
 /**
- * Persist PID entries or remove the file when no entries remain.
+ * Resolve a session PID file path for a given owner.
  *
- * @param entries - Entries to persist
+ * @param owner - Session owner identity
+ * @returns Absolute path to the owner-scoped PID file
+ */
+function getSessionPidFilePath(owner: SessionOwner): string {
+	return join(SESSION_PID_DIR, `${toOwnerKey(owner)}.json`);
+}
+
+/**
+ * Check whether owner metadata is sufficient for identity matching.
+ *
+ * @param owner - Session owner identity
+ * @returns True when owner pid/start-time are both present and usable
+ */
+function hasOwnerIdentity(owner: SessionOwner): owner is { pid: number; startedAt: string } {
+	return owner.pid > 0 && typeof owner.startedAt === "string";
+}
+
+// ─── File I/O ────────────────────────────────────────────────────────────────
+
+/**
+ * Read and parse the legacy global PID file.
+ *
+ * @returns Normalized legacy file, or null when missing/invalid
+ */
+function readLegacyPidFile(): LegacyPidFile | null {
+	try {
+		const raw = readFileSync(LEGACY_PID_FILE_PATH, "utf-8");
+		return normalizeLegacyPidFile(JSON.parse(raw) as unknown);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Read and parse a session PID file.
+ *
+ * @param filePath - Session PID file path
+ * @returns Normalized session file, or null when missing/invalid
+ */
+function readSessionPidFile(filePath: string): SessionPidFile | null {
+	try {
+		const raw = readFileSync(filePath, "utf-8");
+		return normalizeSessionPidFile(JSON.parse(raw) as unknown);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Write a session PID file.
+ *
+ * @param filePath - Session PID file path
+ * @param file - Session PID contents
  * @returns Nothing
  */
-function writePidEntries(entries: readonly PidEntry[]): void {
-	if (entries.length === 0) {
-		try {
-			unlinkSync(PID_FILE_PATH);
-		} catch {
-			// Already gone
-		}
+function writeSessionPidFile(filePath: string, file: SessionPidFile): void {
+	const dir = dirname(filePath);
+	if (!existsSync(dir)) {
+		mkdirSync(dir, { recursive: true });
+	}
+	writeFileSync(filePath, `${JSON.stringify(file, null, "\t")}\n`);
+}
+
+/**
+ * Remove a file if it exists.
+ *
+ * @param filePath - File path to remove
+ * @returns Nothing
+ */
+function removeFile(filePath: string): void {
+	try {
+		unlinkSync(filePath);
+	} catch {
+		// Already absent
+	}
+}
+
+/**
+ * List session-scoped PID files.
+ *
+ * @returns Absolute paths to all session PID files
+ */
+function listSessionPidFiles(): string[] {
+	if (!existsSync(SESSION_PID_DIR)) {
+		return [];
+	}
+
+	try {
+		return readdirSync(SESSION_PID_DIR)
+			.filter((entry) => entry.endsWith(".json") && !entry.startsWith("."))
+			.map((entry) => join(SESSION_PID_DIR, entry));
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Merge PID entries by PID, preferring newer incoming entries.
+ *
+ * @param existing - Existing entries from a destination file
+ * @param incoming - Incoming entries from migration source
+ * @returns Deduplicated merged entries
+ */
+function mergeEntries(existing: readonly PidEntry[], incoming: readonly PidEntry[]): PidEntry[] {
+	const byPid = new Map<number, PidEntry>();
+	for (const entry of existing) {
+		byPid.set(entry.pid, entry);
+	}
+	for (const entry of incoming) {
+		byPid.set(entry.pid, entry);
+	}
+	return [...byPid.values()];
+}
+
+/**
+ * Migrate legacy global PID state into session-scoped files.
+ *
+ * @returns Nothing
+ */
+function migrateLegacyPidFile(): void {
+	const legacy = readLegacyPidFile();
+	if (!legacy) {
 		return;
 	}
 
-	const runDir = dirname(PID_FILE_PATH);
-	if (!existsSync(runDir)) {
-		mkdirSync(runDir, { recursive: true });
+	if (legacy.entries.length === 0) {
+		removeFile(LEGACY_PID_FILE_PATH);
+		return;
 	}
-	writeFileSync(PID_FILE_PATH, `${JSON.stringify({ version: 1, entries }, null, "\t")}\n`);
+
+	if (!existsSync(SESSION_PID_DIR)) {
+		mkdirSync(SESSION_PID_DIR, { recursive: true });
+	}
+
+	const grouped = new Map<string, SessionPidFile>();
+	for (const entry of legacy.entries) {
+		const owner: SessionOwner =
+			typeof entry.ownerPid === "number"
+				? { pid: entry.ownerPid, startedAt: entry.ownerStartedAt }
+				: { pid: -1, startedAt: undefined };
+		const key = toOwnerKey(owner);
+		const current = grouped.get(key) ?? { version: 2, owner, entries: [] };
+		current.entries.push(entry);
+		grouped.set(key, current);
+	}
+
+	for (const file of grouped.values()) {
+		const filePath = getSessionPidFilePath(file.owner);
+		const existing = readSessionPidFile(filePath);
+		const merged = mergeEntries(existing?.entries ?? [], file.entries);
+		const owner = existing?.owner ?? file.owner;
+		writeSessionPidFile(filePath, { version: 2, owner, entries: merged });
+	}
+
+	removeFile(LEGACY_PID_FILE_PATH);
 }
 
 // ─── Process checks ─────────────────────────────────────────────────────────
@@ -182,132 +371,139 @@ function hasMatchingProcessIdentity(entry: PidEntry): boolean {
 }
 
 /**
- * Check whether a PID entry includes owner identity metadata.
+ * Verify whether a session owner is still active and identity-matched.
  *
- * @param entry - Tracked PID entry
- * @returns True when owner PID and owner start time are present
- */
-function hasOwnerIdentity(
-	entry: PidEntry
-): entry is PidEntry & { ownerPid: number; ownerStartedAt: string } {
-	return typeof entry.ownerPid === "number" && typeof entry.ownerStartedAt === "string";
-}
-
-/**
- * Verify that an entry's owner process is still alive and identity-matched.
- *
- * @param entry - Tracked PID entry
+ * @param owner - Session owner identity
  * @returns True when owner process is still active and unchanged
  */
-function hasMatchingOwnerIdentity(entry: PidEntry): boolean {
-	if (!hasOwnerIdentity(entry)) {
+function hasMatchingSessionOwner(owner: SessionOwner): boolean {
+	if (!hasOwnerIdentity(owner)) {
 		return false;
 	}
-	if (!isProcessAlive(entry.ownerPid)) {
+	if (!isProcessAlive(owner.pid)) {
 		return false;
 	}
-	const currentOwnerStartedAt = readProcessStartedAt(entry.ownerPid);
+	const currentOwnerStartedAt = readProcessStartedAt(owner.pid);
 	if (!currentOwnerStartedAt) {
 		return false;
 	}
-	return currentOwnerStartedAt === entry.ownerStartedAt;
+	return currentOwnerStartedAt === owner.startedAt;
+}
+
+/**
+ * Sweep entries for a stale owner file.
+ *
+ * @param entries - Entries from a stale-owner session file
+ * @returns Killed count and remaining entries
+ */
+function cleanupStaleOwnerEntries(entries: readonly PidEntry[]): {
+	killed: number;
+	remaining: PidEntry[];
+} {
+	let killed = 0;
+	const remaining: PidEntry[] = [];
+
+	for (const entry of entries) {
+		if (!isProcessAlive(entry.pid)) {
+			continue;
+		}
+		if (!hasMatchingProcessIdentity(entry)) {
+			// Missing/mismatched child identity is unsafe — keep entry.
+			remaining.push(entry);
+			continue;
+		}
+		try {
+			// Negative PID -> signal process group (detached children are group leaders)
+			process.kill(-entry.pid, "SIGTERM");
+			killed++;
+		} catch {
+			// Process may have exited between probe and kill — keep conservative state.
+			remaining.push(entry);
+		}
+	}
+
+	return { killed, remaining };
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Clean up orphaned child processes left over from a previous session.
+ * Clean up orphaned child processes left over from stale sessions.
  *
- * Reads the PID file, skips entries whose owner process is still alive,
- * then probes orphan-owned entries with `kill -0`, validates child identity
- * via process start time, and sends SIGTERM to matching process groups.
- *
- * The PID file is pruned selectively so entries for live owners are retained.
- * Called once at startup inside `createTallowSession()`.
+ * Startup cleanup migrates any legacy global PID file, then sweeps only
+ * session files whose owner identity is present and no longer active.
+ * Files owned by live sessions are left untouched.
  *
  * @returns Number of orphaned processes killed
  */
 export function cleanupOrphanPids(): number {
-	const file = readPidFile();
-	if (file.entries.length === 0) return 0;
+	migrateLegacyPidFile();
 
 	let killed = 0;
-	const remainingEntries: PidEntry[] = [];
-
-	for (const entry of file.entries) {
-		const childAlive = isProcessAlive(entry.pid);
-
-		if (hasMatchingOwnerIdentity(entry)) {
-			// Entry belongs to a live owner session — never interfere.
-			if (childAlive) {
-				remainingEntries.push(entry);
-			}
+	for (const filePath of listSessionPidFiles()) {
+		const file = readSessionPidFile(filePath);
+		if (!file) {
+			removeFile(filePath);
 			continue;
 		}
 
-		if (!hasOwnerIdentity(entry)) {
-			// Legacy entries fail safe: never signal without owner metadata.
-			if (childAlive) {
-				remainingEntries.push(entry);
-			}
+		if (hasMatchingSessionOwner(file.owner)) {
+			// Live owner session — never interfere.
 			continue;
 		}
 
-		if (!childAlive) {
+		if (!hasOwnerIdentity(file.owner)) {
+			// Unknown owner identity fails safe — no blind signaling.
 			continue;
 		}
-		if (!hasMatchingProcessIdentity(entry)) {
-			// Missing/mismatched child identity is unsafe — keep entry.
-			remainingEntries.push(entry);
-			continue;
-		}
-		try {
-			// Negative PID → send to the process group (detached children are group leaders)
-			process.kill(-entry.pid, "SIGTERM");
-			killed++;
-		} catch {
-			// Process may have exited between probe and kill — keep conservative state.
-			remainingEntries.push(entry);
+
+		const result = cleanupStaleOwnerEntries(file.entries);
+		killed += result.killed;
+		if (result.remaining.length === 0) {
+			removeFile(filePath);
+		} else {
+			writeSessionPidFile(filePath, {
+				...file,
+				entries: result.remaining,
+			});
 		}
 	}
 
-	writePidEntries(remainingEntries);
 	return killed;
 }
 
 /**
- * Kill all tracked child processes and remove the PID file.
+ * Kill tracked child processes owned by the current session only.
  *
  * Called during process shutdown (SIGTERM / SIGINT) as a safety net after
- * `session_shutdown` fires. Entries are only signaled when identity checks
- * confirm they still refer to the originally tracked processes.
+ * `session_shutdown` fires. Files owned by other sessions are untouched.
  *
- * @returns Number of processes signalled
+ * @returns Number of processes signaled
  */
 export function cleanupAllTrackedPids(): number {
-	const file = readPidFile();
-	if (file.entries.length === 0) return 0;
+	migrateLegacyPidFile();
 
 	let killed = 0;
-	for (const entry of file.entries) {
-		if (!isProcessAlive(entry.pid)) {
-			continue;
-		}
-		if (!hasMatchingProcessIdentity(entry)) {
-			continue;
-		}
-		try {
-			process.kill(-entry.pid, "SIGTERM");
-			killed++;
-		} catch {
-			// Already dead — expected after session_shutdown ran
-		}
-	}
+	const currentStartedAt = readProcessStartedAt(process.pid);
 
-	try {
-		unlinkSync(PID_FILE_PATH);
-	} catch {
-		// Already gone
+	for (const filePath of listSessionPidFiles()) {
+		const file = readSessionPidFile(filePath);
+		if (!file) {
+			continue;
+		}
+		if (file.owner.pid !== process.pid) {
+			continue;
+		}
+		if (typeof file.owner.startedAt !== "string" || !currentStartedAt) {
+			continue;
+		}
+		if (file.owner.startedAt !== currentStartedAt) {
+			continue;
+		}
+
+		const result = cleanupStaleOwnerEntries(file.entries);
+		killed += result.killed;
+		removeFile(filePath);
 	}
 
 	return killed;
