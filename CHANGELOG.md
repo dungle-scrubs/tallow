@@ -244,6 +244,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **pid-cleanup:** verify process start identity before signaling tracked PIDs
   to prevent PID-reuse kills of unrelated processes
 
+### Documentation
+
+- **docs:** add WezTerm integration guide covering pane control, turn status
+  signaling, tab bar indicators, and WezTerm Lua configuration
+- **wezterm-notify:** new extension — signals agent turn status to WezTerm via
+  OSC 1337 user variables, enabling tab spinner and done-color indicators
+
 ### Removed
 
 - **image-gen:** remove image-gen extension (moved to external plugin)

@@ -1,0 +1,262 @@
+---
+title: WezTerm Integration
+description: End-to-end guide for tallow's WezTerm integration — pane control, turn status signaling, tab indicators, and terminal configuration.
+---
+
+tallow has deep integration with [WezTerm](https://wezfurlong.org/wezterm/).
+The agent can manage panes and tabs, route sensitive commands to separate
+terminals, and signal turn status through visual indicators in the tab bar.
+
+This guide covers the full integration across the `wezterm-pane-control`
+extension, turn status signaling, and the WezTerm Lua configuration that
+ties it together.
+
+## Pane and tab management
+
+The [`wezterm-pane-control`](/extensions/wezterm-pane-control/) extension
+registers a single `wezterm_pane` tool with 10 actions for controlling
+WezTerm from natural language prompts.
+
+### How it works
+
+The extension checks for the `WEZTERM_PANE` environment variable at load
+time. If present, it registers the tool and injects system prompt context
+telling the model which pane it's running in. Outside WezTerm, the
+extension is a silent no-op with zero overhead.
+
+### Actions
+
+| Action | What it does |
+|--------|-------------|
+| `list` | List panes in the current tab with IDs, titles, sizes |
+| `split` | Split current pane in any direction, optionally run a command |
+| `close` | Kill a pane by ID (defaults to current) |
+| `focus` | Activate a pane by ID or direction |
+| `zoom` | Toggle or set zoom state |
+| `resize` | Adjust pane size directionally |
+| `send_text` | Paste text into a target pane |
+| `read_text` | Get visible text from a pane |
+| `spawn_tab` | Open a new tab with optional command |
+| `move_to_tab` | Detach a pane into its own tab |
+
+### Common patterns
+
+**Spawning a parallel tallow session:**
+
+```
+"split a new tallow session to the right"
+→ wezterm cli split-pane --right -- tallow
+
+"open a bottom panel at 30% with haiku"
+→ wezterm cli split-pane --bottom --percent 30 -- tallow --model haiku
+```
+
+**Running commands in other panes:**
+
+```
+"run the dev server in the pane to the right"
+→ split or send_text to target pane with the command
+```
+
+**Reading output from another pane:**
+
+```
+"what does the other pane show?"
+→ read_text from target pane ID
+```
+
+## Private command execution
+
+The agent can route commands through WezTerm panes instead of capturing
+output through the bash tool. This keeps sensitive output — private keys,
+tokens, credentials — out of the LLM context window entirely.
+
+### When terminal routing is used
+
+The extension's system prompt guidance instructs the model to use its
+judgment:
+
+- **Don't auto-read** commands likely to reveal secrets unless the user
+  explicitly asks
+- **Execute by default** — when prefilling a command for the user, send
+  Enter (`\n`) to run it automatically
+- **Leave unexecuted** only when the user explicitly asks to review or
+  edit the command first
+- **Let the user watch** — for commands where the user wants to monitor
+  output, execute in a visible pane and let them read the terminal directly
+
+This is not a hard security boundary. The model uses judgment based on
+the tool description and system prompt context. Commands like `cat
+~/.ssh/id_rsa` or `op read` are routed to a terminal pane rather than
+captured by bash.
+
+## Turn status signaling
+
+The [`wezterm-notify`](/extensions/wezterm-notify/) extension signals
+agent turn status to WezTerm via
+[OSC 1337 SetUserVar](https://wezfurlong.org/wezterm/shell-integration.html#user-vars)
+sequences. WezTerm Lua config reads the `pi_status` user variable to
+drive visual indicators.
+
+### Lifecycle
+
+| Event | pi_status | Effect |
+|-------|-----------|--------|
+| `turn_start` | `working` | Tab shows spinner |
+| `turn_end` | `done` | Tab turns blue (if inactive) |
+| `input` | _(cleared)_ | Tab returns to normal |
+| `session_start` / `session_shutdown` | _(cleared)_ | Clean slate |
+
+A `pi_heartbeat` variable fires every 500ms during a turn to trigger
+WezTerm tab bar re-renders, advancing the spinner animation.
+
+### OSC stripping
+
+When OSC 1337 sequences appear in bash output (from programs like bun
+test or nvim-treesitter), tallow strips them before display to prevent
+line-width calculation errors:
+
+- **`bash-tool-enhanced`** — `stripNonDisplayOsc()` removes all
+  non-hyperlink OSC sequences from captured output
+- **`tallow-tui`** — `visibleWidth()` strips OSC sequences when
+  calculating terminal column widths
+
+## Tab bar indicators
+
+The WezTerm Lua configuration consumes `pi_status` to show visual
+feedback in the tab bar. These indicators work across all panes in a
+tab — if any pane has an active agent, the tab shows it.
+
+### Spinner (turn in progress)
+
+When any pane in a tab has `pi_status=working`:
+
+- A spinner animation (`◰ ◳ ◲ ◱`) appears before the tab title
+- Cycles at ~500ms (heartbeat interval), so the animation speed stays
+  stable even when other terminal activity occurs
+- Color: amber (`#d8a274`)
+
+### Done indicator (unseen result)
+
+When at least one pane has `pi_status=done` and the tab is **not**
+active (user hasn't seen the result):
+
+- Tab title turns blue (`#61afef`)
+- Tracks "seen" state per pane in `wezterm.GLOBAL.pi_seen`
+- Resets when: agent starts a new turn, user switches to the tab, or
+  the pane loses `pi_status`
+
+### Normal states
+
+- **Active tab:** yellow (`#ccb266`) with underline
+- **Inactive tab:** gray (`#737373`)
+
+## Status bar integration
+
+The right status bar can show contextual information:
+
+- **Git branch** with ahead/behind counts
+- **Process name** of the foreground process
+- **Focus zoom** indicator when zoom mode is active
+- **Workspace numbers** when multiple workspaces exist
+
+## WezTerm Lua setup
+
+tallow ships a Lua module that handles the WezTerm side. Copy or
+symlink it into your WezTerm config directory, then require it:
+
+```bash
+# Symlink into WezTerm config
+ln -s "$(dirname "$(which tallow)")/../lib/node_modules/tallow/extensions/wezterm-notify/wezterm/tallow.lua" \
+  ~/.config/wezterm/tallow.lua
+```
+
+```lua
+-- In your wezterm.lua
+require("tallow").setup()
+```
+
+That registers `format-tab-title` and `update-right-status` handlers
+for the spinner and done-color indicators.
+
+### Custom colors
+
+```lua
+require("tallow").setup({
+  spinner_color = "#d8a274",  -- spinner while working (default: amber)
+  done_color = "#61afef",     -- tab color for unseen results (default: blue)
+  active_color = "#ccb266",   -- active tab color (default: yellow)
+  inactive_color = "#737373", -- inactive tab color (default: gray)
+})
+```
+
+### Advanced: integrate with existing handlers
+
+`setup()` owns both `format-tab-title` and `update-right-status`.
+If you already define either handler, compose manually with helpers:
+
+```lua
+local tallow = require("tallow")
+
+wezterm.on("update-right-status", function(window, pane)
+  tallow.tick()
+  -- your existing update-right-status logic
+end)
+
+wezterm.on("format-tab-title", function(tab)
+  local any_working, any_done_unseen = tallow.get_tab_status(tab)
+  local title = tostring(tab.tab_index + 1)
+  local elements = {}
+
+  if any_working then
+    table.insert(elements, { Foreground = { Color = "#d8a274" } })
+    table.insert(elements, { Text = " " .. tallow.spinner_char() .. " " })
+  else
+    table.insert(elements, { Text = "   " })
+  end
+
+  local fg = tab.is_active and "#ccb266" or "#737373"
+  if any_done_unseen then
+    fg = "#61afef"
+  end
+
+  table.insert(elements, { Foreground = { Color = fg } })
+  table.insert(elements, { Text = " " .. title .. "  " })
+  return elements
+end)
+```
+
+## Workspaces
+
+WezTerm's [workspace](https://wezfurlong.org/wezterm/recipes/workspaces.html)
+feature lets you organize groups of tabs. The status bar shows numbered
+workspace indicators when multiple workspaces exist, and you can switch
+between them with keybindings.
+
+The `wezterm_pane` tool does not currently have workspace actions — pane
+and tab management operate within the current workspace. Workspace
+switching is a user-side operation through WezTerm keybindings.
+
+## Putting it together
+
+A typical WezTerm + tallow setup:
+
+1. **Install tallow** — follow the [installation guide](/getting-started/installation/)
+2. **Configure WezTerm Lua** — symlink `tallow.lua` and call
+   `require("tallow").setup()` (or manually compose with helpers)
+3. **Run tallow in WezTerm** — the extension auto-detects via
+   `WEZTERM_PANE` and activates
+
+The agent can then split panes, spawn sessions, route commands, and
+you'll see spinner/done indicators in the tab bar as it works.
+
+## Related
+
+- [`wezterm-notify`](/extensions/wezterm-notify/) — the extension
+  that emits turn status signals
+- [`wezterm-pane-control`](/extensions/wezterm-pane-control/) — pane
+  and tab management tool
+- [`bash-tool-enhanced`](/extensions/bash-tool-enhanced/) — OSC
+  stripping for clean bash output
+- [WezTerm shell integration docs](https://wezfurlong.org/wezterm/shell-integration.html)
+  — upstream SetUserVar protocol reference

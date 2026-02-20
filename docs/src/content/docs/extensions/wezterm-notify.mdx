@@ -1,0 +1,77 @@
+---
+title: wezterm-notify
+description: Signal agent turn status to WezTerm — enables tab spinner and done-color indicators.
+---
+
+Signals agent turn status to WezTerm via
+[OSC 1337 SetUserVar](https://wezfurlong.org/wezterm/shell-integration.html#user-vars)
+sequences. WezTerm Lua config reads `pi_status` from
+`pane:get_user_vars()` to show a spinner while the agent works
+and change the tab color when it finishes.
+
+Only active when `WEZTERM_PANE` is set — silent no-op outside
+WezTerm.
+
+## How it works
+
+The extension hooks four lifecycle events to write `pi_status`:
+
+| Event | pi_status value | Effect |
+|-------|----------------|--------|
+| `turn_start` | `working` | Tab shows spinner |
+| `turn_end` | `done` | Tab turns blue (if inactive) |
+| `input` | _(cleared)_ | Tab returns to normal |
+| `session_start` / `session_shutdown` | _(cleared)_ | Clean slate |
+
+A `pi_heartbeat` variable fires every 500ms during a turn to
+trigger WezTerm's `update-right-status` event, which advances the
+spinner animation frame.
+
+## WezTerm Lua setup
+
+This extension emits the signals. A Lua module shipped alongside
+it consumes them in WezTerm.
+
+Copy or symlink `tallow.lua` into your WezTerm config directory:
+
+```bash
+# Find the file inside tallow's install
+TALLOW_DIR="$(dirname "$(which tallow)")"
+
+# Symlink into WezTerm config
+ln -s "$TALLOW_DIR/../lib/node_modules/tallow/extensions/wezterm-notify/wezterm/tallow.lua" \
+  ~/.config/wezterm/tallow.lua
+```
+
+Then add one line to your `wezterm.lua`:
+
+```lua
+require("tallow").setup()
+```
+
+`setup()` owns both `format-tab-title` and `update-right-status`.
+If you already have either handler, compose manually with
+`tallow.tick()`, `tallow.get_tab_status(tab)`, and
+`tallow.spinner_char()` instead.
+
+With custom colors:
+
+```lua
+require("tallow").setup({
+  spinner_color = "#d8a274",
+  done_color = "#61afef",
+  active_color = "#ccb266",
+  inactive_color = "#737373",
+})
+```
+
+For the full integration picture, see the
+[WezTerm Integration guide](/guides/wezterm-integration/).
+
+## Relationships with other extensions
+
+### [wezterm-pane-control](/extensions/wezterm-pane-control/)
+
+`wezterm-notify` enhances the pane control extension. Together
+they provide full WezTerm integration: pane/tab management plus
+visual turn status indicators.

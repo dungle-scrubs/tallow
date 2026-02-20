@@ -97,6 +97,10 @@ export default defineConfig({
 							label: "Using tallow in Claude Code projects",
 							slug: "guides/coming-from-claude-code",
 						},
+						{
+							label: "WezTerm Integration",
+							slug: "guides/wezterm-integration",
+						},
 					],
 				},
 				{
