@@ -8,11 +8,15 @@
  * The file format is shared with `extensions/_shared/pid-registry.ts`
  * which handles extension-side registration. Both modules operate on the
  * same JSON file independently — the file schema is the contract.
+ *
+ * Current schema extends legacy entries with optional owner identity
+ * (`ownerPid`, `ownerStartedAt`) so startup cleanup can avoid terminating
+ * processes owned by live sessions.
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { TALLOW_HOME } from "./config.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -21,6 +25,8 @@ import { TALLOW_HOME } from "./config.js";
 export interface PidEntry {
 	pid: number;
 	command: string;
+	ownerPid?: number;
+	ownerStartedAt?: string;
 	processStartedAt?: string;
 	startedAt: number;
 }
@@ -52,6 +58,12 @@ function isPidEntry(value: unknown): value is PidEntry {
 	if (typeof candidate.pid !== "number") return false;
 	if (typeof candidate.command !== "string") return false;
 	if (typeof candidate.startedAt !== "number") return false;
+	if (candidate.ownerPid != null && typeof candidate.ownerPid !== "number") {
+		return false;
+	}
+	if (candidate.ownerStartedAt != null && typeof candidate.ownerStartedAt !== "string") {
+		return false;
+	}
 	if (candidate.processStartedAt != null && typeof candidate.processStartedAt !== "string") {
 		return false;
 	}
@@ -92,6 +104,29 @@ function readPidFile(): PidFile {
 		// File missing, corrupt, or unparseable — start fresh
 	}
 	return { version: 1, entries: [] };
+}
+
+/**
+ * Persist PID entries or remove the file when no entries remain.
+ *
+ * @param entries - Entries to persist
+ * @returns Nothing
+ */
+function writePidEntries(entries: readonly PidEntry[]): void {
+	if (entries.length === 0) {
+		try {
+			unlinkSync(PID_FILE_PATH);
+		} catch {
+			// Already gone
+		}
+		return;
+	}
+
+	const runDir = dirname(PID_FILE_PATH);
+	if (!existsSync(runDir)) {
+		mkdirSync(runDir, { recursive: true });
+	}
+	writeFileSync(PID_FILE_PATH, `${JSON.stringify({ version: 1, entries }, null, "\t")}\n`);
 }
 
 // ─── Process checks ─────────────────────────────────────────────────────────
@@ -146,15 +181,48 @@ function hasMatchingProcessIdentity(entry: PidEntry): boolean {
 	return currentStartedAt === entry.processStartedAt;
 }
 
+/**
+ * Check whether a PID entry includes owner identity metadata.
+ *
+ * @param entry - Tracked PID entry
+ * @returns True when owner PID and owner start time are present
+ */
+function hasOwnerIdentity(
+	entry: PidEntry
+): entry is PidEntry & { ownerPid: number; ownerStartedAt: string } {
+	return typeof entry.ownerPid === "number" && typeof entry.ownerStartedAt === "string";
+}
+
+/**
+ * Verify that an entry's owner process is still alive and identity-matched.
+ *
+ * @param entry - Tracked PID entry
+ * @returns True when owner process is still active and unchanged
+ */
+function hasMatchingOwnerIdentity(entry: PidEntry): boolean {
+	if (!hasOwnerIdentity(entry)) {
+		return false;
+	}
+	if (!isProcessAlive(entry.ownerPid)) {
+		return false;
+	}
+	const currentOwnerStartedAt = readProcessStartedAt(entry.ownerPid);
+	if (!currentOwnerStartedAt) {
+		return false;
+	}
+	return currentOwnerStartedAt === entry.ownerStartedAt;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
  * Clean up orphaned child processes left over from a previous session.
  *
- * Reads the PID file, probes each entry with `kill -0`, validates identity
- * via process start time, then sends SIGTERM to the process group of entries
- * that are still alive and verifiably match the originally tracked process.
+ * Reads the PID file, skips entries whose owner process is still alive,
+ * then probes orphan-owned entries with `kill -0`, validates child identity
+ * via process start time, and sends SIGTERM to matching process groups.
  *
+ * The PID file is pruned selectively so entries for live owners are retained.
  * Called once at startup inside `createTallowSession()`.
  *
  * @returns Number of orphaned processes killed
@@ -164,13 +232,33 @@ export function cleanupOrphanPids(): number {
 	if (file.entries.length === 0) return 0;
 
 	let killed = 0;
+	const remainingEntries: PidEntry[] = [];
 
 	for (const entry of file.entries) {
-		if (!isProcessAlive(entry.pid)) {
+		const childAlive = isProcessAlive(entry.pid);
+
+		if (hasMatchingOwnerIdentity(entry)) {
+			// Entry belongs to a live owner session — never interfere.
+			if (childAlive) {
+				remainingEntries.push(entry);
+			}
+			continue;
+		}
+
+		if (!hasOwnerIdentity(entry)) {
+			// Legacy entries fail safe: never signal without owner metadata.
+			if (childAlive) {
+				remainingEntries.push(entry);
+			}
+			continue;
+		}
+
+		if (!childAlive) {
 			continue;
 		}
 		if (!hasMatchingProcessIdentity(entry)) {
-			// Missing/mismatched identity is treated as unsafe — skip signaling.
+			// Missing/mismatched child identity is unsafe — keep entry.
+			remainingEntries.push(entry);
 			continue;
 		}
 		try {
@@ -178,17 +266,12 @@ export function cleanupOrphanPids(): number {
 			process.kill(-entry.pid, "SIGTERM");
 			killed++;
 		} catch {
-			// Process may have exited between probe and kill — harmless
+			// Process may have exited between probe and kill — keep conservative state.
+			remainingEntries.push(entry);
 		}
 	}
 
-	// Always clear the file — stale entries from dead processes are useless
-	try {
-		unlinkSync(PID_FILE_PATH);
-	} catch {
-		// Already gone or never existed
-	}
-
+	writePidEntries(remainingEntries);
 	return killed;
 }
 
