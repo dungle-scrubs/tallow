@@ -4,9 +4,12 @@
  * and shell policy enforcement via event handlers.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import type { ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
-import backgroundTasksExtension from "../index.js";
+import backgroundTasksExtension, { setBackgroundTaskSpawnForTests } from "../index.js";
 
 /**
  * Build a minimal extension context for tool execution in tests.
@@ -123,14 +126,54 @@ async function execTool(
 	)) as { content: Array<{ type: string; text?: string }>; details: unknown };
 }
 
+/**
+ * Child-process stub used to validate fire-and-forget behavior without `unref`.
+ */
+class ChildProcessWithoutUnref extends EventEmitter {
+	readonly stderr = new PassThrough();
+	readonly stdin = new PassThrough();
+	readonly stdout = new PassThrough();
+	readonly pid = 45_123;
+
+	/**
+	 * Simulate process termination.
+	 *
+	 * @returns Always true
+	 */
+	kill(): boolean {
+		this.emit("close", 0);
+		return true;
+	}
+}
+
+/**
+ * Create a spawn-compatible stub that returns a child without `unref`.
+ *
+ * @param output - Output text emitted before close
+ * @returns Spawn implementation for tests
+ */
+function createSpawnWithoutUnref(output: string): typeof import("node:child_process").spawn {
+	return ((_: string) => {
+		const child = new ChildProcessWithoutUnref();
+		queueMicrotask(() => {
+			child.stdout.write(output);
+			child.stdout.end();
+			child.emit("close", 0);
+		});
+		return child as unknown as ChildProcess;
+	}) as typeof import("node:child_process").spawn;
+}
+
 let harness: ExtensionHarness;
 
 beforeEach(() => {
+	setBackgroundTaskSpawnForTests(undefined);
 	harness = ExtensionHarness.create();
 	backgroundTasksExtension(harness.api);
 });
 
 afterEach(() => {
+	setBackgroundTaskSpawnForTests(undefined);
 	harness.reset();
 });
 
@@ -204,6 +247,24 @@ describe("bg_bash fire-and-forget mode", () => {
 		expect(details.taskId).toBeDefined();
 		expect(details.taskId).toMatch(/^bg_/);
 		expect(firstText(result)).toContain("Task ID:");
+	});
+
+	it("succeeds when child process does not implement unref", async () => {
+		setBackgroundTaskSpawnForTests(createSpawnWithoutUnref("from-no-unref-child\n"));
+		const bgBash = getTool(harness, "bg_bash");
+		const taskStatus = getTool(harness, "task_status");
+		const taskOutput = getTool(harness, "task_output");
+
+		const run = await execTool(bgBash, { command: "echo ignored", background: true });
+		const taskId = (run.details as { taskId: string }).taskId;
+
+		await new Promise((resolve) => setTimeout(resolve, 5));
+
+		const status = await execTool(taskStatus, { taskId });
+		expect((status.details as { status?: string }).status).toBe("completed");
+
+		const output = await execTool(taskOutput, { taskId });
+		expect(firstText(output)).toContain("from-no-unref-child");
 	});
 
 	it("task becomes available for status check", async () => {
