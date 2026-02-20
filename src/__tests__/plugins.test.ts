@@ -4,12 +4,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { PluginSpec } from "../plugins.js";
 import {
+	buildPluginCacheKey,
 	detectPluginFormat,
 	extractClaudePluginResources,
 	getCachePath,
 	isCacheValid,
 	isImmutableRef,
 	normalizePluginSubpath,
+	normalizeRemotePluginSpec,
 	parsePluginSpec,
 	readPluginManifest,
 	resolveContainedSubpath,
@@ -141,6 +143,71 @@ describe("parsePluginSpec", () => {
 	});
 });
 
+// ─── normalizeRemotePluginSpec ───────────────────────────────────────────────
+
+describe("normalizeRemotePluginSpec", () => {
+	it("should normalize parsed remote specs", () => {
+		const parsed = parsePluginSpec("github:owner/repo/plugins/foo@main");
+		const normalized = normalizeRemotePluginSpec(parsed);
+
+		expect(normalized.isLocal).toBe(false);
+		expect(normalized.owner).toBe("owner");
+		expect(normalized.repo).toBe("repo");
+		expect(normalized.subpath).toBe("plugins/foo");
+		expect(normalized.ref).toBe("main");
+		expect(normalized.cacheKey).toContain("owner--repo");
+	});
+
+	it("should reject local specs", () => {
+		const parsed = parsePluginSpec("./local-plugin");
+		expect(() => normalizeRemotePluginSpec(parsed)).toThrow(
+			"Local plugins cannot be normalized as remote specs"
+		);
+	});
+
+	it("should reject remote specs with invalid owner characters", () => {
+		const spec: PluginSpec = {
+			raw: "github:o/wner/repo",
+			isLocal: false,
+			owner: "o/wner",
+			repo: "repo",
+			subpath: "",
+		};
+
+		expect(() => normalizeRemotePluginSpec(spec)).toThrow("unsupported characters");
+	});
+});
+
+// ─── buildPluginCacheKey ─────────────────────────────────────────────────────
+
+describe("buildPluginCacheKey", () => {
+	it("should produce deterministic keys for identical inputs", () => {
+		const input = {
+			owner: "owner",
+			repo: "repo",
+			subpath: "plugins/foo",
+			ref: "feature/new-ui",
+		};
+		const first = buildPluginCacheKey(input);
+		const second = buildPluginCacheKey(input);
+
+		expect(first).toBe(second);
+	});
+
+	it("should produce filesystem-safe keys", () => {
+		const key = buildPluginCacheKey({
+			owner: "owner",
+			repo: "repo",
+			subpath: "plugins/foo",
+			ref: "feature/new-ui",
+		});
+
+		expect(key).not.toContain("/");
+		expect(key).not.toContain("\\");
+		expect(key).toContain("owner--repo");
+	});
+});
+
 // ─── normalizePluginSubpath ─────────────────────────────────────────────────
 
 describe("normalizePluginSubpath", () => {
@@ -240,6 +307,13 @@ describe("getCachePath", () => {
 		const spec = parsePluginSpec("github:owner/repo");
 		const cachePath = getCachePath(spec);
 		expect(cachePath).toContain("@default");
+	});
+
+	it("should sanitize cache keys for refs containing path separators", () => {
+		const spec = parsePluginSpec("github:owner/repo/plugins/foo@feature/new-ui");
+		const cachePath = getCachePath(spec);
+		expect(cachePath).not.toContain("/feature/new-ui");
+		expect(cachePath).toContain("@feature--new-ui");
 	});
 
 	it("should throw for local specs", () => {
