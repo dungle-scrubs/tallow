@@ -43,6 +43,9 @@ import {
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
 
+/** Spawn implementation used by bg_bash (overridable in tests). */
+let spawnProcess: typeof spawn = spawn;
+
 // ANSI escape codes for Catppuccin Macchiato colors (medium-dark variant)
 // Crust bg: #181926, Mauve: #c6a0f6, Text: #cad3f5
 const BG_DARK_GRAY = "\x1b[48;2;24;25;38m"; // Catppuccin Macchiato crust #181926
@@ -158,6 +161,17 @@ function cleanupOldTasks(): void {
 }
 
 // ── Promoted Task API ────────────────────────────────────────────────────────
+
+/**
+ * Override bg_bash spawn implementation for tests.
+ *
+ * @internal
+ * @param implementation - Custom spawn implementation (or undefined to restore default)
+ * @returns Nothing
+ */
+export function setBackgroundTaskSpawnForTests(implementation?: typeof spawn): void {
+	spawnProcess = implementation ?? spawn;
+}
 
 /** Handle for updating a task that was promoted from bash to background. */
 export interface PromotedTaskHandle {
@@ -513,7 +527,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 			// Spawn the process
 			const shell = process.env.SHELL || "/bin/bash";
-			const child = spawn(shell, ["-c", params.command], {
+			const child = spawnProcess(shell, ["-c", params.command], {
 				cwd,
 				stdio: ["ignore", "pipe", "pipe"],
 				detached: true,
@@ -601,7 +615,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					syncTaskState(ctx);
 					postInlineResult(task);
 				});
-				child.unref();
+				if (typeof child.unref === "function") {
+					child.unref();
+				}
 				syncTaskState(ctx);
 
 				return {
