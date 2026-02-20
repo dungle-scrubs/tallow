@@ -135,7 +135,8 @@ export function getNonCollidingSkillPaths(
 		return paths;
 	}
 
-	for (const entry of entries) {
+	const sortedEntries = [...entries].sort((left, right) => left.name.localeCompare(right.name));
+	for (const entry of sortedEntries) {
 		if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
 		if (knownSkillNames.has(entry.name)) continue;
 
