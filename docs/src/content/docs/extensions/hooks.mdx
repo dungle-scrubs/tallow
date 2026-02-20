@@ -25,6 +25,9 @@ Subprocess safety defaults:
   marker
 - timeout/abort termination escalates deterministically:
   `SIGTERM` → grace period → `SIGKILL`
+- agent hooks resolve their runner in this order:
+  `TALLOW_HOOK_AGENT_RUNNER` override → current tallow executable
+  (when detectable) → `tallow` on PATH → legacy `pi` fallback
 
 Configure in `hooks.json` at the project root or in settings.
 Events prefixed with `before_` or `session_before_` support
