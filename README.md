@@ -5,7 +5,7 @@
 <h1 align="center">Tallow</h1>
 
 <p align="center">
-  An opt-in, fully featured coding agent for your terminal. Built on <a href="https://github.com/nicobrinkkemper/pi-coding-agent">pi</a>.
+  A modular coding agent for your terminal. Built on <a href="https://github.com/nicobrinkkemper/pi-coding-agent">pi</a>.
 </p>
 
 <p align="center">
@@ -26,61 +26,30 @@
   <img src="assets/screenshot.jpg" alt="Tallow multi-agent team coordinating a docs audit" />
 </p>
 
-Tallow is opt-in by default: start minimal, then enable only what your project needs.
-It is drop-in compatible with Claude Code projects via `.claude/` bridging.
-Install extensions, themes, and agents in any combination.
-This is a personal project I build in my spare time, so please be patient with
-issue and PR response times.
+Tallow is a terminal coding agent that starts minimal and scales up. Install only the
+extensions, themes, and agents your project needs, or enable everything. It drops into
+existing Claude Code projects via `.claude/` bridging, so nothing breaks when you switch.
+Ships with 49 extensions, 34 themes, and 10 specialized agents.
 
-## Features
-
-- **Most valuable capabilities (non-exhaustive):**
-  - **Multi-model routing** — route work by intent/cost (`auto-cheap`, `auto-balanced`,
-    `auto-premium`) across available providers
-  - **Multi-agent teams** — coordinate specialized agents with shared task boards,
-    dependencies, messaging, and archive/resume
-  - **Context fork** — run isolated subprocess workflows with separate tools/models and
-    merge results back cleanly
-  - **Workspace rewind snapshots** — roll file changes back to earlier conversation turns
-  - **Task primitives + background execution** — explicit task lifecycle tracking and
-    non-blocking long-running work
-  - **Built-in LSP navigation** — definitions, references, hover, and workspace symbol
-    lookup
-- **Opt-in and modular** — install only the pieces you need, skip the rest
-- **Claude Code compatible** — `.claude/` + `.tallow/` directories are bridged so existing
-  project workflows keep working
-- **Fully featured when you want it** — 49 bundled extensions, 34 themes, 8 slash commands,
-  and 10 specialized agents
-- **Session naming** — auto-generated descriptive names for each session, shown in footer
-  and `--list`
-- **Debug mode** — structured JSONL diagnostic logging with `/diag` command
-- **SDK** — embed Tallow in your own scripts and orchestrators
-- **User-owned config** — agents and commands are installed to `~/.tallow/` where you can
-  edit, remove, or add your own
-
-Read the full [documentation](https://tallow.dungle-scrubs.com).
-
-## Requirements
-
-- Node.js ≥ 22
-- An API key for at least one supported LLM provider (Anthropic, OpenAI, Google, etc.)
-
-## Installation
-
-### Global install
+## Quick start
 
 ```bash
-bun install -g tallow
-tallow install
+npm install -g tallow   # or: pnpm add -g tallow / bun install -g tallow
+tallow install          # pick extensions, themes, agents
+tallow                  # start coding
 ```
 
-Or without global install:
+Or try it without installing globally:
 
 ```bash
-bunx tallow install
+npx tallow install      # or: pnpm dlx tallow install / bunx tallow install
 ```
 
-### From source
+> Requires Node.js ≥ 22 and an API key for at least one LLM provider
+> (Anthropic, OpenAI, Google, etc.)
+
+<details>
+<summary><strong>Install from source</strong></summary>
 
 ```bash
 git clone https://github.com/dungle-scrubs/tallow.git
@@ -93,121 +62,127 @@ node dist/install.js
 The installer walks you through selecting extensions, themes, and agents,
 then links the `tallow` binary globally.
 
+</details>
+
+## Highlights
+
+**Multi-model routing** — Route tasks by intent and cost across providers.
+`auto-cheap` for boilerplate, `auto-balanced` for everyday work, `auto-premium`
+when accuracy matters.
+
+**Multi-agent teams** — Spawn specialized agents that share a task board with
+dependencies, messaging, and archive/resume. Coordinate complex work across
+multiple models in parallel.
+
+**Context fork** — Branch into an isolated subprocess with its own tools and model,
+then merge results back into the main session.
+
+**Workspace rewind** — Every conversation turn snapshots your file changes. Roll back
+to any earlier turn when something goes wrong.
+
+**Background tasks** — Kick off long-running work without blocking the session.
+Track task lifecycle explicitly and check back when ready.
+
+**LSP** — Jump to definitions, find references, inspect types, and search
+workspace symbols — no editor required.
+
+**Claude Code compatible** — Projects with `.claude/` directories (skills, agents,
+commands) work without changes. Both `.tallow/` and `.claude/` are scanned;
+`.tallow/` takes precedence.
+
+**User-owned config** — Agents, commands, and extensions install to `~/.tallow/`
+where you own them. Edit, remove, or add your own.
+
 ## Usage
 
 ```bash
-# Interactive mode
+# Interactive session
 tallow
 
 # Single-shot prompt
 tallow -p "Fix the failing tests"
 
-# Pipe input from stdin
-echo "Explain this error" | tallow
-cat README.md | tallow -p "Summarize this"
+# Pipe in context
 git diff | tallow -p "Review these changes"
-
-# Continue most recent session
-tallow --continue
-
-# Use a specific model
-tallow -m anthropic/claude-sonnet-4-20250514
-
-# Set thinking level
-tallow --thinking high
-
-# Run without persisting session
-tallow --no-session
-
-# Load additional extensions
-tallow -e ./my-extension
-
-# List saved sessions (shows auto-generated names)
-tallow --list
-
-# Runtime auth via environment (not persisted)
-TALLOW_API_KEY=sk-ant-... tallow --provider anthropic
-
-# Runtime auth via reference (resolved at runtime)
-TALLOW_API_KEY_REF=op://Services/Anthropic/api-key tallow --provider anthropic
-
-# Run in RPC or JSON mode
-tallow --mode rpc
-
-# Restrict available tools
-tallow --tools read,grep,find      # Only read, grep, find
-tallow --tools readonly            # Preset: read, grep, find, ls
-tallow --tools none                # Chat only, no tools
-
-# Disable all extensions
-tallow --no-extensions
-
-# Print tallow home directory
-tallow --home
-```
-
-`--api-key` was removed to avoid leaking secrets in process arguments.
-Use `TALLOW_API_KEY` or `TALLOW_API_KEY_REF` instead.
-
-### Piped input
-
-Pipe file contents or command output directly into Tallow:
-
-```bash
-# Stdin becomes the prompt
-echo "What is 2+2?" | tallow
-
-# Stdin as context + explicit prompt
 cat src/main.ts | tallow -p "Find bugs in this code"
 
-# Pipe command output
-git log --oneline -20 | tallow -p "Summarize recent changes"
+# Continue the last session
+tallow --continue
+
+# Pick a model and thinking level
+tallow -m anthropic/claude-sonnet-4-20250514 --thinking high
+
+# List saved sessions
+tallow --list
+
+# Restrict available tools
+tallow --tools readonly            # read, grep, find, ls only
+tallow --tools none                # chat only, no tools
 ```
 
-When stdin is piped, Tallow automatically enters print mode (single-shot).
-If both stdin and `-p` are provided, stdin is prepended as context before the
-prompt. Piped input is capped at 10 MB. JSON mode (`--mode json`) also
-accepts piped stdin.
+See the [full CLI reference](https://tallow.dungle-scrubs.com) for all flags
+and modes (RPC, JSON, piped stdin, shell interpolation, etc.)
 
-### Shell interpolation
+## Configuration
 
-Expand shell commands inline with `` !`command` `` syntax:
+Tallow stores its configuration in `~/.tallow/`:
 
+| Path | Purpose |
+|------|---------|
+| `settings.json` | Global settings (theme, icons, keybindings) |
+| `.env` | Environment variables loaded at startup (supports `op://` refs) |
+| `auth.json` | Provider auth references (see [SECURITY.md](SECURITY.md)) |
+| `models.json` | Model configuration |
+| `agents/` | Agent profiles — yours to edit |
+| `commands/` | Slash commands — yours to edit |
+| `extensions/` | User extensions (override bundled ones by name) |
+| `sessions/` | Persisted conversation sessions |
+
+Project-level overrides live in `.tallow/` within your repo.
+
+## Extending Tallow
+
+### Themes
+
+Switch themes in-session with `/theme`, or set a default:
+
+```json
+{ "theme": "tokyo-night" }
 ```
-!`ls -la`
-!`git status`
-!`git branch --show-current`
+
+### Icons
+
+Override any TUI glyph in `settings.json` — only the keys you set change:
+
+```json
+{ "icons": { "success": "✔", "error": "✘" } }
 ```
 
-**Disabled by default.** Enable explicitly with either:
+See the [icon reference](https://tallow.dungle-scrubs.com/getting-started/icons/) for all keys.
 
-- `TALLOW_ENABLE_SHELL_INTERPOLATION=1` (or `TALLOW_SHELL_INTERPOLATION=1`)
-- `"shellInterpolation": true` in `.tallow/settings.json` or `~/.tallow/settings.json`
+### Writing extensions
 
-When enabled, only allowlisted implicit commands run. The command output
-replaces the pattern before reaching the agent. 5-second timeout, 1 MB
-max output, non-recursive. High-risk explicit shell commands require
-confirmation (`TALLOW_ALLOW_UNSAFE_SHELL=1` bypasses confirmation in
-non-interactive environments).
+Extensions are TypeScript files that receive the pi `ExtensionAPI`:
 
-### Slash commands
+```typescript
+import type { ExtensionAPI } from "tallow";
 
-Inside an interactive session, type `/` to see available commands:
+export default function myExtension(api: ExtensionAPI): void {
+  api.registerCommand("greet", {
+    description: "Say hello",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify("Hello from my extension!", "info");
+    },
+  });
+}
+```
 
-| Command | Description |
-|---------|-------------|
-| `/implement` | Implement a feature from a description |
-| `/implement-and-review` | Implement then self-review |
-| `/review` | Review recent changes |
-| `/fix` | Fix a bug from a description |
-| `/test` | Write or fix tests |
-| `/scout-and-plan` | Explore the codebase and create a plan |
-| `/scaffold` | Scaffold a new project |
-| `/question` | Introspect on agent reasoning without triggering actions |
+Place it in `~/.tallow/extensions/my-extension/index.ts`. If it shares a name
+with a bundled extension, yours takes precedence.
 
-## SDK
+### SDK
 
-Use Tallow programmatically in your own tools:
+Embed Tallow in your own scripts:
 
 ```typescript
 import { createTallowSession } from "tallow";
@@ -227,98 +202,20 @@ await session.prompt("What files are in this directory?");
 session.dispose();
 ```
 
-### SDK options
-
-```typescript
-const tallow = await createTallowSession({
-  cwd: "/path/to/project",
-  provider: "anthropic",
-  modelId: "claude-sonnet-4-20250514",
-  thinkingLevel: "high",
-  session: { type: "memory" },        // Don't persist
-  noBundledExtensions: true,           // Start clean
-  additionalExtensions: ["./my-ext"],   // Add your own
-  systemPrompt: "You are a test bot.",  // Override system prompt
-  apiKey: process.env.ANTHROPIC_API_KEY, // Runtime only, not persisted
-});
-```
-
-## Configuration
-
-Tallow stores its configuration in `~/.tallow/`:
-
-| Path | Purpose |
-|------|---------|
-| `~/.tallow/settings.json` | Global settings |
-| `~/.tallow/.env` | Environment variables loaded at startup (supports `op://` refs) |
-| `~/.tallow/auth.json` | Provider auth references (see [SECURITY.md](SECURITY.md)) |
-| `~/.tallow/models.json` | Model configuration |
-| `~/.tallow/keybindings.json` | Keybinding overrides |
-| `~/.tallow/agents/` | Agent profiles (installed from templates, yours to edit) |
-| `~/.tallow/commands/` | Slash commands (installed from templates, yours to edit) |
-| `~/.tallow/extensions/` | User extensions (override bundled ones by name) |
-| `~/.tallow/sessions/` | Persisted conversation sessions |
-
-Project-level configuration lives in `.tallow/` within your project directory.
-
-## Icons
-
-Override any TUI glyph in `~/.tallow/settings.json`:
-
-```json
-{
-  "icons": {
-    "success": "✔",
-    "error": "✘",
-    "spinner": ["⠋", "⠙", "⠹", "⠸"]
-  }
-}
-```
-
-Only keys you set are overridden — everything else keeps its default.
-See the [icon reference](https://tallow.dungle-scrubs.com/getting-started/icons/) for all available keys.
-
-## Themes
-
-Switch themes inside an interactive session with the `/theme` command,
-or set one in `~/.tallow/settings.json`:
-
-```json
-{
-  "theme": "tokyo-night"
-}
-```
-
-## Writing extensions
-
-Extensions are TypeScript files that receive the pi `ExtensionAPI`:
-
-```typescript
-import type { ExtensionAPI } from "tallow";
-
-export default function myExtension(api: ExtensionAPI): void {
-  api.registerCommand("greet", {
-    description: "Say hello",
-    handler: async (_args, ctx) => {
-      ctx.ui.notify("Hello from my extension!", "info");
-    },
-  });
-}
-```
-
-Place your extension in `~/.tallow/extensions/my-extension/index.ts`.
-If it shares a name with a bundled extension, yours takes precedence.
+See the [SDK docs](https://tallow.dungle-scrubs.com) for all options.
 
 ## Known limitations
 
 - Requires Node.js 22+ (uses modern ESM features)
 - Session persistence is local — no cloud sync
-- The `web_fetch` extension works best with a [Firecrawl](https://firecrawl.dev) API key
-  for JS-heavy pages
+- `web_fetch` works best with a [Firecrawl](https://firecrawl.dev) API key for JS-heavy pages
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
+
+This is a personal project I build in my spare time — please be patient with
+issue and PR response times.
 
 ## License
 
