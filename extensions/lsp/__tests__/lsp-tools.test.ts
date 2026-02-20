@@ -13,6 +13,7 @@ import {
 let runtime: LspMockRuntime;
 let lspExtension: typeof import("../index.js").default;
 let resetLspStateForTests: typeof import("../index.js").resetLspStateForTests;
+let setLspProtocolBindingsForTests: typeof import("../index.js").setLspProtocolBindingsForTests;
 let setLspSpawnForTests: typeof import("../index.js").setLspSpawnForTests;
 let setLspTimeoutsForTests: typeof import("../index.js").setLspTimeoutsForTests;
 
@@ -86,6 +87,7 @@ describe("lsp tool behavior with timeout guards", () => {
 		const mod = await import(`../index.js?t=${Date.now()}`);
 		lspExtension = mod.default;
 		resetLspStateForTests = mod.resetLspStateForTests;
+		setLspProtocolBindingsForTests = mod.setLspProtocolBindingsForTests;
 		setLspSpawnForTests = mod.setLspSpawnForTests;
 		setLspTimeoutsForTests = mod.setLspTimeoutsForTests;
 	});
@@ -97,6 +99,7 @@ describe("lsp tool behavior with timeout guards", () => {
 	beforeEach(async () => {
 		runtime.reset();
 		resetLspStateForTests();
+		setLspProtocolBindingsForTests(runtime.protocol);
 		setLspSpawnForTests(runtime.spawn);
 		setLspTimeoutsForTests({ requestMs: 40, startupMs: 50 });
 

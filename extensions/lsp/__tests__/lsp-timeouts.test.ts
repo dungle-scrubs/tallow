@@ -13,6 +13,7 @@ import {
 let runtime: LspMockRuntime;
 let lspExtension: typeof import("../index.js").default;
 let resetLspStateForTests: typeof import("../index.js").resetLspStateForTests;
+let setLspProtocolBindingsForTests: typeof import("../index.js").setLspProtocolBindingsForTests;
 let setLspSpawnForTests: typeof import("../index.js").setLspSpawnForTests;
 let setLspTimeoutsForTests: typeof import("../index.js").setLspTimeoutsForTests;
 
@@ -89,6 +90,7 @@ describe("lsp timeout guards", () => {
 		const mod = await import(`../index.js?t=${Date.now()}`);
 		lspExtension = mod.default;
 		resetLspStateForTests = mod.resetLspStateForTests;
+		setLspProtocolBindingsForTests = mod.setLspProtocolBindingsForTests;
 		setLspSpawnForTests = mod.setLspSpawnForTests;
 		setLspTimeoutsForTests = mod.setLspTimeoutsForTests;
 	});
@@ -100,6 +102,7 @@ describe("lsp timeout guards", () => {
 	beforeEach(async () => {
 		runtime.reset();
 		resetLspStateForTests();
+		setLspProtocolBindingsForTests(runtime.protocol);
 		setLspSpawnForTests(runtime.spawn);
 		setLspTimeoutsForTests({ requestMs: 40, startupMs: 50 });
 
@@ -127,57 +130,73 @@ describe("lsp timeout guards", () => {
 	});
 
 	test("returns a bounded startup-timeout error and cleans up process", async () => {
+		const previousInitialize = runtime.behavior.initialize;
 		runtime.behavior.initialize = async () => new Promise(() => {});
 
-		const filePath = writeFixture(projectDir, "src/example.ts", "export const value = 1;\n");
-		const lspSymbols = getTool(harness, "lsp_symbols");
-		const lspStatus = getTool(harness, "lsp_status");
-		const messages: Array<string | undefined> = [];
-		const ctx = createToolContext(projectDir, messages);
-		const signal = new AbortController().signal;
-
-		const start = Date.now();
-		const result = await lspSymbols.execute("test-call", { file: filePath }, signal, () => {}, ctx);
-		const elapsed = Date.now() - start;
-
-		expect(result.isError).toBe(true);
-		expect(getText(result)).toContain("Language server startup timed out");
-		expect(elapsed).toBeLessThan(500);
-		expect(runtime.spawnedServers).toHaveLength(1);
-		expect(runtime.spawnedServers[0]?.killed).toBe(true);
-		expect(messages.at(-1)).toBeUndefined();
-
-		const status = await lspStatus.execute("status-call", {}, signal, () => {}, ctx);
-		expect(getText(status)).toContain("No language servers running.");
-	});
-
-	test("propagates startup abort without waiting for timeout", async () => {
-		runtime.behavior.which = async () => new Promise(() => {});
-
-		const filePath = writeFixture(projectDir, "src/abort-startup.ts", "export const x = 1;\n");
-		const lspSymbols = getTool(harness, "lsp_symbols");
-		const messages: Array<string | undefined> = [];
-		const ctx = createToolContext(projectDir, messages);
-		const controller = new AbortController();
-		controller.abort();
-
-		let thrown: unknown;
 		try {
-			await lspSymbols.execute(
-				"startup-abort",
+			const filePath = writeFixture(projectDir, "src/example.ts", "export const value = 1;\n");
+			const lspSymbols = getTool(harness, "lsp_symbols");
+			const lspStatus = getTool(harness, "lsp_status");
+			const messages: Array<string | undefined> = [];
+			const ctx = createToolContext(projectDir, messages);
+			const signal = new AbortController().signal;
+
+			const start = Date.now();
+			const result = await lspSymbols.execute(
+				"test-call",
 				{ file: filePath },
-				controller.signal,
+				signal,
 				() => {},
 				ctx
 			);
-		} catch (error) {
-			thrown = error;
-		}
+			const elapsed = Date.now() - start;
 
-		expect(thrown).toBeTruthy();
-		expect((thrown as { name?: string }).name).toBe("AbortError");
-		expect(runtime.spawnedServers).toHaveLength(0);
-		expect(messages.at(-1)).toBeUndefined();
+			expect(result.isError).toBe(true);
+			expect(getText(result)).toContain("Language server startup timed out");
+			expect(elapsed).toBeLessThan(500);
+			expect(runtime.spawnedServers).toHaveLength(1);
+			expect(runtime.spawnedServers[0]?.killed).toBe(true);
+			expect(messages.at(-1)).toBeUndefined();
+
+			const status = await lspStatus.execute("status-call", {}, signal, () => {}, ctx);
+			expect(getText(status)).toContain("No language servers running.");
+		} finally {
+			runtime.behavior.initialize = previousInitialize;
+		}
+	});
+
+	test("propagates startup abort without waiting for timeout", async () => {
+		const previousWhich = runtime.behavior.which;
+		runtime.behavior.which = async () => new Promise(() => {});
+
+		try {
+			const filePath = writeFixture(projectDir, "src/abort-startup.ts", "export const x = 1;\n");
+			const lspSymbols = getTool(harness, "lsp_symbols");
+			const messages: Array<string | undefined> = [];
+			const ctx = createToolContext(projectDir, messages);
+			const controller = new AbortController();
+			controller.abort();
+
+			let thrown: unknown;
+			try {
+				await lspSymbols.execute(
+					"startup-abort",
+					{ file: filePath },
+					controller.signal,
+					() => {},
+					ctx
+				);
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect(thrown).toBeTruthy();
+			expect((thrown as { name?: string }).name).toBe("AbortError");
+			expect(runtime.spawnedServers).toHaveLength(0);
+			expect(messages.at(-1)).toBeUndefined();
+		} finally {
+			runtime.behavior.which = previousWhich;
+		}
 	});
 
 	test("times out stuck requests, evicts the connection, and allows retry", async () => {
