@@ -23,6 +23,12 @@
 // ── Tallow SDK ───────────────────────────────────────────────────────────────
 
 export {
+	type AgentRunnerCandidate,
+	type AgentRunnerResolutionOptions,
+	formatMissingAgentRunnerError,
+	resolveAgentRunnerCandidates,
+} from "./agent-runner.js";
+export {
 	APP_NAME,
 	BUNDLED,
 	bootstrap,

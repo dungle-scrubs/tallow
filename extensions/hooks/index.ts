@@ -30,6 +30,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import {
+	type AgentRunnerCandidate,
+	formatMissingAgentRunnerError,
+	resolveAgentRunnerCandidates,
+} from "../../src/agent-runner.js";
 import { isProjectTrusted } from "../_shared/project-trust.js";
 import { evaluateCommand } from "../_shared/shell-policy.js";
 import { createHookStateManager, type HookStateManager } from "./state-manager.js";
@@ -106,13 +111,6 @@ const HOOK_AGENT_RUNNER_ENV = "TALLOW_HOOK_AGENT_RUNNER";
 /** Internal termination reasons for hook subprocesses. */
 type HookTerminationReason = "abort" | "timeout";
 
-/** Runner descriptor for agent hook subprocesses. */
-interface HookAgentRunner {
-	command: string;
-	preArgs: string[];
-	source: string;
-}
-
 /** Buffered output accumulator state for a single stream. */
 interface HookOutputBuffer {
 	bytes: number;
@@ -160,83 +158,18 @@ function getHookForceKillGraceMs(): number {
 }
 
 /**
- * Build the runner descriptor for the currently running tallow executable.
- *
- * @returns Runner descriptor when argv looks like tallow entrypoint, else null
- */
-function getCurrentTallowRunner(): HookAgentRunner | null {
-	const entrypoint = process.argv[1];
-	if (!entrypoint) {
-		return null;
-	}
-
-	const normalized = entrypoint.replace(/\\/g, "/").toLowerCase();
-	const looksLikeTallow =
-		normalized.includes("/tallow") ||
-		normalized.endsWith("/dist/cli.js") ||
-		normalized === "tallow";
-	if (!looksLikeTallow) {
-		return null;
-	}
-
-	if (/\.(c|m)?js$/i.test(entrypoint)) {
-		return {
-			command: process.execPath,
-			preArgs: [entrypoint],
-			source: "current process",
-		};
-	}
-
-	return {
-		command: entrypoint,
-		preArgs: [],
-		source: "current process",
-	};
-}
-
-/**
  * Resolve hook-agent runner candidates in priority order.
- *
- * Order:
- * 1. TALLOW_HOOK_AGENT_RUNNER override
- * 2. current tallow executable (when detectable)
- * 3. `tallow` on PATH
- * 4. `pi` on PATH (legacy fallback)
  *
  * @returns Deduplicated runner candidates
  */
-export function resolveHookAgentRunnerCandidates(): HookAgentRunner[] {
-	const candidates: HookAgentRunner[] = [];
-	const override = process.env[HOOK_AGENT_RUNNER_ENV]?.trim();
-	if (override) {
-		candidates.push({
-			command: override,
-			preArgs: [],
-			source: HOOK_AGENT_RUNNER_ENV,
-		});
-	}
-
-	const currentRunner = getCurrentTallowRunner();
-	if (currentRunner) {
-		candidates.push(currentRunner);
-	}
-
-	candidates.push({ command: "tallow", preArgs: [], source: "PATH" });
-	candidates.push({ command: "pi", preArgs: [], source: "PATH" });
-
-	const deduped: HookAgentRunner[] = [];
-	const seen = new Set<string>();
-	for (const candidate of candidates) {
-		const key = `${candidate.command}\u0000${candidate.preArgs.join("\u0000")}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		deduped.push(candidate);
-	}
-	return deduped;
+export function resolveHookAgentRunnerCandidates(): AgentRunnerCandidate[] {
+	return resolveAgentRunnerCandidates({
+		overrideEnvVar: HOOK_AGENT_RUNNER_ENV,
+	});
 }
 
 /** Runner resolver used by runAgentHook (overridable in tests). */
-let hookAgentRunnerResolver = resolveHookAgentRunnerCandidates;
+let hookAgentRunnerResolver: () => AgentRunnerCandidate[] = resolveHookAgentRunnerCandidates;
 /** Spawn implementation used by runAgentHook (overridable in tests). */
 let spawnHookAgentProcess: typeof spawn = spawn;
 
@@ -246,9 +179,7 @@ let spawnHookAgentProcess: typeof spawn = spawn;
  * @param resolver - Optional resolver override (reset when omitted)
  * @returns Nothing
  */
-export function setHookAgentRunnerResolverForTests(
-	resolver?: typeof resolveHookAgentRunnerCandidates
-): void {
+export function setHookAgentRunnerResolverForTests(resolver?: () => AgentRunnerCandidate[]): void {
 	hookAgentRunnerResolver = resolver ?? resolveHookAgentRunnerCandidates;
 }
 
@@ -1031,7 +962,7 @@ export async function runAgentHook(
 		if (runners.length === 0) {
 			resolve({
 				ok: false,
-				reason: `No hook agent runner candidates available. Set ${HOOK_AGENT_RUNNER_ENV}.`,
+				reason: formatMissingAgentRunnerError(runners, HOOK_AGENT_RUNNER_ENV),
 			});
 			return;
 		}
@@ -1062,11 +993,13 @@ export async function runAgentHook(
 		const spawnWithRunner = (index: number): void => {
 			const runner = runners[index];
 			if (!runner) {
-				const attempted = runners.map((candidate) => candidate.command).join(", ");
-				const cause = lastSpawnError?.message ? ` Last error: ${lastSpawnError.message}` : "";
 				settle({
 					ok: false,
-					reason: `Hook agent runner not found. Tried: ${attempted}. Set ${HOOK_AGENT_RUNNER_ENV} to a valid tallow binary.${cause}`,
+					reason: formatMissingAgentRunnerError(
+						runners,
+						HOOK_AGENT_RUNNER_ENV,
+						lastSpawnError?.message
+					),
 				});
 				return;
 			}
