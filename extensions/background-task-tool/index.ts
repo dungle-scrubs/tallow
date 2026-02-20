@@ -42,6 +42,7 @@ import {
 } from "../_shared/interop-events.js";
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
+import { createProcessLifecycle } from "./process-lifecycle.js";
 
 /** Spawn implementation used by bg_bash (overridable in tests). */
 let spawnProcess: typeof spawn = spawn;
@@ -567,57 +568,80 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				}
 			};
 
-			child.stdout?.on("data", onData);
-			child.stderr?.on("data", onData);
+			const lifecycle = createProcessLifecycle({
+				child,
+				onAbort: () => {
+					task.endTime = Date.now();
+					task.status = "killed";
+					task.output.push("\n[Killed: aborted by user]\n");
+					if (child.pid != null) unregisterPid(child.pid);
+					task.process = null;
+					syncTaskState(ctx);
+				},
+				onData,
+				onTimeout: () => {
+					task.endTime = Date.now();
+					task.status = "killed";
+					task.output.push(`\n[Killed: timeout after ${params.timeout}s]\n`);
+					if (child.pid != null) unregisterPid(child.pid);
+					task.process = null;
+					syncTaskState(ctx);
+				},
+				signal: fireAndForget ? undefined : signal,
+				timeoutMs: params.timeout && params.timeout > 0 ? params.timeout * 1000 : undefined,
+			});
 
-			/**
-			 * Remove onData listeners from child streams to prevent leaks
-			 * in long sessions with many background tasks.
-			 */
-			const cleanupStreams = () => {
-				child.stdout?.removeListener("data", onData);
-				child.stderr?.removeListener("data", onData);
-			};
+			const applyLifecycleResult = (result: {
+				type: "close" | "error" | "aborted" | "timeout";
+				code?: number | null;
+				error?: Error;
+			}) => {
+				task.endTime = task.endTime ?? Date.now();
+				task.process = null;
 
-			// Handle timeout
-			if (params.timeout && params.timeout > 0) {
-				setTimeout(() => {
-					if (task.status === "running" && task.process) {
-						task.process.kill("SIGTERM");
-						task.status = "killed";
-						if (child.pid != null) unregisterPid(child.pid);
-						task.output.push(`\n[Killed: timeout after ${params.timeout}s]\n`);
-						syncTaskState(ctx);
+				switch (result.type) {
+					case "close": {
+						task.exitCode = result.code ?? null;
+						if (task.status === "running") {
+							task.status = result.code === 0 ? "completed" : "failed";
+						}
+						break;
 					}
-				}, params.timeout * 1000);
-			}
+					case "error": {
+						task.exitCode = null;
+						if (task.status === "running") {
+							task.status = "failed";
+						}
+						task.output.push(`\nError: ${result.error?.message ?? "Unknown error"}\n`);
+						break;
+					}
+					case "aborted":
+					case "timeout": {
+						task.exitCode = null;
+						if (task.status === "running") {
+							task.status = "killed";
+						}
+						break;
+					}
+				}
+
+				if (child.pid != null) {
+					unregisterPid(child.pid);
+				}
+				syncTaskState(ctx);
+			};
 
 			// Fire-and-forget: return immediately
 			if (fireAndForget) {
-				// Handle completion in background
-				child.on("close", (code) => {
-					cleanupStreams();
-					task.endTime = Date.now();
-					task.exitCode = code;
-					task.status = code === 0 ? "completed" : "failed";
-					if (child.pid != null) unregisterPid(child.pid);
-					task.process = null;
-					syncTaskState(ctx);
+				void lifecycle.waitForExit().then((result) => {
+					applyLifecycleResult({
+						...(result.type === "close" ? { code: result.code } : {}),
+						...(result.type === "error" ? { error: result.error } : {}),
+						type: result.type,
+					});
 					postInlineResult(task);
 				});
-				child.on("error", (err) => {
-					cleanupStreams();
-					task.endTime = Date.now();
-					task.status = "failed";
-					task.output.push(`\nError: ${err.message}\n`);
-					if (child.pid != null) unregisterPid(child.pid);
-					task.process = null;
-					syncTaskState(ctx);
-					postInlineResult(task);
-				});
-				if (typeof child.unref === "function") {
-					child.unref();
-				}
+				lifecycle.detach();
 				syncTaskState(ctx);
 
 				return {
@@ -634,43 +658,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			// Streaming mode: wait for process to complete
 			syncTaskState(ctx);
 
-			const result = await new Promise<{
-				exitCode: number | null;
-				error?: string;
-			}>((resolve) => {
-				child.on("close", (code) => {
-					cleanupStreams();
-					task.endTime = Date.now();
-					task.exitCode = code;
-					task.status = code === 0 ? "completed" : "failed";
-					if (child.pid != null) unregisterPid(child.pid);
-					task.process = null;
-					syncTaskState(ctx);
-					resolve({ exitCode: code });
-				});
-				child.on("error", (err) => {
-					cleanupStreams();
-					task.endTime = Date.now();
-					task.status = "failed";
-					task.output.push(`\nError: ${err.message}\n`);
-					if (child.pid != null) unregisterPid(child.pid);
-					task.process = null;
-					syncTaskState(ctx);
-					resolve({ exitCode: null, error: err.message });
-				});
-
-				// Kill on abort signal (e.g., user presses Escape)
-				signal?.addEventListener("abort", () => {
-					if (task.status === "running" && task.process) {
-						task.process.kill("SIGTERM");
-						task.status = "killed";
-						task.endTime = Date.now();
-						if (child.pid != null) unregisterPid(child.pid);
-						task.output.push("\n[Killed: aborted by user]\n");
-						syncTaskState(ctx);
-						resolve({ exitCode: null, error: "Aborted" });
-					}
-				});
+			const lifecycleResult = await lifecycle.waitForExit();
+			applyLifecycleResult({
+				...(lifecycleResult.type === "close" ? { code: lifecycleResult.code } : {}),
+				...(lifecycleResult.type === "error" ? { error: lifecycleResult.error } : {}),
+				type: lifecycleResult.type,
 			});
 
 			// Stop and clean up the persistent Loader for this task
@@ -689,7 +681,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					command: params.command,
 					status: task.status,
 					duration,
-					exitCode: result.exitCode,
+					exitCode: task.exitCode,
 					output,
 				},
 				content: [
