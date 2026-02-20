@@ -29,12 +29,23 @@ interface SpawnedProcessRecord {
 	killed: boolean;
 }
 
+/** Commands mocked as language-server subprocesses. */
+const MOCKED_SERVER_COMMANDS = new Set([
+	"typescript-language-server",
+	"ty",
+	"pyright-langserver",
+	"rust-analyzer",
+	"sourcekit-lsp",
+	"intelephense",
+]);
+
 export interface LspMockRuntime {
 	readonly behavior: LspMockBehavior;
 	readonly exitNotifications: { params: unknown }[];
 	readonly initializedNotifications: { params: unknown }[];
 	readonly shutdownRequests: { params: unknown }[];
 	readonly spawnedServers: SpawnedProcessRecord[];
+	readonly spawn: typeof realChildProcess.spawn;
 	reset: () => void;
 }
 
@@ -89,6 +100,9 @@ function createDefaultBehavior(): LspMockBehavior {
 /**
  * Creates and registers runtime module mocks for LSP tests.
  *
+ * Always pair with {@link teardownLspMockRuntime} in suite teardown so
+ * LSP protocol mocks cannot leak into other suites.
+ *
  * @returns Shared runtime state and behavior controls
  */
 export function setupLspMockRuntime(): LspMockRuntime {
@@ -140,35 +154,48 @@ export function setupLspMockRuntime(): LspMockRuntime {
 			this.emit("close", 0);
 			return true;
 		}
+
+		ref(): this {
+			return this;
+		}
+
+		unref(): this {
+			return this;
+		}
 	}
 
-	mock.module("node:child_process", () => ({
-		...realChildProcess,
-		spawn(command: string, args?: readonly string[]) {
-			const argv = args ? [...args] : [];
+	const spawn = ((command: string, ...spawnArgs: unknown[]): ChildProcess => {
+		const firstArg = spawnArgs[0];
+		const argv = Array.isArray(firstArg) ? [...(firstArg as string[])] : [];
 
-			if (command === "which") {
-				const proc = new FakeChildProcess();
-				void behavior
-					.which(argv[0] ?? "")
-					.then((code) => {
-						proc.emit("close", code);
-					})
-					.catch((error) => {
-						proc.emit("error", error);
-					});
-				return proc as unknown as ChildProcess;
-			}
+		if (command === "which") {
+			const proc = new FakeChildProcess();
+			void behavior
+				.which(argv[0] ?? "")
+				.then((code) => {
+					proc.emit("close", code);
+				})
+				.catch((error) => {
+					proc.emit("error", error);
+				});
+			return proc as unknown as ChildProcess;
+		}
 
-			const record: SpawnedProcessRecord = {
-				args: argv,
+		if (!MOCKED_SERVER_COMMANDS.has(command)) {
+			return (realChildProcess.spawn as (...args: unknown[]) => ChildProcess)(
 				command,
-				killed: false,
-			};
-			spawnedServers.push(record);
-			return new FakeChildProcess(record) as unknown as ChildProcess;
-		},
-	}));
+				...(spawnArgs as unknown[])
+			);
+		}
+
+		const record: SpawnedProcessRecord = {
+			args: argv,
+			command,
+			killed: false,
+		};
+		spawnedServers.push(record);
+		return new FakeChildProcess(record) as unknown as ChildProcess;
+	}) as typeof realChildProcess.spawn;
 
 	mock.module("vscode-jsonrpc/node", () => ({
 		StreamMessageReader: class StreamMessageReader {},
@@ -240,9 +267,22 @@ export function setupLspMockRuntime(): LspMockRuntime {
 			spawnedServers.length = 0;
 		},
 		shutdownRequests,
+		spawn,
 		spawnedServers,
 	};
 
 	globalState[GLOBAL_KEY] = runtime;
 	return runtime;
+}
+
+/**
+ * Restores all Bun module mocks and clears the shared LSP runtime state.
+ *
+ * @returns Nothing
+ */
+export function teardownLspMockRuntime(): void {
+	const globalState = globalThis as Record<string, unknown>;
+	delete globalState[GLOBAL_KEY];
+	mock.restore();
+	mock.clearAllMocks();
 }

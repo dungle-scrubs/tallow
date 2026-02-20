@@ -1,17 +1,20 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
-import { setupLspMockRuntime } from "./mock-lsp-runtime.js";
+import {
+	type LspMockRuntime,
+	setupLspMockRuntime,
+	teardownLspMockRuntime,
+} from "./mock-lsp-runtime.js";
 
-const runtime = setupLspMockRuntime();
-const {
-	default: lspExtension,
-	resetLspStateForTests,
-	setLspTimeoutsForTests,
-} = await import("../index.js");
+let runtime: LspMockRuntime;
+let lspExtension: typeof import("../index.js").default;
+let resetLspStateForTests: typeof import("../index.js").resetLspStateForTests;
+let setLspSpawnForTests: typeof import("../index.js").setLspSpawnForTests;
+let setLspTimeoutsForTests: typeof import("../index.js").setLspTimeoutsForTests;
 
 /**
  * Creates a minimal extension context and records working-message transitions.
@@ -81,9 +84,23 @@ describe("lsp timeout guards", () => {
 	let harness: ExtensionHarness;
 	let projectDir: string;
 
+	beforeAll(async () => {
+		runtime = setupLspMockRuntime();
+		const mod = await import(`../index.js?t=${Date.now()}`);
+		lspExtension = mod.default;
+		resetLspStateForTests = mod.resetLspStateForTests;
+		setLspSpawnForTests = mod.setLspSpawnForTests;
+		setLspTimeoutsForTests = mod.setLspTimeoutsForTests;
+	});
+
+	afterAll(() => {
+		teardownLspMockRuntime();
+	});
+
 	beforeEach(async () => {
 		runtime.reset();
 		resetLspStateForTests();
+		setLspSpawnForTests(runtime.spawn);
 		setLspTimeoutsForTests({ requestMs: 40, startupMs: 50 });
 
 		projectDir = mkdtempSync(join(tmpdir(), "tallow-lsp-timeouts-"));

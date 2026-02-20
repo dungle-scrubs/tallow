@@ -117,6 +117,8 @@ interface LSPConnection {
 const connections = new Map<string, LSPConnection>();
 /** Track languages where no server was found, to log once per language */
 const failedLanguages = new Set<string>();
+/** Spawn implementation used for subprocesses (overridable in tests). */
+let spawnProcess: typeof spawn = spawn;
 
 /** Milliseconds to wait for language server startup (which + initialize). */
 const LSP_STARTUP_TIMEOUT_MS = 10_000;
@@ -148,6 +150,17 @@ export function setLspTimeoutsForTests(overrides: {
 }
 
 /**
+ * Overrides the subprocess spawn implementation for tests.
+ *
+ * @internal
+ * @param implementation - Custom spawn implementation (or undefined to restore default)
+ * @returns Nothing
+ */
+export function setLspSpawnForTests(implementation?: typeof spawn): void {
+	spawnProcess = implementation ?? spawn;
+}
+
+/**
  * Resets LSP timeout overrides and clears all connection state for tests.
  *
  * @internal
@@ -161,6 +174,7 @@ export function resetLspStateForTests(): void {
 	failedLanguages.clear();
 	lspStartupTimeoutMs = LSP_STARTUP_TIMEOUT_MS;
 	lspRequestTimeoutMs = LSP_REQUEST_TIMEOUT_MS;
+	spawnProcess = spawn;
 }
 
 /**
@@ -446,7 +460,7 @@ async function getOrCreateConnection(
 
 		// Check if server is available
 		try {
-			const which = spawn("which", [c.command]);
+			const which = spawnProcess("which", [c.command]);
 			await raceWithTimeout(
 				() =>
 					new Promise<void>((resolve, reject) => {
@@ -497,7 +511,7 @@ async function getOrCreateConnection(
 	}
 
 	// Spawn the language server
-	const serverProcess = spawn(config.command, config.args, {
+	const serverProcess = spawnProcess(config.command, config.args, {
 		cwd: rootPath,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -1423,7 +1437,7 @@ WHEN TO USE:
 				if (lang.includes("_")) continue; // Skip fallback configs
 
 				try {
-					const which = spawn("which", [config.command]);
+					const which = spawnProcess("which", [config.command]);
 					const available = await raceWithTimeout(
 						() =>
 							new Promise<boolean>((resolve) => {

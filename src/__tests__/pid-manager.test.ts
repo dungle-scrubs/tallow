@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,6 +34,10 @@ beforeAll(async () => {
 	mkdirSync(sessionPidDir, { recursive: true });
 	process.env.TALLOW_HOME = tmpDir;
 
+	mock.module("../config.js", () => ({
+		TALLOW_HOME: tmpDir,
+	}));
+
 	const mod = await import(`../pid-manager.js?t=${Date.now()}`);
 	cleanupAllTrackedPidsFn = mod.cleanupAllTrackedPids;
 	cleanupOrphanPidsFn = mod.cleanupOrphanPids;
@@ -54,6 +58,8 @@ afterEach(() => {
 afterAll(() => {
 	rmSync(tmpDir, { recursive: true, force: true });
 	delete process.env.TALLOW_HOME;
+	mock.restore();
+	mock.clearAllMocks();
 });
 
 /**
