@@ -120,6 +120,37 @@ const failedLanguages = new Set<string>();
 /** Spawn implementation used for subprocesses (overridable in tests). */
 let spawnProcess: typeof spawn = spawn;
 
+interface LspProtocolBindings {
+	readonly createProtocolConnection: typeof createProtocolConnection;
+	readonly DefinitionRequest: typeof DefinitionRequest;
+	readonly DidOpenTextDocumentNotification: typeof DidOpenTextDocumentNotification;
+	readonly DocumentSymbolRequest: typeof DocumentSymbolRequest;
+	readonly ExitNotification: typeof ExitNotification;
+	readonly HoverRequest: typeof HoverRequest;
+	readonly InitializedNotification: typeof InitializedNotification;
+	readonly InitializeRequest: typeof InitializeRequest;
+	readonly ReferencesRequest: typeof ReferencesRequest;
+	readonly ShutdownRequest: typeof ShutdownRequest;
+	readonly WorkspaceSymbolRequest: typeof WorkspaceSymbolRequest;
+}
+
+const DEFAULT_PROTOCOL_BINDINGS: LspProtocolBindings = {
+	createProtocolConnection,
+	DefinitionRequest,
+	DidOpenTextDocumentNotification,
+	DocumentSymbolRequest,
+	ExitNotification,
+	HoverRequest,
+	InitializedNotification,
+	InitializeRequest,
+	ReferencesRequest,
+	ShutdownRequest,
+	WorkspaceSymbolRequest,
+};
+
+/** Protocol bindings used by this module (overridable in tests). */
+let protocolBindings: LspProtocolBindings = DEFAULT_PROTOCOL_BINDINGS;
+
 /** Milliseconds to wait for language server startup (which + initialize). */
 const LSP_STARTUP_TIMEOUT_MS = 10_000;
 /** Milliseconds to wait for individual LSP requests (definition, hover, etc.). */
@@ -161,6 +192,17 @@ export function setLspSpawnForTests(implementation?: typeof spawn): void {
 }
 
 /**
+ * Overrides protocol request/notification bindings for tests.
+ *
+ * @internal
+ * @param bindings - Test protocol bindings (or undefined to restore defaults)
+ * @returns Nothing
+ */
+export function setLspProtocolBindingsForTests(bindings?: LspProtocolBindings): void {
+	protocolBindings = bindings ?? DEFAULT_PROTOCOL_BINDINGS;
+}
+
+/**
  * Resets LSP timeout overrides and clears all connection state for tests.
  *
  * @internal
@@ -175,6 +217,7 @@ export function resetLspStateForTests(): void {
 	lspStartupTimeoutMs = LSP_STARTUP_TIMEOUT_MS;
 	lspRequestTimeoutMs = LSP_REQUEST_TIMEOUT_MS;
 	spawnProcess = spawn;
+	protocolBindings = DEFAULT_PROTOCOL_BINDINGS;
 }
 
 /**
@@ -522,7 +565,7 @@ async function getOrCreateConnection(
 	}
 
 	// Create JSON-RPC connection
-	const connection = createProtocolConnection(
+	const connection = protocolBindings.createProtocolConnection(
 		new StreamMessageReader(serverProcess.stdout),
 		new StreamMessageWriter(serverProcess.stdin)
 	);
@@ -559,7 +602,7 @@ async function getOrCreateConnection(
 		const initResult = (await raceWithTimeout(
 			() =>
 				connection.sendRequest(
-					InitializeRequest.type as never,
+					protocolBindings.InitializeRequest.type as never,
 					initParams as never
 				) as Promise<unknown>,
 			{
@@ -568,7 +611,7 @@ async function getOrCreateConnection(
 				description: `${actualLanguage} language server initialization`,
 			}
 		)) as InitializeResult;
-		await connection.sendNotification(InitializedNotification.type, {});
+		await connection.sendNotification(protocolBindings.InitializedNotification.type, {});
 
 		const lspConnection: LSPConnection = {
 			process: serverProcess,
@@ -652,7 +695,7 @@ async function openDocument(conn: LSPConnection, filePath: string): Promise<void
 		languageId = "python";
 	}
 
-	await conn.connection.sendNotification(DidOpenTextDocumentNotification.type, {
+	await conn.connection.sendNotification(protocolBindings.DidOpenTextDocumentNotification.type, {
 		textDocument: {
 			uri,
 			languageId,
@@ -906,7 +949,7 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 			try {
 				const result = (await sendRequestWithTimeout(
 					conn,
-					DefinitionRequest.type,
+					protocolBindings.DefinitionRequest.type,
 					{
 						textDocument: { uri: filePathToUri(filePath) },
 						position: { line: params.line - 1, character: params.character - 1 },
@@ -1025,7 +1068,7 @@ WHEN TO USE:
 			try {
 				const result = (await sendRequestWithTimeout(
 					conn,
-					ReferencesRequest.type,
+					protocolBindings.ReferencesRequest.type,
 					{
 						textDocument: { uri: filePathToUri(filePath) },
 						position: { line: params.line - 1, character: params.character - 1 },
@@ -1148,7 +1191,7 @@ WHEN TO USE:
 			try {
 				const result = (await sendRequestWithTimeout(
 					conn,
-					HoverRequest.type,
+					protocolBindings.HoverRequest.type,
 					{
 						textDocument: { uri: filePathToUri(filePath) },
 						position: { line: params.line - 1, character: params.character - 1 },
@@ -1262,7 +1305,7 @@ WHEN TO USE:
 			try {
 				const result = (await sendRequestWithTimeout(
 					conn,
-					DocumentSymbolRequest.type,
+					protocolBindings.DocumentSymbolRequest.type,
 					{
 						textDocument: { uri: filePathToUri(filePath) },
 					},
@@ -1353,7 +1396,7 @@ WHEN TO USE:
 			try {
 				const result = (await sendRequestWithTimeout(
 					conn,
-					WorkspaceSymbolRequest.type,
+					protocolBindings.WorkspaceSymbolRequest.type,
 					{
 						query: params.query,
 					},
@@ -1513,8 +1556,8 @@ WHEN TO USE:
 				try {
 					await Promise.race([
 						(async () => {
-							await conn.connection.sendRequest(ShutdownRequest.type);
-							conn.connection.sendNotification(ExitNotification.type);
+							await conn.connection.sendRequest(protocolBindings.ShutdownRequest.type);
+							conn.connection.sendNotification(protocolBindings.ExitNotification.type);
 						})(),
 						new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_TIMEOUT_MS)),
 					]);

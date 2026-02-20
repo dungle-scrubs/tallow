@@ -14,6 +14,7 @@ export type {
 } from "./extension-harness.js";
 // Extension testing
 export { ExtensionHarness } from "./extension-harness.js";
+export { FakeChildProcess } from "./fake-child-process.js";
 export type { ScriptedResponse, TextResponse, ToolCallResponse } from "./mock-model.js";
 // Mock model and stream functions
 export {
@@ -21,6 +22,8 @@ export {
 	createMockModel,
 	createScriptedStreamFn,
 } from "./mock-model.js";
+export type { MockScope } from "./mock-scope.js";
+export { createMockScope } from "./mock-scope.js";
 export type { RunResult, SessionRunnerOptions } from "./session-runner.js";
 // Session runner
 export { createSessionRunner, SessionRunner } from "./session-runner.js";

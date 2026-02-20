@@ -1,7 +1,8 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createMockScope } from "../../../test-utils/mock-scope.js";
 
 /**
  * Tests for auto-cheap/auto-premium routing keywords.
@@ -37,7 +38,8 @@ const mockModels = [
 	},
 ];
 
-mock.module("@mariozechner/pi-ai", () => ({
+const mockScope = createMockScope(import.meta.url);
+mockScope.module("@mariozechner/pi-ai", () => ({
 	getProviders: () => ["anthropic", "google"],
 	getModels: (provider: string) => mockModels.filter((m) => m.provider === provider),
 }));
@@ -45,7 +47,7 @@ mock.module("@mariozechner/pi-ai", () => ({
 // NOTE: Do NOT mock ../model-resolver.js — it leaks across test files in bun.
 // The pi-ai mock above provides model data that resolveModelFuzzy uses.
 
-mock.module("../task-classifier.js", () => ({
+mockScope.module("../task-classifier.js", () => ({
 	classifyTask: async (_task: string, primaryType: string) => ({
 		type: primaryType,
 		complexity: 3,
@@ -54,7 +56,19 @@ mock.module("../task-classifier.js", () => ({
 	findCheapestModel: () => "claude-haiku-4-5-20250514",
 }));
 
-const { routeModel, parseRoutingKeyword } = await import("../model-router.js");
+let parseRoutingKeyword!: typeof import("../model-router.js").parseRoutingKeyword;
+let routeModel!: typeof import("../model-router.js").routeModel;
+
+beforeAll(async () => {
+	mockScope.install();
+	const mod = await import(`../model-router.js?t=${Date.now()}`);
+	parseRoutingKeyword = mod.parseRoutingKeyword;
+	routeModel = mod.routeModel;
+});
+
+afterAll(() => {
+	mockScope.teardown();
+});
 
 /**
  * Write a JSON file, creating parent directories when needed.
