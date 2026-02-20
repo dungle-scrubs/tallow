@@ -23,13 +23,15 @@
 ---
 
 <p align="center">
-  <img src="assets/screenshot.jpg" alt="Tallow multi-agent team coordinating a docs audit" />
+  <img src="assets/screenshot-annotated.png" alt="Tallow session showing status bar, auto-named session, and model selection" />
+  <br />
+  <sub>Shown with a customized <a href="https://wezfurlong.org/wezterm/">WezTerm</a> configuration.</sub>
 </p>
 
 Tallow is a terminal coding agent that starts minimal and scales up. Install only the
 extensions, themes, and agents your project needs, or enable everything. It drops into
 existing Claude Code projects via `.claude/` bridging, so nothing breaks when you switch.
-Ships with 49 extensions, 34 themes, and 10 specialized agents.
+Ships with 50 extensions, 34 themes, and 10 specialized agents.
 
 ## Quick start
 
