@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -256,6 +264,69 @@ describe("pid-registry", () => {
 			const { unregisterPid } = await loadModule();
 			// Should not throw
 			unregisterPid(999);
+		});
+	});
+
+	describe("lock contention safety", () => {
+		test("registerPid fails safe when lock is held and does not break lock file", async () => {
+			const ownerStartedAt = readProcessStartedAt(process.pid) ?? undefined;
+			const sessionPath = getCurrentSessionPidFilePath();
+			const lockPath = `${sessionPath}.lock`;
+			mkdirSync(dirname(sessionPath), { recursive: true });
+			writeFileSync(
+				sessionPath,
+				JSON.stringify({
+					version: 2,
+					owner: { pid: process.pid, startedAt: ownerStartedAt },
+					entries: [{ pid: 100, command: "cmd-a", startedAt: Date.now() }],
+				})
+			);
+			writeFileSync(lockPath, "locked");
+
+			const { registerPid } = await loadModule();
+			registerPid(200, "cmd-b");
+
+			const file = readRawPidFile();
+			expect(file.entries).toHaveLength(1);
+			expect(file.entries[0].pid).toBe(100);
+			expect(existsSync(lockPath)).toBe(true);
+			try {
+				unlinkSync(lockPath);
+			} catch {
+				// Cleanup best-effort
+			}
+		});
+
+		test("unregisterPid fails safe when lock is held and leaves entries intact", async () => {
+			const ownerStartedAt = readProcessStartedAt(process.pid) ?? undefined;
+			const sessionPath = getCurrentSessionPidFilePath();
+			const lockPath = `${sessionPath}.lock`;
+			mkdirSync(dirname(sessionPath), { recursive: true });
+			writeFileSync(
+				sessionPath,
+				JSON.stringify({
+					version: 2,
+					owner: { pid: process.pid, startedAt: ownerStartedAt },
+					entries: [
+						{ pid: 100, command: "cmd-a", startedAt: Date.now() },
+						{ pid: 200, command: "cmd-b", startedAt: Date.now() },
+					],
+				})
+			);
+			writeFileSync(lockPath, "locked");
+
+			const { unregisterPid } = await loadModule();
+			unregisterPid(100);
+
+			const file = readRawPidFile();
+			expect(file.entries).toHaveLength(2);
+			expect(file.entries.map((entry) => entry.pid)).toEqual([100, 200]);
+			expect(existsSync(lockPath)).toBe(true);
+			try {
+				unlinkSync(lockPath);
+			} catch {
+				// Cleanup best-effort
+			}
 		});
 	});
 

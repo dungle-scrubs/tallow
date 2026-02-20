@@ -248,21 +248,45 @@ function removeSessionPidFile(filePath: string): void {
 
 // ─── Locking ─────────────────────────────────────────────────────────────────
 
+/** Maximum lock acquisition attempts before failing safe. */
+const PID_LOCK_MAX_RETRIES = 12;
+/** Base lock retry delay in milliseconds (with jitter). */
+const PID_LOCK_RETRY_BASE_MS = 5;
+/** Per-attempt lock retry jitter in milliseconds. */
+const PID_LOCK_RETRY_JITTER_MS = 5;
+
+/**
+ * Sleep synchronously for a bounded number of milliseconds.
+ *
+ * @param ms - Duration in milliseconds
+ * @returns Nothing
+ */
+function sleepSync(ms: number): void {
+	const delay = Math.max(0, Math.trunc(ms));
+	if (delay === 0) return;
+	const shared = new SharedArrayBuffer(4);
+	const view = new Int32Array(shared);
+	Atomics.wait(view, 0, 0, delay);
+}
+
 /**
  * Acquire an exclusive file lock for a session PID file using O_EXCL.
  *
- * Retries briefly to handle contention from concurrent writes. Falls back to
- * unlocked access after max retries to preserve current behavior.
+ * Retries with bounded backoff and jitter. On repeated contention this throws,
+ * and callers must fail safe (skip write) rather than breaking active locks.
  *
  * @param filePath - Session PID file path
  * @returns Cleanup function to release the lock
+ * @throws {Error} When lock acquisition exhausts retries
  */
 function acquirePidLock(filePath: string): () => void {
 	const lockPath = `${filePath}.lock`;
-	const maxRetries = 10;
-	const retryDelayMs = 20;
+	const lockDir = dirname(lockPath);
+	if (!existsSync(lockDir)) {
+		mkdirSync(lockDir, { recursive: true });
+	}
 
-	for (let i = 0; i < maxRetries; i++) {
+	for (let attempt = 0; attempt < PID_LOCK_MAX_RETRIES; attempt++) {
 		try {
 			const fd = openSync(lockPath, "wx");
 			closeSync(fd);
@@ -273,22 +297,17 @@ function acquirePidLock(filePath: string): () => void {
 					/* lock already removed */
 				}
 			};
-		} catch {
-			// Lock held by another process — busy-wait
-			const start = Date.now();
-			while (Date.now() - start < retryDelayMs) {
-				/* spin */
+		} catch (error) {
+			const err = error as NodeJS.ErrnoException;
+			if (err.code !== "EEXIST") {
+				throw err;
 			}
+			const jitter = Math.floor(Math.random() * PID_LOCK_RETRY_JITTER_MS);
+			sleepSync(PID_LOCK_RETRY_BASE_MS + attempt + jitter);
 		}
 	}
 
-	// Stale lock — force remove and proceed unprotected
-	try {
-		unlinkSync(lockPath);
-	} catch {
-		/* already gone */
-	}
-	return () => {};
+	throw new Error(`PID registry lock busy: ${lockPath}`);
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -306,13 +325,19 @@ function acquirePidLock(filePath: string): () => void {
 export function registerPid(pid: number, command: string): void {
 	const owner = getCurrentOwnerIdentity();
 	const filePath = getSessionPidFilePath(owner);
-	const unlock = acquirePidLock(filePath);
+	const processStartedAt = readProcessStartedAt(pid);
+
+	let unlock: (() => void) | null = null;
+	try {
+		unlock = acquirePidLock(filePath);
+	} catch {
+		// Fail safe under contention: do not break active lock holders.
+		return;
+	}
 
 	try {
 		const file = readSessionPidFile(filePath, owner);
 		if (file.entries.some((entry) => entry.pid === pid)) return;
-
-		const processStartedAt = readProcessStartedAt(pid);
 		file.entries.push({
 			command,
 			ownerPid: owner.pid,
@@ -339,7 +364,14 @@ export function registerPid(pid: number, command: string): void {
 export function unregisterPid(pid: number): void {
 	const owner = getCurrentOwnerIdentity();
 	const filePath = getSessionPidFilePath(owner);
-	const unlock = acquirePidLock(filePath);
+
+	let unlock: (() => void) | null = null;
+	try {
+		unlock = acquirePidLock(filePath);
+	} catch {
+		// Fail safe under contention: leave file unchanged.
+		return;
+	}
 
 	try {
 		const file = readSessionPidFile(filePath, owner);
