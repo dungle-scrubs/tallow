@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.5...tallow-v0.8.6) (2026-02-20)
+
+
+### Added
+
+* **wezterm-notify:** add WezTerm turn-status integration ([5d0e671](https://github.com/dungle-scrubs/tallow/commit/5d0e6717e5bfea3caeed5b0b90d8635e56ef99ae))
+
+
+### Fixed
+
+* stabilize claude bridge skill path ordering ([608afd0](https://github.com/dungle-scrubs/tallow/commit/608afd09a613fa01ce10a9aeb86f7d831e418a7c))
+
+
+### Documentation
+
+* refine README structure and clarity ([0a2920b](https://github.com/dungle-scrubs/tallow/commit/0a2920b07d9f1ae1a0cfa79fa30386605c0416c1))
+* **wezterm:** add setup guide and extension docs ([8326aec](https://github.com/dungle-scrubs/tallow/commit/8326aec8acb9f227673bac9ba67bd81eb537d0a7))
+
 ## [0.8.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.4...tallow-v0.8.5) (2026-02-20)
 
 
