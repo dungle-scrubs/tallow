@@ -2,6 +2,16 @@
 	"name": "_icons",
 	"version": "0.1.0",
 	"description": "Icon registry — user-configurable TUI glyphs with sensible defaults",
+	"whenToUse": "Use when you want to override default TUI icons and spinner glyphs.",
+	"capabilities": {
+		"events": ["session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "core",
 	"tags": ["icons", "accessibility", "theming"],
 	"files": ["index.ts"]

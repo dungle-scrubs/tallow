@@ -2,6 +2,16 @@
 	"name": "web-search-tool",
 	"version": "0.1.0",
 	"description": "Web search via Brave Search API with structured results and hyperlinks",
+	"whenToUse": "Use when the model needs web search results before deeper fetching.",
+	"capabilities": {
+		"tools": ["web_search"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["web", "search", "brave"],
 	"files": ["index.ts", "providers/interface.ts", "providers/brave.ts"],

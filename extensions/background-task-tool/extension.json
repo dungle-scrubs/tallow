@@ -2,6 +2,18 @@
 	"name": "background-task-tool",
 	"version": "0.1.0",
 	"description": "Run bash commands in the background with bg_bash, task_output, task_status tools",
+	"whenToUse": "Use when shell commands should keep running in the background while you continue chatting.",
+	"capabilities": {
+		"tools": ["bg_bash", "task_kill", "task_output", "task_status"],
+		"commands": ["bg", "toggle-inline-results"],
+		"events": ["session_shutdown", "session_start", "tool_call", "tool_result"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["background", "async", "bash"],
 	"files": ["index.ts"],

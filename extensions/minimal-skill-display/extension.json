@@ -2,6 +2,16 @@
 	"name": "minimal-skill-display",
 	"version": "0.1.0",
 	"description": "Minimal skill display without background box and extra padding",
+	"whenToUse": "Use when skill invocations should render with minimal UI chrome.",
+	"capabilities": {
+		"events": ["input", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["skills", "display", "minimal"],
 	"files": ["index.ts"],

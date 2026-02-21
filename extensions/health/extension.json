@@ -2,6 +2,16 @@
 	"name": "health",
 	"version": "0.1.0",
 	"description": "Session diagnostics — /health to view session, model, context, tools, and environment info",
+	"whenToUse": "Use when you need a one-command environment and session health check.",
+	"capabilities": {
+		"commands": ["doctor", "health"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "command",
 	"tags": ["diagnostics", "health", "status", "doctor"],
 	"files": ["index.ts"],

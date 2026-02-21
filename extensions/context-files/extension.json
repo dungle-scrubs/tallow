@@ -2,6 +2,17 @@
 	"name": "context-files",
 	"version": "0.1.0",
 	"description": "Load both CLAUDE.md and AGENTS.md files from parent dirs, cwd, and subdirectories. Supplements pi's native context loading which picks only one when both exist.",
+	"whenToUse": "Use when AGENTS.md and CLAUDE.md (plus imports) should both be added to context.",
+	"capabilities": {
+		"commands": ["add-dir", "clear-dirs"],
+		"events": ["before_agent_start", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "context",
 	"tags": ["context", "claude", "agents", "instructions"],
 	"files": ["index.ts"],

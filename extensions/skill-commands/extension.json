@@ -2,6 +2,16 @@
 	"name": "skill-commands",
 	"version": "0.1.0",
 	"description": "Manage and invoke tallow skills",
+	"whenToUse": "Use when skills should register as direct slash commands.",
+	"capabilities": {
+		"commands": ["<skill-command>"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "command",
 	"tags": ["skills", "commands"],
 	"files": ["index.ts"],

@@ -2,6 +2,25 @@
 	"name": "plan-mode-tool",
 	"version": "0.1.0",
 	"description": "Plan mode — structured planning before execution",
+	"whenToUse": "Use when you want a planning-first, read-only workflow before execution.",
+	"capabilities": {
+		"tools": ["plan_mode"],
+		"commands": ["plan-mode", "todos"],
+		"events": [
+			"agent_end",
+			"before_agent_start",
+			"context",
+			"session_start",
+			"tool_call",
+			"turn_end"
+		]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["planning", "workflow"],
 	"files": ["index.ts", "utils.ts"],

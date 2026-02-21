@@ -2,6 +2,16 @@
 	"name": "claude-bridge",
 	"version": "0.1.0",
 	"description": "Bridges .claude/ directories so tallow discovers Claude Code skills, agents, and commands",
+	"whenToUse": "Use when your project stores agents/skills/commands in `.claude/` and tallow should load them.",
+	"capabilities": {
+		"events": ["resources_discover"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "integration",
 	"tags": ["claude-code", "compatibility", "bridging"],
 	"files": ["index.ts"],

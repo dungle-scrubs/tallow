@@ -2,6 +2,17 @@
 	"name": "read-tool-enhanced",
 	"version": "0.3.0",
 	"description": "Enhanced read tool with live truncated preview, compact summary, and PDF text extraction",
+	"whenToUse": "Use when you need improved `read` previews, truncation, and PDF extraction.",
+	"capabilities": {
+		"tools": ["read"],
+		"events": ["context", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "utility",
 	"tags": ["context", "optimization", "display", "pdf"],
 	"files": ["index.ts", "pdf.ts"],

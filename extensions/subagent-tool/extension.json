@@ -2,6 +2,17 @@
 	"name": "subagent-tool",
 	"version": "0.1.0",
 	"description": "Delegate tasks to specialized sub-agents with isolated contexts",
+	"whenToUse": "Use when delegating work to isolated subagents from within a session.",
+	"capabilities": {
+		"tools": ["subagent", "subagent_status"],
+		"events": ["agent_end", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["agents", "delegation", "parallel"],
 	"files": ["index.ts"],

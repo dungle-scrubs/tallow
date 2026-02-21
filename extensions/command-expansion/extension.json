@@ -2,6 +2,16 @@
 	"name": "command-expansion",
 	"version": "0.1.0",
 	"description": "Expands nested commands/skills/templates used as arguments to other commands",
+	"whenToUse": "Use when slash-command arguments contain nested commands or skills that should expand first.",
+	"capabilities": {
+		"events": ["input", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "command",
 	"tags": ["commands", "skills", "templates", "expansion"],
 	"files": ["index.ts"],

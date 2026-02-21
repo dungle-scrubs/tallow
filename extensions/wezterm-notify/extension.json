@@ -2,6 +2,16 @@
 	"name": "wezterm-notify",
 	"version": "0.1.0",
 	"description": "Signal agent turn status to WezTerm via OSC 1337 user variables — enables tab spinner and done-color indicators.",
+	"whenToUse": "Use when WezTerm should receive turn-state signals for tab indicators.",
+	"capabilities": {
+		"events": ["input", "session_shutdown", "session_start", "turn_end", "turn_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "integration",
 	"tags": ["terminal", "wezterm", "notifications"],
 	"files": ["index.ts"],

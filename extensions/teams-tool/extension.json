@@ -2,6 +2,26 @@
 	"name": "teams-tool",
 	"version": "0.1.0",
 	"description": "Multi-agent teams with shared task boards and direct inter-agent messaging",
+	"whenToUse": "Use when coordinating multiple teammate agents on a shared task board.",
+	"capabilities": {
+		"tools": [
+			"team_add_tasks",
+			"team_create",
+			"team_resume",
+			"team_send",
+			"team_shutdown",
+			"team_spawn",
+			"team_status"
+		],
+		"commands": ["team-dashboard"],
+		"events": ["agent_end", "session_shutdown", "session_start", "turn_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["agents", "teams", "coordination", "multi-agent"],
 	"files": [

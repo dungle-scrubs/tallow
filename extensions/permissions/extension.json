@@ -2,6 +2,17 @@
 	"name": "permissions",
 	"version": "0.1.0",
 	"description": "Claude Code-compatible permission rules — Tool(specifier) syntax with allow/deny/ask tiers",
+	"whenToUse": "Use when enforcing allow/deny/ask tool policies from settings files.",
+	"capabilities": {
+		"commands": ["permissions"],
+		"events": ["session_start", "tool_call"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "security",
 	"tags": ["permissions", "security", "policy", "allow", "deny"],
 	"files": ["index.ts"],

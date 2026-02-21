@@ -2,6 +2,18 @@
 	"name": "mcp-adapter-tool",
 	"version": "0.2.0",
 	"description": "Drop-in support for standard MCP servers via STDIO, SSE, and Streamable HTTP transport",
+	"whenToUse": "Use when connecting MCP servers and exposing their tools to the model.",
+	"capabilities": {
+		"commands": ["mcp"],
+		"events": ["before_agent_start", "session_shutdown", "session_start"],
+		"tools": ["mcp__<server>__<tool>"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": true,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["mcp", "tools", "integration", "sse", "http"],
 	"files": ["index.ts"],

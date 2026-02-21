@@ -2,6 +2,16 @@
 	"name": "context-fork",
 	"version": "0.1.0",
 	"description": "Runs commands/skills with context: fork frontmatter in isolated pi subprocesses",
+	"whenToUse": "Use when a command or skill must run in an isolated forked tallow subprocess.",
+	"capabilities": {
+		"events": ["input", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "command",
 	"tags": ["fork", "context", "subprocess", "agents", "isolation"],
 	"files": ["index.ts", "model-resolver.ts", "frontmatter-index.ts", "spawn.ts"],

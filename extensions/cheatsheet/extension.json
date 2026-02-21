@@ -2,6 +2,16 @@
 	"name": "cheatsheet",
 	"version": "0.1.0",
 	"description": "Quick reference cheatsheet for pi commands and shortcuts",
+	"whenToUse": "Use when you need an in-app reference for keybindings and shortcuts.",
+	"capabilities": {
+		"commands": ["cheatsheet", "keybindings", "keymap", "keys"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "utility",
 	"tags": ["help", "reference"],
 	"files": ["index.ts"],

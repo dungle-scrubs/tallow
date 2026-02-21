@@ -2,6 +2,17 @@
 	"name": "wezterm-pane-control",
 	"version": "0.1.0",
 	"description": "Control WezTerm panes, tabs, and splits via wezterm CLI. Gated by WEZTERM_PANE env var.",
+	"whenToUse": "Use when the model should split or manage WezTerm panes via CLI.",
+	"capabilities": {
+		"tools": ["wezterm_pane"],
+		"events": ["before_agent_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["wezterm", "terminal", "pane", "split", "multiplexer"],
 	"files": ["index.ts"],

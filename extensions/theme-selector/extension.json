@@ -2,6 +2,18 @@
 	"name": "theme-selector",
 	"version": "0.1.1",
 	"description": "Theme switcher with 34 dark themes — /theme to switch with live preview",
+	"whenToUse": "Use when switching TUI themes interactively or via tool calls.",
+	"capabilities": {
+		"tools": ["switch_theme"],
+		"commands": ["theme"],
+		"events": ["session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["theme", "colors", "catppuccin", "dracula", "nord"],
 	"files": ["index.ts"],

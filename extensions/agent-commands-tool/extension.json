@@ -2,6 +2,16 @@
 	"name": "agent-commands-tool",
 	"version": "0.1.0",
 	"description": "Commands for managing pi agents — list, view, create",
+	"whenToUse": "Use when you want `/agent:<name>` commands for installed agent files.",
+	"capabilities": {
+		"commands": ["agent:<agent-name>"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["agents", "commands"],
 	"files": ["index.ts"],

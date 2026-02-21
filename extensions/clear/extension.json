@@ -2,6 +2,16 @@
 	"name": "clear",
 	"version": "0.1.0",
 	"description": "Alias /clear for /new (start a fresh session)",
+	"whenToUse": "Use when you want `/clear` as an alias for starting a fresh session.",
+	"capabilities": {
+		"commands": ["clear"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "alias",
 	"tags": ["session", "alias"],
 	"files": ["index.ts"],

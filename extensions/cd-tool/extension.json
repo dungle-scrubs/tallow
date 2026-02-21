@@ -2,6 +2,17 @@
 	"name": "cd-tool",
 	"version": "0.1.0",
 	"description": "Change pi's working directory via /cd command and cd tool",
+	"whenToUse": "Use when the model or user needs to change the working directory safely.",
+	"capabilities": {
+		"tools": ["cd"],
+		"commands": ["cd"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["navigation", "filesystem"],
 	"files": ["index.ts"],

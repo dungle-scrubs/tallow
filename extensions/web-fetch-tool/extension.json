@@ -2,6 +2,16 @@
 	"name": "web-fetch-tool",
 	"version": "0.1.0",
 	"description": "Fetch web content with optional Firecrawl fallback for large pages",
+	"whenToUse": "Use when the model needs to fetch and read a specific web page.",
+	"capabilities": {
+		"tools": ["web_fetch"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["web", "fetch", "firecrawl"],
 	"files": ["index.ts"],

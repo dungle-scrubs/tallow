@@ -2,6 +2,16 @@
 	"name": "custom-footer",
 	"version": "0.1.0",
 	"description": "Responsive footer with git info, token counts, cost, model display, and thinking level",
+	"whenToUse": "Use when you want a richer footer with model, git, token, and cost status.",
+	"capabilities": {
+		"events": ["session_start", "tool_result"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["footer", "status"],
 	"files": ["index.ts"],
