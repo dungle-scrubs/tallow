@@ -17,7 +17,10 @@ import type {
 	ClassificationResult,
 	CostPreference,
 	ResolvedModel,
+	RoutingModelSignal,
+	RoutingRouteSignal,
 	SelectionOptions,
+	RoutingSignalsSnapshot as SynapseRoutingSignalsSnapshot,
 	TaskType,
 } from "@dungle-scrubs/synapse";
 import * as synapse from "@dungle-scrubs/synapse";
@@ -61,11 +64,7 @@ export type MatrixOverrides = Readonly<
 >;
 
 /** Routing telemetry snapshot payload passed into synapse selector options. */
-export interface RoutingSignalsSnapshot {
-	readonly generatedAtMs: number;
-	readonly models?: Readonly<Record<string, unknown>>;
-	readonly routes?: Readonly<Record<string, unknown>>;
-}
+export type RoutingSignalsSnapshot = SynapseRoutingSignalsSnapshot;
 
 /** Configuration for the routing engine (from settings.json). */
 export interface RoutingConfig {
@@ -559,6 +558,105 @@ export function loadMatrixOverrides(
 }
 
 /**
+ * Parse an optional finite numeric field.
+ *
+ * @param value - Raw field value
+ * @returns Parsed number when finite
+ */
+function parseOptionalFiniteNumber(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	return undefined;
+}
+
+/**
+ * Parse a single model telemetry signal.
+ *
+ * @param value - Raw signal payload
+ * @returns Sanitized model signal
+ */
+function parseRoutingModelSignal(value: unknown): RoutingModelSignal | undefined {
+	if (!isRecord(value)) return undefined;
+	const observedAtMs = parseOptionalFiniteNumber(value.observedAtMs);
+	if (observedAtMs === undefined) return undefined;
+
+	const signal: {
+		observedAtMs: number;
+		outputTpsMedian?: number;
+		source?: string;
+		ttftMedianMs?: number;
+	} = { observedAtMs };
+	const outputTpsMedian = parseOptionalFiniteNumber(value.outputTpsMedian);
+	if (outputTpsMedian !== undefined) signal.outputTpsMedian = outputTpsMedian;
+	const ttftMedianMs = parseOptionalFiniteNumber(value.ttftMedianMs);
+	if (ttftMedianMs !== undefined) signal.ttftMedianMs = ttftMedianMs;
+	if (typeof value.source === "string" && value.source.length > 0) signal.source = value.source;
+	return signal;
+}
+
+/**
+ * Parse a single route telemetry signal.
+ *
+ * @param value - Raw signal payload
+ * @returns Sanitized route signal
+ */
+function parseRoutingRouteSignal(value: unknown): RoutingRouteSignal | undefined {
+	if (!isRecord(value)) return undefined;
+	const observedAtMs = parseOptionalFiniteNumber(value.observedAtMs);
+	if (observedAtMs === undefined) return undefined;
+
+	const signal: {
+		observedAtMs: number;
+		errorRate?: number;
+		fallbackRate?: number;
+		latencyP50Ms?: number;
+		latencyP90Ms?: number;
+		source?: string;
+		throughputP50Tps?: number;
+		throughputP90Tps?: number;
+		uptime?: number;
+		windowMs?: number;
+	} = { observedAtMs };
+	const errorRate = parseOptionalFiniteNumber(value.errorRate);
+	if (errorRate !== undefined) signal.errorRate = errorRate;
+	const fallbackRate = parseOptionalFiniteNumber(value.fallbackRate);
+	if (fallbackRate !== undefined) signal.fallbackRate = fallbackRate;
+	const latencyP50Ms = parseOptionalFiniteNumber(value.latencyP50Ms);
+	if (latencyP50Ms !== undefined) signal.latencyP50Ms = latencyP50Ms;
+	const latencyP90Ms = parseOptionalFiniteNumber(value.latencyP90Ms);
+	if (latencyP90Ms !== undefined) signal.latencyP90Ms = latencyP90Ms;
+	if (typeof value.source === "string" && value.source.length > 0) signal.source = value.source;
+	const throughputP50Tps = parseOptionalFiniteNumber(value.throughputP50Tps);
+	if (throughputP50Tps !== undefined) signal.throughputP50Tps = throughputP50Tps;
+	const throughputP90Tps = parseOptionalFiniteNumber(value.throughputP90Tps);
+	if (throughputP90Tps !== undefined) signal.throughputP90Tps = throughputP90Tps;
+	const uptime = parseOptionalFiniteNumber(value.uptime);
+	if (uptime !== undefined) signal.uptime = uptime;
+	const windowMs = parseOptionalFiniteNumber(value.windowMs);
+	if (windowMs !== undefined) signal.windowMs = windowMs;
+	return signal;
+}
+
+/**
+ * Parse a telemetry map keyed by model/route IDs.
+ *
+ * @param value - Raw telemetry map payload
+ * @param parser - Entry parser for each map value
+ * @returns Sanitized telemetry map
+ */
+function parseSignalsRecord<T>(
+	value: unknown,
+	parser: (entry: unknown) => T | undefined
+): Readonly<Record<string, T>> | undefined {
+	if (!isRecord(value)) return undefined;
+	const parsed: Record<string, T> = {};
+	for (const [id, entry] of Object.entries(value)) {
+		const signal = parser(entry);
+		if (signal !== undefined) parsed[id] = signal;
+	}
+	return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+/**
  * Load routing telemetry snapshot from the configured file path.
  *
  * Drops snapshots older than `signalsMaxAgeMs` based on `generatedAtMs`.
@@ -575,14 +673,15 @@ export function loadRoutingSignalsSnapshot(
 	const absolutePath = resolveConfiguredPath(cwd, config.signalsSnapshotPath);
 	const payload = readJsonFile(absolutePath);
 	if (!isRecord(payload)) return undefined;
-	if (typeof payload.generatedAtMs !== "number" || !Number.isFinite(payload.generatedAtMs)) {
-		return undefined;
-	}
-	if (Date.now() - payload.generatedAtMs > config.signalsMaxAgeMs) return undefined;
+
+	const generatedAtMs = parseOptionalFiniteNumber(payload.generatedAtMs);
+	if (generatedAtMs === undefined) return undefined;
+	if (Date.now() - generatedAtMs > config.signalsMaxAgeMs) return undefined;
+
 	return {
-		generatedAtMs: payload.generatedAtMs,
-		models: isRecord(payload.models) ? payload.models : undefined,
-		routes: isRecord(payload.routes) ? payload.routes : undefined,
+		generatedAtMs,
+		models: parseSignalsRecord(payload.models, parseRoutingModelSignal),
+		routes: parseSignalsRecord(payload.routes, parseRoutingRouteSignal),
 	};
 }
 
