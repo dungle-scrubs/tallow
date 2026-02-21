@@ -94,6 +94,10 @@ export default defineConfig({
 					label: "Guides",
 					items: [
 						{
+							label: "Autocomplete",
+							slug: "guides/autocomplete",
+						},
+						{
 							label: "Using tallow in Claude Code projects",
 							slug: "guides/coming-from-claude-code",
 						},
