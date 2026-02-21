@@ -69,6 +69,33 @@ Manage debug mode from within a session:
 | `/diagnostics-clear` | Truncate the log file |
 | `/diagnostics-tail [n]` | Show last N log entries (default: 20) |
 
+## Diagnostics vs debugger (`/debug`)
+
+These are related, but not the same tool:
+
+- **Diagnostics** (`/diagnostics*`) are the raw event stream (JSONL logs).
+- **Debugger** (`/debug`) is model-assisted analysis on top of those logs.
+
+Think of it like this:
+
+- **Diagnostics** = the **flight recorder** (what happened, exactly when).
+- **`/debug`** = the **investigator** (what pattern likely explains it).
+
+Use **diagnostics** when you need concrete evidence:
+
+- verify whether an event happened
+- inspect exact timing and ordering
+- tail live output while reproducing an issue
+
+Use **`/debug`** when you need interpretation:
+
+- summarize large logs quickly
+- cluster recurring errors
+- identify likely bottlenecks and next checks
+
+Typical workflow: enable diagnostics, reproduce the issue, then run `/debug`
+for guided analysis.
+
 ## Examples
 
 ### Inspect tool performance
