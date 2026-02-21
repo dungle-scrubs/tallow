@@ -1,15 +1,15 @@
 ---
 title: WezTerm Integration
-description: End-to-end guide for tallow's WezTerm integration — pane control, turn status signaling, tab indicators, and terminal configuration.
+description: End-to-end guide for tallow's WezTerm integration — pane control, working-session signaling, tab indicators, and terminal configuration.
 ---
 
 tallow has deep integration with [WezTerm](https://wezfurlong.org/wezterm/).
 The agent can manage panes and tabs, route sensitive commands to separate
-terminals, and signal turn status through visual indicators in the tab bar.
+terminals, and signal working-session status through visual indicators in the tab bar.
 
 This guide covers the full integration across the `wezterm-pane-control`
-extension, turn status signaling, and the WezTerm Lua configuration that
-ties it together.
+extension, working-session signaling, and the WezTerm Lua configuration
+that ties it together.
 
 ## Pane and tab management
 
@@ -90,25 +90,28 @@ the tool description and system prompt context. Commands like `cat
 ~/.ssh/id_rsa` or `op read` are routed to a terminal pane rather than
 captured by bash.
 
-## Turn status signaling
+## Working-session signaling
 
 The [`wezterm-notify`](/extensions/wezterm-notify/) extension signals
-agent turn status to WezTerm via
+agent working-session status to WezTerm via
 [OSC 1337 SetUserVar](https://wezfurlong.org/wezterm/shell-integration.html#user-vars)
 sequences. WezTerm Lua config reads the `pi_status` user variable to
 drive visual indicators.
 
 ### Lifecycle
 
-| Event | pi_status | Effect |
-|-------|-----------|--------|
-| `turn_start` | `working` | Tab shows spinner |
-| `turn_end` | `done` | Tab turns blue (if inactive) |
-| `input` | _(cleared)_ | Tab returns to normal |
-| `session_start` / `session_shutdown` | _(cleared)_ | Clean slate |
+Status transitions are tracked at the **agent session** level and
+coalesced across overlapping lifecycle events:
 
-A `pi_heartbeat` variable fires every 500ms during a turn to trigger
-WezTerm tab bar re-renders, advancing the spinner animation.
+| Lifecycle edge | pi_status | Effect |
+|----------------|-----------|--------|
+| `before_agent_start` / `agent_start` | `working` | Enter working once (duplicate starts coalesce) |
+| `agent_end` | `done` | Inactive tab turns blue |
+| `input` while working | _(unchanged)_ | Avoids mid-run flicker |
+| `input` while idle, `session_start`, `session_shutdown` | _(cleared)_ | Reset to neutral |
+
+Entering `working` emits an immediate `pi_heartbeat`, then pulses
+continue every 500ms while working to trigger WezTerm redraws.
 
 ### OSC stripping
 
@@ -127,13 +130,13 @@ The WezTerm Lua configuration consumes `pi_status` to show visual
 feedback in the tab bar. These indicators work across all panes in a
 tab — if any pane has an active agent, the tab shows it.
 
-### Spinner (turn in progress)
+### Spinner (working session in progress)
 
 When any pane in a tab has `pi_status=working`:
 
 - A spinner animation (`◰ ◳ ◲ ◱`) appears before the tab title
-- Cycles at ~500ms (heartbeat interval), so the animation speed stays
-  stable even when other terminal activity occurs
+- Frame advancement is deterministic: one step per redraw while any
+  pane is `working` (heartbeat provides the redraw cadence)
 - Color: amber (`#d8a274`)
 
 ### Done indicator (unseen result)
@@ -143,8 +146,8 @@ active (user hasn't seen the result):
 
 - Tab title turns blue (`#61afef`)
 - Tracks "seen" state per pane in `wezterm.GLOBAL.pi_seen`
-- Resets when: agent starts a new turn, user switches to the tab, or
-  the pane loses `pi_status`
+- Resets when: agent re-enters a working session, user switches to the
+  tab, or the pane loses `pi_status`
 
 ### Normal states
 
@@ -253,7 +256,7 @@ you'll see spinner/done indicators in the tab bar as it works.
 ## Related
 
 - [`wezterm-notify`](/extensions/wezterm-notify/) — the extension
-  that emits turn status signals
+  that emits working-session signals
 - [`wezterm-pane-control`](/extensions/wezterm-pane-control/) — pane
   and tab management tool
 - [`bash-tool-enhanced`](/extensions/bash-tool-enhanced/) — OSC
