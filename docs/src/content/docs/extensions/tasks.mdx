@@ -57,6 +57,15 @@ overflow indicator. Task titles, agent task previews, and
 background command strings all truncate independently based on
 available column width.
 
+### Presentation roles
+
+The widget uses shared [presentation roles](/extensions/tool-display/#presentation-roles):
+
+- **title/action/identity** for the primary task and agent context
+- **meta/hint** for tree structure, counters, and helper context
+- **process_output** for low-priority activity chatter
+- **status** colors for pending/in-progress/completed indicators
+
 <Gallery images={[
   { src: "/screenshots/extensions/tasks/board.png", alt: "Task board with pending, active, and completed tasks" },
 ]} />

@@ -12,6 +12,23 @@ This is a library extension, other tool extensions (bash-live,
 read-summary, etc.) import its configuration to ensure consistent
 display behavior across all tools.
 
+## Presentation roles
+
+Tool-display also exports shared presentation helpers used by
+`tasks`, `subagent-tool`, and `teams-tool` dashboards:
+
+- **title** — section headers and primary headings
+- **action** — what an agent/tool is actively doing now
+- **identity** — deterministic identity styling (`@name`)
+- **meta** — counters, tree lines, timestamps, structural context
+- **process_output** — low-priority output chatter/log tails
+- **status** — success/warning/error state indicators
+- **hint** — guidance and secondary helper text
+
+Use `formatPresentationText(theme, role, text)` for role-based text
+hierarchy and `formatIdentityText(text, seed)` for deterministic
+identity colors across extensions.
+
 ## Clickable file paths
 
 File tool headers (read, edit, write) emit

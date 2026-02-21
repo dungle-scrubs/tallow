@@ -233,6 +233,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fetch with 50KB truncation only
 - **debug:** rename `/diag*` commands to `/diagnostics*` and make
   `/diagnostics` capability-aware with WezTerm live-pane follow fallback
+- **tasks/teams-tool:** align task and team dashboard rendering to shared
+  presentation roles, emphasizing identity/action context over process chatter
 
 ### Fixed
 
@@ -270,6 +272,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signaling, tab bar indicators, and WezTerm Lua configuration
 - **wezterm-notify:** new extension — signals agent turn status to WezTerm via
   OSC 1337 user variables, enabling tab spinner and done-color indicators
+- **docs:** add presentation-role guidance for tool-display, tasks,
+  subagent-tool, and teams-tool, plus extension-first/TUI-fork-last-resort policy
+  updates in AGENTS.md
 
 ### Removed
 
