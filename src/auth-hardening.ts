@@ -6,6 +6,8 @@ import {
 	type ApiKeyCredential,
 	type AuthCredential,
 	AuthStorage,
+	type AuthStorageBackend,
+	FileAuthStorageBackend,
 } from "@mariozechner/pi-coding-agent";
 import { atomicWriteFileSync, restoreFromBackup } from "./atomic-write.js";
 
@@ -42,56 +44,114 @@ export interface SecureAuthStorageOptions {
 	readonly secretStore?: ApiKeySecretStore;
 }
 
-/**
- * AuthStorage wrapper that guarantees api_key credentials are persisted as
- * references only (keychain/opchain/env/shell), never as raw values.
- */
-export class SecureAuthStorage extends AuthStorage {
+/** Return value from {@link createSecureAuthStorage}. */
+export interface SecureAuthStorageResult {
+	/** AuthStorage instance with secure persistence. */
+	readonly authStorage: AuthStorage;
+	/** Providers migrated from plaintext to secure references on creation. */
 	readonly migration: MigrationResult;
+}
 
-	private readonly authPathValue: string;
+/**
+ * AuthStorageBackend that intercepts writes to normalize API key credentials.
+ * Wraps FileAuthStorageBackend — raw keys are converted to secure references
+ * (keychain/opchain/env/shell) before they reach disk.
+ */
+class SecureFileAuthStorageBackend implements AuthStorageBackend {
+	private readonly inner: FileAuthStorageBackend;
 	private readonly secretStore: ApiKeySecretStore;
 
 	/**
-	 * Create a secure auth storage instance and run one-time migration.
-	 *
 	 * @param authPath - Absolute auth.json path
-	 * @param options - Optional testing dependencies
+	 * @param secretStore - Backend for raw key storage
 	 */
-	constructor(authPath: string, options: SecureAuthStorageOptions = {}) {
-		super(authPath);
-		this.authPathValue = authPath;
-		this.secretStore = options.secretStore ?? createApiKeySecretStore();
-
-		assertSecureAuthFilePermissions(authPath);
-		this.migration = migratePlaintextApiKeys(authPath, this.secretStore);
-		if (this.migration.migratedProviders.length > 0) {
-			super.reload();
-		}
+	constructor(authPath: string, secretStore: ApiKeySecretStore) {
+		this.inner = new FileAuthStorageBackend(authPath);
+		this.secretStore = secretStore;
 	}
 
 	/**
-	 * Persist a provider credential.
-	 * API keys are converted to secure references before writing to disk.
+	 * Execute fn under lock, normalizing any API keys in the write payload.
 	 *
-	 * @param provider - Provider ID
-	 * @param credential - Credential payload
+	 * @param fn - Lock callback receiving current content
+	 * @returns Result from fn
 	 */
-	override set(provider: string, credential: AuthCredential): void {
-		if (credential.type !== "api_key") {
-			super.set(provider, credential);
-			assertSecureAuthFilePermissions(this.authPathValue);
-			return;
-		}
-
-		const secureCredential: ApiKeyCredential = {
-			type: "api_key",
-			key: normalizeApiKeyValue(provider, credential.key, this.secretStore),
-		};
-
-		super.set(provider, secureCredential);
-		assertSecureAuthFilePermissions(this.authPathValue);
+	withLock<T>(fn: (current: string | undefined) => { result: T; next?: string }): T {
+		return this.inner.withLock((current) => {
+			const lockResult = fn(current);
+			if (lockResult.next !== undefined) {
+				lockResult.next = this.normalizeStorageContent(lockResult.next);
+			}
+			return lockResult;
+		});
 	}
+
+	/**
+	 * Async variant of withLock.
+	 *
+	 * @param fn - Async lock callback receiving current content
+	 * @returns Result from fn
+	 */
+	withLockAsync<T>(
+		fn: (current: string | undefined) => Promise<{ result: T; next?: string }>
+	): Promise<T> {
+		return this.inner.withLockAsync(async (current) => {
+			const lockResult = await fn(current);
+			if (lockResult.next !== undefined) {
+				lockResult.next = this.normalizeStorageContent(lockResult.next);
+			}
+			return lockResult;
+		});
+	}
+
+	/**
+	 * Parse JSON content and normalize any raw API keys to secure references.
+	 *
+	 * @param jsonContent - Serialized auth data
+	 * @returns Normalized JSON content
+	 */
+	private normalizeStorageContent(jsonContent: string): string {
+		try {
+			const data = JSON.parse(jsonContent) as Record<string, AuthCredential>;
+			let changed = false;
+			for (const [provider, credential] of Object.entries(data)) {
+				if (credential?.type !== "api_key" || typeof credential.key !== "string") continue;
+				const normalized = normalizeApiKeyValue(provider, credential.key, this.secretStore);
+				if (normalized !== credential.key) {
+					(data[provider] as ApiKeyCredential).key = normalized;
+					changed = true;
+				}
+			}
+			return changed ? JSON.stringify(data, null, 2) : jsonContent;
+		} catch {
+			return jsonContent;
+		}
+	}
+}
+
+/**
+ * Create an AuthStorage instance with secure persistence.
+ * Raw API keys are normalized to references at the storage-backend layer,
+ * ensuring they never reach disk in plaintext. Runs one-time migration
+ * for any existing plaintext keys.
+ *
+ * @param authPath - Absolute auth.json path
+ * @param options - Optional testing dependencies
+ * @returns AuthStorage instance and migration result
+ */
+export function createSecureAuthStorage(
+	authPath: string,
+	options: SecureAuthStorageOptions = {}
+): SecureAuthStorageResult {
+	const secretStore = options.secretStore ?? createApiKeySecretStore();
+
+	assertSecureAuthFilePermissions(authPath);
+	const migration = migratePlaintextApiKeys(authPath, secretStore);
+
+	const backend = new SecureFileAuthStorageBackend(authPath, secretStore);
+	const authStorage = AuthStorage.fromStorage(backend);
+
+	return { authStorage, migration };
 }
 
 /**

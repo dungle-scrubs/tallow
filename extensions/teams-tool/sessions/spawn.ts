@@ -64,7 +64,7 @@ export async function spawnTeammateSession(
 		throw new Error(`Model resolved to "${resolved.id}" but not found in registry`);
 	}
 
-	const authStorage = new AuthStorage();
+	const authStorage = AuthStorage.create();
 	const modelRegistry = new ModelRegistry(authStorage);
 
 	const otherNames = Array.from(team.teammates.keys()).filter((n) => n !== name);
