@@ -41,6 +41,10 @@ import {
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
 import {
+	appendSection,
+	dimProcessOutputLine,
+	formatPresentationText,
+	formatSectionDivider,
 	formatToolVerb,
 	getToolDisplayConfig,
 	renderLines,
@@ -359,6 +363,22 @@ async function executePdf(
 }
 
 /**
+ * Linkify the file-path prefix in a summary string.
+ *
+ * Summaries follow `<path> (<meta>)`; this keeps metadata plain while turning
+ * the path into an OSC 8 file link.
+ *
+ * @param summary - Summary text with optional metadata in parentheses
+ * @returns Summary with the file path portion linkified
+ */
+function linkifySummaryPath(summary: string): string {
+	const parenIdx = summary.indexOf(" (");
+	return parenIdx > 0
+		? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
+		: fileLink(summary);
+}
+
+/**
  * Extended read tool schema that adds a `pages` parameter for PDF page selection.
  * Non-PDF files ignore this parameter.
  */
@@ -392,8 +412,10 @@ export default function readSummary(pi: ExtensionAPI): void {
 			if (isSkillPath(path)) {
 				const skillName = getSkillName(path);
 				const icon = getSkillIcon(skillName);
-				const left = theme.fg("accent", `${icon} skill: ${skillName}`);
-				const right = theme.fg("dim", keyHint("expandTools", "to expand"));
+				const left =
+					formatPresentationText(theme, "identity", icon) +
+					` ${formatPresentationText(theme, "identity", `skill: ${skillName}`)}`;
+				const right = formatPresentationText(theme, "hint", keyHint("expandTools", "to expand"));
 
 				return {
 					render(width: number): string[] {
@@ -414,15 +436,17 @@ export default function readSummary(pi: ExtensionAPI): void {
 			const pagesArg = args.pages as string | undefined;
 			if (pagesArg) {
 				return new Text(
-					theme.fg("toolTitle", theme.bold(`${verb} `)) +
-						theme.fg("muted", `${fileLink(path)} (pages ${pagesArg})`),
+					formatPresentationText(theme, "title", `${verb} `) +
+						formatPresentationText(theme, "action", fileLink(path)) +
+						formatPresentationText(theme, "meta", ` (pages ${pagesArg})`),
 					0,
 					0
 				);
 			}
 
 			return new Text(
-				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", fileLink(path)),
+				formatPresentationText(theme, "title", `${verb} `) +
+					formatPresentationText(theme, "action", fileLink(path)),
 				0,
 				0
 			);
@@ -580,52 +604,55 @@ export default function readSummary(pi: ExtensionAPI): void {
 			const textContent = result.content.find((c: { type: string }) => c.type === "text") as
 				| { text: string }
 				| undefined;
+			const styleProcessLine = (line: string): string =>
+				dimProcessOutputLine(line, (value) =>
+					formatPresentationText(theme, "process_output", value)
+				);
+			const readVerb = formatToolVerb("read", true);
+			const buildFooter = (summary: string): string => {
+				const linkedSummary = linkifySummaryPath(summary);
+				return (
+					formatPresentationText(theme, "status_success", `${getIcon("success")} ${readVerb}`) +
+					` ${formatPresentationText(theme, "action", linkedSummary)}`
+				);
+			};
 
 			// Live preview during execution
 			if (isPartial && details?._preview) {
 				const previewText = textContent?.text ?? "";
-				return renderLines(previewText.split("\n").map((l) => theme.fg("dim", l)));
+				return renderLines(previewText.split("\n").map(styleProcessLine));
 			}
 
 			// Loading state (fallback)
 			if (isPartial) {
-				return renderLines([theme.fg("muted", "...")]);
+				return renderLines([formatPresentationText(theme, "meta", "...")]);
 			}
 
 			// Skill file: collapsed by default, show full on expand
 			if (details?._isSkill) {
 				if (expanded && details?._fullText) {
-					return renderLines(details._fullText.split("\n"), { wrap: true });
+					return renderLines(details._fullText.split("\n").map(styleProcessLine), { wrap: true });
 				}
 				return renderLines([]);
 			}
 
 			// Image file: show dimensions and format
-			const readVerb = formatToolVerb("read", true);
 			if (details?.[IMAGE_MARKER]) {
 				const summary = textContent?.text ?? "image";
-				const parenIdx = summary.indexOf(" (");
-				const linkedSummary =
-					parenIdx > 0
-						? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
-						: fileLink(summary);
-				const footer = theme.fg("muted", `${getIcon("success")} ${readVerb} ${linkedSummary}`);
-				return renderLines([footer]);
+				return renderLines([buildFooter(summary)]);
 			}
 
 			// PDF file: compact summary collapsed, full text expanded
 			if (details?.[PDF_MARKER]) {
 				const summary = textContent?.text ?? "PDF";
-				const parenIdx = summary.indexOf(" (");
-				const linkedSummary =
-					parenIdx > 0
-						? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
-						: fileLink(summary);
-				const footer = theme.fg("muted", `${getIcon("success")} ${readVerb} ${linkedSummary}`);
+				const footer = buildFooter(summary);
 
 				if (expanded && details?._fullText) {
-					const contentLines = details._fullText.split("\n").map((l) => theme.fg("dim", l));
-					return renderLines([...contentLines, footer], { wrap: true });
+					const lines: string[] = [];
+					appendSection(lines, [formatSectionDivider(theme, "Output")]);
+					appendSection(lines, details._fullText.split("\n").map(styleProcessLine));
+					appendSection(lines, [footer], { blankBefore: true });
+					return renderLines(lines, { wrap: true });
 				}
 				return renderLines([footer]);
 			}
@@ -633,22 +660,19 @@ export default function readSummary(pi: ExtensionAPI): void {
 			// If not summarized, show raw content
 			if (!details?.[SUMMARY_MARKER]) {
 				const raw = textContent?.text ?? "";
-				return renderLines(raw.split("\n").map((l) => theme.fg("dim", l)));
+				return renderLines(raw.split("\n").map(styleProcessLine));
 			}
 
 			const summary = textContent?.text ?? "file";
-			// Linkify the file path portion of the summary (everything before the parens)
-			const parenIdx = summary.indexOf(" (");
-			const linkedSummary =
-				parenIdx > 0
-					? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
-					: fileLink(summary);
-			const footer = theme.fg("muted", `${getIcon("success")} ${readVerb} ${linkedSummary}`);
+			const footer = buildFooter(summary);
 
 			// Expanded: full content with wrapping, then summary footer at bottom
 			if (expanded && details?._fullText) {
-				const contentLines = details._fullText.split("\n").map((l) => theme.fg("dim", l));
-				return renderLines([...contentLines, footer], { wrap: true });
+				const lines: string[] = [];
+				appendSection(lines, [formatSectionDivider(theme, "Output")]);
+				appendSection(lines, details._fullText.split("\n").map(styleProcessLine));
+				appendSection(lines, [footer], { blankBefore: true });
+				return renderLines(lines, { wrap: true });
 			}
 
 			// Collapsed: summary footer only

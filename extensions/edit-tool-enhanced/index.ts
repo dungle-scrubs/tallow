@@ -17,7 +17,14 @@ import {
 import { fileLink, hyperlink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { commandExistsOnPath, runGitCommandSync } from "../_shared/shell-policy.js";
-import { formatToolVerb, renderLines } from "../tool-display/index.js";
+import {
+	appendSection,
+	dimProcessOutputLine,
+	formatPresentationText,
+	formatSectionDivider,
+	formatToolVerb,
+	renderLines,
+} from "../tool-display/index.js";
 
 /**
  * Check whether an executable exists on PATH.
@@ -88,7 +95,8 @@ export default function editLive(pi: ExtensionAPI): void {
 			const path = args.path ?? "file";
 			const verb = formatToolVerb("edit", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", fileLink(path)),
+				formatPresentationText(theme, "title", `${verb} `) +
+					formatPresentationText(theme, "action", fileLink(path)),
 				0,
 				0
 			);
@@ -116,21 +124,31 @@ export default function editLive(pi: ExtensionAPI): void {
 			const textContent = result.content.find((c: { type: string }) => c.type === "text") as
 				| { text: string }
 				| undefined;
+			const styleProcessLine = (line: string): string =>
+				dimProcessOutputLine(line, (value) =>
+					formatPresentationText(theme, "process_output", value)
+				);
 
 			if (isPartial) {
-				return renderLines([theme.fg("muted", "...")]);
+				return renderLines([formatPresentationText(theme, "meta", "...")]);
 			}
 
 			const errorText = textContent?.text ?? "";
 			if (errorText.startsWith("Error") || errorText.includes("not found")) {
-				return renderLines([theme.fg("error", errorText || "Edit failed")]);
+				return renderLines([
+					formatPresentationText(theme, "status_error", errorText || "Edit failed"),
+				]);
 			}
 
 			if (!details?.[EDIT_MARKER]) {
 				if (details?.diff) {
-					return renderLines(renderDiff(details.diff).split("\n"), { wrap: expanded });
+					return renderLines(renderDiff(details.diff).split("\n").map(styleProcessLine), {
+						wrap: expanded,
+					});
 				}
-				return renderLines((textContent?.text ?? "").split("\n"), { wrap: expanded });
+				return renderLines((textContent?.text ?? "").split("\n").map(styleProcessLine), {
+					wrap: expanded,
+				});
 			}
 
 			const finalFilename = details._filename ?? "file";
@@ -138,11 +156,16 @@ export default function editLive(pi: ExtensionAPI): void {
 
 			const verb = formatToolVerb("edit", true);
 			const footer =
-				theme.fg("muted", `${getIcon("success")} ${verb} ${fileLink(finalFilename)}`) + diffLink;
+				formatPresentationText(theme, "status_success", `${getIcon("success")} ${verb}`) +
+				` ${formatPresentationText(theme, "action", fileLink(finalFilename))}` +
+				diffLink;
 
 			if (details._diff) {
-				const diffLines = renderDiff(details._diff).split("\n");
-				return renderLines([...diffLines, "", footer], { wrap: expanded });
+				const lines: string[] = [];
+				appendSection(lines, [formatSectionDivider(theme, "Diff")]);
+				appendSection(lines, renderDiff(details._diff).split("\n").map(styleProcessLine));
+				appendSection(lines, [footer], { blankBefore: true });
+				return renderLines(lines, { wrap: expanded });
 			}
 
 			return renderLines([footer]);

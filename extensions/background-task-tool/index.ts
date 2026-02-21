@@ -19,7 +19,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { type ExtensionAPI, type ExtensionContext, keyHint } from "@mariozechner/pi-coding-agent";
+import {
+	type ExtensionAPI,
+	type ExtensionContext,
+	keyHint,
+	type Theme,
+} from "@mariozechner/pi-coding-agent";
 import {
 	Container,
 	Key,
@@ -42,6 +47,13 @@ import {
 } from "../_shared/interop-events.js";
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
+import {
+	appendSection,
+	dimProcessOutputLine,
+	formatPresentationText,
+	formatSectionDivider,
+	renderLines,
+} from "../tool-display/index.js";
 import { createProcessLifecycle } from "./process-lifecycle.js";
 
 /** Spawn implementation used by bg_bash (overridable in tests). */
@@ -68,6 +80,19 @@ function withDarkBlueBg(line: string, width: number): string {
 	const padding = " ".repeat(Math.max(0, width - visLen));
 	// Reset any existing colors, then apply dark blue bg + white text
 	return `${RESET_ALL}${BG_DARK_GRAY}${FG_WHITE}${line}${padding}${RESET_ALL}`;
+}
+
+/**
+ * Apply shared process-output styling while preserving pre-colored ANSI lines.
+ *
+ * @param theme - Active UI theme
+ * @param line - Raw output line
+ * @returns Safely styled process-output line
+ */
+export function styleBackgroundOutputLine(theme: Theme, line: string): string {
+	return dimProcessOutputLine(line, (value) =>
+		formatPresentationText(theme, "process_output", value)
+	);
 }
 
 interface BackgroundTask {
@@ -388,25 +413,41 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			const d = message.details;
 			if (!d) return undefined;
 
-			const icon =
+			const statusRole =
 				d.status === "completed"
-					? theme.fg("success", getIcon("success"))
-					: theme.fg("error", getIcon("error"));
+					? "status_success"
+					: d.status === "killed"
+						? "status_warning"
+						: "status_error";
+			const icon = d.status === "completed" ? getIcon("success") : getIcon("error");
 			const label = d.status === "completed" ? "completed" : d.status;
-
-			let text = `${icon} ${theme.fg("muted", "⚙ Task")} ${theme.fg("accent", d.taskId)} ${theme.fg("muted", label)} ${theme.fg("dim", `(exit ${d.exitCode ?? "?"}, ${d.duration})`)}`;
-
+			const lines: string[] = [];
+			appendSection(lines, [
+				formatPresentationText(theme, statusRole, `${icon} ⚙ Task ${d.taskId} ${label}`) +
+					` ${formatPresentationText(theme, "meta", `(exit ${d.exitCode ?? "?"}, ${d.duration})`)}`,
+			]);
+			appendSection(lines, [formatSectionDivider(theme, "Preview")], { blankBefore: true });
 			if (d.preview.length > 0) {
-				for (const line of d.preview) {
-					text += `\n  ${theme.fg("dim", line)}`;
-				}
+				appendSection(
+					lines,
+					d.preview.map((line) => `  ${styleBackgroundOutputLine(theme, line)}`)
+				);
 			} else {
-				text += `\n  ${theme.fg("dim", "(no output)")}`;
+				appendSection(lines, [formatPresentationText(theme, "meta", "  (no output)")]);
 			}
+			appendSection(
+				lines,
+				[
+					formatPresentationText(
+						theme,
+						"hint",
+						`Use task_output("${d.taskId}") to view full output`
+					),
+				],
+				{ blankBefore: true }
+			);
 
-			text += `\n  ${theme.fg("muted", `Use task_output("${d.taskId}") to view full output`)}`;
-
-			return new Text(text, 0, 0);
+			return renderLines(lines, { wrap: true });
 		}
 	);
 
@@ -695,20 +736,32 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const cmd = truncateCommand(args.command as string, 60);
-			const bg = args.background ? theme.fg("dim", " (detached)") : "";
+			const bg = args.background ? formatPresentationText(theme, "meta", " (detached)") : "";
 			return new Text(
-				theme.fg("toolTitle", theme.bold("bg_bash ")) + theme.fg("muted", cmd) + bg,
+				formatPresentationText(theme, "title", "bg_bash ") +
+					formatPresentationText(theme, "action", cmd) +
+					bg,
 				0,
 				0
 			);
 		},
 
 		renderResult(result, { expanded, isPartial }, theme) {
-			const details = result.details as { fireAndForget?: boolean; taskId?: string } | undefined;
+			const details = result.details as
+				| {
+						fireAndForget?: boolean;
+						taskId?: string;
+						status?: string;
+						duration?: string;
+						exitCode?: number | null;
+				  }
+				| undefined;
 
 			// Fire-and-forget: compact one-liner
 			if (details?.fireAndForget) {
-				return new Text(theme.fg("success", "⚙ Started (detached)"), 0, 0);
+				return renderLines([
+					formatPresentationText(theme, "status_success", "⚙ Started (detached)"),
+				]);
 			}
 
 			const COLLAPSED_LINES = 10;
@@ -727,16 +780,21 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					const maxLines = COLLAPSED_LINES;
 					const truncated = allLines.length > maxLines;
 					const tail = truncated ? allLines.slice(-maxLines) : allLines;
-
-					let rendered = "";
+					const lines: string[] = [];
 					if (truncated) {
-						rendered += `${theme.fg("dim", `... ${allLines.length - maxLines} more lines above`)}\n`;
+						appendSection(lines, [
+							formatPresentationText(
+								theme,
+								"meta",
+								`... ${allLines.length - maxLines} more lines above`
+							),
+						]);
 					}
-					for (let i = 0; i < tail.length; i++) {
-						rendered += theme.fg("muted", tail[i]);
-						if (i < tail.length - 1) rendered += "\n";
-					}
-					container.addChild(new Text(rendered, 0, 0));
+					appendSection(
+						lines,
+						tail.map((line) => styleBackgroundOutputLine(theme, line))
+					);
+					container.addChild(renderLines(lines, { wrap: true }));
 				}
 
 				// Reuse persistent Loader (one per task, avoids leaking intervals)
@@ -755,33 +813,72 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				if (loader) {
 					container.addChild(loader);
 				} else {
-					container.addChild(new Text(theme.fg("bashMode", "Running..."), 0, 0));
+					container.addChild(
+						new Text(formatPresentationText(theme, "status_warning", "Running..."), 0, 0)
+					);
 				}
 
 				return container;
 			}
 
 			// Completed: show output
-			if (!output) return new Text(theme.fg("dim", "(no output)"), 0, 0);
+			if (!output) return renderLines([formatPresentationText(theme, "meta", "(no output)")]);
 
 			const allLines = output.split("\n").filter((l: string) => l.length > 0);
 			const maxLines = expanded ? EXPANDED_LINES : COLLAPSED_LINES;
 			const truncated = allLines.length > maxLines;
 			const tail = truncated ? allLines.slice(-maxLines) : allLines;
+			const lines: string[] = [];
 
-			let rendered = "";
 			if (truncated) {
-				rendered += `${theme.fg("dim", `... ${allLines.length - maxLines} more lines above`)}\n`;
+				appendSection(lines, [
+					formatPresentationText(
+						theme,
+						"meta",
+						`... ${allLines.length - maxLines} more lines above`
+					),
+				]);
 			}
-			for (let i = 0; i < tail.length; i++) {
-				rendered += theme.fg("toolOutput", tail[i]);
-				if (i < tail.length - 1) rendered += "\n";
-			}
+			appendSection(
+				lines,
+				tail.map((line) => styleBackgroundOutputLine(theme, line))
+			);
 			if (truncated && !expanded) {
-				rendered += `\n${theme.fg("dim", `... ${allLines.length - maxLines} more lines`)} ${keyHint("expandTools", "to expand")}`;
+				appendSection(lines, [
+					`${formatPresentationText(theme, "meta", `... ${allLines.length - maxLines} more lines`)} ${formatPresentationText(theme, "hint", keyHint("expandTools", "to expand"))}`,
+				]);
 			}
 
-			return new Text(rendered, 0, 0);
+			if (details?.status) {
+				const statusIcon =
+					details.status === "completed"
+						? getIcon("success")
+						: details.status === "running"
+							? getIcon("in_progress")
+							: getIcon("error");
+				const statusRole =
+					details.status === "completed"
+						? "status_success"
+						: details.status === "running"
+							? "status_warning"
+							: "status_error";
+				const statusMetaParts: string[] = [];
+				if (details.exitCode !== null && details.exitCode !== undefined) {
+					statusMetaParts.push(`exit ${details.exitCode}`);
+				}
+				if (details.duration) statusMetaParts.push(details.duration);
+				const statusMeta = statusMetaParts.length > 0 ? ` (${statusMetaParts.join(", ")})` : "";
+				appendSection(
+					lines,
+					[
+						formatPresentationText(theme, statusRole, `${statusIcon} bg_bash ${details.status}`) +
+							formatPresentationText(theme, "meta", statusMeta),
+					],
+					{ blankBefore: true }
+				);
+			}
+
+			return renderLines(lines, { wrap: expanded });
 		},
 	});
 
@@ -847,8 +944,10 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			const taskId = args.taskId as string;
 			const task = tasks.get(taskId);
 			const cmd = task ? truncateCommand(task.command, 40) : "";
-			let text = theme.fg("toolTitle", theme.bold("task_output ")) + theme.fg("accent", taskId);
-			if (cmd) text += theme.fg("dim", ` ${cmd}`);
+			let text =
+				formatPresentationText(theme, "title", "task_output ") +
+				formatPresentationText(theme, "identity", taskId);
+			if (cmd) text += ` ${formatPresentationText(theme, "meta", cmd)}`;
 			return new Text(text, 0, 0);
 		},
 
@@ -873,7 +972,13 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			// Error case — show full text
 			if (details?.error) {
 				const text = result.content[0];
-				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
+				return renderLines([
+					formatPresentationText(
+						theme,
+						"status_error",
+						text?.type === "text" ? text.text : "Error"
+					),
+				]);
 			}
 
 			const status = details?.status ?? "unknown";
@@ -881,23 +986,26 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 			// Status icon
 			let icon: string;
-			let statusColor: "success" | "warning" | "error" | "accent";
+			let statusRole: "status_success" | "status_warning" | "status_error";
 			switch (status) {
 				case "running":
 					icon = getIcon("in_progress");
-					statusColor = "accent";
+					statusRole = "status_warning";
 					break;
 				case "completed":
 					icon = getIcon("success");
-					statusColor = "success";
+					statusRole = "status_success";
 					break;
 				default:
 					icon = getIcon("error");
-					statusColor = "error";
+					statusRole = "status_error";
 			}
 
-			// Header line
-			let text = theme.fg(statusColor, `${icon} ${status}`) + theme.fg("muted", ` (${duration})`);
+			const lines: string[] = [];
+			appendSection(lines, [
+				formatPresentationText(theme, statusRole, `${icon} ${status}`) +
+					formatPresentationText(theme, "meta", ` (${duration})`),
+			]);
 
 			// Show output tail (always — collapsed=10 lines, expanded=50)
 			if (details?.output) {
@@ -906,21 +1014,33 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				const truncated = allLines.length > maxLines;
 				const tail = truncated ? allLines.slice(-maxLines) : allLines;
 
+				appendSection(lines, [formatSectionDivider(theme, "Output")], { blankBefore: true });
 				if (truncated) {
-					text += `\n${theme.fg("dim", `  ... ${allLines.length - maxLines} more lines above`)}`;
+					appendSection(lines, [
+						formatPresentationText(
+							theme,
+							"meta",
+							`  ... ${allLines.length - maxLines} more lines above`
+						),
+					]);
 				}
-				for (const line of tail) {
-					text += `\n${theme.fg("dim", `  ${line}`)}`;
-				}
+				appendSection(
+					lines,
+					tail.map((line) => `  ${styleBackgroundOutputLine(theme, line)}`)
+				);
 
 				if (!expanded && truncated) {
-					text += `\n${keyHint("expandTools", "to show more")}`;
+					appendSection(lines, [
+						formatPresentationText(theme, "hint", keyHint("expandTools", "to show more")),
+					]);
 				}
 			} else {
-				text += theme.fg("dim", " (no output yet)");
+				appendSection(lines, [formatPresentationText(theme, "meta", "(no output yet)")], {
+					blankBefore: true,
+				});
 			}
 
-			return new Text(text, 0, 0);
+			return renderLines(lines, { wrap: expanded });
 		},
 	});
 
@@ -978,8 +1098,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("task_status ")) +
-					theme.fg("accent", args.taskId as string),
+				formatPresentationText(theme, "title", "task_status ") +
+					formatPresentationText(theme, "identity", args.taskId as string),
 				0,
 				0
 			);
@@ -991,7 +1111,13 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				| undefined;
 			if (details?.error) {
 				const text = result.content[0];
-				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Not found"), 0, 0);
+				return renderLines([
+					formatPresentationText(
+						theme,
+						"status_error",
+						text?.type === "text" ? text.text : "Not found"
+					),
+				]);
 			}
 			const status = details?.status ?? "unknown";
 			const duration = details?.duration ?? "";
@@ -1001,13 +1127,16 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					: status === "completed"
 						? getIcon("success")
 						: getIcon("error");
-			const color: "success" | "accent" | "error" =
-				status === "completed" ? "success" : status === "running" ? "accent" : "error";
-			return new Text(
-				theme.fg(color, `${icon} ${status}`) + theme.fg("muted", ` (${duration})`),
-				0,
-				0
-			);
+			const statusRole: "status_success" | "status_warning" | "status_error" =
+				status === "completed"
+					? "status_success"
+					: status === "running"
+						? "status_warning"
+						: "status_error";
+			return renderLines([
+				formatPresentationText(theme, statusRole, `${icon} ${status}`) +
+					formatPresentationText(theme, "meta", ` (${duration})`),
+			]);
 		},
 	});
 
@@ -1066,7 +1195,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("task_kill ")) + theme.fg("error", args.taskId as string),
+				formatPresentationText(theme, "title", "task_kill ") +
+					formatPresentationText(theme, "status_error", args.taskId as string),
 				0,
 				0
 			);
@@ -1076,9 +1206,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			const details = result.details as { killed?: boolean; error?: boolean } | undefined;
 			if (details?.error) {
 				const text = result.content[0];
-				return new Text(theme.fg("error", text?.type === "text" ? text.text : "Error"), 0, 0);
+				return renderLines([
+					formatPresentationText(
+						theme,
+						"status_error",
+						text?.type === "text" ? text.text : "Error"
+					),
+				]);
 			}
-			return new Text(theme.fg("warning", `${getIcon("error")} Killed`), 0, 0);
+			return renderLines([
+				formatPresentationText(theme, "status_warning", `${getIcon("error")} Killed`),
+			]);
 		},
 	});
 

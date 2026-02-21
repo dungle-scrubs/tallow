@@ -4,7 +4,14 @@
 import { createWriteTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { fileLink, Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
-import { formatToolVerb, renderLines } from "../tool-display/index.js";
+import {
+	appendSection,
+	dimProcessOutputLine,
+	formatPresentationText,
+	formatSectionDivider,
+	formatToolVerb,
+	renderLines,
+} from "../tool-display/index.js";
 
 const PREVIEW_MARKER = "__write_preview__";
 
@@ -27,7 +34,8 @@ export default function writePreview(pi: ExtensionAPI): void {
 			const path = args.path ?? "file";
 			const verb = formatToolVerb("write", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", fileLink(path)),
+				formatPresentationText(theme, "title", `${verb} `) +
+					formatPresentationText(theme, "action", fileLink(path)),
 				0,
 				0
 			);
@@ -53,30 +61,39 @@ export default function writePreview(pi: ExtensionAPI): void {
 
 		renderResult(result, { isPartial, expanded }, theme) {
 			const details = result.details as WritePreviewDetails | undefined;
+			const styleProcessLine = (line: string): string =>
+				dimProcessOutputLine(line, (value) =>
+					formatPresentationText(theme, "process_output", value)
+				);
 
 			if (isPartial) {
-				return renderLines([theme.fg("muted", "...")]);
+				return renderLines([formatPresentationText(theme, "meta", "...")]);
 			}
 
 			if (!details?.[PREVIEW_MARKER]) {
 				const textContent = result.content.find((c: { type: string }) => c.type === "text") as
 					| { text: string }
 					| undefined;
-				return renderLines((textContent?.text ?? "").split("\n"));
+				return renderLines((textContent?.text ?? "").split("\n").map(styleProcessLine));
 			}
 
 			const summary = details._summary ?? "file";
-			// Linkify the file path portion of the summary (everything before the parens)
 			const parenIdx = summary.indexOf(" (");
 			const linkedSummary =
 				parenIdx > 0
 					? fileLink(summary.slice(0, parenIdx)) + summary.slice(parenIdx)
 					: fileLink(summary);
 			const verb = formatToolVerb("write", true);
-			const footer = theme.fg("muted", `${getIcon("success")} ${verb} ${linkedSummary}`);
+			const footer =
+				formatPresentationText(theme, "status_success", `${getIcon("success")} ${verb}`) +
+				` ${formatPresentationText(theme, "action", linkedSummary)}`;
 			const body = details._content ?? "";
-			const contentLines = body.split("\n").map((line) => theme.fg("dim", line));
-			return renderLines([...contentLines, "", footer], { wrap: expanded });
+			const contentLines = body.split("\n").map(styleProcessLine);
+			const lines: string[] = [];
+			appendSection(lines, [formatSectionDivider(theme, "Content")]);
+			appendSection(lines, contentLines);
+			appendSection(lines, [footer], { blankBefore: true });
+			return renderLines(lines, { wrap: expanded });
 		},
 	});
 }
