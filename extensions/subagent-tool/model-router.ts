@@ -20,6 +20,7 @@ import type {
 	SelectionOptions,
 	TaskType,
 } from "@dungle-scrubs/synapse";
+import * as synapse from "@dungle-scrubs/synapse";
 import {
 	listAvailableModels,
 	resolveModelCandidates,
@@ -30,15 +31,69 @@ import { classifyTask } from "./task-classifier.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** Supported score-based routing modes. */
+export type RoutingMode = "balanced" | "cheap" | "fast" | "quality" | "reliable";
+
+/** Mode-policy override map keyed by routing mode. */
+export type RoutingModePolicyOverrides = Partial<Record<RoutingMode, RoutingModePolicyOverride>>;
+
+/** Partial mode-policy override payload (passed through to synapse). */
+export interface RoutingModePolicyOverride {
+	readonly complexityBias?: number;
+	readonly constraints?: {
+		readonly maxErrorRate?: number;
+		readonly maxLatencyP90Ms?: number;
+		readonly minUptime?: number;
+	};
+	readonly taskFloors?: Partial<Record<TaskType, number>>;
+	readonly weights?: {
+		readonly capability?: number;
+		readonly cost?: number;
+		readonly latency?: number;
+		readonly reliability?: number;
+		readonly throughput?: number;
+	};
+}
+
+/** Matrix override payload passed into synapse selector options. */
+export type MatrixOverrides = Readonly<
+	Record<string, Readonly<Partial<Record<TaskType, number>>> | null>
+>;
+
+/** Routing telemetry snapshot payload passed into synapse selector options. */
+export interface RoutingSignalsSnapshot {
+	readonly generatedAtMs: number;
+	readonly models?: Readonly<Record<string, unknown>>;
+	readonly routes?: Readonly<Record<string, unknown>>;
+}
+
 /** Configuration for the routing engine (from settings.json). */
 export interface RoutingConfig {
-	/** Whether auto-routing is enabled. */
-	enabled: boolean;
-	/** Agent's default task type. */
-	primaryType: TaskType;
 	/** User's cost preference. */
 	costPreference: CostPreference;
+	/** Whether auto-routing is enabled. */
+	enabled: boolean;
+	/** Optional matrix override JSON path. */
+	matrixOverridesPath?: string;
+	/** Optional mode policy override map. */
+	modePolicyOverrides?: RoutingModePolicyOverrides;
+	/** Score-based routing mode. */
+	mode: RoutingMode;
+	/** Agent's default task type. */
+	primaryType: TaskType;
+	/** Max age for telemetry snapshots in milliseconds. */
+	signalsMaxAgeMs: number;
+	/** Optional telemetry snapshot JSON path. */
+	signalsSnapshotPath?: string;
 }
+
+/** Selection options extended with forward-compatible routing payload fields. */
+type SelectionOptionsWithRouting = SelectionOptions & {
+	matrixOverrides?: MatrixOverrides;
+	routingMode?: RoutingMode;
+	routingModePolicyOverride?: RoutingModePolicyOverride;
+	routingSignals?: RoutingSignalsSnapshot;
+};
 
 /**
  * Per-call routing hints from the parent LLM.
@@ -97,18 +152,32 @@ export type { CostPreference, TaskType } from "@dungle-scrubs/synapse";
 // ─── Settings ────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONFIG: RoutingConfig = {
-	enabled: true,
-	primaryType: "code",
 	costPreference: "balanced",
+	enabled: true,
+	mode: "balanced",
+	primaryType: "code",
+	signalsMaxAgeMs: 1_800_000,
 };
 
 const VALID_COST_PREFS = new Set<CostPreference>(["eco", "balanced", "premium"]);
+const VALID_ROUTING_MODES = new Set<RoutingMode>([
+	"balanced",
+	"cheap",
+	"fast",
+	"quality",
+	"reliable",
+]);
 const VALID_TASK_TYPES = new Set<TaskType>(["code", "vision", "text"]);
 
 interface RawRoutingConfig {
-	enabled?: unknown;
-	primaryType?: unknown;
 	costPreference?: unknown;
+	enabled?: unknown;
+	matrixOverridesPath?: unknown;
+	mode?: unknown;
+	modePolicyOverrides?: unknown;
+	primaryType?: unknown;
+	signalsMaxAgeMs?: unknown;
+	signalsSnapshotPath?: unknown;
 }
 
 /**
@@ -173,6 +242,164 @@ function resolveEnumField<T extends string>(
 }
 
 /**
+ * Check whether a value is a plain object record.
+ *
+ * @param value - Value to test
+ * @returns True when value is an object record
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Resolve an optional string field with project > user precedence.
+ *
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @returns Non-empty string when available
+ */
+function resolveOptionalStringField(projectValue: unknown, userValue: unknown): string | undefined {
+	if (typeof projectValue === "string" && projectValue.length > 0) return projectValue;
+	if (typeof userValue === "string" && userValue.length > 0) return userValue;
+	return undefined;
+}
+
+/**
+ * Resolve a positive-number field with project > user > default precedence.
+ *
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @param fallback - Default fallback value
+ * @returns Resolved positive number
+ */
+function resolvePositiveNumberField(
+	projectValue: unknown,
+	userValue: unknown,
+	fallback: number
+): number {
+	if (typeof projectValue === "number" && Number.isFinite(projectValue) && projectValue > 0) {
+		return projectValue;
+	}
+	if (typeof userValue === "number" && Number.isFinite(userValue) && userValue > 0) {
+		return userValue;
+	}
+	return fallback;
+}
+
+/**
+ * Parse and sanitize a single mode-policy override object.
+ *
+ * @param value - Raw override payload
+ * @returns Sanitized override or undefined when invalid
+ */
+function parseModePolicyOverride(value: unknown): RoutingModePolicyOverride | undefined {
+	if (!isRecord(value)) return undefined;
+
+	const parsed: {
+		complexityBias?: number;
+		constraints?: { maxErrorRate?: number; maxLatencyP90Ms?: number; minUptime?: number };
+		taskFloors?: Partial<Record<TaskType, number>>;
+		weights?: {
+			capability?: number;
+			cost?: number;
+			latency?: number;
+			reliability?: number;
+			throughput?: number;
+		};
+	} = {};
+
+	if (typeof value.complexityBias === "number" && Number.isFinite(value.complexityBias)) {
+		parsed.complexityBias = value.complexityBias;
+	}
+
+	if (isRecord(value.constraints)) {
+		const constraints: { maxErrorRate?: number; maxLatencyP90Ms?: number; minUptime?: number } = {};
+		if (
+			typeof value.constraints.maxErrorRate === "number" &&
+			Number.isFinite(value.constraints.maxErrorRate)
+		) {
+			constraints.maxErrorRate = value.constraints.maxErrorRate;
+		}
+		if (
+			typeof value.constraints.maxLatencyP90Ms === "number" &&
+			Number.isFinite(value.constraints.maxLatencyP90Ms)
+		) {
+			constraints.maxLatencyP90Ms = value.constraints.maxLatencyP90Ms;
+		}
+		if (
+			typeof value.constraints.minUptime === "number" &&
+			Number.isFinite(value.constraints.minUptime)
+		) {
+			constraints.minUptime = value.constraints.minUptime;
+		}
+		if (Object.keys(constraints).length > 0) parsed.constraints = constraints;
+	}
+
+	if (isRecord(value.taskFloors)) {
+		const taskFloors: Partial<Record<TaskType, number>> = {};
+		for (const taskType of ["code", "vision", "text"] as const) {
+			const floor = value.taskFloors[taskType];
+			if (typeof floor === "number" && Number.isFinite(floor) && floor >= 1 && floor <= 5) {
+				taskFloors[taskType] = floor;
+			}
+		}
+		if (Object.keys(taskFloors).length > 0) parsed.taskFloors = taskFloors;
+	}
+
+	if (isRecord(value.weights)) {
+		const weights: {
+			capability?: number;
+			cost?: number;
+			latency?: number;
+			reliability?: number;
+			throughput?: number;
+		} = {};
+		for (const key of ["capability", "cost", "latency", "reliability", "throughput"] as const) {
+			const weight = value.weights[key];
+			if (typeof weight === "number" && Number.isFinite(weight) && weight >= 0) {
+				weights[key] = weight;
+			}
+		}
+		if (Object.keys(weights).length > 0) parsed.weights = weights;
+	}
+
+	return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+/**
+ * Parse and sanitize the mode-policy override map.
+ *
+ * @param value - Raw override-map payload
+ * @returns Sanitized override map or undefined when invalid
+ */
+function parseModePolicyOverrides(value: unknown): RoutingModePolicyOverrides | undefined {
+	if (!isRecord(value)) return undefined;
+	const parsed: RoutingModePolicyOverrides = {};
+	for (const [mode, overrideValue] of Object.entries(value)) {
+		if (!VALID_ROUTING_MODES.has(mode as RoutingMode)) continue;
+		const override = parseModePolicyOverride(overrideValue);
+		if (override) parsed[mode as RoutingMode] = override;
+	}
+	return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+/**
+ * Resolve mode-policy overrides with project > user precedence.
+ *
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @returns Sanitized mode-policy overrides
+ */
+function resolveModePolicyOverridesField(
+	projectValue: unknown,
+	userValue: unknown
+): RoutingModePolicyOverrides | undefined {
+	const projectOverrides = parseModePolicyOverrides(projectValue);
+	if (projectOverrides) return projectOverrides;
+	return parseModePolicyOverrides(userValue);
+}
+
+/**
  * Loads routing configuration from settings files.
  *
  * Reads from:
@@ -193,10 +420,30 @@ export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 	const projectRouting = readRawRoutingConfig(projectSettingsPath);
 
 	return {
+		costPreference: resolveEnumField(
+			projectRouting?.costPreference,
+			userRouting?.costPreference,
+			VALID_COST_PREFS,
+			DEFAULT_CONFIG.costPreference
+		),
 		enabled: resolveBooleanField(
 			projectRouting?.enabled,
 			userRouting?.enabled,
 			DEFAULT_CONFIG.enabled
+		),
+		matrixOverridesPath: resolveOptionalStringField(
+			projectRouting?.matrixOverridesPath,
+			userRouting?.matrixOverridesPath
+		),
+		mode: resolveEnumField(
+			projectRouting?.mode,
+			userRouting?.mode,
+			VALID_ROUTING_MODES,
+			DEFAULT_CONFIG.mode
+		),
+		modePolicyOverrides: resolveModePolicyOverridesField(
+			projectRouting?.modePolicyOverrides,
+			userRouting?.modePolicyOverrides
 		),
 		primaryType: resolveEnumField(
 			projectRouting?.primaryType,
@@ -204,12 +451,138 @@ export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 			VALID_TASK_TYPES,
 			DEFAULT_CONFIG.primaryType
 		),
-		costPreference: resolveEnumField(
-			projectRouting?.costPreference,
-			userRouting?.costPreference,
-			VALID_COST_PREFS,
-			DEFAULT_CONFIG.costPreference
+		signalsMaxAgeMs: resolvePositiveNumberField(
+			projectRouting?.signalsMaxAgeMs,
+			userRouting?.signalsMaxAgeMs,
+			DEFAULT_CONFIG.signalsMaxAgeMs
 		),
+		signalsSnapshotPath: resolveOptionalStringField(
+			projectRouting?.signalsSnapshotPath,
+			userRouting?.signalsSnapshotPath
+		),
+	};
+}
+
+// ─── Routing Data Sources ────────────────────────────────────────────────────
+
+/**
+ * Resolve a settings-configured path into an absolute path.
+ *
+ * Supports:
+ * - `~/...` (HOME expansion)
+ * - absolute paths
+ * - relative paths resolved from `cwd`
+ *
+ * @param cwd - Working directory for relative path resolution
+ * @param configuredPath - Raw path string from settings
+ * @returns Absolute file path
+ */
+function resolveConfiguredPath(cwd: string, configuredPath: string): string {
+	const home = process.env.HOME || os.homedir();
+	if (configuredPath.startsWith("~/")) {
+		return path.join(home, configuredPath.slice(2));
+	}
+	if (path.isAbsolute(configuredPath)) return configuredPath;
+	return path.resolve(cwd, configuredPath);
+}
+
+/**
+ * Read and parse a JSON file.
+ *
+ * @param filePath - Absolute JSON file path
+ * @returns Parsed JSON payload, or undefined when unreadable/invalid
+ */
+function readJsonFile(filePath: string): unknown {
+	try {
+		return JSON.parse(fs.readFileSync(filePath, "utf-8")) as unknown;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Parse matrix overrides in a backward-compatible way.
+ *
+ * Uses synapse's parser when available, otherwise falls back to local
+ * validation logic with the same accepted shapes.
+ *
+ * @param input - Raw JSON payload from override file
+ * @returns Sanitized matrix override map
+ */
+function parseMatrixOverrides(input: unknown): MatrixOverrides | undefined {
+	const parser = (synapse as Record<string, unknown>).parseModelMatrixOverrides;
+	if (typeof parser === "function") {
+		const parsed = (parser as (payload: unknown) => MatrixOverrides | undefined)(input);
+		if (parsed && isRecord(parsed)) return parsed;
+	}
+
+	const root =
+		isRecord(input) && Object.hasOwn(input, "matrixOverrides")
+			? (input as { matrixOverrides?: unknown }).matrixOverrides
+			: input;
+	if (!isRecord(root)) return undefined;
+
+	const parsed: Record<string, Readonly<Partial<Record<TaskType, number>>> | null> = {};
+	for (const [modelPrefix, override] of Object.entries(root)) {
+		if (override === null) {
+			parsed[modelPrefix] = null;
+			continue;
+		}
+		if (!isRecord(override)) continue;
+		const ratings: Partial<Record<TaskType, number>> = {};
+		for (const taskType of ["code", "vision", "text"] as const) {
+			const rating = override[taskType];
+			if (typeof rating === "number" && Number.isInteger(rating) && rating >= 1 && rating <= 5) {
+				ratings[taskType] = rating;
+			}
+		}
+		if (Object.keys(ratings).length > 0) parsed[modelPrefix] = ratings;
+	}
+
+	return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+/**
+ * Load matrix overrides from the configured file path.
+ *
+ * @param cwd - Working directory for relative path resolution
+ * @param config - Effective routing config
+ * @returns Parsed matrix overrides, or undefined when unavailable/invalid
+ */
+export function loadMatrixOverrides(
+	cwd: string,
+	config: RoutingConfig
+): MatrixOverrides | undefined {
+	if (!config.matrixOverridesPath) return undefined;
+	const absolutePath = resolveConfiguredPath(cwd, config.matrixOverridesPath);
+	return parseMatrixOverrides(readJsonFile(absolutePath));
+}
+
+/**
+ * Load routing telemetry snapshot from the configured file path.
+ *
+ * Drops snapshots older than `signalsMaxAgeMs` based on `generatedAtMs`.
+ *
+ * @param cwd - Working directory for relative path resolution
+ * @param config - Effective routing config
+ * @returns Fresh telemetry snapshot, or undefined when stale/unavailable/invalid
+ */
+export function loadRoutingSignalsSnapshot(
+	cwd: string,
+	config: RoutingConfig
+): RoutingSignalsSnapshot | undefined {
+	if (!config.signalsSnapshotPath) return undefined;
+	const absolutePath = resolveConfiguredPath(cwd, config.signalsSnapshotPath);
+	const payload = readJsonFile(absolutePath);
+	if (!isRecord(payload)) return undefined;
+	if (typeof payload.generatedAtMs !== "number" || !Number.isFinite(payload.generatedAtMs)) {
+		return undefined;
+	}
+	if (Date.now() - payload.generatedAtMs > config.signalsMaxAgeMs) return undefined;
+	return {
+		generatedAtMs: payload.generatedAtMs,
+		models: isRecord(payload.models) ? payload.models : undefined,
+		routes: isRecord(payload.routes) ? payload.routes : undefined,
 	};
 }
 
@@ -262,6 +635,21 @@ const ROUTING_KEYWORDS: ReadonlyMap<string, CostPreference> = new Map([
  */
 export function parseRoutingKeyword(model: string): CostPreference | undefined {
 	return ROUTING_KEYWORDS.get(model.toLowerCase().trim());
+}
+
+/**
+ * Convert a cost preference into its equivalent score-based routing mode.
+ *
+ * This preserves historical semantics where costPreference materially changes
+ * ranking behavior, not just tie-break behavior.
+ *
+ * @param costPreference - Effective cost preference
+ * @returns Routing mode aligned with the preference
+ */
+function costPreferenceToRoutingMode(costPreference: CostPreference): RoutingMode {
+	if (costPreference === "eco") return "cheap";
+	if (costPreference === "premium") return "quality";
+	return "balanced";
 }
 
 // ─── Routing ─────────────────────────────────────────────────────────────────
@@ -339,7 +727,8 @@ export async function routeModel(
 		}
 	}
 
-	const config = loadRoutingConfig(cwd);
+	const effectiveCwd = cwd ?? process.cwd();
+	const config = loadRoutingConfig(effectiveCwd);
 	const fallback = parentModelId
 		? resolveFallback(parentModelId)
 		: { provider: "unknown", id: "unknown", displayName: "unknown" };
@@ -353,6 +742,11 @@ export async function routeModel(
 	// Priority: per-call hints > routing keyword > global config
 	const effectiveCostPref =
 		hints?.costPreference ?? routingKeywordCostPref ?? config.costPreference;
+	const hasPerCallCostPreferenceOverride =
+		hints?.costPreference !== undefined || routingKeywordCostPref !== undefined;
+	const effectiveRoutingMode = hasPerCallCostPreferenceOverride
+		? costPreferenceToRoutingMode(effectiveCostPref)
+		: config.mode;
 
 	// Build classification — use hints to skip/override classifier where provided
 	let classification: ClassificationResult;
@@ -391,12 +785,24 @@ export async function routeModel(
 	// Detect subscription providers for preferential tiebreaking
 	const preferredProviders = getSubscriptionProviders();
 
-	const selectionOptions: SelectionOptions = {
+	const matrixOverrides = loadMatrixOverrides(effectiveCwd, config);
+	const routingModePolicyOverride = config.modePolicyOverrides?.[config.mode];
+	const routingSignals = loadRoutingSignalsSnapshot(effectiveCwd, config);
+
+	const selectionOptions: SelectionOptionsWithRouting = {
+		matrixOverrides,
 		pool: scopePool,
 		preferredProviders: preferredProviders.length > 0 ? preferredProviders : undefined,
+		routingMode: effectiveRoutingMode,
+		routingModePolicyOverride,
+		routingSignals,
 	};
 
-	const ranked = selectModels(classification, effectiveCostPref, selectionOptions);
+	const ranked = selectModels(
+		classification,
+		effectiveCostPref,
+		selectionOptions as SelectionOptions
+	);
 	if (ranked.length > 0) {
 		return {
 			ok: true,
