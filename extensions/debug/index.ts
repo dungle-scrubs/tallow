@@ -9,11 +9,11 @@
  *
  * Registers:
  *   - --debug CLI flag
- *   - /diag command (status, toggle, tail, clear)
+ *   - /diagnostics commands (toggle, tail, clear, live follow)
  *   - Event hooks for all diagnostic categories
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import {
@@ -34,17 +34,6 @@ const toolTimings = new Map<string, number>();
 let totalToolCalls = 0;
 let totalTurns = 0;
 let sessionStartTime = 0;
-
-/**
- * Formats a byte count as a human-readable string.
- * @param bytes - Raw byte count
- * @returns Formatted string (e.g. "12.3 KB")
- */
-function formatBytes(bytes: number): string {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 /**
  * Safely extracts text content length from a tool result's content array.
@@ -75,7 +64,7 @@ function tailLog(logPath: string, n: number): string[] {
 }
 
 /**
- * Registers the debug extension: CLI flag, event hooks, and /diag command.
+ * Registers the debug extension: CLI flag, event hooks, and /diagnostics commands.
  * @param pi - Extension API for registering handlers
  */
 export default function (pi: ExtensionAPI) {
@@ -431,7 +420,7 @@ export default function (pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: "Debug mode is not active. Enable it with /diag-on or start tallow with --debug.",
+							text: "Debug mode is not active. Enable it with /diagnostics-on or start tallow with --debug.",
 						},
 					],
 					details: undefined,
@@ -484,7 +473,7 @@ export default function (pi: ExtensionAPI) {
 				pi.sendMessage({
 					customType: "debug",
 					content:
-						"Debug mode is not active. Enable with `/diag-on` or start tallow with `--debug`.",
+						"Debug mode is not active. Enable with `/diagnostics-on` or start tallow with `--debug`.",
 					display: true,
 				});
 				return;
@@ -503,9 +492,9 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// ── /diag commands (kept for backward compatibility) ─────────
+	// ── /diagnostics commands ────────────────────────────────────
 	// Separate commands — no space-separated subcommands.
-	// Autocomplete can't handle `/diag on`; must be `/diag-on`.
+	// Autocomplete can't handle `/diagnostics on`; must be `/diagnostics-on`.
 
 	/**
 	 * Resolves the debug log file path from the active logger or the default location.
@@ -515,48 +504,143 @@ export default function (pi: ExtensionAPI) {
 		return logger?.logPath ?? `${process.env.HOME}/.tallow/debug.log`;
 	}
 
-	pi.registerCommand("diag", {
-		description: "Show debug mode status, log path, size, and recent entries",
-		handler: async () => {
-			const logPath = getLogPath();
-			const active = logger !== null;
-			const logExists = existsSync(logPath);
-			const logSize = logExists ? formatBytes(statSync(logPath).size) : "N/A";
-			const recentLines = tailLog(logPath, 5);
-			const recent =
-				recentLines.length > 0
-					? recentLines
-							.map((line) => {
-								try {
-									const entry = JSON.parse(line);
-									return `  ${entry.cat}/${entry.evt}`;
-								} catch {
-									return `  ${line.slice(0, 60)}`;
-								}
-							})
-							.join("\n")
-					: "  (empty)";
+	/**
+	 * Parses a tail line-count argument with a default fallback.
+	 * @param args - Raw slash-command arguments
+	 * @returns Number of lines to show (default: 20)
+	 */
+	function parseTailCount(args: string): number {
+		const parsed = parseInt(args.trim(), 10);
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
+	}
 
-			const status = [
-				`Debug mode: ${active ? "ON" : "OFF"}`,
-				`Log file: ${logPath}`,
-				`Log size: ${logSize}`,
-				`Recent entries:\n${recent}`,
-				"",
-				"Commands: /diag-on, /diag-off, /diag-tail, /diag-clear",
-				"Interactive: /debug — model-assisted troubleshooting",
-			].join("\n");
+	/**
+	 * Sends the last N debug log entries into the current chat pane.
+	 * @param lineCount - Number of entries to include
+	 */
+	function sendLocalTailOutput(lineCount: number): void {
+		const lines = tailLog(getLogPath(), lineCount);
+		if (lines.length === 0) {
+			pi.sendMessage({
+				customType: "diagnostics",
+				content: "No log entries found.",
+				display: true,
+			});
+			return;
+		}
 
-			pi.sendMessage({ customType: "diag", content: status, display: true });
+		const formatted = lines
+			.map((line) => {
+				try {
+					const entry = JSON.parse(line);
+					return `[${entry.ts}] ${entry.cat}/${entry.evt}: ${JSON.stringify(entry.data)}`;
+				} catch {
+					return line;
+				}
+			})
+			.join("\n");
+
+		pi.sendMessage({
+			customType: "diagnostics",
+			content: `Last ${lines.length} entries:\n\`\`\`\n${formatted}\n\`\`\``,
+			display: true,
+		});
+	}
+
+	/**
+	 * Checks whether WezTerm pane control capability is available.
+	 * @returns True when the wezterm_pane tool is registered
+	 */
+	function hasWeztermPaneCapability(): boolean {
+		return pi.getAllTools().some((tool) => tool.name === "wezterm_pane");
+	}
+
+	/**
+	 * Resolves the wezterm executable path from the current environment.
+	 * @returns Executable path for wezterm CLI calls
+	 */
+	function resolveWeztermExecutable(): string {
+		const executableDir = process.env.WEZTERM_EXECUTABLE_DIR;
+		if (typeof executableDir === "string" && executableDir.length > 0) {
+			const candidate = `${executableDir}/wezterm`;
+			if (existsSync(candidate)) {
+				return candidate;
+			}
+		}
+		return "wezterm";
+	}
+
+	/**
+	 * Opens a new WezTerm pane running `tail -f` on the debug log file.
+	 * @param ctx - Command context for shell execution and UI notifications
+	 * @param logPath - Absolute path to the debug log file
+	 * @returns True if a live-follow pane was launched successfully
+	 */
+	async function openLiveFollowPane(
+		ctx: ExtensionCommandContext,
+		logPath: string
+	): Promise<boolean> {
+		try {
+			const args = ["cli", "split-pane"];
+			if (process.env.WEZTERM_PANE) {
+				args.push("--pane-id", process.env.WEZTERM_PANE);
+			}
+			args.push("--bottom", "--", "tail", "-f", logPath);
+
+			const result = await pi.exec(resolveWeztermExecutable(), args, { cwd: ctx.cwd });
+			if (result.code !== 0) {
+				const reason = result.stderr.trim() || `wezterm exited with code ${result.code}`;
+				throw new Error(reason);
+			}
+
+			ctx.ui.notify("Opened live diagnostics follow in a new WezTerm pane.", "info");
+			return true;
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			ctx.ui.notify(
+				`Couldn't open live diagnostics pane (${reason}). Showing local tail instead.`,
+				"warning"
+			);
+			return false;
+		}
+	}
+
+	pi.registerCommand("diagnostics", {
+		description: "Show local diagnostics tail, or open live follow in a new WezTerm pane",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			const lineCount = parseTailCount(args);
+
+			if (!hasWeztermPaneCapability() || !ctx.hasUI) {
+				sendLocalTailOutput(lineCount);
+				return;
+			}
+
+			const choice = await ctx.ui.select("Diagnostics output", [
+				`Local tail output (last ${lineCount} entries)`,
+				"Live follow in new WezTerm pane",
+			]);
+			if (choice === undefined) {
+				return;
+			}
+
+			if (choice.startsWith("Local tail output")) {
+				sendLocalTailOutput(lineCount);
+				return;
+			}
+
+			const launched = await openLiveFollowPane(ctx, getLogPath());
+			if (!launched) {
+				sendLocalTailOutput(lineCount);
+			}
 		},
 	});
 
-	pi.registerCommand("diag-on", {
+	pi.registerCommand("diagnostics-on", {
 		description: "Enable debug diagnostic logging",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			if (logger) {
 				pi.sendMessage({
-					customType: "diag",
+					customType: "diagnostics",
 					content: "Debug mode is already active.",
 					display: true,
 				});
@@ -567,18 +651,22 @@ export default function (pi: ExtensionAPI) {
 			process.on("uncaughtException", onUncaughtException);
 			process.on("unhandledRejection", onUnhandledRejection);
 			pi.sendMessage({
-				customType: "diag",
+				customType: "diagnostics",
 				content: `Debug mode enabled. Logging to ${getLogPath()}`,
 				display: true,
 			});
 		},
 	});
 
-	pi.registerCommand("diag-off", {
+	pi.registerCommand("diagnostics-off", {
 		description: "Disable debug diagnostic logging",
 		handler: async () => {
 			if (!logger) {
-				pi.sendMessage({ customType: "diag", content: "Debug mode is not active.", display: true });
+				pi.sendMessage({
+					customType: "diagnostics",
+					content: "Debug mode is not active.",
+					display: true,
+				});
 				return;
 			}
 			logger.close();
@@ -586,44 +674,24 @@ export default function (pi: ExtensionAPI) {
 			globalThis.__piDebugLogger = undefined;
 			process.removeListener("uncaughtException", onUncaughtException);
 			process.removeListener("unhandledRejection", onUnhandledRejection);
-			pi.sendMessage({ customType: "diag", content: "Debug mode disabled.", display: true });
+			pi.sendMessage({ customType: "diagnostics", content: "Debug mode disabled.", display: true });
 		},
 	});
 
-	pi.registerCommand("diag-tail", {
+	pi.registerCommand("diagnostics-tail", {
 		description: "Show last N debug log entries (default: 20)",
 		handler: async (args: string) => {
-			const n = parseInt(args.trim(), 10) || 20;
-			const lines = tailLog(getLogPath(), n);
-			if (lines.length === 0) {
-				pi.sendMessage({ customType: "diag", content: "No log entries found.", display: true });
-				return;
-			}
-			const formatted = lines
-				.map((line) => {
-					try {
-						const entry = JSON.parse(line);
-						return `[${entry.ts}] ${entry.cat}/${entry.evt}: ${JSON.stringify(entry.data)}`;
-					} catch {
-						return line;
-					}
-				})
-				.join("\n");
-			pi.sendMessage({
-				customType: "diag",
-				content: `Last ${lines.length} entries:\n\`\`\`\n${formatted}\n\`\`\``,
-				display: true,
-			});
+			sendLocalTailOutput(parseTailCount(args));
 		},
 	});
 
-	pi.registerCommand("diag-clear", {
+	pi.registerCommand("diagnostics-clear", {
 		description: "Truncate the debug log file",
 		handler: async () => {
 			if (logger) {
 				logger.clear();
 			}
-			pi.sendMessage({ customType: "diag", content: "Debug log cleared.", display: true });
+			pi.sendMessage({ customType: "diagnostics", content: "Debug log cleared.", display: true });
 		},
 	});
 }
