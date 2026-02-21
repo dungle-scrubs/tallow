@@ -28,6 +28,22 @@ interface InteractiveModePrototypeLike {
 
 const APPLY_FLAG = "__tallow_interactive_stale_ui_patch_applied__";
 
+/** Matches messages that begin with an emoji/symbol icon. */
+const LEADING_ICON_PATTERN = /^\s*\p{Extended_Pictographic}/u;
+
+/**
+ * Returns whether a notify message starts with an icon.
+ *
+ * Extension notify messages that already start with an icon (e.g. "⛔")
+ * don't need the extra "Error:" prefix added by InteractiveMode error rendering.
+ *
+ * @param message - Notification message text
+ * @returns True when the message starts with a leading icon
+ */
+function hasLeadingIcon(message: string): boolean {
+	return LEADING_ICON_PATTERN.test(message);
+}
+
 /**
  * Returns whether queued steering/follow-up messages exist.
  *
@@ -108,6 +124,24 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 					(originalSetWorkingMessage as (value?: string) => unknown)(message);
 				};
 			}
+
+			const originalNotify = context.notify;
+			if (typeof originalNotify === "function") {
+				context.notify = (message: string, type?: "info" | "warning" | "error") => {
+					if (type === "error" && hasLeadingIcon(message)) {
+						(originalNotify as (msg: string, level?: "info" | "warning" | "error") => unknown)(
+							message,
+							"info"
+						);
+						return;
+					}
+					(originalNotify as (msg: string, level?: "info" | "warning" | "error") => unknown)(
+						message,
+						type
+					);
+				};
+			}
+
 			return context;
 		};
 	}

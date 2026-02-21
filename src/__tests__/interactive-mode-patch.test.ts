@@ -15,6 +15,7 @@ class FakeInteractiveMode {
 	renderRequests = 0;
 	session = { isStreaming: false };
 	statusClears = 0;
+	notifyCalls: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
 	updateCalls = 0;
 	ui = { requestRender: () => this.renderRequests++ };
 
@@ -81,8 +82,14 @@ class FakeInteractiveMode {
 	 *
 	 * @returns Extension UI context object
 	 */
-	createExtensionUIContext(): { setWorkingMessage: (message?: string) => void } {
+	createExtensionUIContext(): {
+		notify: (message: string, type?: "info" | "warning" | "error") => void;
+		setWorkingMessage: (message?: string) => void;
+	} {
 		return {
+			notify: (message: string, type?: "info" | "warning" | "error"): void => {
+				this.notifyCalls.push({ message, type });
+			},
 			setWorkingMessage: (message?: string): void => {
 				if (this.loadingAnimation) {
 					return;
@@ -159,5 +166,17 @@ describe("patchInteractiveModePrototype", () => {
 		mode.session.isStreaming = true;
 		uiContext.setWorkingMessage("queued while streaming");
 		expect(mode.pendingWorkingMessage).toBe("queued while streaming");
+	});
+
+	it("downgrades icon-prefixed extension error notifications to info to avoid duplicate prefixes", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		const uiContext = mode.createExtensionUIContext();
+
+		uiContext.notify("⛔ Hook blocked tool_call", "error");
+		uiContext.notify("plain failure", "error");
+
+		expect(mode.notifyCalls[0]).toEqual({ message: "⛔ Hook blocked tool_call", type: "info" });
+		expect(mode.notifyCalls[1]).toEqual({ message: "plain failure", type: "error" });
 	});
 });
