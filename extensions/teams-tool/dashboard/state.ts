@@ -41,6 +41,9 @@ const dashboardActivity = new TeamDashboardActivityStore();
 /** Rolling event feed displayed in the dashboard sidebar, keyed by team name. */
 const dashboardFeedByTeam = new Map<string, TeamDashboardFeedItem[]>();
 
+/** Duplicate-event suppression window for feed chatter (milliseconds). */
+const DASHBOARD_FEED_DEDUP_WINDOW_MS = 2500;
+
 /** Shared interop event bus reference for module-level publishers. */
 let interopEvents: ExtensionAPI["events"] | undefined;
 
@@ -193,13 +196,27 @@ export function appendDashboardFeedEvent(
 	content: string
 ): void {
 	if (shouldSuppressDashboardFeedEvent(content)) return;
+
+	const summary = summarizeFeedMessage(content);
+	const timestamp = Date.now();
+	const current = dashboardFeedByTeam.get(teamName) ?? [];
+	const last = current[current.length - 1];
+	if (
+		last &&
+		last.from === from &&
+		last.to === to &&
+		last.content === summary &&
+		timestamp - last.timestamp <= DASHBOARD_FEED_DEDUP_WINDOW_MS
+	) {
+		return;
+	}
+
 	const event: TeamDashboardFeedItem = {
-		content: summarizeFeedMessage(content),
+		content: summary,
 		from,
-		timestamp: Date.now(),
+		timestamp,
 		to,
 	};
-	const current = dashboardFeedByTeam.get(teamName) ?? [];
 	const next = [...current, event];
 	if (next.length > DASHBOARD_FEED_MAX_ITEMS) {
 		next.splice(0, next.length - DASHBOARD_FEED_MAX_ITEMS);
@@ -239,12 +256,15 @@ export function clearDashboardFeedEvents(teamName: string): void {
 function getRecentFeed(team: Team<Teammate>): TeamDashboardFeedItem[] {
 	const feedEvents = getDashboardFeedEvents(team.name);
 	if (feedEvents.length > 0) return feedEvents;
-	return team.messages.slice(-DASHBOARD_FEED_MAX_ITEMS).map((message) => ({
-		content: summarizeFeedMessage(message.content),
-		from: message.from,
-		timestamp: message.timestamp,
-		to: message.to,
-	}));
+	return team.messages
+		.filter((message) => !shouldSuppressDashboardFeedEvent(message.content))
+		.slice(-DASHBOARD_FEED_MAX_ITEMS)
+		.map((message) => ({
+			content: summarizeFeedMessage(message.content),
+			from: message.from,
+			timestamp: message.timestamp,
+			to: message.to,
+		}));
 }
 
 /**
