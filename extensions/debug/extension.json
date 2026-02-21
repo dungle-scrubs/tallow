@@ -15,6 +15,12 @@
 			"name": "subagent-tool",
 			"kind": "enhances",
 			"reason": "Logs subagent start/stop events"
+		},
+		{
+			"name": "wezterm-pane-control",
+			"kind": "enhances",
+			"reason": "Optionally opens live diagnostics follow in a dedicated WezTerm pane",
+			"optional": true
 		}
 	],
 	"npmDependencies": {}

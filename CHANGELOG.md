@@ -231,6 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   precedence for routing defaults
 - **web-fetch:** remove Firecrawl fallback and JS-detection — plain HTTP
   fetch with 50KB truncation only
+- **debug:** rename `/diag*` commands to `/diagnostics*` and make
+  `/diagnostics` capability-aware with WezTerm live-pane follow fallback
 
 ### Fixed
 
@@ -1046,7 +1048,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Debug mode** — structured JSONL diagnostic logging to `~/.tallow/debug.log`
   - Activate via `--debug` flag, `TALLOW_DEBUG=1` env, or `NODE_ENV=development`
   - Logs tool timings, turn boundaries, model changes, subagent events, errors
-  - `/diag` command for status, toggling, tailing, and clearing the log
+  - `/diagnostics` command for viewing, toggling, tailing, and clearing the log
   - Zero-cost when disabled — no file I/O or object allocation
 - **Shell interpolation** — expand `` !`command` `` patterns in input by executing
   shell commands and inlining stdout. CC-compatible syntax. 5s timeout, 1MB max
