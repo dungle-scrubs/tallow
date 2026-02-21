@@ -486,6 +486,65 @@ describe("readPluginManifest", () => {
 		expect(manifest?.name).toBe("my-tool");
 	});
 
+	it("parses extended tallow manifest metadata fields", () => {
+		fs.writeFileSync(
+			path.join(tmpDir, "extension.json"),
+			JSON.stringify({
+				name: "meta-ext",
+				whenToUse: ["when linting fails"],
+				tags: ["meta", "catalog"],
+				files: ["index.ts", "helpers.ts"],
+				relationships: [{ name: "tasks", kind: "enhances", reason: "adds metadata" }],
+				capabilities: {
+					tools: ["meta_tool"],
+					commands: ["meta"],
+					events: ["turn_start"],
+				},
+				permissionSurface: {
+					filesystem: "read",
+					shell: false,
+					network: false,
+					subprocess: false,
+				},
+			})
+		);
+
+		const manifest = readPluginManifest(tmpDir, "tallow-extension");
+		expect(manifest).not.toBeNull();
+		expect(manifest).toMatchObject({
+			name: "meta-ext",
+			whenToUse: ["when linting fails"],
+			tags: ["meta", "catalog"],
+			files: ["index.ts", "helpers.ts"],
+			relationships: [{ name: "tasks", kind: "enhances", reason: "adds metadata" }],
+			capabilities: {
+				tools: ["meta_tool"],
+				commands: ["meta"],
+				events: ["turn_start"],
+			},
+			permissionSurface: {
+				filesystem: "read",
+				shell: false,
+				network: false,
+				subprocess: false,
+			},
+		});
+	});
+
+	it("normalizes string whenToUse into an array", () => {
+		fs.writeFileSync(
+			path.join(tmpDir, "extension.json"),
+			JSON.stringify({
+				name: "single-when",
+				whenToUse: "Use when testing parser behavior.",
+			})
+		);
+
+		const manifest = readPluginManifest(tmpDir, "tallow-extension");
+		expect(manifest).not.toBeNull();
+		expect(manifest?.whenToUse).toEqual(["Use when testing parser behavior."]);
+	});
+
 	it("should return null for unknown format", () => {
 		expect(readPluginManifest(tmpDir, "unknown")).toBeNull();
 	});

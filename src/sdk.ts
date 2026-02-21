@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import {
 	bashTool,
@@ -30,7 +31,13 @@ import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-har
 import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
-import { extractClaudePluginResources, type ResolvedPlugin, resolvePlugins } from "./plugins.js";
+import {
+	extractClaudePluginResources,
+	type ResolvedPlugin,
+	readPluginManifest,
+	resolvePlugins,
+	type TallowExtensionManifest,
+} from "./plugins.js";
 import {
 	applyProjectTrustContextToEnv,
 	type ProjectTrustContext,
@@ -74,8 +81,11 @@ export interface TallowSessionOptions {
 		| { type: "resume"; sessionId: string }
 		| { type: "fork"; sourceSessionId: string };
 
-	/** Additional extension paths (on top of bundled + user) */
+	/** Additional extension selectors (bundled IDs or filesystem paths). */
 	additionalExtensions?: string[];
+
+	/** Load only explicitly selected extension selectors (IDs/paths). */
+	extensionsOnly?: boolean;
 
 	/** Plugin specs — remote repos or local paths (Claude Code or tallow format) */
 	plugins?: string[];
@@ -209,6 +219,203 @@ export interface TallowSession {
 	sessionId: string;
 }
 
+/** Catalog entry for a bundled extension shipped with tallow. */
+export interface BundledExtensionCatalogEntry {
+	/** Extension category from extension.json (if declared). */
+	readonly category?: string;
+	/** Human-readable extension description (if declared). */
+	readonly description?: string;
+	/** Stable extension identifier (directory name). */
+	readonly id: string;
+	/** Parsed extension manifest (null when missing/invalid). */
+	readonly manifest: TallowExtensionManifest | null;
+	/** Absolute extension directory path. */
+	readonly path: string;
+}
+
+/** Result of resolving a CLI extension selector into a concrete path. */
+export interface ExtensionSelectorResolution {
+	/** Canonical extension ID for bundled selectors. */
+	readonly id?: string;
+	/** Original selector string from CLI/options. */
+	readonly selector: string;
+	/** Resolution source. */
+	readonly source: "bundled" | "path";
+	/** Absolute extension path passed into the resource loader. */
+	readonly path: string;
+}
+
+/** Number of bundled extension IDs to include in unknown-ID errors. */
+const EXTENSION_ID_SUGGESTION_LIMIT = 10;
+
+/**
+ * Return all bundled extension manifests keyed by extension directory name.
+ *
+ * @param bundledExtensionsDir - Optional bundled extensions directory override
+ * @returns Sorted bundled extension catalog entries
+ */
+export function getBundledExtensionCatalog(
+	bundledExtensionsDir = BUNDLED.extensions
+): BundledExtensionCatalogEntry[] {
+	const entries = discoverExtensionDirs(bundledExtensionsDir)
+		.filter((fullPath) => {
+			try {
+				return statSync(fullPath).isDirectory();
+			} catch {
+				return false;
+			}
+		})
+		.map((fullPath) => {
+			const id = basename(fullPath);
+			const manifest = readPluginManifest(
+				fullPath,
+				"tallow-extension"
+			) as TallowExtensionManifest | null;
+
+			return {
+				category: manifest?.category,
+				description: manifest?.description,
+				id,
+				manifest,
+				path: fullPath,
+			};
+		})
+		.sort((a, b) => a.id.localeCompare(b.id));
+
+	return entries;
+}
+
+/**
+ * Resolve a single extension selector (bundled ID or filesystem path).
+ *
+ * Selector resolution order:
+ * 1. Explicit path selectors (`./`, `../`, `/`, `~`, or with path separators)
+ * 2. Bundled extension IDs (directory names under bundled extensions)
+ * 3. Existing cwd-relative paths for backward compatibility
+ *
+ * @param selector - Raw selector string from CLI/SDK options
+ * @param options - Resolution options
+ * @returns Resolved selector with absolute extension path
+ * @throws Error when selector is empty, path is missing, or ID is unknown
+ */
+export function resolveExtensionSelector(
+	selector: string,
+	options: {
+		bundledExtensionsDir?: string;
+		cwd?: string;
+		catalog?: readonly BundledExtensionCatalogEntry[];
+	} = {}
+): ExtensionSelectorResolution {
+	const trimmedSelector = selector.trim();
+	if (!trimmedSelector) {
+		throw new Error("Extension selector cannot be empty.");
+	}
+
+	const cwd = options.cwd ?? process.cwd();
+	const explicitPath = isLikelyPathSelector(trimmedSelector);
+	if (explicitPath) {
+		const resolvedPath = resolveExtensionPath(trimmedSelector, cwd);
+		if (!existsSync(resolvedPath)) {
+			throw new Error(`Extension path not found: ${selector}`);
+		}
+		return {
+			path: resolvedPath,
+			selector,
+			source: "path",
+		};
+	}
+
+	const catalog = options.catalog ?? getBundledExtensionCatalog(options.bundledExtensionsDir);
+	const bundledMatch = catalog.find((entry) => entry.id === trimmedSelector);
+	if (bundledMatch) {
+		return {
+			id: bundledMatch.id,
+			path: bundledMatch.path,
+			selector,
+			source: "bundled",
+		};
+	}
+
+	const compatibilityPath = resolveExtensionPath(trimmedSelector, cwd);
+	if (existsSync(compatibilityPath)) {
+		return {
+			path: compatibilityPath,
+			selector,
+			source: "path",
+		};
+	}
+
+	const suggestions = catalog
+		.slice(0, EXTENSION_ID_SUGGESTION_LIMIT)
+		.map((entry) => entry.id)
+		.join(", ");
+
+	throw new Error(
+		`Unknown extension ID: "${selector}". ` +
+			`Run \`tallow extensions\` for all IDs or pass a path (e.g. ./my-extension). ` +
+			(suggestions ? `Known IDs include: ${suggestions}` : "")
+	);
+}
+
+/**
+ * Resolve many extension selectors into deduplicated absolute paths.
+ *
+ * @param selectors - Extension selectors from CLI/SDK options
+ * @param options - Resolution options
+ * @returns Ordered unique resolved extension paths
+ */
+export function resolveExtensionSelectors(
+	selectors: readonly string[] | undefined,
+	options: {
+		bundledExtensionsDir?: string;
+		cwd?: string;
+		catalog?: readonly BundledExtensionCatalogEntry[];
+	} = {}
+): string[] {
+	if (!selectors || selectors.length === 0) {
+		return [];
+	}
+
+	const resolved = selectors.map((selector) => resolveExtensionSelector(selector, options).path);
+	return [...new Set(resolved)];
+}
+
+/**
+ * Check whether an extension selector should be interpreted as a path.
+ *
+ * @param selector - Selector string to classify
+ * @returns True when selector is an explicit filesystem path expression
+ */
+function isLikelyPathSelector(selector: string): boolean {
+	return (
+		selector.startsWith("./") ||
+		selector.startsWith("../") ||
+		selector.startsWith("/") ||
+		selector.startsWith("~") ||
+		selector.includes("/") ||
+		selector.includes("\\")
+	);
+}
+
+/**
+ * Resolve a path selector to an absolute filesystem path.
+ *
+ * @param selector - Path-like selector
+ * @param cwd - Base directory for relative selectors
+ * @returns Absolute path
+ */
+function resolveExtensionPath(selector: string, cwd: string): string {
+	if (selector === "~") {
+		return homedir();
+	}
+
+	if (selector.startsWith("~/")) {
+		return resolve(homedir(), selector.slice(2));
+	}
+
+	return resolve(cwd, selector);
+}
+
 // ─── Skill Name Normalization ────────────────────────────────────────────────
 
 /**
@@ -328,12 +535,13 @@ export async function createTallowSession(
 	const additionalSkillPaths: string[] = [];
 	const additionalPromptPaths: string[] = [];
 	const additionalThemePaths: string[] = [];
+	const extensionsOnly = options.extensionsOnly === true;
 
 	// Track bundled extensions overridden by user extensions
 	const extensionOverrides: Array<{ name: string; userPath: string }> = [];
 
 	// Bundled resources from the package
-	if (!options.noBundledExtensions && existsSync(BUNDLED.extensions)) {
+	if (!extensionsOnly && !options.noBundledExtensions && existsSync(BUNDLED.extensions)) {
 		// Discover user extensions that might override bundled ones
 		const userExtDir = join(TALLOW_HOME, "extensions");
 		const userExtNames = new Set<string>();
@@ -363,72 +571,81 @@ export async function createTallowSession(
 		additionalThemePaths.push(BUNDLED.themes);
 	}
 
-	// User-provided additional paths
+	// User-provided selectors (bundled IDs or filesystem paths)
 	if (options.additionalExtensions) {
-		additionalExtensionPaths.push(...options.additionalExtensions);
+		additionalExtensionPaths.push(
+			...resolveExtensionSelectors(options.additionalExtensions, {
+				cwd,
+			})
+		);
 	}
 
 	// ── Plugin Resolution ────────────────────────────────────────────────────
 	// Resolve plugins from settings + CLI options. Remote plugins are fetched
 	// and cached; local plugins are loaded live from disk.
+	//
+	// In extensionsOnly mode we skip plugin-driven extension auto-loading so
+	// only explicitly selected --extension selectors are loaded.
 
-	const pluginSpecs = collectPluginSpecs(cwd, options.plugins, projectTrust.status);
-	const pluginResult = resolvePlugins(pluginSpecs);
+	const resolvedPlugins: ResolvedPlugin[] = [];
+	if (!extensionsOnly) {
+		const pluginSpecs = collectPluginSpecs(cwd, options.plugins, projectTrust.status);
+		const pluginResult = resolvePlugins(pluginSpecs);
 
-	// Report plugin errors (non-fatal — one bad plugin doesn't block startup)
-	for (const { spec, error } of pluginResult.errors) {
-		console.error(`\x1b[33m⚠ Plugin "${spec}": ${error}\x1b[0m`);
-	}
-
-	// Route resolved plugins to the appropriate loader
-	const resolvedPlugins: ResolvedPlugin[] = pluginResult.resolved;
-	const pluginCommandsDirs: string[] = [];
-	const pluginAgentsDirs: string[] = [];
-
-	for (const plugin of resolvedPlugins) {
-		switch (plugin.format) {
-			case "tallow-extension":
-				// Tallow extensions go through the standard extension loader
-				additionalExtensionPaths.push(plugin.path);
-				break;
-
-			case "claude-code": {
-				// Claude Code plugins: extract resources and feed into loaders
-				const resources = extractClaudePluginResources(plugin.path);
-				if (resources.skillPaths.length > 0) {
-					additionalSkillPaths.push(...resources.skillPaths);
-				}
-				if (resources.commandsDir) {
-					pluginCommandsDirs.push(resources.commandsDir);
-				}
-				if (resources.agentsDir) {
-					pluginAgentsDirs.push(resources.agentsDir);
-				}
-				break;
-			}
-
-			case "unknown":
-				console.error(
-					`\x1b[33m⚠ Plugin "${plugin.spec.raw}": unrecognized format ` +
-						`(expected .claude-plugin/plugin.json or extension.json)\x1b[0m`
-				);
-				break;
+		// Report plugin errors (non-fatal — one bad plugin doesn't block startup)
+		for (const { spec, error } of pluginResult.errors) {
+			console.error(`\x1b[33m⚠ Plugin "${spec}": ${error}\x1b[0m`);
 		}
-	}
 
-	// Expose plugin commands/agents dirs as env vars for the command-prompt
-	// and agent-commands-tool extensions to discover at runtime.
-	if (pluginCommandsDirs.length > 0) {
-		const existing = process.env.TALLOW_PLUGIN_COMMANDS_DIRS;
-		process.env.TALLOW_PLUGIN_COMMANDS_DIRS = existing
-			? `${existing}:${pluginCommandsDirs.join(":")}`
-			: pluginCommandsDirs.join(":");
-	}
-	if (pluginAgentsDirs.length > 0) {
-		const existing = process.env.TALLOW_PLUGIN_AGENTS_DIRS;
-		process.env.TALLOW_PLUGIN_AGENTS_DIRS = existing
-			? `${existing}:${pluginAgentsDirs.join(":")}`
-			: pluginAgentsDirs.join(":");
+		resolvedPlugins.push(...pluginResult.resolved);
+		const pluginCommandsDirs: string[] = [];
+		const pluginAgentsDirs: string[] = [];
+
+		for (const plugin of resolvedPlugins) {
+			switch (plugin.format) {
+				case "tallow-extension":
+					// Tallow extensions go through the standard extension loader
+					additionalExtensionPaths.push(plugin.path);
+					break;
+
+				case "claude-code": {
+					// Claude Code plugins: extract resources and feed into loaders
+					const resources = extractClaudePluginResources(plugin.path);
+					if (resources.skillPaths.length > 0) {
+						additionalSkillPaths.push(...resources.skillPaths);
+					}
+					if (resources.commandsDir) {
+						pluginCommandsDirs.push(resources.commandsDir);
+					}
+					if (resources.agentsDir) {
+						pluginAgentsDirs.push(resources.agentsDir);
+					}
+					break;
+				}
+
+				case "unknown":
+					console.error(
+						`\x1b[33m⚠ Plugin "${plugin.spec.raw}": unrecognized format ` +
+							`(expected .claude-plugin/plugin.json or extension.json)\x1b[0m`
+					);
+					break;
+			}
+		}
+
+		// Expose plugin commands/agents dirs as env vars for the command-prompt
+		// and agent-commands-tool extensions to discover at runtime.
+		if (pluginCommandsDirs.length > 0) {
+			const existing = process.env.TALLOW_PLUGIN_COMMANDS_DIRS;
+			process.env.TALLOW_PLUGIN_COMMANDS_DIRS = existing
+				? `${existing}:${pluginCommandsDirs.join(":")}`
+				: pluginCommandsDirs.join(":");
+		}
+		if (pluginAgentsDirs.length > 0) {
+			const existing = process.env.TALLOW_PLUGIN_AGENTS_DIRS;
+			process.env.TALLOW_PLUGIN_AGENTS_DIRS = existing
+				? `${existing}:${pluginAgentsDirs.join(":")}`
+				: pluginAgentsDirs.join(":");
+		}
 	}
 
 	// ── Package AGENTS.md loading ────────────────────────────────────────────
@@ -445,12 +662,14 @@ export async function createTallowSession(
 		);
 	}
 
+	const dedupedExtensionPaths = [...new Set(additionalExtensionPaths)];
+
 	const loader = new DefaultResourceLoader({
 		cwd,
 		agentDir: TALLOW_HOME,
 		settingsManager,
 		eventBus,
-		additionalExtensionPaths,
+		additionalExtensionPaths: dedupedExtensionPaths,
 		additionalSkillPaths,
 		additionalPromptTemplatePaths: additionalPromptPaths,
 		additionalThemePaths,
@@ -461,6 +680,7 @@ export async function createTallowSession(
 			createProjectTrustExtension(cwd, projectTrust),
 			...(options.extensionFactories ?? []),
 		],
+		noExtensions: extensionsOnly,
 		extensionsOverride: shouldBlockProjectExtensions
 			? (base) => {
 					const filtered = base.extensions.filter((ext) => {
