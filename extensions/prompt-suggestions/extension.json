@@ -2,6 +2,16 @@
 	"name": "prompt-suggestions",
 	"version": "0.1.0",
 	"description": "Context-aware prompt suggestions shown as ghost text in the editor input",
+	"whenToUse": "Use when you want ghost-text prompt suggestions from recent conversation context.",
+	"capabilities": {
+		"events": ["session_shutdown", "session_start", "turn_end", "turn_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["suggestions", "ghost-text", "autocomplete"],
 	"files": ["index.ts"],

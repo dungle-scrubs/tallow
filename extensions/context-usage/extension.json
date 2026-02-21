@@ -2,6 +2,16 @@
 	"name": "context-usage",
 	"version": "0.1.0",
 	"description": "Visualize context window usage with a waffle chart breakdown",
+	"whenToUse": "Use when you need a quick visual breakdown of context/token usage.",
+	"capabilities": {
+		"commands": ["context"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "utility",
 	"tags": ["context", "tokens", "usage", "debug"],
 	"files": ["index.ts"],

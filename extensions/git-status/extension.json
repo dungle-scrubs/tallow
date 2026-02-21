@@ -2,6 +2,16 @@
 	"name": "git-status",
 	"version": "0.1.0",
 	"description": "Show git branch, dirty state, ahead/behind, and PR status in the status bar",
+	"whenToUse": "Use when you want live git branch/dirty/ahead-behind status in the UI.",
+	"capabilities": {
+		"events": ["agent_end", "session_shutdown", "session_start", "tool_result"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "ui",
 	"tags": ["git", "status-bar"],
 	"files": ["index.ts"],

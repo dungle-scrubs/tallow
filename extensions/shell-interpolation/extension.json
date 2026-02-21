@@ -2,6 +2,16 @@
 	"name": "shell-interpolation",
 	"version": "0.1.0",
 	"description": "Expands !`command` patterns by executing shell commands and inlining stdout",
+	"whenToUse": "Use when prompts contain !`command` snippets that should execute inline.",
+	"capabilities": {
+		"events": ["input"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "command",
 	"tags": ["shell", "interpolation", "commands", "cc-compat"],
 	"files": ["index.ts"],

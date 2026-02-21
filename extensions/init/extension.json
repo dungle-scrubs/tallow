@@ -2,6 +2,16 @@
 	"name": "init",
 	"version": "0.1.0",
 	"description": "Initialize AGENTS.md for a project via /init command, with CLAUDE.md migration support",
+	"whenToUse": "Use when bootstrapping AGENTS.md and migrating `.claude/` project config to `.tallow/`.",
+	"capabilities": {
+		"commands": ["init"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "utility",
 	"tags": ["init", "setup"],
 	"files": ["index.ts"],

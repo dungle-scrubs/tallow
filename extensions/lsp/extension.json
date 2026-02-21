@@ -2,6 +2,24 @@
 	"name": "lsp",
 	"version": "0.1.0",
 	"description": "Language Server Protocol support — jump to definition, references, hover, symbols",
+	"whenToUse": "Use when you want language-intelligence tools like hover, definition, references, and symbols.",
+	"capabilities": {
+		"tools": [
+			"lsp_definition",
+			"lsp_hover",
+			"lsp_references",
+			"lsp_status",
+			"lsp_symbols",
+			"lsp_workspace_symbols"
+		],
+		"events": ["session_shutdown"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "language-support",
 	"tags": ["lsp", "code-intelligence"],
 	"files": ["index.ts", "types.d.ts"],

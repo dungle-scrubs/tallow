@@ -2,6 +2,16 @@
 	"name": "progress-indicator",
 	"version": "0.1.0",
 	"description": "Shows terminal progress bar via OSC 9;4 during tool execution",
+	"whenToUse": "Use when your terminal supports OSC progress and you want turn progress feedback.",
+	"capabilities": {
+		"events": ["agent_end", "session_shutdown", "turn_end", "turn_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["progress", "osc", "terminal", "visual"],
 	"files": ["index.ts"],

@@ -2,6 +2,17 @@
 	"name": "stats",
 	"version": "0.1.0",
 	"description": "Per-session and aggregate usage statistics with /stats command",
+	"whenToUse": "Use when you want per-session and aggregate token/cost usage metrics.",
+	"capabilities": {
+		"commands": ["stats"],
+		"events": ["session_shutdown", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "utility",
 	"tags": ["stats", "tokens", "cost", "usage", "analytics"],
 	"files": ["index.ts", "stats-log.ts", "aggregator.ts", "formatters.ts"],

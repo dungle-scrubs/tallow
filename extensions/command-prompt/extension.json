@@ -2,6 +2,17 @@
 	"name": "command-prompt",
 	"version": "0.4.0",
 	"description": "Merges commands/ and prompts/ as one source with colon-separated namespaces and toggleable prompt expansion visibility",
+	"whenToUse": "Use when markdown prompt files should register as runnable slash commands.",
+	"capabilities": {
+		"commands": ["prompt", "<prompt-command>"],
+		"events": ["before_agent_start", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "command",
 	"tags": ["prompts", "commands", "namespacing", "packages", "merge", "visibility"],
 	"files": ["index.ts"],

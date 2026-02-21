@@ -2,6 +2,28 @@
 	"name": "tasks",
 	"version": "0.1.1",
 	"description": "Task management with status widget — tracks tasks, background jobs, and subagents",
+	"whenToUse": "Use when you need persistent task tracking with status transitions and UI widgets.",
+	"capabilities": {
+		"tools": ["manage_tasks"],
+		"commands": ["tasks"],
+		"events": [
+			"agent_end",
+			"before_agent_start",
+			"session_shutdown",
+			"session_start",
+			"subagent_start",
+			"subagent_stop",
+			"subagent_tool_call",
+			"subagent_tool_result",
+			"turn_end"
+		]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["tasks", "widget", "status"],
 	"files": [
@@ -18,7 +40,11 @@
 			"kind": "enhances",
 			"reason": "Shows background task status in widget"
 		},
-		{ "name": "subagent-tool", "kind": "enhances", "reason": "Shows subagent status in widget" }
+		{
+			"name": "subagent-tool",
+			"kind": "enhances",
+			"reason": "Shows subagent status in widget"
+		}
 	],
 	"npmDependencies": {}
 }

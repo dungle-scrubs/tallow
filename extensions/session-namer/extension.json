@@ -2,6 +2,16 @@
 	"name": "session-namer",
 	"version": "0.1.0",
 	"description": "Auto-generates session names via Haiku and displays them in a persistent top bar",
+	"whenToUse": "Use when sessions should auto-name themselves after early assistant output.",
+	"capabilities": {
+		"events": ["agent_end", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["sessions", "naming", "header"],
 	"files": ["index.ts"],

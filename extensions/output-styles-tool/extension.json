@@ -2,6 +2,17 @@
 	"name": "output-styles-tool",
 	"version": "0.1.0",
 	"description": "Switchable agent personality modes via named markdown files",
+	"whenToUse": "Use when switching assistant output persona/style from markdown presets.",
+	"capabilities": {
+		"commands": ["output-style"],
+		"events": ["before_agent_start", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["system-prompt", "personality", "style"],
 	"files": ["index.ts", "utils.ts"],

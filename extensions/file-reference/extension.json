@@ -2,6 +2,16 @@
 	"name": "file-reference",
 	"version": "0.1.0",
 	"description": "Expands @path/to/file patterns by reading files and inlining their contents",
+	"whenToUse": "Use when prompts include `@path` references that should inline file contents.",
+	"capabilities": {
+		"events": ["input"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "command",
 	"tags": ["file", "reference", "context", "cc-compat"],
 	"files": ["index.ts"],

@@ -2,6 +2,16 @@
 	"name": "edit-tool-enhanced",
 	"version": "0.1.0",
 	"description": "Enhanced edit tool with full diff display and summary footer",
+	"whenToUse": "Use when you want `edit` results rendered with full diffs and summaries.",
+	"capabilities": {
+		"tools": ["edit"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["edit", "diff", "display"],
 	"files": ["index.ts"],

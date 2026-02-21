@@ -2,6 +2,17 @@
 	"name": "bash-tool-enhanced",
 	"version": "0.1.1",
 	"description": "Enhanced bash tool with tail-truncated live output",
+	"whenToUse": "Use when you need richer `bash` output with truncation and auto-backgrounding.",
+	"capabilities": {
+		"tools": ["bash"],
+		"events": ["before_agent_start", "session_start", "tool_call", "tool_result"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["bash", "display", "truncation"],
 	"files": ["index.ts"],

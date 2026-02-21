@@ -2,6 +2,17 @@
 	"name": "rewind",
 	"version": "0.1.0",
 	"description": "Undo file changes by rolling back to a previous conversation turn via git snapshots",
+	"whenToUse": "Use when you need to roll file changes back to an earlier conversation turn.",
+	"capabilities": {
+		"commands": ["rewind"],
+		"events": ["before_agent_start", "session_shutdown", "session_start", "tool_result", "turn_end"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "tool",
 	"tags": ["git", "undo", "rewind", "snapshot", "rollback"],
 	"files": ["index.ts", "tracker.ts", "snapshots.ts", "ui.ts"],

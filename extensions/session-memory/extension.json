@@ -2,6 +2,16 @@
 	"name": "session-memory",
 	"version": "0.1.0",
 	"description": "Search and recall context from previous tallow sessions using FTS5 + LLM curator",
+	"whenToUse": "Use when the model should recall relevant context from prior sessions.",
+	"capabilities": {
+		"tools": ["session_recall"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["sessions", "memory", "search", "recall"],
 	"files": ["index.ts", "indexer.ts", "sqlite-adapter.ts", "curator-prompt.ts", "types.ts"],

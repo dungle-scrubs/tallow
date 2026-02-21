@@ -2,6 +2,14 @@
 	"name": "tool-display",
 	"version": "0.1.0",
 	"description": "Shared configuration for tool output truncation and display",
+	"whenToUse": "Use when other extensions need shared tool-output truncation/render helpers.",
+	"capabilities": {},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["config", "display", "truncation"],
 	"files": ["index.ts"],

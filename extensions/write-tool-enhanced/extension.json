@@ -2,11 +2,25 @@
 	"name": "write-tool-enhanced",
 	"version": "0.2.0",
 	"description": "Enhanced write tool that shows full file content with summary footer",
+	"whenToUse": "Use when you want `write` output to show full file content with summaries.",
+	"capabilities": {
+		"tools": ["write"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["write", "preview"],
 	"files": ["index.ts"],
 	"relationships": [
-		{ "name": "tasks", "kind": "enhances", "reason": "Similar UI enhancement pattern" },
+		{
+			"name": "tasks",
+			"kind": "enhances",
+			"reason": "Similar UI enhancement pattern"
+		},
 		{
 			"name": "tool-display",
 			"kind": "requires",

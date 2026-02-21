@@ -2,6 +2,16 @@
 	"name": "ask-user-question-tool",
 	"version": "0.1.0",
 	"description": "Let the LLM ask the user multiple-choice questions",
+	"whenToUse": "Use when the model should pause and ask you a multiple-choice question.",
+	"capabilities": {
+		"tools": ["ask_user_question"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "tool",
 	"tags": ["interaction", "prompts"],
 	"files": ["index.ts"],

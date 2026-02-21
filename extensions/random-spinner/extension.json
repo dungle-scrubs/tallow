@@ -2,6 +2,16 @@
 	"name": "random-spinner",
 	"version": "0.1.0",
 	"description": "Replaces the default loader spinner with a random cli-spinners preset each session",
+	"whenToUse": "Use when you want a randomized loader spinner style each session.",
+	"capabilities": {
+		"events": ["session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "ui",
 	"tags": ["spinner", "loader", "cli-spinners", "visual"],
 	"files": ["index.ts"],

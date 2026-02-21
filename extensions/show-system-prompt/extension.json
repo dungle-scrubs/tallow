@@ -2,6 +2,16 @@
 	"name": "show-system-prompt",
 	"version": "0.1.0",
 	"description": "Show the current system prompt via /system-prompt command",
+	"whenToUse": "Use when you need to inspect the active system prompt text.",
+	"capabilities": {
+		"commands": ["show-system-prompt"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
 	"category": "utility",
 	"tags": ["debug", "system-prompt"],
 	"files": ["index.ts"],

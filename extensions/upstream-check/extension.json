@@ -2,6 +2,16 @@
 	"name": "upstream-check",
 	"version": "0.1.0",
 	"description": "Dev-only: notify when upstream pi-coding-agent or pi-tui have new versions",
+	"whenToUse": "Use when maintaining tallow and checking upstream pi package versions.",
+	"capabilities": {
+		"commands": ["upstream"]
+	},
+	"permissionSurface": {
+		"filesystem": "read",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
 	"category": "dev",
 	"tags": ["dev", "upstream", "version"],
 	"files": ["index.ts"]

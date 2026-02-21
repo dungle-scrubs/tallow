@@ -2,6 +2,38 @@
 	"name": "debug",
 	"version": "0.1.0",
 	"description": "Structured diagnostic logging and interactive troubleshooting — tool timings, error analysis, turn metrics",
+	"whenToUse": "Use when troubleshooting tool timings, lifecycle events, and extension behavior.",
+	"capabilities": {
+		"tools": ["debug_inspect"],
+		"commands": [
+			"debug",
+			"diagnostics",
+			"diagnostics-clear",
+			"diagnostics-off",
+			"diagnostics-on",
+			"diagnostics-tail"
+		],
+		"events": [
+			"agent_end",
+			"before_agent_start",
+			"hooks:merge",
+			"model_select",
+			"session_shutdown",
+			"session_start",
+			"subagent_start",
+			"subagent_stop",
+			"tool_call",
+			"tool_result",
+			"turn_end",
+			"turn_start"
+		]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": true,
+		"network": false,
+		"subprocess": true
+	},
 	"category": "utility",
 	"tags": ["debug", "diagnostics", "logging", "troubleshooting"],
 	"files": ["index.ts", "logger.ts", "analysis.ts"],
