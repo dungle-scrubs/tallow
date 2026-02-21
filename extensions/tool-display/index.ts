@@ -10,7 +10,7 @@
  * This is a shared library — the default export is a noop extension.
  * Other extensions import the named exports.
  */
-import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 
 /**
@@ -23,6 +23,183 @@ import { truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 export interface RenderComponent {
 	render(width: number): string[];
 	invalidate(): void;
+}
+
+/** Semantic roles for presentation hierarchy across tool output surfaces. */
+export type PresentationRole =
+	| "title"
+	| "action"
+	| "identity"
+	| "meta"
+	| "process_output"
+	| "status_success"
+	| "status_warning"
+	| "status_error"
+	| "hint";
+
+/** Theme-token mapping for semantic presentation roles. */
+const ROLE_THEME_COLORS: Readonly<Record<PresentationRole, ThemeColor>> = {
+	action: "accent",
+	hint: "dim",
+	identity: "accent",
+	meta: "muted",
+	process_output: "dim",
+	status_error: "error",
+	status_success: "success",
+	status_warning: "warning",
+	title: "toolTitle",
+};
+
+/**
+ * Apply semantic presentation styling to a text fragment.
+ *
+ * @param theme - Active UI theme
+ * @param role - Semantic role for the text fragment
+ * @param text - Raw text content
+ * @returns Styled text mapped to the role's visual treatment
+ */
+export function formatPresentationText(theme: Theme, role: PresentationRole, text: string): string {
+	const themed = theme.fg(ROLE_THEME_COLORS[role], text);
+	if (role === "title" || role === "identity") return theme.bold(themed);
+	return themed;
+}
+
+/**
+ * Format a muted section divider with consistent structure.
+ *
+ * @param theme - Active UI theme
+ * @param label - Section title
+ * @returns Styled divider line (e.g. "─── Output ───")
+ */
+export function formatSectionDivider(theme: Theme, label: string): string {
+	return formatPresentationText(theme, "meta", `─── ${label} ───`);
+}
+
+/**
+ * Push a section of lines with optional blank-line spacing.
+ *
+ * @param lines - Mutable output line buffer
+ * @param section - Lines for this section
+ * @param options - Optional spacing controls
+ * @returns Nothing
+ */
+export function appendSection(
+	lines: string[],
+	section: readonly string[],
+	options?: { blankAfter?: boolean; blankBefore?: boolean }
+): void {
+	if (options?.blankBefore && lines.length > 0 && lines.at(-1) !== "") lines.push("");
+	for (const line of section) lines.push(line);
+	if (options?.blankAfter) lines.push("");
+}
+
+/**
+ * Return true when a line already has ANSI escape sequences.
+ *
+ * @param line - Output line to inspect
+ * @returns True when line contains ANSI styling
+ */
+export function hasAnsiStyling(line: string): boolean {
+	return line.includes("\u001b[") || line.includes("\u001b]");
+}
+
+/**
+ * Dim process-output text without double-styling pre-colored lines.
+ *
+ * @param line - Output line to style
+ * @param dim - Function applying dim styling
+ * @returns Safely styled line
+ */
+export function dimProcessOutputLine(line: string, dim: (value: string) => string): string {
+	return hasAnsiStyling(line) ? line : dim(line);
+}
+
+/** Deterministic identity palette used across tasks/subagents/teams. */
+export const IDENTITY_COLOR_NAMES = ["green", "cyan", "magenta", "yellow", "blue", "red"] as const;
+
+/** Identity color name. */
+export type IdentityColorName = (typeof IDENTITY_COLOR_NAMES)[number];
+
+/** ANSI 256-color mapping for identity colors. */
+const IDENTITY_ANSI_CODES: Readonly<Record<IdentityColorName, number>> = {
+	blue: 75,
+	cyan: 80,
+	green: 78,
+	magenta: 170,
+	red: 203,
+	yellow: 220,
+};
+
+/**
+ * Hash a string deterministically for palette selection.
+ *
+ * @param value - Identity seed
+ * @returns Signed hash value
+ */
+export function hashIdentity(value: string): number {
+	let hash = 0;
+	for (let i = 0; i < value.length; i++) {
+		hash = Math.imul(31, hash) + value.charCodeAt(i);
+	}
+	return hash;
+}
+
+/**
+ * Pick an identity color name deterministically from a seed.
+ *
+ * @param value - Identity seed
+ * @returns Stable identity color name
+ */
+export function getIdentityColorName(value: string): IdentityColorName {
+	const index = Math.abs(hashIdentity(value)) % IDENTITY_COLOR_NAMES.length;
+	return IDENTITY_COLOR_NAMES[index] ?? "green";
+}
+
+/**
+ * Convert an identity color name to its ANSI 256-color code.
+ *
+ * @param color - Identity color name
+ * @returns ANSI color code
+ */
+export function identityColorToAnsi(color: IdentityColorName): number {
+	return IDENTITY_ANSI_CODES[color];
+}
+
+/**
+ * Resolve a seed directly to an ANSI 256-color identity code.
+ *
+ * @param value - Identity seed
+ * @returns ANSI color code
+ */
+export function getIdentityAnsiColor(value: string): number {
+	return identityColorToAnsi(getIdentityColorName(value));
+}
+
+/**
+ * Apply deterministic ANSI identity styling to a text fragment.
+ *
+ * @param text - Text to style
+ * @param value - Identity seed
+ * @param highlighted - Whether to apply bold emphasis
+ * @returns ANSI-styled text
+ */
+export function formatIdentityText(text: string, value: string, highlighted = false): string {
+	const color = getIdentityAnsiColor(value);
+	const prefix = highlighted ? `\x1b[1;38;5;${color}m` : `\x1b[38;5;${color}m`;
+	const suffix = highlighted ? "\x1b[22;39m" : "\x1b[39m";
+	return `${prefix}${text}${suffix}`;
+}
+
+/**
+ * Select a color code from a numeric ANSI palette deterministically.
+ *
+ * @param value - Identity seed
+ * @param palette - Palette of ANSI color codes
+ * @returns Deterministic ANSI color code
+ */
+export function pickAnsiColor(value: string, palette: readonly number[]): number {
+	if (palette.length === 0) return 78;
+	return palette[Math.abs(hashIdentity(value)) % palette.length] ?? palette[0] ?? 78;
 }
 
 /**

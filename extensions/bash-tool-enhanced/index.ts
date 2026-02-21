@@ -32,6 +32,10 @@ import { INTEROP_API_CHANNELS } from "../_shared/interop-events.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
 import type { PromotedTaskHandle } from "../background-task-tool/index.js";
 import {
+	appendSection,
+	dimProcessOutputLine,
+	formatPresentationText,
+	formatSectionDivider,
 	formatToolVerb,
 	formatTruncationIndicator,
 	getToolDisplayConfig,
@@ -117,26 +121,14 @@ export function stripNonDisplayOsc(line: string): string {
 }
 
 /**
- * Detect whether a line already contains ANSI escape sequences.
- *
- * We only need a lightweight check for CSI/OSC prefixes because bash output
- * from tools like git diff includes those directly in each affected line.
- *
- * @param line - Output line from bash
- * @returns True when ANSI escape sequences are already present
- */
-function hasAnsiEscape(line: string): boolean {
-	return line.includes("\u001b[") || line.includes("\u001b]");
-}
-
-/**
- * Keep existing ANSI-colored output untouched.
+ * Keep existing ANSI-colored output untouched while dimming plain lines.
  *
  * Many commands (like git diff) already include color/reset sequences.
  * Wrapping those lines again with theme colors can create nested escape
  * state that leaks styling between rows.
  *
- * Strips non-display OSC sequences first so visibleWidth() counts correctly.
+ * Strips non-display OSC sequences first so visibleWidth() counts correctly,
+ * then delegates ANSI-safe dimming to the shared tool-display helper.
  *
  * @param line - Output line from bash
  * @param dim - Theme dim color function
@@ -145,7 +137,7 @@ function hasAnsiEscape(line: string): boolean {
 /** @internal */
 export function styleBashLine(line: string, dim: (value: string) => string): string {
 	const clean = stripNonDisplayOsc(line);
-	return hasAnsiEscape(clean) ? clean : dim(clean);
+	return dimProcessOutputLine(clean, dim);
 }
 
 /**
@@ -333,10 +325,14 @@ export default function bashLive(pi: ExtensionAPI): void {
 			const cmd = args.command ?? "";
 			const firstLine = cmd.split("\n")[0];
 			const preview = firstLine.length > 80 ? `${firstLine.slice(0, 80)}...` : firstLine;
-			const multiLine = cmd.includes("\n") ? theme.fg("dim", " (multiline)") : "";
+			const multiLine = cmd.includes("\n")
+				? formatPresentationText(theme, "meta", " (multiline)")
+				: "";
 			const verb = formatToolVerb("bash", false);
 			return new Text(
-				theme.fg("toolTitle", theme.bold(`${verb} `)) + theme.fg("muted", preview) + multiLine,
+				formatPresentationText(theme, "title", `${verb} `) +
+					formatPresentationText(theme, "action", preview) +
+					multiLine,
 				0,
 				0
 			);
@@ -555,20 +551,39 @@ export default function bashLive(pi: ExtensionAPI): void {
 				| BashToolDetails
 				| { autoBackgrounded: true; taskId: string }
 				| undefined;
+			const styleProcessLine = (line: string): string =>
+				styleBashLine(line, (value) => formatPresentationText(theme, "process_output", value));
 
 			// Auto-backgrounded: show compact status with task ID
 			if (details && "autoBackgrounded" in details) {
-				const icon = getIcon("in_progress");
-				let rendered = `${theme.fg("warning", icon)} ${theme.fg("accent", "Auto-backgrounded")} → ${theme.fg("dim", `task_output("${details.taskId}")`)}`;
+				const lines: string[] = [];
+				const statusLine =
+					formatPresentationText(
+						theme,
+						"status_warning",
+						`${getIcon("in_progress")} Auto-backgrounded`
+					) +
+					` ${formatPresentationText(theme, "meta", "→")} ${formatPresentationText(theme, "action", `task_output("${details.taskId}")`)}`;
+				appendSection(lines, [statusLine]);
 				if (expanded) {
-					rendered += `\n${theme.fg("muted", text)}`;
+					appendSection(lines, [formatSectionDivider(theme, "Details")], { blankBefore: true });
+					appendSection(
+						lines,
+						text
+							.split("\n")
+							.map((line) =>
+								dimProcessOutputLine(line, (value) =>
+									formatPresentationText(theme, "process_output", value)
+								)
+							)
+					);
 				}
-				return new Text(rendered, 0, 0);
+				return renderLines(lines, { wrap: expanded });
 			}
 
 			// During execution: show tail-truncated live output
 			if (isPartial) {
-				if (!text) return renderLines([theme.fg("muted", "...")]);
+				if (!text) return renderLines([formatPresentationText(theme, "meta", "...")]);
 
 				const { visible, truncated, totalLines, hiddenLines } = truncateForDisplay(
 					text,
@@ -577,11 +592,11 @@ export default function bashLive(pi: ExtensionAPI): void {
 
 				const lines: string[] = [];
 				if (truncated) {
-					lines.push(formatTruncationIndicator(displayConfig, totalLines, hiddenLines, theme));
+					appendSection(lines, [
+						formatTruncationIndicator(displayConfig, totalLines, hiddenLines, theme),
+					]);
 				}
-				for (const line of visible.split("\n")) {
-					lines.push(styleBashLine(line, (value) => theme.fg("dim", value)));
-				}
+				appendSection(lines, visible.split("\n").map(styleProcessLine));
 				return renderLines(lines);
 			}
 
@@ -594,20 +609,20 @@ export default function bashLive(pi: ExtensionAPI): void {
 
 			// Exit 0–1: normal (grep no-match, diff, test false, etc.)
 			const statusIcon = exitCode <= 1 ? getIcon("success") : getIcon("error");
-			const statusColor = exitCode <= 1 ? "muted" : "error";
+			const statusRole = exitCode <= 1 ? "status_success" : "status_error";
 			const verb = formatToolVerb("bash", true);
 			const summary = `${statusIcon} ${verb} (${lineCount} lines, ${sizeKb}KB, exit ${exitCode})`;
 			const fullPathSuffix = details?.fullOutputPath
-				? theme.fg("dim", ` → ${details.fullOutputPath}`)
+				? formatPresentationText(theme, "meta", ` → ${details.fullOutputPath}`)
 				: "";
+			const summaryLine = formatPresentationText(theme, statusRole, summary) + fullPathSuffix;
 
 			// Expanded: show all output with wrapping, footer last
 			if (expanded) {
 				const lines: string[] = [];
-				for (const line of text.split("\n")) {
-					lines.push(styleBashLine(line, (value) => theme.fg("dim", value)));
-				}
-				lines.push(theme.fg(statusColor, summary) + fullPathSuffix);
+				appendSection(lines, [formatSectionDivider(theme, "Output")]);
+				appendSection(lines, text.split("\n").map(styleProcessLine));
+				appendSection(lines, [summaryLine], { blankBefore: true });
 				return renderLines(lines, { wrap: true });
 			}
 
@@ -619,12 +634,12 @@ export default function bashLive(pi: ExtensionAPI): void {
 
 			const lines: string[] = [];
 			if (truncated) {
-				lines.push(formatTruncationIndicator(displayConfig, totalLines, hiddenLines, theme));
+				appendSection(lines, [
+					formatTruncationIndicator(displayConfig, totalLines, hiddenLines, theme),
+				]);
 			}
-			for (const line of visible.split("\n")) {
-				lines.push(styleBashLine(line, (value) => theme.fg("dim", value)));
-			}
-			lines.push(theme.fg(statusColor, summary) + fullPathSuffix);
+			appendSection(lines, visible.split("\n").map(styleProcessLine));
+			appendSection(lines, [summaryLine], { blankBefore: true });
 			return renderLines(lines);
 		},
 	});
