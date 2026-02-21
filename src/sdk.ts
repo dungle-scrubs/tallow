@@ -746,24 +746,51 @@ function discoverExtensionDirs(baseDir: string): string[] {
 }
 
 /**
+ * Wrap multiline text in a simple box so high-signal warnings stand out in the UI.
+ *
+ * @param lines - Lines to render inside the box
+ * @returns Boxed message string
+ */
+function formatMessageBox(lines: readonly string[]): string {
+	const safeLines = lines.length > 0 ? lines : [""];
+	const width = safeLines.reduce((max, line) => Math.max(max, line.length), 0);
+	const border = "─".repeat(width + 2);
+
+	return [
+		`┌${border}┐`,
+		...safeLines.map((line) => `│ ${line.padEnd(width, " ")} │`),
+		`└${border}┘`,
+	].join("\n");
+}
+
+/**
  * Build a trust warning banner shown when repo-controlled surfaces are blocked.
  *
  * @param trust - Current project trust context
  * @returns Human-readable trust warning message
  */
 function formatProjectTrustBanner(trust: ProjectTrustContext): string {
-	const blocked =
-		"plugins, hooks, mcpServers, packages, permissions, shellInterpolation, and project extensions";
-	const base =
+	const statusLine =
 		trust.status === "stale_fingerprint"
-			? "Project trust is stale (config fingerprint changed)."
-			: "Project is untrusted.";
-	return (
-		`${base} Repo-controlled execution surfaces are blocked: ${blocked}.\n` +
-		"Run /trust-project to trust this project, /trust-status to inspect trust state, " +
-		"or /untrust-project to revoke trust.\n" +
-		"Trust auto-invalidates when trust-scoped project config changes."
-	);
+			? "Trust is stale: trust-scoped config changed since last approval."
+			: "This project is currently untrusted.";
+
+	return formatMessageBox([
+		"PROJECT TRUST REQUIRED",
+		"",
+		statusLine,
+		"",
+		"Blocked until trusted:",
+		"  plugins, hooks, mcpServers, packages, permissions, shellInterpolation,",
+		"  and project extensions.",
+		"",
+		"Trusting this folder means trusting the code and config inside it.",
+		"Those files can change agent behavior and execute commands.",
+		"",
+		"Use /trust-project to enable these surfaces for this folder.",
+		"Use /trust-status to inspect trust state or /untrust-project to revoke.",
+		"Trust auto-invalidates when trust-scoped project config changes.",
+	]);
 }
 
 /**
