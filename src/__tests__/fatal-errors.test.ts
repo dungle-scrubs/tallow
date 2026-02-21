@@ -120,12 +120,12 @@ describe("Fatal error handlers", () => {
 		expect(stderr).toContain("Crash log:");
 	});
 
-	it("includes /diag-on hint in banner", async () => {
+	it("includes /diagnostics-on hint in banner", async () => {
 		const { stderr } = await runCrashScenario(`
 			throw new Error("hint check");
 		`);
 
-		expect(stderr).toContain("/diag-on");
+		expect(stderr).toContain("/diagnostics-on");
 	});
 
 	it("handles non-Error rejection values", async () => {
