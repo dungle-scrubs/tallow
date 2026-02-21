@@ -25,6 +25,18 @@ Every extension needs an `extension.json` manifest. This file is the source of t
   "name": "my-extension",
   "version": "0.1.0",
   "description": "What the extension does in one line",
+  "whenToUse": "Use when users need a quick greeting command",
+  "capabilities": {
+    "commands": ["greet"],
+    "events": ["session_start"],
+    "tools": ["my_tool"]
+  },
+  "permissionSurface": {
+    "filesystem": "read",
+    "shell": false,
+    "network": false,
+    "subprocess": false
+  },
   "category": "tool",
   "tags": ["utility"],
   "files": ["index.ts"],
@@ -40,6 +52,9 @@ Every extension needs an `extension.json` manifest. This file is the source of t
 | `name` | Yes | Unique extension name. Must match the directory name. |
 | `version` | Yes | Semver version string. |
 | `description` | Yes | One-line description. |
+| `whenToUse` | No | One-line operator guidance shown in the extension catalog (`Use when ...`). |
+| `capabilities` | No | Capability map with optional `tools`, `commands`, and `events` arrays. |
+| `permissionSurface` | No | Execution surface object: `filesystem` (`none\|read\|write`), `shell` (bool), `network` (bool), `subprocess` (bool). |
 | `category` | No | One of `tool`, `ui`, `utility`, `command`, `integration`, `language-support`, `context`, `alias`. |
 | `tags` | No | Searchable tags. |
 | `files` | Yes | Files included with the extension. Glob patterns supported. `extension.json` is always included automatically. |
@@ -47,6 +62,14 @@ Every extension needs an `extension.json` manifest. This file is the source of t
 | `npmDependencies` | No | npm packages needed at runtime. |
 | `configFiles` | No | Config files to copy or merge into the install root. |
 | `piVersion` | No | Minimum pi version required. |
+
+### Catalog metadata tips
+
+Keep catalog fields short and task-oriented:
+
+- **`whenToUse`**, one sentence that starts with `Use when ...`
+- **`capabilities`**, list concrete `tools`, `commands`, and `events` exposed by the extension
+- **`permissionSurface`**, declare minimal side-effect surface (`filesystem`, `shell`, `network`, `subprocess`)
 
 ### Relationships
 

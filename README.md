@@ -122,6 +122,25 @@ tallow --tools readonly            # read, grep, find, ls only
 tallow --tools none                # chat only, no tools
 ```
 
+### Extension catalog + least-privilege startup
+
+Use the extension catalog to inspect what each extension does:
+
+```bash
+tallow extensions          # table view (default)
+tallow extensions --json   # machine-readable catalog
+tallow extensions tasks    # details for one extension ID
+```
+
+For least-privilege sessions, start from an explicit allowlist:
+
+```bash
+tallow --extensions-only --extension tasks --extension lsp
+tallow --extensions-only --extension read-tool-enhanced --extension write-tool-enhanced
+```
+
+Repeat `--extension <selector>` to add only what the task needs.
+
 See the [full CLI reference](https://tallow.dungle-scrubs.com) for all flags
 and modes (RPC, JSON, piped stdin, shell interpolation, etc.)
 

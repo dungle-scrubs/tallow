@@ -42,6 +42,33 @@ these categories:
 | **Aliases** | 1 | /clear → /new |
 | **Core** | 1 | \_icons (internal icon registry) |
 
+## Catalog and selection
+
+Use the catalog command to inspect extensions before enabling them:
+
+```bash
+tallow extensions          # default table output
+tallow extensions --json   # machine-readable catalog
+tallow extensions tasks    # detail view for one extension ID
+```
+
+| Invocation | Output |
+|------------|--------|
+| `tallow extensions` | Human-friendly table (default) |
+| `tallow extensions --json` | Full JSON payload for scripts/CI |
+| `tallow extensions <id>` | Expanded metadata for a single extension |
+
+Catalog output is driven by each extension manifest, including
+`whenToUse`, `capabilities`, and `permissionSurface`.
+
+For least-privilege startup, explicitly select only what you need:
+
+```bash
+tallow --extensions-only --extension tasks --extension lsp
+```
+
+Repeat `--extension <selector>` to compose the exact extension set.
+
 ## How extensions are loaded
 
 All bundled extensions ship with tallow and are loaded

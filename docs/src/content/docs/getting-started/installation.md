@@ -119,6 +119,9 @@ tallow --session-id my-run        Start or continue a named session
 tallow --resume <id>              Resume a specific session (fails if not found)
 tallow --fork-session <id>        Fork from an existing session
 tallow --list                     List available sessions
+tallow extensions                 List extensions (table view)
+tallow extensions --json          List extensions as JSON
+tallow extensions <id>            Show metadata for one extension
 tallow --model claude-sonnet      Use a specific model
 tallow --thinking high            Set thinking level
 tallow --no-session               In-memory only (no persistence)
