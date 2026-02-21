@@ -31,7 +31,6 @@ local defaults = {
 	done_color = "#61afef",
 	active_color = "#ccb266",
 	inactive_color = "#737373",
-	spinner_interval_seconds = 0.5,
 	max_title_length = 24,
 }
 
@@ -118,18 +117,32 @@ function M.get_tab_status(tab)
 	return any_working, any_done_unseen
 end
 
----Advance spinner frame using wall-clock throttling.
----@param opts table|nil Optional overrides
-function M.tick(opts)
-	local resolved = resolve_options(opts)
-	local now = os.clock()
-	local last = wezterm.GLOBAL.tallow_spinner_last or 0
+---Advance the spinner frame by one step.
+local function advance_spinner_frame()
+	local frame = wezterm.GLOBAL.tallow_spinner_frame or 0
+	wezterm.GLOBAL.tallow_spinner_frame = (frame + 1) % #SPINNER_CHARS
+end
 
-	if (now - last) >= resolved.spinner_interval_seconds then
-		local frame = wezterm.GLOBAL.tallow_spinner_frame or 0
-		wezterm.GLOBAL.tallow_spinner_frame = (frame + 1) % #SPINNER_CHARS
-		wezterm.GLOBAL.tallow_spinner_last = now
+---Advance at most once for the current redraw generation.
+local function advance_spinner_for_redraw()
+	local generation = wezterm.GLOBAL.tallow_spinner_generation or 0
+	local last_generation = wezterm.GLOBAL.tallow_spinner_last_advanced_generation or -1
+
+	if generation == last_generation then
+		return
 	end
+
+	advance_spinner_frame()
+	wezterm.GLOBAL.tallow_spinner_last_advanced_generation = generation
+end
+
+---Mark a redraw generation.
+---
+---Call this from `update-right-status`; tab rendering consumes the generation
+---and advances the spinner deterministically while work is active.
+function M.tick()
+	local generation = wezterm.GLOBAL.tallow_spinner_generation or 0
+	wezterm.GLOBAL.tallow_spinner_generation = generation + 1
 end
 
 ---Get current spinner glyph for the active frame.
@@ -141,7 +154,7 @@ end
 
 ---Render default tab title elements with tallow status indicators.
 ---@param tab table TabInformation from format-tab-title
----@param opts table|nil Optional color/timing overrides
+---@param opts table|nil Optional style overrides
 ---@return table
 function M.render_tab_title(tab, opts)
 	local resolved = resolve_options(opts)
@@ -150,6 +163,7 @@ function M.render_tab_title(tab, opts)
 	local elements = {}
 
 	if any_working then
+		advance_spinner_for_redraw()
 		table.insert(elements, { Foreground = { Color = resolved.spinner_color } })
 		table.insert(elements, { Text = " " .. M.spinner_char() .. " " })
 	else
@@ -173,7 +187,7 @@ end
 ---(`tick`, `get_tab_status`, `spinner_char`, `render_tab_title`) and
 ---compose manually in your own handlers instead.
 ---
----@param opts table|nil Optional color/timing overrides
+---@param opts table|nil Optional style overrides
 function M.setup(opts)
 	local resolved = resolve_options(opts)
 
@@ -186,7 +200,7 @@ function M.setup(opts)
 	wezterm.GLOBAL.tallow_handler_options = resolved
 
 	wezterm.on("update-right-status", function()
-		M.tick(wezterm.GLOBAL.tallow_handler_options)
+		M.tick()
 	end)
 
 	wezterm.on("format-tab-title", function(tab)

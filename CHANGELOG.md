@@ -265,6 +265,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-allowlisted extension tools while plan mode is active
 - **pid-cleanup:** verify process start identity before signaling tracked PIDs
   to prevent PID-reuse kills of unrelated processes
+- **wezterm-notify:** stabilize tab loader visibility by using agent-level
+  lifecycle signaling and redraw-driven spinner advancement to avoid short-run flicker
 
 ### Documentation
 
