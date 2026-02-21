@@ -18,6 +18,13 @@ import { Container, Markdown, Spacer, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../_icons/index.js";
 import { INTEROP_EVENT_NAMES, onInteropEvent } from "../_shared/interop-events.js";
+import {
+	appendSection,
+	dimProcessOutputLine,
+	formatIdentityText,
+	formatPresentationText,
+	formatSectionDivider,
+} from "../tool-display/index.js";
 import type { RoutingHints } from "./model-router.js";
 
 // ── Re-exported modules ──────────────────────────────────────────────────────
@@ -546,17 +553,6 @@ async function executeParallel(
 	parentModelId: string | undefined,
 	routingHints: RoutingHints | undefined
 ) {
-	if (tasks.length > MAX_PARALLEL_TASKS)
-		return {
-			content: [
-				{
-					type: "text" as const,
-					text: `Too many parallel tasks (${tasks.length}). Max is ${MAX_PARALLEL_TASKS}.`,
-				},
-			],
-			details: makeDetails("parallel")([]),
-		};
-
 	// Background mode: spawn without awaiting, return immediately
 	if (params.background) {
 		const taskIds: string[] = [];
@@ -590,6 +586,14 @@ async function executeParallel(
 			details: makeDetails("parallel")([]),
 			isError: errors.length > 0 && taskIds.length === 0,
 		};
+	}
+
+	const taskBatches: { start: number; tasks: typeof tasks }[] = [];
+	for (let start = 0; start < tasks.length; start += MAX_PARALLEL_TASKS) {
+		taskBatches.push({
+			start,
+			tasks: tasks.slice(start, start + MAX_PARALLEL_TASKS),
+		});
 	}
 
 	// Clear any stale foreground subagent entries from previous runs
@@ -647,36 +651,54 @@ async function executeParallel(
 		emitParallelUpdate();
 	}, 100);
 
-	ctx.ui.setWorkingMessage(`Waiting for ${tasks.length} parallel agents to finish`);
+	if (taskBatches.length > 1) {
+		ctx.ui.setWorkingMessage(
+			`Running ${tasks.length} agents in ${taskBatches.length} batches ` +
+				`(max ${MAX_PARALLEL_TASKS} per call)`
+		);
+	} else {
+		ctx.ui.setWorkingMessage(`Waiting for ${tasks.length} parallel agents to finish`);
+	}
 
 	let results: SingleResult[];
 	try {
-		results = await mapWithConcurrencyLimit(tasks, MAX_CONCURRENCY, async (t, index) => {
-			const result = await runSingleAgent(
-				ctx.cwd,
-				agents,
-				t.agent,
-				t.task,
-				t.cwd,
-				undefined,
-				signal,
-				(partial) => {
-					if (partial.details?.results[0]) {
-						allResults[index] = partial.details.results[0];
-						emitParallelUpdate();
-					}
-				},
-				makeDetails("parallel"),
-				pi.events,
-				undefined,
-				(t as { model?: string }).model,
-				parentModelId,
-				defaults,
-				routingHints
-			);
-			allResults[index] = result;
-			return result;
-		});
+		for (let batchIndex = 0; batchIndex < taskBatches.length; batchIndex++) {
+			const batch = taskBatches[batchIndex];
+			if (taskBatches.length > 1) {
+				ctx.ui.setWorkingMessage(
+					`Running parallel batch ${batchIndex + 1}/${taskBatches.length} ` +
+						`(${batch.tasks.length} agents)`
+				);
+			}
+			await mapWithConcurrencyLimit(batch.tasks, MAX_CONCURRENCY, async (t, index) => {
+				const globalIndex = batch.start + index;
+				const result = await runSingleAgent(
+					ctx.cwd,
+					agents,
+					t.agent,
+					t.task,
+					t.cwd,
+					undefined,
+					signal,
+					(partial) => {
+						if (partial.details?.results[0]) {
+							allResults[globalIndex] = partial.details.results[0];
+							emitParallelUpdate();
+						}
+					},
+					makeDetails("parallel"),
+					pi.events,
+					undefined,
+					(t as { model?: string }).model,
+					parentModelId,
+					defaults,
+					routingHints
+				);
+				allResults[globalIndex] = result;
+				return result;
+			});
+		}
+		results = [...allResults];
 	} finally {
 		if (spinnerInterval) {
 			clearInterval(spinnerInterval);
@@ -694,11 +716,19 @@ async function executeParallel(
 			: fallback.slice(0, 100) + (fallback.length > 100 ? "..." : "");
 		return `[${r.agent}] ${r.exitCode === 0 ? "completed" : "failed"}: ${preview}`;
 	});
+	const batchNote =
+		taskBatches.length > 1
+			? `\nAuto-batched into ${taskBatches.length} calls ` +
+				`(${taskBatches.map((batch) => batch.tasks.length).join(" + ")}) ` +
+				`to respect max ${MAX_PARALLEL_TASKS} tasks per call.\n`
+			: "";
 	return {
 		content: [
 			{
 				type: "text" as const,
-				text: `Parallel: ${successCount}/${results.length} succeeded\n\n${summaries.join("\n\n")}`,
+				text:
+					`Parallel: ${successCount}/${results.length} succeeded${batchNote}\n` +
+					`${summaries.join("\n\n")}`,
 			},
 		],
 		details: makeDetails("parallel")(results),
@@ -835,94 +865,275 @@ async function executeSingle(
 
 // ── Render Functions ─────────────────────────────────────────────────────────
 
+interface DisplayRenderOptions {
+	itemLimit?: number;
+	maxLineLength?: number;
+	textLineLimit?: number;
+}
+
+/**
+ * Build a compact single-line preview from raw text.
+ *
+ * @param text - Raw preview text (possibly multiline)
+ * @param maxLength - Maximum visible characters
+ * @returns Compact preview with ellipsis when truncated
+ */
+function toCompactPreview(text: string, maxLength: number): string {
+	const normalized = text.replace(/\s+/g, " ").trim();
+	if (normalized.length <= maxLength) return normalized;
+	if (maxLength <= 1) return "…";
+	return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+/**
+ * Format muted metadata values as a bullet-separated line.
+ *
+ * @param theme - Active theme
+ * @param entries - Metadata entries to render
+ * @returns Formatted metadata line, or undefined when empty
+ */
+function formatMetaLine(
+	theme: Theme,
+	entries: readonly (string | undefined)[]
+): string | undefined {
+	const present = entries.filter((entry): entry is string => Boolean(entry?.trim()));
+	if (present.length === 0) return undefined;
+	return formatPresentationText(theme, "meta", present.join(" • "));
+}
+
+/**
+ * Apply deterministic identity styling for subagent names.
+ *
+ * @param identity - Agent identity label
+ * @returns ANSI-styled identity token
+ */
+function formatSubagentIdentity(identity: string): string {
+	return formatIdentityText(identity, identity, true);
+}
+
+/**
+ * Build a compact model label for agent rows.
+ *
+ * @param theme - Active theme
+ * @param model - Optional model identifier
+ * @returns Styled model label, or undefined
+ */
+function formatModelTag(theme: Theme, model: string | undefined): string | undefined {
+	if (!model) return undefined;
+	const modelId = model.split("/").at(-1) ?? model;
+	const shortModel = modelId.length > 24 ? `${modelId.slice(0, 21)}...` : modelId;
+	return formatPresentationText(theme, "hint", `(${shortModel})`);
+}
+
+/**
+ * Build the shared subagent header line with semantic roles.
+ *
+ * @param theme - Active theme
+ * @param action - Mode/status action label
+ * @param identity - Optional identity label (agent name)
+ * @param icon - Optional status icon prefix
+ * @returns Formatted header line
+ */
+function formatSubagentHeader(
+	theme: Theme,
+	action: string,
+	identity?: string,
+	icon?: string
+): string {
+	const parts: string[] = [];
+	if (icon) parts.push(icon);
+	parts.push(formatPresentationText(theme, "title", "subagent"));
+	parts.push(formatPresentationText(theme, "action", action));
+	if (identity) parts.push(formatSubagentIdentity(identity));
+	return parts.join(" ");
+}
+
+/**
+ * Build a subdued color adapter for `formatToolCall` output.
+ *
+ * @param theme - Active theme
+ * @returns Theme color formatter biased toward muted/process styles
+ */
+function createToolCallThemeFg(theme: Theme): (color: ThemeColor, text: string) => string {
+	return (color, text) => {
+		switch (color) {
+			case "dim":
+			case "muted":
+				return formatPresentationText(theme, "meta", text);
+			case "error":
+				return formatPresentationText(theme, "status_error", text);
+			case "warning":
+				return formatPresentationText(theme, "status_warning", text);
+			default:
+				return formatPresentationText(theme, "process_output", text);
+		}
+	};
+}
+
+/**
+ * Return whether a subagent result should be rendered as an error.
+ *
+ * @param result - Single subagent result
+ * @returns True when the result ended in an error state
+ */
+function isResultError(result: SingleResult): boolean {
+	if (result.exitCode === -1) return false;
+	return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+}
+
 /**
  * Render the tool call header for the subagent tool.
+ *
+ * @param args - Tool call arguments
+ * @param theme - Active theme
+ * @returns Renderable text component
  */
 function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 	const scope: AgentScope = (args.agentScope as AgentScope) ?? "user";
-	const modelTag = args.model ? ` ${theme.fg("dim", args.model as string)}` : "";
+	const model = typeof args.model === "string" ? args.model : undefined;
 	const centipedeArr = coerceArray(
-		args.centipede as { agent: string; task: string }[] | string | undefined
+		args.centipede as { agent: string; model?: string; task: string }[] | string | undefined
 	);
 	const tasksArr = coerceArray(
-		args.tasks as { agent: string; task: string }[] | string | undefined
+		args.tasks as { agent: string; model?: string; task: string }[] | string | undefined
 	);
+	const lines: string[] = [];
+
 	if (centipedeArr && centipedeArr.length > 0) {
-		let text =
-			theme.fg("toolTitle", theme.bold("subagent ")) +
-			theme.fg("accent", `centipede (${centipedeArr.length} steps)`) +
-			theme.fg("muted", ` [${scope}]`) +
-			modelTag;
-		for (let i = 0; i < Math.min(centipedeArr.length, 3); i++) {
-			const step = centipedeArr[i];
-			const cleanTask = step.task.replace(/\{previous\}/g, "").trim();
-			const preview = cleanTask.length > 40 ? `${cleanTask.slice(0, 40)}...` : cleanTask;
-			text +=
-				"\n  " +
-				theme.fg("muted", `${i + 1}.`) +
-				" " +
-				theme.fg("accent", step.agent) +
-				theme.fg("dim", ` ${preview}`);
+		appendSection(lines, [formatSubagentHeader(theme, `centipede (${centipedeArr.length} steps)`)]);
+		const metaLine = formatMetaLine(theme, [
+			`scope:${scope}`,
+			model ? `model:${model}` : undefined,
+		]);
+		if (metaLine) appendSection(lines, [metaLine]);
+
+		const previewLines = centipedeArr.slice(0, 3).map((step, index) => {
+			const task = step.task.replace(/\{previous\}/g, "").trim();
+			const preview = toCompactPreview(task || "(uses previous output)", 60);
+			const modelTag = formatModelTag(theme, step.model);
+			const identity = modelTag
+				? `${formatSubagentIdentity(step.agent)} ${modelTag}`
+				: formatSubagentIdentity(step.agent);
+			return `${formatPresentationText(theme, "meta", `${index + 1}.`)} ${identity} ${formatPresentationText(theme, "process_output", preview)}`;
+		});
+		if (previewLines.length > 0) appendSection(lines, previewLines, { blankBefore: true });
+		if (centipedeArr.length > 3) {
+			appendSection(lines, [
+				formatPresentationText(theme, "hint", `… +${centipedeArr.length - 3} more steps`),
+			]);
 		}
-		if (centipedeArr.length > 3)
-			text += `\n  ${theme.fg("muted", `... +${centipedeArr.length - 3} more`)}`;
-		return new Text(text, 0, 0);
+		return new Text(lines.join("\n"), 0, 0);
 	}
+
 	if (tasksArr && tasksArr.length > 0) {
-		const text =
-			theme.fg("toolTitle", theme.bold("subagent ")) +
-			theme.fg("accent", `parallel (${tasksArr.length} tasks)`) +
-			theme.fg("muted", ` [${scope}]`) +
-			modelTag;
-		return new Text(text, 0, 0);
+		appendSection(lines, [formatSubagentHeader(theme, `parallel (${tasksArr.length} tasks)`)]);
+		const metaLine = formatMetaLine(theme, [
+			`scope:${scope}`,
+			model ? `model:${model}` : undefined,
+		]);
+		if (metaLine) appendSection(lines, [metaLine]);
+
+		const previewLines = tasksArr.slice(0, 2).map((task, index) => {
+			const taskPreview = toCompactPreview(task.task, 58);
+			const modelTag = formatModelTag(theme, task.model);
+			const identity = modelTag
+				? `${formatSubagentIdentity(task.agent)} ${modelTag}`
+				: formatSubagentIdentity(task.agent);
+			return `${formatPresentationText(theme, "meta", `${index + 1}.`)} ${identity} ${formatPresentationText(theme, "process_output", taskPreview)}`;
+		});
+		if (previewLines.length > 0) appendSection(lines, previewLines, { blankBefore: true });
+		if (tasksArr.length > 2) {
+			appendSection(lines, [
+				formatPresentationText(theme, "hint", `… +${tasksArr.length - 2} more tasks`),
+			]);
+		}
+		return new Text(lines.join("\n"), 0, 0);
 	}
+
 	const agentName = (args.agent as string) || "...";
-	const preview = args.task
-		? (args.task as string).length > 200
-			? `${(args.task as string).slice(0, 200)}...`
-			: (args.task as string)
-		: "...";
-	let text =
-		theme.fg("toolTitle", theme.bold("subagent ")) +
-		theme.fg("accent", agentName) +
-		theme.fg("muted", ` [${scope}]`) +
-		modelTag;
-	text += `\n  ${theme.fg("dim", preview)}`;
-	return new Text(text, 0, 0);
+	const task = typeof args.task === "string" ? args.task : "...";
+	appendSection(lines, [formatSubagentHeader(theme, "single", agentName)]);
+	const metaLine = formatMetaLine(theme, [`scope:${scope}`, model ? `model:${model}` : undefined]);
+	if (metaLine) appendSection(lines, [metaLine]);
+	appendSection(
+		lines,
+		[formatPresentationText(theme, "process_output", toCompactPreview(task, 200))],
+		{
+			blankBefore: true,
+		}
+	);
+	return new Text(lines.join("\n"), 0, 0);
 }
 
 /**
  * Render display items (text + tool calls) from subagent messages.
+ *
+ * @param items - Display items extracted from assistant messages
+ * @param theme - Active theme
+ * @param expanded - Whether the tool result is expanded
+ * @param options - Optional truncation controls
+ * @returns Rendered display lines
  */
 function renderDisplayItems(
 	items: ReturnType<typeof getDisplayItems>,
 	theme: Theme,
 	expanded: boolean,
-	limit?: number
-) {
+	options?: DisplayRenderOptions
+): string[] {
+	const limit = options?.itemLimit;
 	const toShow = limit ? items.slice(-limit) : items;
 	const skipped = limit && items.length > limit ? items.length - limit : 0;
-	let text = "";
-	if (skipped > 0) text += theme.fg("muted", `... ${skipped} earlier items\n`);
+	const lines: string[] = [];
+
+	if (skipped > 0) {
+		lines.push(
+			formatPresentationText(theme, "hint", `… ${skipped} earlier item${skipped > 1 ? "s" : ""}`)
+		);
+	}
+
 	for (const item of toShow) {
 		if (item.type === "text") {
-			const preview = expanded
-				? item.text
-				: item.text
-						.split("\n")
-						.filter((l) => l.trim())
-						.slice(0, 3)
-						.join("\n");
-			text += `${theme.fg("dim", preview)}\n`;
-		} else {
-			text += `${theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
+			const textLines = item.text
+				.split("\n")
+				.map((line) => line.trimEnd())
+				.filter((line) => line.trim().length > 0);
+			if (textLines.length === 0) continue;
+			const lineLimit = expanded ? textLines.length : (options?.textLineLimit ?? 2);
+			for (let index = 0; index < Math.min(textLines.length, lineLimit); index++) {
+				const rawLine = textLines[index] ?? "";
+				const preview =
+					options?.maxLineLength !== undefined
+						? toCompactPreview(rawLine, options.maxLineLength)
+						: rawLine;
+				const styled = dimProcessOutputLine(preview, (value) =>
+					formatPresentationText(theme, "process_output", value)
+				);
+				if (index === 0) {
+					lines.push(`${formatPresentationText(theme, "meta", "•")} ${styled}`);
+				} else {
+					lines.push(`  ${styled}`);
+				}
+			}
+			continue;
 		}
+
+		const toolCallText = formatToolCall(item.name, item.args, createToolCallThemeFg(theme));
+		const toolLine = dimProcessOutputLine(toolCallText, (value) =>
+			formatPresentationText(theme, "process_output", value)
+		);
+		lines.push(`${formatPresentationText(theme, "meta", "→")} ${toolLine}`);
 	}
-	return text.trimEnd();
+
+	return lines;
 }
 
 /**
  * Render the subagent tool result.
+ *
+ * @param result - Tool result payload
+ * @param expanded - Whether result is expanded in the TUI
+ * @param theme - Active theme
+ * @returns Renderable component
  */
 function renderSubagentResult(
 	result: { content: { type: string; text?: string }[]; details?: unknown },
@@ -936,18 +1147,17 @@ function renderSubagentResult(
 	}
 
 	const mdTheme = getMarkdownTheme();
-	const themeFg = theme.fg.bind(theme);
 
 	if (details.mode === "single" && details.results.length === 1) {
-		return renderSingleResult(details, expanded, theme, mdTheme, themeFg);
+		return renderSingleResult(details, expanded, theme, mdTheme);
 	}
 
 	if (details.mode === "centipede") {
-		return renderCentipedeResult(details, expanded, theme, mdTheme, themeFg);
+		return renderCentipedeResult(details, expanded, theme, mdTheme);
 	}
 
 	if (details.mode === "parallel") {
-		return renderParallelResult(details, expanded, theme, mdTheme, themeFg);
+		return renderParallelResult(details, expanded, theme, mdTheme);
 	}
 
 	const text = result.content[0];
@@ -961,13 +1171,11 @@ function renderSingleResult(
 	details: SubagentDetails,
 	expanded: boolean,
 	theme: Theme,
-	mdTheme: ReturnType<typeof getMarkdownTheme>,
-	themeFg: (color: ThemeColor, text: string) => string
+	mdTheme: ReturnType<typeof getMarkdownTheme>
 ) {
 	const r = details.results[0];
 	const isRunning = r.exitCode === -1;
-	const isError =
-		!isRunning && (r.exitCode !== 0 || r.stopReason === "error" || r.stopReason === "aborted");
+	const isError = isResultError(r);
 	const spinnerChar =
 		details.spinnerFrame !== undefined
 			? SPINNER_FRAMES[details.spinnerFrame % SPINNER_FRAMES.length]
@@ -977,199 +1185,379 @@ function renderSingleResult(
 		: isError
 			? theme.fg("error", getIcon("error"))
 			: theme.fg("success", getIcon("success"));
+	const statusLabel = isRunning ? "running" : isError ? "failed" : "completed";
+	const headerLine = formatSubagentHeader(theme, statusLabel, r.agent, icon);
+	const metaLine = formatMetaLine(theme, [
+		`source:${r.agentSource}`,
+		r.model ? `model:${r.model}` : undefined,
+		!isRunning && r.stopReason ? `stop:${r.stopReason}` : undefined,
+	]);
 	const displayItems = getDisplayItems(r.messages);
 	const finalOutput = getFinalOutput(r.messages);
+	const usageStr = formatUsageStats(r.usage);
 
 	if (expanded) {
 		const container = new Container();
-		let header = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
-		if (r.model) header += ` ${theme.fg("dim", r.model)}`;
-		if (isError && r.stopReason) header += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
-		container.addChild(new Text(header, 0, 0));
-		if (isError && r.errorMessage)
-			container.addChild(new Text(theme.fg("error", `Error: ${r.errorMessage}`), 0, 0));
+		const lines: string[] = [];
+		appendSection(lines, [headerLine]);
+		if (metaLine) appendSection(lines, [metaLine]);
+		if (isError && r.errorMessage) {
+			appendSection(lines, [
+				formatPresentationText(theme, "status_error", `Error: ${r.errorMessage}`),
+			]);
+		}
 		if (r.deniedTools && r.deniedTools.length > 0) {
 			const unique = [...new Set(r.deniedTools)];
-			container.addChild(
-				new Text(theme.fg("warning", `⚠ Denied tools: ${unique.join(", ")}`), 0, 0)
-			);
+			appendSection(lines, [
+				formatPresentationText(theme, "status_warning", `Denied tools: ${unique.join(", ")}`),
+			]);
 		}
-		container.addChild(new Spacer(1));
-		container.addChild(new Text(theme.fg("muted", "─── Task ───"), 0, 0));
-		container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
-		container.addChild(new Spacer(1));
-		container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
-		if (displayItems.length === 0 && !finalOutput) {
-			container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
-		} else {
-			for (const item of displayItems) {
-				if (item.type === "toolCall")
-					container.addChild(
-						new Text(theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, themeFg), 0, 0)
-					);
-			}
-			if (finalOutput) {
-				container.addChild(new Spacer(1));
-				container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-			}
+
+		appendSection(
+			lines,
+			[
+				formatSectionDivider(theme, "Task"),
+				formatPresentationText(theme, "process_output", r.task),
+			],
+			{ blankBefore: true }
+		);
+
+		const activityItems = finalOutput
+			? displayItems.filter((item) => item.type === "toolCall")
+			: displayItems;
+		const activityLines = renderDisplayItems(activityItems, theme, true, {
+			maxLineLength: 140,
+			textLineLimit: 6,
+		});
+		appendSection(
+			lines,
+			[
+				formatSectionDivider(theme, "Activity"),
+				...(activityLines.length > 0
+					? activityLines
+					: [
+							formatPresentationText(
+								theme,
+								"meta",
+								finalOutput ? "(no tool calls)" : "(no activity)"
+							),
+						]),
+			],
+			{ blankBefore: true }
+		);
+
+		if (finalOutput) {
+			appendSection(lines, [formatSectionDivider(theme, "Final output")], { blankBefore: true });
 		}
-		const usageStr = formatUsageStats(r.usage, r.model);
+
+		container.addChild(new Text(lines.join("\n"), 0, 0));
+
+		if (finalOutput) {
+			container.addChild(new Spacer(1));
+			container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
+		}
+
 		if (usageStr) {
 			container.addChild(new Spacer(1));
-			container.addChild(new Text(theme.fg("dim", usageStr), 0, 0));
+			container.addChild(new Text(formatSectionDivider(theme, "Usage"), 0, 0));
+			container.addChild(new Text(formatPresentationText(theme, "meta", usageStr), 0, 0));
 		}
 		return container;
 	}
 
-	let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
-	if (r.model) text += ` ${theme.fg("dim", r.model)}`;
+	const lines: string[] = [];
+	appendSection(lines, [headerLine]);
+	if (metaLine) appendSection(lines, [metaLine]);
+
 	if (isRunning) {
-		text += ` ${theme.fg("warning", "(running...)")}`;
-		if (displayItems.length > 0) {
-			text += `\n${renderDisplayItems(displayItems, theme, expanded, 3)}`;
+		const activityLines = renderDisplayItems(displayItems, theme, false, {
+			itemLimit: 2,
+			maxLineLength: 92,
+			textLineLimit: 1,
+		});
+		if (activityLines.length > 0) {
+			appendSection(lines, [formatSectionDivider(theme, "Activity"), ...activityLines], {
+				blankBefore: true,
+			});
+		} else {
+			appendSection(lines, [formatPresentationText(theme, "meta", "(running, no output yet)")], {
+				blankBefore: true,
+			});
 		}
-	} else if (isError && r.stopReason) {
-		text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
-		if (r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
-	} else if (displayItems.length === 0) {
-		text += `\n${theme.fg("muted", "(no output)")}`;
+	} else if (isError) {
+		const errorInfo = r.errorMessage || r.stderr || finalOutput || "(no output)";
+		appendSection(
+			lines,
+			[
+				formatSectionDivider(theme, "Error"),
+				formatPresentationText(theme, "status_error", toCompactPreview(errorInfo, 140)),
+			],
+			{ blankBefore: true }
+		);
 	} else {
-		text += `\n${renderDisplayItems(displayItems, theme, expanded, COLLAPSED_ITEM_COUNT)}`;
-		if (displayItems.length > COLLAPSED_ITEM_COUNT)
-			text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
+		const activityLines = renderDisplayItems(displayItems, theme, false, {
+			itemLimit: COLLAPSED_ITEM_COUNT,
+			maxLineLength: 92,
+			textLineLimit: 2,
+		});
+		if (activityLines.length > 0) {
+			appendSection(lines, [formatSectionDivider(theme, "Activity"), ...activityLines], {
+				blankBefore: true,
+			});
+		} else {
+			appendSection(lines, [formatPresentationText(theme, "meta", "(no output)")], {
+				blankBefore: true,
+			});
+		}
+		if (displayItems.length > COLLAPSED_ITEM_COUNT) {
+			appendSection(lines, [formatPresentationText(theme, "hint", "(Ctrl+O to expand)")]);
+		}
 	}
+
 	if (r.deniedTools && r.deniedTools.length > 0) {
 		const unique = [...new Set(r.deniedTools)];
-		text += `\n${theme.fg("warning", `⚠ Denied: ${unique.join(", ")}`)}`;
+		appendSection(
+			lines,
+			[formatPresentationText(theme, "status_warning", `Denied tools: ${unique.join(", ")}`)],
+			{
+				blankBefore: true,
+			}
+		);
 	}
-	{
-		const usageStr = formatUsageStats(r.usage, r.model);
-		if (usageStr) text += `\n${theme.fg("dim", usageStr)}`;
+
+	if (usageStr) {
+		appendSection(lines, [formatPresentationText(theme, "meta", usageStr)], {
+			blankBefore: true,
+		});
 	}
-	return new Text(text, 0, 0);
+
+	return new Text(lines.join("\n"), 0, 0);
+}
+
+/**
+ * Build a compact preview line for collapsed tree nodes.
+ *
+ * @param result - Single subagent result
+ * @param theme - Active theme
+ * @param maxLineLength - Maximum preview width
+ * @returns Formatted preview line
+ */
+function formatCollapsedResultPreview(
+	result: SingleResult,
+	theme: Theme,
+	maxLineLength: number
+): string {
+	const rendered = renderDisplayItems(getDisplayItems(result.messages), theme, false, {
+		itemLimit: 1,
+		maxLineLength,
+		textLineLimit: 1,
+	});
+	if (rendered.length > 0) return rendered[0] ?? "";
+	const fallback = result.errorMessage || result.stderr || result.task || "(no output)";
+	const role = isResultError(result) ? "status_error" : "process_output";
+	return formatPresentationText(theme, role, toCompactPreview(fallback, maxLineLength));
 }
 
 /**
  * Render a centipede-mode subagent result.
+ *
+ * @param details - Render details with centipede results
+ * @param expanded - Whether the result is expanded
+ * @param theme - Active theme
+ * @param mdTheme - Markdown theme for rich output
+ * @returns Renderable component
  */
 function renderCentipedeResult(
 	details: SubagentDetails,
 	expanded: boolean,
 	theme: Theme,
-	mdTheme: ReturnType<typeof getMarkdownTheme>,
-	themeFg: (color: ThemeColor, text: string) => string
+	mdTheme: ReturnType<typeof getMarkdownTheme>
 ) {
 	const totalSteps = details.centipedeSteps?.length ?? details.results.length;
-	const isRunning = details.results.some((r) => r.exitCode === -1);
-	const successCount = details.results.filter((r) => r.exitCode === 0).length;
-	const failCount = details.results.filter((r) => r.exitCode > 0).length;
+	const runningCount = details.results.filter((result) => result.exitCode === -1).length;
+	const successCount = details.results.filter((result) => result.exitCode === 0).length;
+	const failCount = details.results.filter((result) => isResultError(result)).length;
+	const isRunning = runningCount > 0;
 	const spinnerChar =
 		details.spinnerFrame !== undefined
 			? SPINNER_FRAMES[details.spinnerFrame % SPINNER_FRAMES.length]
 			: getSpinner()[0];
-
 	const icon = isRunning
 		? theme.fg("warning", spinnerChar)
 		: failCount > 0
 			? theme.fg("error", getIcon("error"))
 			: theme.fg("success", getIcon("success"));
-
-	const getStepIcon = (stepNum: number): string => {
-		const r = details.results.find((res) => res.step === stepNum);
-		if (!r) return "";
-		if (r.exitCode === -1) return ` ${theme.fg("warning", spinnerChar)}`;
-		if (r.exitCode === 0) return ` ${theme.fg("success", getIcon("success"))}`;
-		return ` ${theme.fg("error", getIcon("error"))}`;
-	};
+	const summaryLine = formatMetaLine(theme, [
+		`${successCount + failCount}/${totalSteps} done`,
+		runningCount > 0 ? `${runningCount} running` : undefined,
+		failCount > 0 ? `${failCount} failed` : undefined,
+	]);
 
 	if (expanded) {
 		const container = new Container();
-		container.addChild(
-			new Text(
-				icon +
-					" " +
-					theme.fg("toolTitle", theme.bold("centipede ")) +
-					theme.fg("accent", `${successCount}/${totalSteps} steps`),
-				0,
-				0
-			)
-		);
+		const headerLines: string[] = [formatSubagentHeader(theme, "centipede", undefined, icon)];
+		if (summaryLine) appendSection(headerLines, [summaryLine]);
+		container.addChild(new Text(headerLines.join("\n"), 0, 0));
 
 		for (let si = 0; si < totalSteps; si++) {
 			const stepNum = si + 1;
-			const r = details.results.find((res) => res.step === stepNum);
-			const stepAgent = r?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
-			const rIcon = getStepIcon(stepNum);
+			const stepResult = details.results.find((result) => result.step === stepNum);
+			const stepAgent =
+				stepResult?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
+			const stepStatus = !stepResult
+				? "pending"
+				: stepResult.exitCode === -1
+					? "running"
+					: isResultError(stepResult)
+						? "failed"
+						: "completed";
+			const stepStatusRole = !stepResult
+				? "meta"
+				: stepResult.exitCode === -1
+					? "status_warning"
+					: isResultError(stepResult)
+						? "status_error"
+						: "status_success";
+			const stepIcon = !stepResult
+				? ""
+				: stepResult.exitCode === -1
+					? theme.fg("warning", spinnerChar)
+					: isResultError(stepResult)
+						? theme.fg("error", getIcon("error"))
+						: theme.fg("success", getIcon("success"));
+			const modelTag = formatModelTag(theme, stepResult?.model);
+
+			const stepLines: string[] = [];
+			appendSection(stepLines, [formatSectionDivider(theme, `Step ${stepNum}`)]);
+			appendSection(stepLines, [
+				`${stepIcon ? `${stepIcon} ` : ""}${formatSubagentIdentity(stepAgent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, stepStatusRole, `(${stepStatus})`)}`,
+			]);
+
+			if (stepResult) {
+				appendSection(
+					stepLines,
+					[
+						formatSectionDivider(theme, "Task"),
+						formatPresentationText(theme, "process_output", stepResult.task),
+					],
+					{ blankBefore: true }
+				);
+
+				const activityLines = renderDisplayItems(
+					getDisplayItems(stepResult.messages).filter((item) => item.type === "toolCall"),
+					theme,
+					true,
+					{
+						maxLineLength: 120,
+						textLineLimit: 4,
+					}
+				);
+				appendSection(
+					stepLines,
+					[
+						formatSectionDivider(theme, "Activity"),
+						...(activityLines.length > 0
+							? activityLines
+							: [formatPresentationText(theme, "meta", "(no tool calls)")]),
+					],
+					{ blankBefore: true }
+				);
+
+				const stepUsage = formatUsageStats(stepResult.usage);
+				if (stepUsage) {
+					appendSection(stepLines, [formatPresentationText(theme, "meta", stepUsage)], {
+						blankBefore: true,
+					});
+				}
+			} else {
+				const pendingTask = details.centipedeSteps?.[si]?.task;
+				if (pendingTask) {
+					appendSection(
+						stepLines,
+						[formatPresentationText(theme, "hint", toCompactPreview(pendingTask, 120))],
+						{ blankBefore: true }
+					);
+				}
+			}
 
 			container.addChild(new Spacer(1));
-			container.addChild(
-				new Text(
-					theme.fg("muted", `─── Step ${stepNum}: `) + theme.fg("accent", stepAgent) + rIcon,
-					0,
-					0
-				)
-			);
+			container.addChild(new Text(stepLines.join("\n"), 0, 0));
 
-			if (r) {
-				const displayItems = getDisplayItems(r.messages);
-				const finalOutput = getFinalOutput(r.messages);
-
-				container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
-
-				for (const item of displayItems) {
-					if (item.type === "toolCall") {
-						container.addChild(
-							new Text(
-								theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, themeFg),
-								0,
-								0
-							)
-						);
-					}
-				}
-
-				if (finalOutput) {
-					container.addChild(new Spacer(1));
-					container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
-				}
-
-				const stepUsage = formatUsageStats(r.usage, r.model);
-				if (stepUsage) container.addChild(new Text(theme.fg("dim", stepUsage), 0, 0));
+			const finalOutput = stepResult ? getFinalOutput(stepResult.messages) : "";
+			if (finalOutput) {
+				container.addChild(new Spacer(1));
+				container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
 			}
 		}
 
 		const usageStr = formatUsageStats(aggregateUsage(details.results));
 		if (usageStr) {
 			container.addChild(new Spacer(1));
-			container.addChild(new Text(theme.fg("dim", `Total: ${usageStr}`), 0, 0));
+			container.addChild(new Text(formatSectionDivider(theme, "Total usage"), 0, 0));
+			container.addChild(new Text(formatPresentationText(theme, "meta", usageStr), 0, 0));
 		}
 		return container;
 	}
 
-	// Collapsed view
-	let text =
-		icon +
-		" " +
-		theme.fg("toolTitle", theme.bold("centipede ")) +
-		theme.fg("accent", `${successCount}/${totalSteps} steps`);
+	const lines: string[] = [formatSubagentHeader(theme, "centipede", undefined, icon)];
+	if (summaryLine) appendSection(lines, [summaryLine]);
+
 	for (let si = 0; si < totalSteps; si++) {
 		const stepNum = si + 1;
-		const r = details.results.find((res) => res.step === stepNum);
-		const stepAgent = r?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
-		const rIcon = getStepIcon(stepNum);
-		text += `\n\n${theme.fg("muted", `─── Step ${stepNum}: `)}${theme.fg("accent", stepAgent)}${rIcon}`;
-		if (r) {
-			const displayItems = getDisplayItems(r.messages);
-			if (displayItems.length === 0) text += `\n${theme.fg("muted", "(no output)")}`;
-			else text += `\n${renderDisplayItems(displayItems, theme, expanded, 5)}`;
-			const stepUsage = formatUsageStats(r.usage, r.model);
-			if (stepUsage) text += `\n${theme.fg("dim", stepUsage)}`;
+		const stepResult = details.results.find((result) => result.step === stepNum);
+		const stepAgent = stepResult?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
+		const isLast = si === totalSteps - 1;
+		const branch = formatPresentationText(theme, "meta", isLast ? "└─" : "├─");
+		const stem = isLast ? "   " : `${formatPresentationText(theme, "meta", "│")}  `;
+		const stepStatus = !stepResult
+			? "pending"
+			: stepResult.exitCode === -1
+				? "running"
+				: isResultError(stepResult)
+					? "failed"
+					: "done";
+		const statusRole = !stepResult
+			? "meta"
+			: stepResult.exitCode === -1
+				? "status_warning"
+				: isResultError(stepResult)
+					? "status_error"
+					: "status_success";
+		const stepIcon = !stepResult
+			? ""
+			: stepResult.exitCode === -1
+				? theme.fg("warning", spinnerChar)
+				: isResultError(stepResult)
+					? theme.fg("error", getIcon("error"))
+					: theme.fg("success", getIcon("success"));
+		const modelTag = formatModelTag(theme, stepResult?.model);
+		lines.push(
+			`${branch} ${stepIcon ? `${stepIcon} ` : ""}${formatSubagentIdentity(stepAgent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, statusRole, `(${stepStatus})`)}`
+		);
+
+		if (stepResult) {
+			lines.push(`${stem}${formatCollapsedResultPreview(stepResult, theme, 72)}`);
+			const stepUsage = formatUsageStats(stepResult.usage);
+			if (stepUsage) lines.push(`${stem}${formatPresentationText(theme, "meta", stepUsage)}`);
+		} else {
+			const pendingTask = details.centipedeSteps?.[si]?.task;
+			if (pendingTask) {
+				lines.push(
+					`${stem}${formatPresentationText(theme, "hint", toCompactPreview(pendingTask, 72))}`
+				);
+			}
 		}
 	}
+
 	const usageStr = formatUsageStats(aggregateUsage(details.results));
-	if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
-	if (!isRunning) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
-	return new Text(text, 0, 0);
+	if (usageStr) {
+		appendSection(lines, [formatPresentationText(theme, "meta", `total ${usageStr}`)], {
+			blankBefore: true,
+		});
+	}
+	if (!isRunning)
+		appendSection(lines, [formatPresentationText(theme, "hint", "(Ctrl+O to expand)")]);
+	return new Text(lines.join("\n"), 0, 0);
 }
 
 /**
@@ -1179,12 +1567,11 @@ function renderParallelResult(
 	details: SubagentDetails,
 	expanded: boolean,
 	theme: Theme,
-	mdTheme: ReturnType<typeof getMarkdownTheme>,
-	themeFg: (color: ThemeColor, text: string) => string
+	mdTheme: ReturnType<typeof getMarkdownTheme>
 ) {
-	const running = details.results.filter((r) => r.exitCode === -1).length;
-	const successCount = details.results.filter((r) => r.exitCode === 0).length;
-	const failCount = details.results.filter((r) => r.exitCode > 0).length;
+	const running = details.results.filter((result) => result.exitCode === -1).length;
+	const successCount = details.results.filter((result) => result.exitCode === 0).length;
+	const failCount = details.results.filter((result) => isResultError(result)).length;
 	const isRunning = running > 0;
 	const spinnerChar =
 		details.spinnerFrame !== undefined
@@ -1193,129 +1580,141 @@ function renderParallelResult(
 	const icon = isRunning
 		? theme.fg("warning", spinnerChar)
 		: failCount > 0
-			? theme.fg("warning", getSpinner()[0])
+			? theme.fg("error", getIcon("error"))
 			: theme.fg("success", getIcon("success"));
-	const status = isRunning
-		? `${successCount + failCount}/${details.results.length} done, ${running} running`
-		: `${details.results.length} agents complete`;
+	const summaryLine = formatMetaLine(theme, [
+		`${successCount + failCount}/${details.results.length} done`,
+		running > 0 ? `${running} running` : undefined,
+		failCount > 0 ? `${failCount} failed` : undefined,
+	]);
 
 	if (expanded && !isRunning) {
 		const container = new Container();
-		container.addChild(
-			new Text(
-				`${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`,
-				0,
-				0
-			)
-		);
+		const headerLines = [formatSubagentHeader(theme, "parallel", undefined, icon)];
+		if (summaryLine) appendSection(headerLines, [summaryLine]);
+		container.addChild(new Text(headerLines.join("\n"), 0, 0));
 
-		for (const r of details.results) {
-			const rIcon =
-				r.exitCode === 0
-					? theme.fg("success", getIcon("success"))
-					: theme.fg("error", getIcon("error"));
-			const displayItems = getDisplayItems(r.messages);
-			const finalOutput = getFinalOutput(r.messages);
-			const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
+		for (const result of details.results) {
+			const resultError = isResultError(result);
+			const resultIcon = resultError
+				? theme.fg("error", getIcon("error"))
+				: theme.fg("success", getIcon("success"));
+			const resultStatus = resultError ? "failed" : "completed";
+			const resultLines: string[] = [];
+			const modelTag = formatModelTag(theme, result.model);
+
+			appendSection(resultLines, [formatSectionDivider(theme, result.agent)]);
+			appendSection(resultLines, [
+				`${resultIcon} ${formatSubagentIdentity(result.agent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, "action", resultStatus)}`,
+			]);
+			const resultMeta = formatMetaLine(theme, [`source:${result.agentSource}`]);
+			if (resultMeta) appendSection(resultLines, [resultMeta]);
+
+			appendSection(
+				resultLines,
+				[
+					formatSectionDivider(theme, "Task"),
+					formatPresentationText(theme, "process_output", result.task),
+				],
+				{ blankBefore: true }
+			);
+
+			const activityLines = renderDisplayItems(
+				getDisplayItems(result.messages).filter((item) => item.type === "toolCall"),
+				theme,
+				true,
+				{
+					maxLineLength: 120,
+					textLineLimit: 4,
+				}
+			);
+			appendSection(
+				resultLines,
+				[
+					formatSectionDivider(theme, "Activity"),
+					...(activityLines.length > 0
+						? activityLines
+						: [formatPresentationText(theme, "meta", "(no tool calls)")]),
+				],
+				{ blankBefore: true }
+			);
 
 			container.addChild(new Spacer(1));
-			container.addChild(
-				new Text(
-					`${theme.fg("muted", "─── ") + theme.fg("accent", r.agent)} ${rIcon}${modelTag}`,
-					0,
-					0
-				)
-			);
-			container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
+			container.addChild(new Text(resultLines.join("\n"), 0, 0));
 
-			for (const item of displayItems) {
-				if (item.type === "toolCall") {
-					container.addChild(
-						new Text(theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, themeFg), 0, 0)
-					);
-				}
-			}
-
+			const finalOutput = getFinalOutput(result.messages);
 			if (finalOutput) {
 				container.addChild(new Spacer(1));
 				container.addChild(new Markdown(finalOutput.trim(), 0, 0, mdTheme));
 			} else {
-				const errInfo = r.errorMessage || r.stderr;
+				const errInfo = result.errorMessage || result.stderr;
 				if (errInfo) {
 					container.addChild(new Spacer(1));
-					container.addChild(new Text(theme.fg("error", errInfo.trim().slice(0, 200)), 0, 0));
-				} else {
-					container.addChild(new Text(theme.fg("muted", "(no output)"), 0, 0));
+					container.addChild(
+						new Text(
+							formatPresentationText(theme, "status_error", toCompactPreview(errInfo, 200)),
+							0,
+							0
+						)
+					);
 				}
 			}
 
-			const taskUsage = formatUsageStats(r.usage, r.model);
-			if (taskUsage) container.addChild(new Text(theme.fg("dim", taskUsage), 0, 0));
+			const taskUsage = formatUsageStats(result.usage);
+			if (taskUsage) {
+				container.addChild(new Text(formatPresentationText(theme, "meta", taskUsage), 0, 0));
+			}
 		}
 
 		const usageStr = formatUsageStats(aggregateUsage(details.results));
 		if (usageStr) {
 			container.addChild(new Spacer(1));
-			container.addChild(new Text(theme.fg("dim", `Total: ${usageStr}`), 0, 0));
+			container.addChild(new Text(formatSectionDivider(theme, "Total usage"), 0, 0));
+			container.addChild(new Text(formatPresentationText(theme, "meta", usageStr), 0, 0));
 		}
 		return container;
 	}
 
-	if (isRunning) {
-		let text = `${theme.fg("warning", spinnerChar)} ${theme.fg("accent", status)}`;
-		for (let i = 0; i < details.results.length; i++) {
-			const r = details.results[i];
-			const isLast = i === details.results.length - 1;
-			const treeChar = isLast ? "└─" : "├─";
-			const rIcon =
-				r.exitCode === -1
-					? theme.fg("warning", spinnerChar)
-					: r.exitCode === 0
-						? theme.fg("success", getIcon("success"))
-						: theme.fg("error", getIcon("error"));
-			const taskPreview = r.task.length > 40 ? `${r.task.slice(0, 37)}...` : r.task;
-			const contChar = isLast ? "   " : `${theme.fg("muted", "│")}  `;
-			text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}`;
-			text += `\n${contChar}${theme.fg("dim", taskPreview)}`;
-			const agentUsage = formatUsageStats(r.usage, r.model);
-			if (agentUsage) text += `\n${contChar}${theme.fg("muted", agentUsage)}`;
+	const lines: string[] = [formatSubagentHeader(theme, "parallel", undefined, icon)];
+	if (summaryLine) appendSection(lines, [summaryLine]);
+
+	for (let index = 0; index < details.results.length; index++) {
+		const result = details.results[index];
+		const isLast = index === details.results.length - 1;
+		const branch = formatPresentationText(theme, "meta", isLast ? "└─" : "├─");
+		const stem = isLast ? "   " : `${formatPresentationText(theme, "meta", "│")}  `;
+		const resultRunning = result.exitCode === -1;
+		const resultError = isResultError(result);
+		const resultStatus = resultRunning ? "running" : resultError ? "failed" : "done";
+		const statusRole = resultRunning
+			? "status_warning"
+			: resultError
+				? "status_error"
+				: "status_success";
+		const resultIcon = resultRunning
+			? theme.fg("warning", spinnerChar)
+			: resultError
+				? theme.fg("error", getIcon("error"))
+				: theme.fg("success", getIcon("success"));
+		const modelTag = formatModelTag(theme, result.model);
+		lines.push(
+			`${branch} ${resultIcon} ${formatSubagentIdentity(result.agent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, statusRole, `(${resultStatus})`)}`
+		);
+		lines.push(`${stem}${formatCollapsedResultPreview(result, theme, 74)}`);
+		if (!isRunning) {
+			const taskUsage = formatUsageStats(result.usage);
+			if (taskUsage) lines.push(`${stem}${formatPresentationText(theme, "meta", taskUsage)}`);
 		}
-		const liveTotal = formatUsageStats(aggregateUsage(details.results));
-		if (liveTotal) text += `\n${theme.fg("dim", `Total: ${liveTotal}`)}`;
-		return new Text(text, 0, 0);
 	}
 
-	let text = `${icon} ${theme.fg("accent", status)}`;
-	for (let i = 0; i < details.results.length; i++) {
-		const r = details.results[i];
-		const isLast = i === details.results.length - 1;
-		const treeChar = isLast ? "└─" : "├─";
-		const contChar = isLast ? "   " : `${theme.fg("muted", "│")}  `;
-		const rIcon =
-			r.exitCode === 0
-				? theme.fg("success", getIcon("success"))
-				: theme.fg("error", getIcon("error"));
-		const displayItems = getDisplayItems(r.messages);
-		const modelTag = r.model ? ` ${theme.fg("dim", r.model)}` : "";
-		text += `\n${theme.fg("muted", treeChar)} ${theme.fg("accent", r.agent)} ${rIcon}${modelTag}`;
-		if (displayItems.length === 0) {
-			const errInfo = r.errorMessage || r.stderr;
-			if (errInfo) {
-				const errPreview = errInfo.trim().split("\n")[0].slice(0, 80);
-				text += `\n${contChar}${theme.fg("error", errPreview)}`;
-			} else {
-				text += `\n${contChar}${theme.fg("muted", "(no output)")}`;
-			}
-		} else {
-			const rendered = renderDisplayItems(displayItems, theme, expanded, 5)
-				.split("\n")
-				.filter((l) => l.trim())
-				.join(`\n${contChar}`);
-			text += `\n${contChar}${rendered}`;
-		}
-	}
 	const usageStr = formatUsageStats(aggregateUsage(details.results));
-	if (usageStr) text += `\n${theme.fg("dim", `Total: ${usageStr}`)}`;
-	if (!expanded) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
-	return new Text(text, 0, 0);
+	if (usageStr) {
+		appendSection(lines, [formatPresentationText(theme, "meta", `total ${usageStr}`)], {
+			blankBefore: true,
+		});
+	}
+	if (!isRunning && !expanded) {
+		appendSection(lines, [formatPresentationText(theme, "hint", "(Ctrl+O to expand)")]);
+	}
+	return new Text(lines.join("\n"), 0, 0);
 }

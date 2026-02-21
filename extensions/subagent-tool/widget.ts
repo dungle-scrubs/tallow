@@ -22,6 +22,7 @@ import type { SingleResult } from "./formatting.js";
 export interface RunningSubagent {
 	id: string;
 	agent: string;
+	model?: string;
 	task: string;
 	startTime: number;
 }
@@ -30,6 +31,7 @@ export interface RunningSubagent {
 export interface BackgroundSubagent {
 	id: string;
 	agent: string;
+	model?: string;
 	task: string;
 	startTime: number;
 	process: ReturnType<typeof spawn>;
@@ -90,6 +92,7 @@ export function buildSubagentSnapshot(): {
 	const background: InteropSubagentView[] = [...backgroundSubagents.values()].map((subagent) => ({
 		agent: subagent.agent,
 		id: subagent.id,
+		model: subagent.model ?? subagent.result.model,
 		startTime: subagent.startTime,
 		status: subagent.status,
 		task: subagent.task,
@@ -97,6 +100,7 @@ export function buildSubagentSnapshot(): {
 	const foreground: InteropSubagentView[] = [...runningSubagents.values()].map((subagent) => ({
 		agent: subagent.agent,
 		id: subagent.id,
+		model: subagent.model,
 		startTime: subagent.startTime,
 		status: "running",
 		task: subagent.task,
@@ -176,15 +180,17 @@ export function clearAllSubagents(piEvents?: ExtensionAPI["events"]): void {
  * @param task - Task description
  * @param startTime - Start timestamp in ms
  * @param piEvents - Shared event bus for snapshot updates
+ * @param model - Selected model identifier
  */
 export function registerForegroundSubagent(
 	id: string,
 	agent: string,
 	task: string,
 	startTime: number,
-	piEvents?: ExtensionAPI["events"]
+	piEvents?: ExtensionAPI["events"],
+	model?: string
 ): void {
-	runningSubagents.set(id, { id, agent, task, startTime });
+	runningSubagents.set(id, { id, agent, model, task, startTime });
 	publishSubagentSnapshot(piEvents);
 	startWidgetUpdates();
 }

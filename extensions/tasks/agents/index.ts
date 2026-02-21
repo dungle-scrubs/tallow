@@ -6,6 +6,8 @@
  * color assignment, and human-readable tool-call summaries for the widget.
  */
 
+import { getIdentityColorName, IDENTITY_COLOR_NAMES } from "../../tool-display/index.js";
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /**
@@ -46,15 +48,8 @@ export const AGENT_TYPE_LABELS = [
 	"Analyze",
 ] as const;
 
-/** Agent color palette for teammate display (CC-style). */
-export const AGENT_COLORS: readonly string[] = [
-	"green",
-	"cyan",
-	"magenta",
-	"yellow",
-	"blue",
-	"red",
-] as const;
+/** Agent color palette for teammate display (shared deterministic palette). */
+export const AGENT_COLORS = IDENTITY_COLOR_NAMES;
 
 // ── Classification ───────────────────────────────────────────────────────────
 
@@ -94,17 +89,13 @@ export function classifyAgent(task: string, agentName: string): AgentIdentity {
 }
 
 /**
- * Assigns a deterministic color to an agent name via hash.
+ * Assign a deterministic color to an agent identity.
  *
- * @param name - Agent name to hash
- * @returns ANSI color name from {@link AGENT_COLORS}
+ * @param name - Agent name seed
+ * @returns ANSI palette color name from {@link AGENT_COLORS}
  */
-export function agentColor(name: string): string {
-	let hash = 0;
-	for (let i = 0; i < name.length; i++) {
-		hash = Math.trunc(hash * 31 + name.charCodeAt(i));
-	}
-	return AGENT_COLORS[Math.abs(hash) % AGENT_COLORS.length];
+export function agentColor(name: string): (typeof AGENT_COLORS)[number] {
+	return getIdentityColorName(name);
 }
 
 /**

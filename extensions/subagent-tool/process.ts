@@ -305,6 +305,7 @@ export async function spawnBackgroundSubagent(
 	const bgSubagent: BackgroundSubagent = {
 		id,
 		agent: agentName,
+		model: agent.model,
 		task,
 		startTime: Date.now(),
 		process: proc,
@@ -543,7 +544,7 @@ export async function runSingleAgent(
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const taskId = `fg_${generateId()}`;
 
-	registerForegroundSubagent(taskId, agentName, task, Date.now(), piEvents);
+	registerForegroundSubagent(taskId, agentName, task, Date.now(), piEvents, agent.model);
 
 	// Emit subagent_start event
 	piEvents?.emit("subagent_start", {
