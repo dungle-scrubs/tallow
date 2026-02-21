@@ -85,12 +85,40 @@ export interface ClaudePluginManifest {
 	readonly author?: { name?: string; email?: string };
 }
 
+/** Metadata from extension capabilities in extension.json */
+export interface TallowExtensionCapabilities {
+	readonly commands?: readonly string[];
+	readonly events?: readonly string[];
+	readonly tools?: readonly string[];
+}
+
+/** Extension dependency/interaction metadata. */
+export interface TallowExtensionRelationship {
+	readonly kind?: string;
+	readonly name: string;
+	readonly reason?: string;
+}
+
+/** Execution surface declared by an extension manifest. */
+export interface TallowExtensionPermissionSurface {
+	readonly filesystem?: "none" | "read" | "write";
+	readonly network?: boolean;
+	readonly shell?: boolean;
+	readonly subprocess?: boolean;
+}
+
 /** Metadata from a tallow extension.json */
 export interface TallowExtensionManifest {
-	readonly name: string;
-	readonly description?: string;
-	readonly version?: string;
+	readonly capabilities?: TallowExtensionCapabilities;
 	readonly category?: string;
+	readonly description?: string;
+	readonly files?: readonly string[];
+	readonly name: string;
+	readonly permissionSurface?: TallowExtensionPermissionSurface;
+	readonly relationships?: readonly TallowExtensionRelationship[];
+	readonly tags?: readonly string[];
+	readonly version?: string;
+	readonly whenToUse?: readonly string[];
 }
 
 /** Result of resolving a plugin — path on disk + detected format. */
@@ -711,6 +739,186 @@ export function detectPluginFormat(pluginPath: string): PluginFormat {
 	return "unknown";
 }
 
+type JsonRecord = Record<string, unknown>;
+
+/**
+ * Check whether a value is a plain JSON object.
+ *
+ * @param value - Value to test
+ * @returns True when value is a non-array object
+ */
+function isJsonRecord(value: unknown): value is JsonRecord {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parse an optional array of non-empty strings.
+ *
+ * @param value - Candidate array value
+ * @returns Normalized string array or undefined
+ */
+function parseStringArray(value: unknown): readonly string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+
+	const parsed = value
+		.filter((item): item is string => typeof item === "string")
+		.map((item) => item.trim())
+		.filter((item) => item.length > 0);
+
+	return parsed.length > 0 ? parsed : undefined;
+}
+
+/**
+ * Parse extension relationship metadata.
+ *
+ * @param value - Candidate relationships value
+ * @returns Parsed relationships array or undefined
+ */
+function parseRelationships(value: unknown): readonly TallowExtensionRelationship[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+
+	const parsed = value
+		.map((item) => {
+			if (typeof item === "string") {
+				const name = item.trim();
+				return name ? { name } : null;
+			}
+			if (!isJsonRecord(item) || typeof item.name !== "string") return null;
+
+			const name = item.name.trim();
+			if (!name) return null;
+
+			const kind = typeof item.kind === "string" ? item.kind : undefined;
+			const reason = typeof item.reason === "string" ? item.reason : undefined;
+
+			return {
+				kind,
+				name,
+				reason,
+			};
+		})
+		.filter((item): item is TallowExtensionRelationship => item !== null);
+
+	return parsed.length > 0 ? parsed : undefined;
+}
+
+/**
+ * Parse capability metadata from an extension manifest.
+ *
+ * @param root - Parsed manifest object
+ * @returns Parsed capabilities object or undefined
+ */
+function parseCapabilities(root: JsonRecord): TallowExtensionCapabilities | undefined {
+	const capabilitiesRoot = isJsonRecord(root.capabilities) ? root.capabilities : root;
+	const commands = parseStringArray(capabilitiesRoot.commands);
+	const events = parseStringArray(capabilitiesRoot.events);
+	const tools = parseStringArray(capabilitiesRoot.tools);
+
+	if (!commands && !events && !tools) return undefined;
+
+	return {
+		commands,
+		events,
+		tools,
+	};
+}
+
+/**
+ * Parse permission surface metadata from an extension manifest.
+ *
+ * @param value - Candidate permissionSurface value
+ * @returns Parsed permission surface object or undefined
+ */
+function parsePermissionSurface(value: unknown): TallowExtensionPermissionSurface | undefined {
+	if (!isJsonRecord(value)) return undefined;
+
+	const filesystem =
+		value.filesystem === "none" || value.filesystem === "read" || value.filesystem === "write"
+			? value.filesystem
+			: undefined;
+	const network = typeof value.network === "boolean" ? value.network : undefined;
+	const shell = typeof value.shell === "boolean" ? value.shell : undefined;
+	const subprocess = typeof value.subprocess === "boolean" ? value.subprocess : undefined;
+
+	if (
+		filesystem === undefined &&
+		network === undefined &&
+		shell === undefined &&
+		subprocess === undefined
+	) {
+		return undefined;
+	}
+
+	return {
+		filesystem,
+		network,
+		shell,
+		subprocess,
+	};
+}
+
+/**
+ * Parse whenToUse metadata from an extension manifest.
+ *
+ * @param value - Candidate whenToUse value
+ * @returns Parsed whenToUse array or undefined
+ */
+function parseWhenToUse(value: unknown): readonly string[] | undefined {
+	if (typeof value === "string") {
+		const trimmed = value.trim();
+		return trimmed ? [trimmed] : undefined;
+	}
+	return parseStringArray(value);
+}
+
+/**
+ * Parse a Claude Code plugin manifest.
+ *
+ * @param value - Parsed JSON value
+ * @returns Claude manifest or null when invalid
+ */
+function parseClaudePluginManifest(value: unknown): ClaudePluginManifest | null {
+	if (!isJsonRecord(value) || typeof value.name !== "string") return null;
+
+	return {
+		author: isJsonRecord(value.author)
+			? {
+					email: typeof value.author.email === "string" ? value.author.email : undefined,
+					name: typeof value.author.name === "string" ? value.author.name : undefined,
+				}
+			: undefined,
+		description: typeof value.description === "string" ? value.description : undefined,
+		name: value.name,
+		version: typeof value.version === "string" ? value.version : undefined,
+	};
+}
+
+/**
+ * Parse a tallow extension manifest.
+ *
+ * @param value - Parsed JSON value
+ * @returns Tallow extension manifest or null when invalid
+ */
+function parseTallowExtensionManifest(value: unknown): TallowExtensionManifest | null {
+	if (!isJsonRecord(value) || typeof value.name !== "string") return null;
+
+	const name = value.name.trim();
+	if (!name) return null;
+
+	return {
+		capabilities: parseCapabilities(value),
+		category: typeof value.category === "string" ? value.category : undefined,
+		description: typeof value.description === "string" ? value.description : undefined,
+		files: parseStringArray(value.files),
+		name,
+		permissionSurface: parsePermissionSurface(value.permissionSurface),
+		relationships: parseRelationships(value.relationships),
+		tags: parseStringArray(value.tags),
+		version: typeof value.version === "string" ? value.version : undefined,
+		whenToUse: parseWhenToUse(value.whenToUse),
+	};
+}
+
 /**
  * Read the manifest from a plugin directory.
  *
@@ -726,11 +934,11 @@ export function readPluginManifest(
 		switch (format) {
 			case "claude-code": {
 				const content = readFileSync(join(pluginPath, ".claude-plugin", "plugin.json"), "utf-8");
-				return JSON.parse(content) as ClaudePluginManifest;
+				return parseClaudePluginManifest(JSON.parse(content));
 			}
 			case "tallow-extension": {
 				const content = readFileSync(join(pluginPath, "extension.json"), "utf-8");
-				return JSON.parse(content) as TallowExtensionManifest;
+				return parseTallowExtensionManifest(JSON.parse(content));
 			}
 			default:
 				return null;

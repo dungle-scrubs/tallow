@@ -56,7 +56,10 @@ export {
 	refreshPlugin,
 	resolvePlugin,
 	resolvePlugins,
+	type TallowExtensionCapabilities,
 	type TallowExtensionManifest,
+	type TallowExtensionPermissionSurface,
+	type TallowExtensionRelationship,
 } from "./plugins.js";
 export {
 	createRuntimePathProvider,
@@ -64,7 +67,17 @@ export {
 	type RuntimeHomeResolver,
 	type RuntimePathProvider,
 } from "./runtime-path-provider.js";
-export { createTallowSession, type TallowSession, type TallowSessionOptions } from "./sdk.js";
+export {
+	type BundledExtensionCatalogEntry,
+	createTallowSession,
+	type ExtensionSelectorResolution,
+	getBundledExtensionCatalog,
+	parseToolFlag,
+	resolveExtensionSelector,
+	resolveExtensionSelectors,
+	type TallowSession,
+	type TallowSessionOptions,
+} from "./sdk.js";
 export { createSessionWithId, findSessionById } from "./session-utils.js";
 
 // ── Re-exports from pi (convenience) ─────────────────────────────────────────

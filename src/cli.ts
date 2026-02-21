@@ -41,7 +41,14 @@ import {
 	SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { Command, Option } from "commander";
-import { createTallowSession, parseToolFlag, type TallowSessionOptions } from "./sdk.js";
+import {
+	type BundledExtensionCatalogEntry,
+	createTallowSession,
+	getBundledExtensionCatalog,
+	parseToolFlag,
+	resolveExtensionSelectors,
+	type TallowSessionOptions,
+} from "./sdk.js";
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -92,7 +99,8 @@ program
 		"--disallowedTools <rules...>",
 		'Permission deny rules in Tool(specifier) format (e.g. "Bash(ssh *)" "WebFetch")'
 	)
-	.option("-e, --extension <path...>", "Additional extension paths")
+	.option("-e, --extension <selector...>", "Extension selectors (bundled IDs or filesystem paths)")
+	.option("--extensions-only", "Load only extensions from explicit --extension selectors")
 	.option(
 		"--plugin-dir <path...>",
 		"Load plugins from local directories (Claude Code or tallow format)"
@@ -124,6 +132,15 @@ program
 		await import("./install.js");
 	});
 
+program
+	.command("extensions")
+	.description("List bundled extensions, or show details for a single extension ID")
+	.argument("[id]", "Bundled extension ID")
+	.option("--json", "Output machine-readable JSON")
+	.action((id: string | undefined, options: { json?: boolean }) => {
+		runExtensionsCommand(id, options);
+	});
+
 program.parse();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -142,6 +159,7 @@ async function run(opts: {
 	disallowedTools?: string[];
 	extension?: string[];
 	extensions?: boolean;
+	extensionsOnly?: boolean;
 	forkSession?: string;
 	pluginDir?: string[];
 	home?: boolean;
@@ -217,9 +235,28 @@ async function run(opts: {
 		}
 	}
 
+	if (opts.extensions === false && opts.extensionsOnly) {
+		console.error("Error: --no-extensions cannot be combined with --extensions-only.");
+		process.exit(1);
+	}
+
+	let resolvedExtensionPaths: string[] = [];
+	try {
+		resolvedExtensionPaths = resolveExtensionSelectors(opts.extension, { cwd: process.cwd() });
+	} catch (error) {
+		console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+		process.exit(1);
+	}
+
+	if (opts.extensionsOnly && resolvedExtensionPaths.length === 0) {
+		console.error("Error: --extensions-only requires at least one --extension selector.");
+		process.exit(1);
+	}
+
 	const sessionOpts: TallowSessionOptions = {
-		additionalExtensions: opts.extension,
+		additionalExtensions: resolvedExtensionPaths.length > 0 ? resolvedExtensionPaths : undefined,
 		// apiKey resolved from TALLOW_API_KEY env var inside createTallowSession
+		extensionsOnly: opts.extensionsOnly,
 		modelId,
 		noBundledExtensions: opts.extensions === false,
 		noBundledSkills: opts.extensions === false,
@@ -383,6 +420,139 @@ async function run(opts: {
 		default:
 			console.error(`Unknown mode: ${opts.mode}`);
 			process.exit(1);
+	}
+}
+
+/**
+ * Handle `tallow extensions` command output.
+ *
+ * @param id - Optional bundled extension ID
+ * @param options - Command output options
+ * @returns Nothing
+ */
+function runExtensionsCommand(id: string | undefined, options: { json?: boolean }): void {
+	const catalog = getBundledExtensionCatalog();
+
+	if (id) {
+		const entry = catalog.find((item) => item.id === id);
+		if (!entry) {
+			console.error(`Error: Unknown extension ID: ${id}. Run \`tallow extensions\` for all IDs.`);
+			process.exit(1);
+		}
+
+		if (options.json) {
+			console.log(JSON.stringify(entry, null, 2));
+			return;
+		}
+
+		printExtensionDetails(entry);
+		return;
+	}
+
+	if (options.json) {
+		console.log(JSON.stringify(catalog, null, 2));
+		return;
+	}
+
+	printExtensionCatalog(catalog);
+}
+
+/**
+ * Print the bundled extension catalog in a compact human format.
+ *
+ * @param catalog - Bundled extension catalog entries
+ * @returns Nothing
+ */
+function printExtensionCatalog(catalog: readonly BundledExtensionCatalogEntry[]): void {
+	if (catalog.length === 0) {
+		console.log("No bundled extensions found.");
+		return;
+	}
+
+	const idWidth = Math.max("ID".length, ...catalog.map((entry) => entry.id.length));
+	const categoryWidth = Math.max(
+		"CATEGORY".length,
+		...catalog.map((entry) => entry.category?.length ?? 1)
+	);
+
+	console.log(`Bundled extensions (${catalog.length}):`);
+	console.log(`${"ID".padEnd(idWidth)}  ${"CATEGORY".padEnd(categoryWidth)}  DESCRIPTION`);
+	console.log(`${"-".repeat(idWidth)}  ${"-".repeat(categoryWidth)}  -----------`);
+	for (const entry of catalog) {
+		const category = entry.category ?? "-";
+		const description = entry.description ?? "";
+		console.log(`${entry.id.padEnd(idWidth)}  ${category.padEnd(categoryWidth)}  ${description}`);
+	}
+	console.log("\nUse `tallow extensions <id>` for manifest details.");
+}
+
+/**
+ * Print a single extension entry with full manifest details.
+ *
+ * @param entry - Catalog entry to render
+ * @returns Nothing
+ */
+function printExtensionDetails(entry: BundledExtensionCatalogEntry): void {
+	console.log(entry.id);
+	console.log(`Path: ${entry.path}`);
+
+	if (!entry.manifest) {
+		console.log("Manifest: missing or invalid extension.json");
+		return;
+	}
+
+	if (entry.manifest.version) {
+		console.log(`Version: ${entry.manifest.version}`);
+	}
+	if (entry.manifest.category) {
+		console.log(`Category: ${entry.manifest.category}`);
+	}
+	if (entry.manifest.description) {
+		console.log(`Description: ${entry.manifest.description}`);
+	}
+	if (entry.manifest.tags && entry.manifest.tags.length > 0) {
+		console.log(`Tags: ${entry.manifest.tags.join(", ")}`);
+	}
+	if (entry.manifest.whenToUse && entry.manifest.whenToUse.length > 0) {
+		console.log("When to use:");
+		for (const item of entry.manifest.whenToUse) {
+			console.log(`  - ${item}`);
+		}
+	}
+	if (entry.manifest.capabilities) {
+		const { commands, events, tools } = entry.manifest.capabilities;
+		if (tools && tools.length > 0) {
+			console.log(`Capabilities.tools: ${tools.join(", ")}`);
+		}
+		if (commands && commands.length > 0) {
+			console.log(`Capabilities.commands: ${commands.join(", ")}`);
+		}
+		if (events && events.length > 0) {
+			console.log(`Capabilities.events: ${events.join(", ")}`);
+		}
+	}
+	if (entry.manifest.relationships && entry.manifest.relationships.length > 0) {
+		console.log("Relationships:");
+		for (const rel of entry.manifest.relationships) {
+			const kind = rel.kind ? ` (${rel.kind})` : "";
+			const reason = rel.reason ? ` — ${rel.reason}` : "";
+			console.log(`  - ${rel.name}${kind}${reason}`);
+		}
+	}
+	if (entry.manifest.permissionSurface) {
+		const { filesystem, network, shell, subprocess } = entry.manifest.permissionSurface;
+		if (filesystem !== undefined) {
+			console.log(`Permission filesystem: ${filesystem}`);
+		}
+		if (shell !== undefined) {
+			console.log(`Permission shell: ${shell}`);
+		}
+		if (network !== undefined) {
+			console.log(`Permission network: ${network}`);
+		}
+		if (subprocess !== undefined) {
+			console.log(`Permission subprocess: ${String(subprocess)}`);
+		}
 	}
 }
 
