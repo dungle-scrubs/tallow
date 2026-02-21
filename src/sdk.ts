@@ -39,6 +39,7 @@ import {
 	trustProject,
 	untrustProject,
 } from "./project-trust.js";
+import { buildProjectTrustBannerPayload } from "./project-trust-banner.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 
@@ -746,54 +747,6 @@ function discoverExtensionDirs(baseDir: string): string[] {
 }
 
 /**
- * Wrap multiline text in a simple box so high-signal warnings stand out in the UI.
- *
- * @param lines - Lines to render inside the box
- * @returns Boxed message string
- */
-function formatMessageBox(lines: readonly string[]): string {
-	const safeLines = lines.length > 0 ? lines : [""];
-	const width = safeLines.reduce((max, line) => Math.max(max, line.length), 0);
-	const border = "─".repeat(width + 2);
-
-	return [
-		`┌${border}┐`,
-		...safeLines.map((line) => `│ ${line.padEnd(width, " ")} │`),
-		`└${border}┘`,
-	].join("\n");
-}
-
-/**
- * Build a trust warning banner shown when repo-controlled surfaces are blocked.
- *
- * @param trust - Current project trust context
- * @returns Human-readable trust warning message
- */
-function formatProjectTrustBanner(trust: ProjectTrustContext): string {
-	const statusLine =
-		trust.status === "stale_fingerprint"
-			? "Trust is stale: trust-scoped config changed since last approval."
-			: "This project is currently untrusted.";
-
-	return formatMessageBox([
-		"PROJECT TRUST REQUIRED",
-		"",
-		statusLine,
-		"",
-		"Blocked until trusted:",
-		"  plugins, hooks, mcpServers, packages, permissions, shellInterpolation,",
-		"  and project extensions.",
-		"",
-		"Trusting this folder means trusting the code and config inside it.",
-		"Those files can change agent behavior and execute commands.",
-		"",
-		"Use /trust-project to enable these surfaces for this folder.",
-		"Use /trust-status to inspect trust state or /untrust-project to revoke.",
-		"Trust auto-invalidates when trust-scoped project config changes.",
-	]);
-}
-
-/**
  * Register trust commands and startup banner for project trust UX.
  *
  * @param cwd - Session working directory
@@ -811,18 +764,14 @@ function createProjectTrustExtension(
 			if (!ctx.hasUI) return;
 			if (trustContext.status === "trusted") return;
 
-			const banner = formatProjectTrustBanner(trustContext);
-			ctx.ui.notify(banner, "warning");
+			const banner = buildProjectTrustBannerPayload(trustContext);
+			ctx.ui.notify(banner.content, "warning");
 			pi.sendMessage(
 				{
 					customType: "project-trust-banner",
-					content: banner,
+					content: banner.content,
 					display: true,
-					details: {
-						status: trustContext.status,
-						canonicalCwd: trustContext.canonicalCwd,
-						fingerprint: trustContext.fingerprint,
-					},
+					details: banner.details,
 				},
 				{ deliverAs: "nextTurn" }
 			);
