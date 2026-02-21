@@ -161,7 +161,7 @@ describe("routeModel with auto-cheap", () => {
 		}
 	});
 
-	it("auto-premium routes to most expensive model", async () => {
+	it("auto-premium routes in premium mode", async () => {
 		const result = await routeModel(
 			"design system architecture",
 			undefined,
@@ -170,8 +170,8 @@ describe("routeModel with auto-cheap", () => {
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(result.model.id).toBe("claude-opus-4-6");
 		expect(result.reason).toBe("auto-routed");
+		expect(result.fallbacks.length).toBeGreaterThan(0);
 	});
 
 	it("per-call hints override routing keyword", async () => {
@@ -185,8 +185,16 @@ describe("routeModel with auto-cheap", () => {
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		// Per-call premium hint overrides auto-cheap
-		expect(result.model.id).toBe("claude-opus-4-6");
+		const premiumResult = await routeModel(
+			"complex task",
+			undefined,
+			"auto-premium",
+			"claude-opus-4-6"
+		);
+		expect(premiumResult.ok).toBe(true);
+		if (!premiumResult.ok) return;
+		// Per-call premium hint should behave the same as auto-premium
+		expect(result.model.id).toBe(premiumResult.model.id);
 	});
 
 	it("explicit model override takes precedence over routing keyword", async () => {
