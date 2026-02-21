@@ -17,9 +17,13 @@ import {
 	startLegacyInteropBridge,
 } from "../../_shared/interop-events.js";
 import {
+	formatIdentityText,
+	formatPresentationText,
+	type PresentationRole,
+} from "../../tool-display/index.js";
+import {
 	type AgentActivity,
 	type AgentIdentity,
-	agentColor,
 	classifyAgent,
 	refineAgentIdentityAsync,
 	summarizeToolCall,
@@ -41,7 +45,7 @@ import {
 	type TasksState,
 	type TeamWidgetView,
 } from "../state/index.js";
-import { colorToAnsi, mergeSideBySide } from "../ui/index.js";
+import { mergeSideBySide } from "../ui/index.js";
 
 // ── Module-level mutable singletons ──────────────────────────────────────────
 // These live outside the closure so they survive extension reloads.
@@ -113,6 +117,27 @@ export function registerTasksExtension(
 	subagentEventsCleanup = undefined;
 
 	/**
+	 * Apply shared semantic presentation styling for task-widget fragments.
+	 * @param ctx - Extension context containing the active theme
+	 * @param role - Semantic role for hierarchy styling
+	 * @param text - Raw text fragment
+	 * @returns Styled text fragment
+	 */
+	function formatWidgetRole(ctx: ExtensionContext, role: PresentationRole, text: string): string {
+		return formatPresentationText(ctx.ui.theme, role, text);
+	}
+
+	/**
+	 * Format an identity token with deterministic shared colors.
+	 * @param identity - Identity seed (without @ prefix)
+	 * @param highlighted - Whether to apply bold emphasis
+	 * @returns Styled identity token
+	 */
+	function formatWidgetIdentity(identity: string, highlighted = true): string {
+		return formatIdentityText(`@${identity}`, identity, highlighted);
+	}
+
+	/**
 	 * Render task list lines (left column in side-by-side mode)
 	 */
 	function renderTaskLines(ctx: ExtensionContext, maxTitleLen: number): string[] {
@@ -123,14 +148,14 @@ export function registerTasksExtension(
 		const maxVisible = Math.min(10, state.tasks.length);
 		const visibleTasks = state.tasks.slice(0, maxVisible);
 
-		lines.push(ctx.ui.theme.fg("accent", `Tasks (${completed}/${state.tasks.length})`));
+		lines.push(formatWidgetRole(ctx, "title", `Tasks (${completed}/${state.tasks.length})`));
 
 		for (let i = 0; i < visibleTasks.length; i++) {
 			const task = visibleTasks[i];
 			const isLast = i === visibleTasks.length - 1 && state.tasks.length <= maxVisible;
 			const treeChar = isLast ? "└─" : "├─";
 			let icon: string;
-			let textStyle: (s: string) => string;
+			let textStyle: (value: string) => string;
 
 			// Check if a running agent is actively working on this task.
 			// No owner = main agent is working on it (always active while in_progress).
@@ -146,112 +171,154 @@ export function registerTasksExtension(
 
 			switch (task.status) {
 				case "completed":
-					icon = ctx.ui.theme.fg("success", getIcon("success"));
-					textStyle = (s) => ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(s));
+					icon = formatWidgetRole(ctx, "status_success", getIcon("success"));
+					textStyle = (value) => formatWidgetRole(ctx, "meta", ctx.ui.theme.strikethrough(value));
 					break;
 				case "in_progress":
-					// Only animate spinner when a real agent is working; otherwise static indicator
+					// Only animate spinner when a real agent is working; otherwise static indicator.
 					if (hasActiveAgent) {
-						icon = ctx.ui.theme.fg("warning", SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length]);
+						icon = formatWidgetRole(
+							ctx,
+							"status_warning",
+							SPINNER_FRAMES[spinnerFrame % SPINNER_FRAMES.length]
+						);
 					} else {
-						icon = ctx.ui.theme.fg("warning", getIcon("in_progress"));
+						icon = formatWidgetRole(ctx, "status_warning", getIcon("in_progress"));
 					}
-					textStyle = (s) => ctx.ui.theme.fg("accent", s);
+					textStyle = (value) => formatWidgetRole(ctx, "action", value);
 					break;
 				default:
 					icon = getIcon("pending");
-					textStyle = (s) => s;
+					textStyle = (value) => formatWidgetRole(ctx, "action", value);
 			}
 
 			const label =
 				task.status === "in_progress" && task.activeForm ? task.activeForm : task.subject;
 
-			// Owner attribution: show (@name) in agent's color
 			const ownerSuffix = task.owner
-				? ` \x1b[38;5;${colorToAnsi(agentColor(task.owner))}m(@${task.owner})\x1b[0m`
+				? ` ${formatWidgetRole(ctx, "meta", "(")}${formatWidgetIdentity(task.owner)}${formatWidgetRole(ctx, "meta", ")")}`
 				: "";
 			const ownerVisibleLen = task.owner ? 4 + task.owner.length : 0; // " (@name)"
-			const titleBudget = Math.max(10, maxTitleLen - ownerVisibleLen);
+			const titleBudget = Math.max(10, maxTitleLen - ownerVisibleLen - task.id.length - 2);
 			const title =
 				label.length > titleBudget ? `${label.substring(0, titleBudget - 3)}...` : label;
-			lines.push(`${ctx.ui.theme.fg("muted", treeChar)} ${icon} ${textStyle(title)}${ownerSuffix}`);
+			lines.push(
+				`${formatWidgetRole(ctx, "meta", treeChar)} ${icon} ${formatWidgetRole(ctx, "meta", `#${task.id}`)} ${textStyle(title)}${ownerSuffix}`
+			);
 
-			// Blocked-by tree: show blocking agent names as sub-tree
+			// Blocked-by tree: show blocking agent names as a subdued sub-tree.
 			if (task.blockedBy.length > 0 && task.status !== "completed") {
 				const contChar = isLast ? " " : "│";
 				const blockerNames = task.blockedBy
 					.map((depId) => {
 						const dep = state.tasks.find((t) => t.id === depId);
-						return dep?.owner ? `@${dep.owner}` : `#${depId}`;
+						return dep?.owner
+							? formatWidgetIdentity(dep.owner, false)
+							: formatWidgetRole(ctx, "meta", `#${depId}`);
 					})
-					.map((name) => {
-						const raw = name.startsWith("@") ? name.slice(1) : "";
-						return raw
-							? `\x1b[38;5;${colorToAnsi(agentColor(raw))}m${name}\x1b[0m`
-							: ctx.ui.theme.fg("muted", name);
-					});
+					.join(formatWidgetRole(ctx, "meta", ", "));
 				lines.push(
-					`${ctx.ui.theme.fg("muted", `${contChar}  └─`)} ${ctx.ui.theme.fg("muted", "blocked by")} ${blockerNames.join(ctx.ui.theme.fg("muted", ", "))}`
+					`${formatWidgetRole(ctx, "meta", `${contChar}  └─`)} ${formatWidgetRole(ctx, "hint", "blocked by")} ${blockerNames}`
 				);
 			}
 		}
 
 		if (state.tasks.length > maxVisible) {
-			lines.push(ctx.ui.theme.fg("muted", `└─ ... and ${state.tasks.length - maxVisible} more`));
+			lines.push(
+				formatWidgetRole(ctx, "hint", `└─ ... and ${state.tasks.length - maxVisible} more`)
+			);
 		}
 
 		return lines;
 	}
 
 	/**
-	 * Render subagent lines (right column in side-by-side mode, or below tasks in stacked mode)
+	 * Render subagent lines (right column in side-by-side mode, or below tasks in stacked mode).
 	 */
 	function renderSubagentLines(
 		ctx: ExtensionContext,
 		spinner: string,
-		fgRunning: Array<{ id: string; agent: string; task: string; startTime: number }>,
-		bgRunning: Array<{ id: string; agent: string; task: string; startTime: number }>,
+		fgRunning: Array<{
+			id: string;
+			agent: string;
+			model?: string;
+			task: string;
+			startTime: number;
+		}>,
+		bgRunning: Array<{
+			id: string;
+			agent: string;
+			model?: string;
+			task: string;
+			startTime: number;
+		}>,
 		maxTaskPreviewLen: number,
 		_standalone: boolean
 	): string[] {
 		const allRunning = [...fgRunning, ...bgRunning];
 		if (allRunning.length === 0) return [];
 
+		/**
+		 * Build a compact model label for widget rows.
+		 * @param model - Optional model identifier
+		 * @returns Styled model label, or empty string
+		 */
+		function getModelLabel(model: string | undefined): string {
+			if (!model) return "";
+			const modelId = model.split("/").at(-1) ?? model;
+			const shortModel = modelId.length > 18 ? `${modelId.slice(0, 15)}...` : modelId;
+			return ` ${formatWidgetRole(ctx, "hint", `(${shortModel})`)}`;
+		}
+
+		const models = [...new Set(allRunning.map((sub) => sub.model).filter(Boolean))];
+		const modelSummary =
+			models.length > 0
+				? formatWidgetRole(
+						ctx,
+						"meta",
+						` · ${models
+							.map((model) => {
+								const modelId = String(model).split("/").at(-1) ?? String(model);
+								return modelId.length > 12 ? `${modelId.slice(0, 9)}...` : modelId;
+							})
+							.join(", ")}`
+					)
+				: "";
+
 		const lines: string[] = [];
 		const count = allRunning.length;
-		lines.push(ctx.ui.theme.fg("accent", `${count} agent${count > 1 ? "s" : ""} launched`));
+		lines.push(`${formatWidgetRole(ctx, "title", `Subagents (${count} running)`)}${modelSummary}`);
 
 		for (let i = 0; i < allRunning.length; i++) {
 			const sub = allRunning[i];
 			const isLast = i === allRunning.length - 1;
 			const treeChar = isLast ? "└─" : "├─";
 			const contChar = isLast ? " " : "│";
-			const color = agentColor(sub.agent);
 			const ms = Date.now() - sub.startTime;
 			const secs = Math.floor(ms / 1000);
 			const duration = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
 
-			// Line 1: @display-name (TypeLabel) with colored indicator
+			// Line 1: spinner + @display-name + model + role + duration.
 			const identity = agentIdentities.get(sub.id);
 			const displayName = identity?.displayName ?? sub.agent;
 			const typeSuffix = identity?.typeLabel
-				? ` ${ctx.ui.theme.fg("muted", `(${identity.typeLabel})`)}`
+				? ` ${formatWidgetRole(ctx, "meta", `(${identity.typeLabel})`)}`
 				: "";
 			lines.push(
-				`${ctx.ui.theme.fg("muted", treeChar)} \x1b[38;5;${colorToAnsi(color)}m${spinner}\x1b[0m \x1b[1;38;5;${colorToAnsi(color)}m@${displayName}\x1b[0m${typeSuffix} ${ctx.ui.theme.fg("muted", `· ${duration}`)}`
+				`${formatWidgetRole(ctx, "meta", treeChar)} ${formatWidgetRole(ctx, "status_warning", spinner)} ${formatWidgetIdentity(displayName)}${getModelLabel(sub.model)}${typeSuffix} ${formatWidgetRole(ctx, "meta", `· ${duration}`)}`
 			);
 
-			// Line 2: task description (collapse newlines to single line)
+			// Line 2: assigned action preview.
 			const flatTask = sub.task.replace(/\n+/g, " ").replace(/\s{2,}/g, " ");
 			const taskPreview =
 				flatTask.length > maxTaskPreviewLen
 					? `${flatTask.slice(0, maxTaskPreviewLen - 3)}...`
 					: flatTask;
 			lines.push(
-				`${ctx.ui.theme.fg("muted", `${contChar}  `)} ${ctx.ui.theme.fg("dim", taskPreview)}`
+				`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, "action", taskPreview)}`
 			);
 
-			// Line 3: live activity (if available)
+			// Line 3: live tool chatter (subdued vs identity + action context).
 			const activity = agentActivity.get(sub.id);
 			if (activity) {
 				const activityText =
@@ -259,7 +326,7 @@ export function registerTasksExtension(
 						? `${activity.summary.slice(0, maxTaskPreviewLen - 3)}...`
 						: activity.summary;
 				lines.push(
-					`${ctx.ui.theme.fg("muted", `${contChar}  `)} ${ctx.ui.theme.fg("warning", activityText)}`
+					`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, "process_output", activityText)}`
 				);
 			}
 		}
@@ -278,7 +345,7 @@ export function registerTasksExtension(
 		if (running.length === 0) return [];
 
 		const lines: string[] = [];
-		lines.push(ctx.ui.theme.fg("accent", `Background Tasks (${running.length})`));
+		lines.push(formatWidgetRole(ctx, "title", `Background Tasks (${running.length})`));
 
 		for (let i = 0; i < Math.min(running.length, 5); i++) {
 			const task = running[i];
@@ -287,16 +354,16 @@ export function registerTasksExtension(
 			const ms = Date.now() - task.startTime;
 			const secs = Math.floor(ms / 1000);
 			const duration = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
-			// Collapse newlines and truncate to max length
+			// Collapse newlines and truncate to max length.
 			const flatCmd = task.command.replace(/\n/g, " ↵ ");
 			const cmd = flatCmd.length > maxCmdLen ? `${flatCmd.slice(0, maxCmdLen - 3)}...` : flatCmd;
 			lines.push(
-				`${ctx.ui.theme.fg("muted", treeChar)} ${ctx.ui.theme.fg("accent", getIcon("in_progress"))} ${cmd} ${ctx.ui.theme.fg("muted", `(${duration})`)}`
+				`${formatWidgetRole(ctx, "meta", treeChar)} ${formatWidgetRole(ctx, "status_warning", getIcon("in_progress"))} ${formatWidgetRole(ctx, "process_output", cmd)} ${formatWidgetRole(ctx, "meta", `(${duration})`)}`
 			);
 		}
 
 		if (running.length > 5) {
-			lines.push(ctx.ui.theme.fg("muted", `└─ ... and ${running.length - 5} more`));
+			lines.push(formatWidgetRole(ctx, "hint", `└─ ... and ${running.length - 5} more`));
 		}
 
 		return lines;
@@ -330,23 +397,25 @@ export function registerTasksExtension(
 			// Header: "Team: name (2/3 tasks)" or "Team: name ✓ 3/3 complete"
 			if (allDone) {
 				lines.push(
-					ctx.ui.theme.fg("success", `Team: ${team.name}`) +
-						ctx.ui.theme.fg("success", ` ${getIcon("success")} ${total}/${total} complete`)
+					formatWidgetRole(ctx, "status_success", `Team: ${team.name}`) +
+						formatWidgetRole(
+							ctx,
+							"status_success",
+							` ${getIcon("success")} ${total}/${total} complete`
+						)
 				);
 			} else {
 				lines.push(
-					ctx.ui.theme.fg("accent", `Team: ${team.name}`) +
-						ctx.ui.theme.fg("muted", ` (${completed}/${total} tasks)`)
+					formatWidgetRole(ctx, "title", `Team: ${team.name}`) +
+						formatWidgetRole(ctx, "meta", ` (${completed}/${total} tasks)`)
 				);
 			}
 
-			// Teammates with their current task
+			// Teammates with their current task.
 			for (let i = 0; i < team.teammates.length; i++) {
 				const mate = team.teammates[i];
 				const isLast = i === team.teammates.length - 1;
 				const treeChar = isLast ? "└─" : "├─";
-				const color = agentColor(mate.name);
-				const colorCode = colorToAnsi(color);
 
 				const isFinished =
 					allDone &&
@@ -355,23 +424,23 @@ export function registerTasksExtension(
 					Math.max(0, Math.floor(mate.completedTaskCount ?? 0)) > 0;
 				const statusIcon =
 					mate.status === "working"
-						? `\x1b[38;5;${colorCode}m${spinner}\x1b[0m`
+						? formatWidgetRole(ctx, "status_warning", spinner)
 						: isFinished
-							? ctx.ui.theme.fg("success", getIcon("success"))
+							? formatWidgetRole(ctx, "status_success", getIcon("success"))
 							: mate.status === "idle"
-								? ctx.ui.theme.fg("muted", getIcon("blocked"))
-								: ctx.ui.theme.fg("muted", "⏹");
+								? formatWidgetRole(ctx, "meta", getIcon("blocked"))
+								: formatWidgetRole(ctx, "meta", "⏹");
 
 				const taskSuffix = mate.currentTask
-					? ` ${ctx.ui.theme.fg("dim", "→")} ${ctx.ui.theme.fg("dim", mate.currentTask.length > maxLen ? `${mate.currentTask.slice(0, maxLen - 3)}...` : mate.currentTask)}`
+					? ` ${formatWidgetRole(ctx, "meta", "→")} ${formatWidgetRole(ctx, "action", mate.currentTask.length > maxLen ? `${mate.currentTask.slice(0, maxLen - 3)}...` : mate.currentTask)}`
 					: isFinished
-						? ctx.ui.theme.fg("success", " (done)")
+						? formatWidgetRole(ctx, "status_success", " (done)")
 						: mate.status === "idle"
-							? ctx.ui.theme.fg("dim", " (idle)")
+							? formatWidgetRole(ctx, "hint", " (idle)")
 							: "";
 
 				lines.push(
-					`${ctx.ui.theme.fg("muted", treeChar)} ${statusIcon} \x1b[1;38;5;${colorCode}m@${mate.name}\x1b[0m${taskSuffix}`
+					`${formatWidgetRole(ctx, "meta", treeChar)} ${statusIcon} ${formatWidgetIdentity(mate.name)}${taskSuffix}`
 				);
 			}
 		}
@@ -418,13 +487,11 @@ export function registerTasksExtension(
 		}
 
 		const totalCount = allAgents.length + teamMates.length;
-		const coloredNames = [...agentNames]
-			.map((name) => `\x1b[1;38;5;${colorToAnsi(agentColor(name))}m@${name}\x1b[0m`)
-			.join(" ");
+		const coloredNames = [...agentNames].map((name) => formatWidgetIdentity(name)).join(" ");
 
 		ctx.ui.setStatus(
 			"agents",
-			`${coloredNames} · ${totalCount} teammate${totalCount > 1 ? "s" : ""}`
+			`${coloredNames} ${formatWidgetRole(ctx, "meta", "·")} ${formatWidgetRole(ctx, "hint", `${totalCount} teammate${totalCount > 1 ? "s" : ""}`)}`
 		);
 	}
 

@@ -6,23 +6,25 @@
  */
 
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import {
+	IDENTITY_COLOR_NAMES,
+	type IdentityColorName,
+	identityColorToAnsi,
+} from "../../tool-display/index.js";
 
 /**
- * Maps color names to ANSI 256-color codes.
+ * Maps identity color names to ANSI 256-color codes.
  *
- * @param color - Color name string (green, cyan, magenta, yellow, blue, red)
+ * Unknown colors fall back to the shared default (`green`).
+ *
+ * @param color - Deterministic identity color
  * @returns ANSI 256-color code number
  */
 export function colorToAnsi(color: string): number {
-	const map: Record<string, number> = {
-		green: 78,
-		cyan: 80,
-		magenta: 170,
-		yellow: 220,
-		blue: 75,
-		red: 203,
-	};
-	return map[color] ?? 78;
+	if ((IDENTITY_COLOR_NAMES as readonly string[]).includes(color)) {
+		return identityColorToAnsi(color as IdentityColorName);
+	}
+	return identityColorToAnsi("green");
 }
 
 /**

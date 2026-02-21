@@ -65,6 +65,7 @@ const TeamTeammateViewSchema = Type.Object({
 const InteropSubagentViewSchema = Type.Object({
 	agent: Type.String(),
 	id: Type.String(),
+	model: Type.Optional(Type.String()),
 	startTime: Type.Number(),
 	status: SubagentStatusSchema,
 	task: Type.String(),
