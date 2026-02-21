@@ -10,6 +10,12 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import {
+	formatIdentityText,
+	formatPresentationText,
+	getIdentityAnsiColor,
+	type PresentationRole,
+} from "../tool-display/index.js";
 
 /** Minimum width for the left tree pane. */
 export const DASHBOARD_LEFT_MIN_WIDTH = 24;
@@ -27,8 +33,6 @@ export const DASHBOARD_MAX_OUTPUT_CHARS = 2400;
 export const DASHBOARD_OUTPUT_PREVIEW_LINES = 5;
 /** Palette used for deterministic per-team colors in the left tree. */
 const DASHBOARD_TEAM_COLORS = [110, 109, 108, 103, 144, 138, 66, 72] as const;
-/** Footer-aligned member colors (matches tasks agent palette ordering). */
-const DASHBOARD_MEMBER_COLORS = [78, 80, 170, 220, 75, 203] as const;
 /** Fallback spinner frames for working-agent indicators. */
 const DASHBOARD_FALLBACK_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 /** Mouse wheel line delta for dashboard card scrolling. */
@@ -748,7 +752,7 @@ export class TeamDashboardEditor extends CustomEditor {
 		height: number
 	): string[] {
 		const t = this.colorTheme;
-		const treeLines: string[] = [t.fg("muted", "Teams")];
+		const treeLines: string[] = [formatDashboardRole(t, "title", "Teams")];
 		const selectedNode = nodes[this.selectedNodeIndex];
 		let selectedTreeLine = 0;
 
@@ -756,7 +760,7 @@ export class TeamDashboardEditor extends CustomEditor {
 			const team = snapshot.teams[teamIndex];
 			if (!team) continue;
 			const teamSelected = selectedNode?.kind === "team" && selectedNode.teamIndex === teamIndex;
-			const teamLine = `${team.name} ${t.fg("muted", `(${team.teammates.length})`)}`;
+			const teamLine = `${team.name} ${formatDashboardRole(t, "meta", `(${team.teammates.length})`)}`;
 			treeLines.push(colorByTeam(teamLine, team.name, teamSelected));
 			if (teamSelected) selectedTreeLine = treeLines.length - 1;
 
@@ -769,9 +773,11 @@ export class TeamDashboardEditor extends CustomEditor {
 					selectedNode.teammateIndex === teammateIndex;
 				const inbox =
 					teammate.unreadInboxCount > 0
-						? ` ${t.fg("warning", `✉${teammate.unreadInboxCount}`)}`
+						? ` ${formatDashboardRole(t, "status_warning", `✉${teammate.unreadInboxCount}`)}`
 						: "";
-				const referee = isRefereeRole(teammate.role) ? ` ${t.fg("warning", "⚖")}` : "";
+				const referee = isRefereeRole(teammate.role)
+					? ` ${formatDashboardRole(t, "hint", "⚖")}`
+					: "";
 				const memberName = colorMemberText(`@${teammate.name}`, teammate.name, teammateSelected);
 				const activityGlyph = pickActiveGlyph(teammate.name, teammate.status, this.spinnerFrames);
 				const displayStatus = getDisplayStatus(teammate, team.isComplete);
@@ -781,7 +787,7 @@ export class TeamDashboardEditor extends CustomEditor {
 				treeLines.push(teammateLine);
 				if (teammateSelected) selectedTreeLine = treeLines.length - 1;
 
-				treeLines.push(t.fg("muted", `    └─ ${shortModelId(teammate.model)}`));
+				treeLines.push(formatDashboardRole(t, "meta", `    └─ ${shortModelId(teammate.model)}`));
 			}
 		}
 
@@ -809,13 +815,13 @@ export class TeamDashboardEditor extends CustomEditor {
 	 */
 	private renderSidebarFeed(team: TeamDashboardTeam | undefined, width: number): string[] {
 		const t = this.colorTheme;
-		const lines: string[] = [t.fg("muted", "Feed")];
+		const lines: string[] = [formatDashboardRole(t, "title", "Feed")];
 		if (!team) {
-			lines.push(t.fg("muted", "(no active team)"));
+			lines.push(formatDashboardRole(t, "hint", "(no active team)"));
 			return lines;
 		}
 		if (team.feed.length === 0) {
-			lines.push(t.fg("muted", "(no feed events yet)"));
+			lines.push(formatDashboardRole(t, "hint", "(no feed events yet)"));
 			return lines;
 		}
 
@@ -823,17 +829,24 @@ export class TeamDashboardEditor extends CustomEditor {
 		const contentIndentWidth = visibleWidth(contentIndent);
 		const safeWidth = Math.max(1, width);
 		for (const entry of team.feed) {
-			const timestamp = t.fg("dim", formatFeedTimestamp(entry.timestamp));
-			const toLabel = entry.to === "all" ? "all" : `@${entry.to}`;
+			const timestamp = formatDashboardRole(t, "meta", formatFeedTimestamp(entry.timestamp));
+			const toLabel =
+				entry.to === "all"
+					? formatDashboardRole(t, "action", "all")
+					: colorMemberText(`@${entry.to}`, entry.to, false);
 			const from = colorMemberText(`@${entry.from}`, entry.from, false);
-			const heading = `${t.fg("muted", "•")} ${timestamp} ${from}${t.fg("muted", ` → ${toLabel}`)}`;
+			const heading = `${formatDashboardRole(t, "meta", "•")} ${timestamp} ${from}${formatDashboardRole(t, "meta", " → ")}${toLabel}`;
 			lines.push(truncateToWidth(heading, safeWidth, ""));
 
 			const contentWidth = Math.max(6, safeWidth - contentIndentWidth);
 			const wrappedContent = wrapPlainText(entry.content, contentWidth);
 			for (const line of wrappedContent) {
 				lines.push(
-					truncateToWidth(`${t.fg("muted", contentIndent)}${t.fg("muted", line)}`, safeWidth, "")
+					truncateToWidth(
+						`${formatDashboardRole(t, "meta", contentIndent)}${formatDashboardRole(t, "process_output", line)}`,
+						safeWidth,
+						""
+					)
 				);
 			}
 		}
@@ -861,9 +874,13 @@ export class TeamDashboardEditor extends CustomEditor {
 			this.cardScrollOffset = 0;
 			return padLines(
 				[
-					"Team dashboard",
-					t.fg("dim", "No active teams."),
-					t.fg("dim", "Create a team with team_create and spawn teammates with team_spawn."),
+					formatDashboardRole(t, "title", "Team dashboard"),
+					formatDashboardRole(t, "hint", "No active teams."),
+					formatDashboardRole(
+						t,
+						"hint",
+						"Create a team with team_create and spawn teammates with team_spawn."
+					),
 				],
 				height
 			);
@@ -871,8 +888,11 @@ export class TeamDashboardEditor extends CustomEditor {
 
 		const modelSummary = summarizeTeamModels(team);
 		const heading =
-			`Team: ${team.name} (${team.teammates.length} teammate${team.teammates.length === 1 ? "" : "s"})` +
-			(modelSummary.length > 0 ? ` · ${modelSummary}` : "");
+			`${formatDashboardRole(t, "title", "Team:")} ${colorByTeam(team.name, team.name, true)} ` +
+			`${formatDashboardRole(t, "meta", `(${team.teammates.length} teammate${team.teammates.length === 1 ? "" : "s"})`)}` +
+			(modelSummary.length > 0
+				? `${formatDashboardRole(t, "meta", " · ")}${formatDashboardRole(t, "hint", modelSummary)}`
+				: "");
 		const cardsHeight = Math.max(1, height - 1);
 		this.cardViewportHeight = cardsHeight;
 
@@ -885,13 +905,11 @@ export class TeamDashboardEditor extends CustomEditor {
 			this.cardScrollOffset + cardsHeight
 		);
 		const scrollLabel =
-			this.maxScrollOffset > 0 ? ` ${this.cardScrollOffset}/${this.maxScrollOffset}` : "";
+			this.maxScrollOffset > 0
+				? formatDashboardRole(t, "meta", ` ${this.cardScrollOffset}/${this.maxScrollOffset}`)
+				: "";
 
-		const headingLine = truncateToWidth(
-			`${colorByTeam(heading, team.name, true)}${t.fg("dim", scrollLabel)}`,
-			Math.max(1, width),
-			""
-		);
+		const headingLine = truncateToWidth(`${heading}${scrollLabel}`, Math.max(1, width), "");
 		return padLines([headingLine, ...visibleCardLines], height);
 	}
 
@@ -968,21 +986,31 @@ export class TeamDashboardEditor extends CustomEditor {
 		const outputLines = summarizeOutput(teammate.output, DASHBOARD_OUTPUT_PREVIEW_LINES);
 		const inboxLabel =
 			teammate.unreadInboxCount > 0
-				? `${t.fg("warning", "✉")} ${teammate.unreadInboxCount} unread`
-				: t.fg("muted", "inbox clear");
+				? `${formatDashboardRole(t, "status_warning", "✉")} ${formatDashboardRole(t, "action", `${teammate.unreadInboxCount} unread`)}`
+				: formatDashboardRole(t, "hint", "inbox clear");
 		const displayStatus = getDisplayStatus(teammate, teamIsComplete);
+		const taskValue = teammate.currentTask
+			? formatDashboardRole(t, "action", teammate.currentTask)
+			: formatDashboardRole(t, "meta", "—");
+		const toolValue = teammate.lastTool
+			? formatDashboardRole(t, "action", teammate.lastTool)
+			: formatDashboardRole(t, "meta", "—");
 		const body = [
 			formatLabeledValue("status", formatStatusLabel(displayStatus, t), t),
-			formatLabeledValue("role", teammate.role, t),
-			formatLabeledValue("model", teammate.model, t),
-			formatLabeledValue("task", teammate.currentTask ?? "—", t),
-			formatLabeledValue("tool", teammate.lastTool ?? "—", t),
+			formatLabeledValue("role", formatDashboardRole(t, "meta", teammate.role), t),
+			formatLabeledValue("model", formatDashboardRole(t, "meta", teammate.model), t),
+			formatLabeledValue("task", taskValue, t),
+			formatLabeledValue("tool", toolValue, t),
 			formatLabeledValue("inbox", inboxLabel, t),
 			formatLabeledValue("tokens", formatTokenMeters(teammate, t), t),
-			formatLabeledValue("updated", formatRelativeTimestamp(teammate.updatedAt), t),
+			formatLabeledValue(
+				"updated",
+				formatDashboardRole(t, "hint", formatRelativeTimestamp(teammate.updatedAt)),
+				t
+			),
 			"",
-			t.fg("muted", "output"),
-			...outputLines.map((line) => `  ${t.fg("muted", line)}`),
+			formatDashboardRole(t, "meta", "output"),
+			...outputLines.map((line) => `  ${formatDashboardRole(t, "process_output", line)}`),
 		];
 
 		const box = new BorderedBox(body, {
@@ -1004,7 +1032,7 @@ export class TeamDashboardEditor extends CustomEditor {
 		const hints =
 			"Esc cancel/close · ↑/↓ j/k select · Tab/Shift+Tab team · PgUp/PgDn Ctrl+U/Ctrl+D scroll · mouse wheel scroll";
 		return padToWidth(
-			truncateToWidth(this.colorTheme.fg("dim", hints), Math.max(1, width), ""),
+			truncateToWidth(formatDashboardRole(this.colorTheme, "hint", hints), Math.max(1, width), ""),
 			Math.max(1, width)
 		);
 	}
@@ -1024,6 +1052,28 @@ export class TeamDashboardEditor extends CustomEditor {
 	private getHalfPageScrollStep(): number {
 		return Math.max(1, Math.floor(this.cardViewportHeight / 2));
 	}
+}
+
+/**
+ * Apply shared semantic role styling for dashboard text fragments.
+ * @param theme - Active UI theme
+ * @param role - Semantic presentation role
+ * @param text - Raw text fragment
+ * @returns Styled text fragment
+ */
+function formatDashboardRole(theme: Theme, role: PresentationRole, text: string): string {
+	return formatPresentationText(theme, role, text);
+}
+
+/**
+ * Apply deterministic identity styling for teammate names and identity tokens.
+ * @param text - Raw token text (for example, "@alice")
+ * @param memberName - Identity seed used for deterministic color selection
+ * @param highlighted - Whether to apply bold emphasis
+ * @returns ANSI-styled identity token
+ */
+function formatDashboardIdentity(text: string, memberName: string, highlighted: boolean): string {
+	return formatIdentityText(text, memberName, highlighted);
 }
 
 /**
@@ -1074,15 +1124,15 @@ function getDisplayStatus(
 function formatStatusLabel(status: TeamDashboardDisplayStatus, theme: Theme): string {
 	switch (status) {
 		case "working":
-			return theme.fg("warning", "working");
+			return formatDashboardRole(theme, "status_warning", "working");
 		case "idle":
-			return theme.fg("success", "idle");
+			return formatDashboardRole(theme, "status_success", "idle");
 		case "finished":
-			return theme.fg("success", `${getIcon("success")} finished`);
+			return formatDashboardRole(theme, "status_success", `${getIcon("success")} finished`);
 		case "error":
-			return theme.fg("error", "error");
+			return formatDashboardRole(theme, "status_error", "error");
 		case "shutdown":
-			return theme.fg("dim", "shutdown");
+			return formatDashboardRole(theme, "hint", "shutdown");
 	}
 }
 
@@ -1095,15 +1145,15 @@ function formatStatusLabel(status: TeamDashboardDisplayStatus, theme: Theme): st
 function formatStatusBadge(status: TeamDashboardDisplayStatus, theme: Theme): string {
 	switch (status) {
 		case "working":
-			return theme.fg("warning", "●");
+			return formatDashboardRole(theme, "status_warning", "●");
 		case "idle":
-			return theme.fg("success", "○");
+			return formatDashboardRole(theme, "status_success", "○");
 		case "finished":
-			return theme.fg("success", getIcon("success"));
+			return formatDashboardRole(theme, "status_success", getIcon("success"));
 		case "error":
-			return theme.fg("error", "×");
+			return formatDashboardRole(theme, "status_error", "×");
 		case "shutdown":
-			return theme.fg("dim", "■");
+			return formatDashboardRole(theme, "hint", "■");
 	}
 }
 
@@ -1152,7 +1202,9 @@ function pickActiveGlyph(
 	const source = frames.length > 0 ? frames : DASHBOARD_FALLBACK_FRAMES;
 	const offset = hashString(teammateName);
 	const index = Math.abs(Math.floor(Date.now() / 220) + offset) % source.length;
-	return source[index] ?? "•";
+	const glyph = source[index] ?? "•";
+	const color = getIdentityAnsiColor(teammateName);
+	return `\x1b[38;5;${color}m${glyph}\x1b[39m`;
 }
 
 /**
@@ -1178,7 +1230,7 @@ function colorByTeam(text: string, teamName: string, highlighted = false): strin
  * @returns Styled label/value line
  */
 function formatLabeledValue(label: string, value: string, theme: Theme): string {
-	return `${theme.fg("muted", `${label}:`)} ${value}`;
+	return `${formatDashboardRole(theme, "meta", `${label}:`)} ${value}`;
 }
 
 /**
@@ -1192,13 +1244,13 @@ function formatTokenMeters(teammate: TeamDashboardTeammate, theme: Theme): strin
 	const outputTotal = formatCompactTokens(teammate.totalOutputTokens);
 	const inputLive =
 		teammate.liveInputTokens > 0
-			? theme.fg("dim", ` (+${formatCompactTokens(teammate.liveInputTokens)})`)
+			? formatDashboardRole(theme, "hint", ` (+${formatCompactTokens(teammate.liveInputTokens)})`)
 			: "";
 	const outputLive =
 		teammate.liveOutputTokens > 0
-			? theme.fg("dim", ` (+${formatCompactTokens(teammate.liveOutputTokens)})`)
+			? formatDashboardRole(theme, "hint", ` (+${formatCompactTokens(teammate.liveOutputTokens)})`)
 			: "";
-	return `${theme.fg("accent", "↑")}${inputTotal}${inputLive} ${theme.fg("muted", "↓")}${outputTotal}${outputLive}`;
+	return `${formatDashboardRole(theme, "action", "↑")}${inputTotal}${inputLive} ${formatDashboardRole(theme, "meta", "↓")}${outputTotal}${outputLive}`;
 }
 
 /**
@@ -1228,15 +1280,6 @@ function hashString(input: string): number {
 }
 
 /**
- * Get a deterministic member color code for an agent name.
- * @param memberName - Teammate name
- * @returns ANSI 256-color code
- */
-function memberColorCode(memberName: string): number {
-	return DASHBOARD_MEMBER_COLORS[Math.abs(hashString(memberName)) % DASHBOARD_MEMBER_COLORS.length];
-}
-
-/**
  * Apply deterministic teammate coloring for names and badges.
  * @param text - Text to style
  * @param memberName - Teammate name used for color hashing
@@ -1244,10 +1287,7 @@ function memberColorCode(memberName: string): number {
  * @returns Styled text
  */
 function colorMemberText(text: string, memberName: string, highlighted: boolean): string {
-	const color = memberColorCode(memberName);
-	const prefix = highlighted ? `\x1b[1;38;5;${color}m` : `\x1b[38;5;${color}m`;
-	const suffix = highlighted ? "\x1b[22;39m" : "\x1b[39m";
-	return `${prefix}${text}${suffix}`;
+	return formatDashboardIdentity(text, memberName, highlighted);
 }
 
 /**
