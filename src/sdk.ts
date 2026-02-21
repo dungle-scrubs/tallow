@@ -26,7 +26,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { setNextImageFilePath } from "@mariozechner/pi-tui";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { resolveRuntimeApiKeyFromEnv, SecureAuthStorage } from "./auth-hardening.js";
+import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
@@ -281,10 +281,10 @@ export async function createTallowSession(
 	// ── Auth & Models ────────────────────────────────────────────────────────
 
 	const authPath = join(TALLOW_HOME, "auth.json");
-	const authStorage = new SecureAuthStorage(authPath);
-	if (authStorage.migration.migratedProviders.length > 0) {
+	const { authStorage, migration } = createSecureAuthStorage(authPath);
+	if (migration.migratedProviders.length > 0) {
 		console.error(
-			`\x1b[33m🔐 Migrated ${authStorage.migration.migratedProviders.length} auth credential(s) to secure references: ${authStorage.migration.migratedProviders.join(", ")}\x1b[0m`
+			`\x1b[33m🔐 Migrated ${migration.migratedProviders.length} auth credential(s) to secure references: ${migration.migratedProviders.join(", ")}\x1b[0m`
 		);
 	}
 	const modelRegistry = new ModelRegistry(authStorage, join(TALLOW_HOME, "models.json"));

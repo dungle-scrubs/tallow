@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ApiKeySecretStore, SecureAuthStorage } from "../auth-hardening.js";
+import { type ApiKeySecretStore, createSecureAuthStorage } from "../auth-hardening.js";
 
 let tempDir: string | undefined;
 
@@ -38,7 +38,7 @@ afterEach(() => {
 	tempDir = undefined;
 });
 
-describe("SecureAuthStorage", () => {
+describe("createSecureAuthStorage", () => {
 	test("persists api_key credentials as store-backed references", () => {
 		const dir = makeTempDir();
 		const authPath = join(dir, "auth.json");
@@ -50,8 +50,8 @@ describe("SecureAuthStorage", () => {
 			},
 		};
 
-		const auth = new SecureAuthStorage(authPath, { secretStore: fakeStore });
-		auth.set("anthropic", { type: "api_key", key: "sk-ant-secret" });
+		const { authStorage } = createSecureAuthStorage(authPath, { secretStore: fakeStore });
+		authStorage.set("anthropic", { type: "api_key", key: "sk-ant-secret" });
 
 		expect(calls).toEqual([{ provider: "anthropic", apiKey: "sk-ant-secret" }]);
 		const data = readAuth(authPath);
@@ -67,8 +67,8 @@ describe("SecureAuthStorage", () => {
 			},
 		};
 
-		const auth = new SecureAuthStorage(authPath, { secretStore: fakeStore });
-		auth.set("anthropic", {
+		const { authStorage } = createSecureAuthStorage(authPath, { secretStore: fakeStore });
+		authStorage.set("anthropic", {
 			type: "api_key",
 			key: "op://Services/Anthropic/api-key",
 		});
@@ -83,13 +83,13 @@ describe("SecureAuthStorage", () => {
 	test("leaves oauth credentials untouched", () => {
 		const dir = makeTempDir();
 		const authPath = join(dir, "auth.json");
-		const auth = new SecureAuthStorage(authPath, {
+		const { authStorage } = createSecureAuthStorage(authPath, {
 			secretStore: {
 				store: () => "!unused",
 			},
 		});
 
-		auth.set("github", {
+		authStorage.set("github", {
 			type: "oauth",
 			access_token: "tok",
 			refresh_token: "refresh",
