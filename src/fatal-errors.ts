@@ -71,7 +71,7 @@ function displayFatalBanner(type: string, error: Error): void {
 		...(stackLine ? [`  \x1b[2m${stackLine}\x1b[0m`] : []),
 		"",
 		`  \x1b[2mCrash log: ${CRASH_LOG}\x1b[0m`,
-		`  \x1b[2mRun /diag-on for detailed debug logs\x1b[0m`,
+		`  \x1b[2mRun /diagnostics-on for detailed debug logs\x1b[0m`,
 		"",
 	];
 
