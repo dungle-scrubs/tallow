@@ -51,6 +51,8 @@ describe("loadRoutingConfig", () => {
 		expect(config.enabled).toBe(true);
 		expect(config.primaryType).toBe("code");
 		expect(config.costPreference).toBe("balanced");
+		expect(config.mode).toBe("balanced");
+		expect(config.signalsMaxAgeMs).toBe(1_800_000);
 	});
 
 	it("reads global routing config from ~/.tallow/settings.json", () => {
@@ -58,7 +60,11 @@ describe("loadRoutingConfig", () => {
 			routing: {
 				costPreference: "eco",
 				enabled: false,
+				matrixOverridesPath: "~/.tallow/model-matrix-overrides.json",
+				mode: "quality",
 				primaryType: "text",
+				signalsMaxAgeMs: 120_000,
+				signalsSnapshotPath: "~/.tallow/routing-signals.json",
 			},
 		});
 
@@ -66,7 +72,11 @@ describe("loadRoutingConfig", () => {
 		expect(config).toEqual({
 			costPreference: "eco",
 			enabled: false,
+			matrixOverridesPath: "~/.tallow/model-matrix-overrides.json",
+			mode: "quality",
 			primaryType: "text",
+			signalsMaxAgeMs: 120_000,
+			signalsSnapshotPath: "~/.tallow/routing-signals.json",
 		});
 	});
 
@@ -75,14 +85,22 @@ describe("loadRoutingConfig", () => {
 			routing: {
 				costPreference: "eco",
 				enabled: false,
+				matrixOverridesPath: "~/.tallow/global-overrides.json",
+				mode: "cheap",
 				primaryType: "text",
+				signalsMaxAgeMs: 120_000,
+				signalsSnapshotPath: "~/.tallow/global-signals.json",
 			},
 		});
 		writeJson(join(testCwd, ".tallow", "settings.json"), {
 			routing: {
 				costPreference: "premium",
 				enabled: true,
+				matrixOverridesPath: "./.tallow/project-overrides.json",
+				mode: "reliable",
 				primaryType: "vision",
+				signalsMaxAgeMs: 300_000,
+				signalsSnapshotPath: "./.tallow/project-signals.json",
 			},
 		});
 
@@ -90,7 +108,11 @@ describe("loadRoutingConfig", () => {
 		expect(config).toEqual({
 			costPreference: "premium",
 			enabled: true,
+			matrixOverridesPath: "./.tallow/project-overrides.json",
+			mode: "reliable",
 			primaryType: "vision",
+			signalsMaxAgeMs: 300_000,
+			signalsSnapshotPath: "./.tallow/project-signals.json",
 		});
 	});
 
@@ -99,7 +121,11 @@ describe("loadRoutingConfig", () => {
 			routing: {
 				costPreference: "max-performance",
 				enabled: "yes",
+				matrixOverridesPath: 42,
+				mode: "turbo",
 				primaryType: "audio",
+				signalsMaxAgeMs: -10,
+				signalsSnapshotPath: ["bad"],
 			},
 		});
 
@@ -107,7 +133,9 @@ describe("loadRoutingConfig", () => {
 		expect(config).toEqual({
 			costPreference: "balanced",
 			enabled: true,
+			mode: "balanced",
 			primaryType: "code",
+			signalsMaxAgeMs: 1_800_000,
 		});
 	});
 
@@ -116,14 +144,22 @@ describe("loadRoutingConfig", () => {
 			routing: {
 				costPreference: "eco",
 				enabled: false,
+				matrixOverridesPath: "~/.tallow/global-overrides.json",
+				mode: "fast",
 				primaryType: "text",
+				signalsMaxAgeMs: 240_000,
+				signalsSnapshotPath: "~/.tallow/global-signals.json",
 			},
 		});
 		writeJson(join(testCwd, ".tallow", "settings.json"), {
 			routing: {
 				costPreference: "invalid",
 				enabled: "invalid",
+				matrixOverridesPath: { invalid: true },
+				mode: "invalid",
 				primaryType: "invalid",
+				signalsMaxAgeMs: 0,
+				signalsSnapshotPath: true,
 			},
 		});
 
@@ -131,7 +167,32 @@ describe("loadRoutingConfig", () => {
 		expect(config).toEqual({
 			costPreference: "eco",
 			enabled: false,
+			matrixOverridesPath: "~/.tallow/global-overrides.json",
+			mode: "fast",
 			primaryType: "text",
+			signalsMaxAgeMs: 240_000,
+			signalsSnapshotPath: "~/.tallow/global-signals.json",
+		});
+	});
+
+	it("keeps valid modePolicyOverrides map", () => {
+		writeJson(join(testCwd, ".tallow", "settings.json"), {
+			routing: {
+				modePolicyOverrides: {
+					reliable: {
+						complexityBias: 1,
+						constraints: { minUptime: 0.99 },
+					},
+				},
+			},
+		});
+
+		const config = loadRoutingConfig(testCwd);
+		expect(config.modePolicyOverrides).toEqual({
+			reliable: {
+				complexityBias: 1,
+				constraints: { minUptime: 0.99 },
+			},
 		});
 	});
 });
