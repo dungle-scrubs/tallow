@@ -32,13 +32,58 @@ When you start typing (4+ characters), the extension calls a fast,
 cheap model to suggest a completion. The suggestion appears as ghost
 text after your cursor — hit Tab to accept.
 
+:::note
+This is the **LLM-powered** autocomplete for natural language
+suggestions. For structural autocomplete (slash commands, file paths,
+`@file` references), see the
+[Autocomplete guide](/guides/autocomplete/).
+:::
+
+### Model selection
+
 The default model is **Groq Llama 3.1 8B** (`$0.05/$0.08` per million
 tokens). At ~50 tokens per suggestion, 100 suggestions cost ~$0.004.
 
+If the configured model isn't available, the extension walks a
+fallback chain until it finds one with a valid API key:
+
+1. `groq/llama-3.1-8b-instant` (default)
+2. `anthropic/claude-haiku-4-5`
+3. `anthropic/claude-3-5-haiku-latest`
+4. `openai/gpt-4o-mini`
+5. Cheapest available model in your registry (sorted by input cost)
+
+The model is resolved once per session on the first autocomplete
+trigger. If no model in the chain has auth configured, inline
+autocomplete silently disables itself.
+
+### What the model receives
+
+Each autocomplete call sends:
+
+- **System prompt** — instructs the model to act as an inline
+  autocomplete engine predicting how a developer will finish their
+  sentence. The model is told to reply with only the completion
+  text, not repeat the input or add formatting.
+- **Conversation context** — the last 6 user/assistant text
+  exchanges from the current session (up to 2,000 characters
+  total). Individual messages are capped at 500 characters. Tool
+  calls and tool results are excluded — only human-readable text
+  is included. This gives the model awareness of what you've been
+  working on so suggestions stay relevant.
+- **Partial input** — what you've typed so far, sent as the user
+  message.
+- **Parameters** — `maxTokens: 60`, `temperature: 0.3`. The
+  response is cleaned to the first line only.
+
+### Guardrails
+
 - Debounces at 600ms after you stop typing
 - Cancels in-flight requests on new keystrokes (AbortController)
-- Skips slash commands (handled by built-in autocomplete)
+- Skips slash commands (handled by
+  [structural autocomplete](/guides/autocomplete/#structural-autocomplete))
 - Capped at 200 calls per session as a cost guardrail
+- Suppressed while the agent is processing a turn
 
 ## Settings
 
