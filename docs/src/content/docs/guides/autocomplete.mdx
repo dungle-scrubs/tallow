@@ -1,0 +1,145 @@
+---
+title: Autocomplete
+description: How tallow's two autocomplete systems work — structural completions and LLM ghost text.
+---
+
+tallow has two independent autocomplete systems that work
+together in the editor input:
+
+| System | Trigger | What it does |
+|--------|---------|--------------|
+| **Structural** | `/`, `@`, file paths, Tab | Completes commands, file references, and paths deterministically |
+| **LLM ghost text** | Typing 4+ characters | Calls a fast model to predict how you'll finish your sentence |
+
+## Structural autocomplete
+
+Structural autocomplete is built into the TUI editor. It uses no
+LLM — completions come from the filesystem, registered commands,
+and fuzzy matching. Results appear in a dropdown menu.
+
+### Slash commands
+
+Type `/` at the start of a line to see all available commands.
+Keep typing to fuzzy-filter the list.
+
+```
+/rev       → matches /rewind, /reviewer
+/task      → matches /tasks
+```
+
+After selecting a command and pressing Space, some commands offer
+**argument completions** (for example, `/context-fork` suggests
+branch names).
+
+### `@file` references
+
+Type `@` followed by a filename to fuzzy-search your project.
+The search uses [`fd`](https://github.com/sharkdp/fd) under the
+hood — it's fast, respects `.gitignore`, and searches the full
+directory tree.
+
+```
+@login     → matches src/auth/login.ts, tests/auth/login.test.ts
+@pack      → matches package.json, packages/
+```
+
+Each suggestion shows:
+
+| Field | Content |
+|-------|---------|
+| **Label** | Filename (with trailing `/` for directories) |
+| **Description** | Relative path from project root |
+| **Value** | Full `@path` insertion text |
+
+Directories are sorted first. Filenames with spaces are
+automatically quoted (`@"path with spaces/file.ts"`).
+
+When you select a file, the
+[file-reference](/extensions/file-reference/) extension reads it
+and inlines the contents into your prompt.
+
+### File path completions
+
+Paths are completed via directory listing whenever the input
+contains path-like patterns:
+
+- `./src/` — relative paths
+- `~/` — home directory paths
+- `../` — parent directory paths
+- Any text containing `/`
+
+Press **Tab** to force file completion even when the input
+doesn't look like a path yet.
+
+### Keys
+
+| Key | Behavior |
+|-----|----------|
+| **Tab** | Accept selected completion / force file completions |
+| **↑ / ↓** | Navigate completion list |
+| **Escape** | Dismiss completions |
+| Typing | Filters the completion list |
+
+## LLM ghost text
+
+When you type 4 or more characters (and aren't typing a `/`
+command), tallow calls a fast, cheap model to suggest how you
+might finish your sentence. The suggestion appears as dim ghost
+text after your cursor.
+
+```
+fix the login bug on the  ← you typed this
+                          authentication page  ← ghost text
+```
+
+### Keys
+
+| Key | Behavior |
+|-----|----------|
+| **Tab** | Accept ghost text into the editor |
+| **Enter** (empty input) | Accept idle suggestion and submit |
+| **Escape** | Dismiss ghost text |
+| Any character | Dismiss ghost text, type normally |
+
+### Model and cost
+
+The default model is **Groq Llama 3.1 8B** at `$0.05 / $0.08`
+per million tokens. If it's unavailable, tallow falls back
+through a chain of cheap models. See the
+[prompt-suggestions extension](/extensions/prompt-suggestions/)
+for the full fallback chain, conversation context details, and
+configuration.
+
+Ghost text is capped at **200 API calls per session**. At ~50
+tokens per call, a full session of autocomplete costs roughly
+**$0.004**.
+
+### Idle suggestions
+
+When the editor is empty and the agent is idle, a random prompt
+suggestion appears as ghost text (no model call — these are
+picked from a curated template list). Press Enter to accept and
+submit, or start typing to dismiss.
+
+## Configuration
+
+All LLM autocomplete settings live in `~/.tallow/settings.json`:
+
+```json
+{
+  "prompt-suggestions.enabled": true,
+  "prompt-suggestions.autocomplete": true,
+  "prompt-suggestions.model": "groq/llama-3.1-8b-instant",
+  "prompt-suggestions.debounceMs": 600
+}
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `prompt-suggestions.enabled` | `true` | Enable/disable the entire extension (idle + LLM) |
+| `prompt-suggestions.autocomplete` | `true` | Enable/disable LLM autocomplete only |
+| `prompt-suggestions.model` | `groq/llama-3.1-8b-instant` | Model for autocomplete (`provider/model-id`) |
+| `prompt-suggestions.debounceMs` | `600` | Delay in ms before calling the model |
+
+Structural autocomplete has no configuration — it's always
+available.
