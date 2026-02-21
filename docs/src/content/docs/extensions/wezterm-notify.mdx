@@ -1,9 +1,9 @@
 ---
 title: wezterm-notify
-description: Signal agent turn status to WezTerm — enables tab spinner and done-color indicators.
+description: Signal agent working-session status to WezTerm — enables tab spinner and done-color indicators.
 ---
 
-Signals agent turn status to WezTerm via
+Signals agent working-session status to WezTerm via
 [OSC 1337 SetUserVar](https://wezfurlong.org/wezterm/shell-integration.html#user-vars)
 sequences. WezTerm Lua config reads `pi_status` from
 `pane:get_user_vars()` to show a spinner while the agent works
@@ -14,18 +14,20 @@ WezTerm.
 
 ## How it works
 
-The extension hooks four lifecycle events to write `pi_status`:
+The extension tracks an **agent-level working session** (start →
+finish), then emits coalesced `pi_status` transitions:
 
-| Event | pi_status value | Effect |
-|-------|----------------|--------|
-| `turn_start` | `working` | Tab shows spinner |
-| `turn_end` | `done` | Tab turns blue (if inactive) |
-| `input` | _(cleared)_ | Tab returns to normal |
-| `session_start` / `session_shutdown` | _(cleared)_ | Clean slate |
+| Lifecycle edge | pi_status value | Effect |
+|----------------|-----------------|--------|
+| `before_agent_start` / `agent_start` | `working` | Enter working once (duplicate starts are coalesced) |
+| `agent_end` | `done` | Inactive tab turns blue |
+| `input` while working | _(unchanged)_ | Avoids mid-run flicker |
+| `input` while idle, `session_start`, `session_shutdown` | _(cleared)_ | Reset to neutral |
 
-A `pi_heartbeat` variable fires every 500ms during a turn to
-trigger WezTerm's `update-right-status` event, which advances the
-spinner animation frame.
+Entering `working` emits an immediate `pi_heartbeat`, then pulses
+continue every 500ms while working to force WezTerm redraws.
+Spinner frames advance deterministically from those redraws, and
+only while work is active.
 
 ## WezTerm Lua setup
 
@@ -74,4 +76,4 @@ For the full integration picture, see the
 
 `wezterm-notify` enhances the pane control extension. Together
 they provide full WezTerm integration: pane/tab management plus
-visual turn status indicators.
+visual working-session indicators.
