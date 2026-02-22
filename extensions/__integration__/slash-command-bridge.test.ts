@@ -135,4 +135,32 @@ describe("slash-command-bridge integration", () => {
 		expect(toolResults).toHaveLength(1);
 		expect(toolResults[0]).toContain("compaction will begin");
 	});
+
+	it("model invokes release-memory successfully", async () => {
+		const toolResults: string[] = [];
+
+		const tracker: ExtensionFactory = (pi: ExtensionAPI): void => {
+			pi.on("tool_result", async (event) => {
+				if (event.toolName === "run_slash_command") {
+					const text = event.content.find((c) => c.type === "text");
+					if (text?.type === "text") toolResults.push(text.text);
+				}
+			});
+		};
+
+		runner = await createSessionRunner({
+			streamFn: createScriptedStreamFn([
+				{
+					toolCalls: [{ name: "run_slash_command", arguments: { command: "release-memory" } }],
+				},
+				{ text: "Memory release started" },
+			]),
+			extensionFactories: [slashCommandBridge, tracker],
+		});
+
+		await runner.run("Release memory for this session");
+
+		expect(toolResults).toHaveLength(1);
+		expect(toolResults[0]).toContain("memory release will begin");
+	});
 });

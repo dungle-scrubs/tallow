@@ -5,6 +5,7 @@
 	"whenToUse": "Use when the model should invoke slash commands through a tool.",
 	"capabilities": {
 		"tools": ["run_slash_command"],
+		"commands": ["release-memory"],
 		"events": ["agent_end", "before_agent_start", "session_before_switch"]
 	},
 	"permissionSurface": {
@@ -28,6 +29,10 @@
 		{
 			"type": "enhances",
 			"extension": "show-system-prompt"
+		},
+		{
+			"type": "enhances",
+			"extension": "session-memory"
 		}
 	]
 }

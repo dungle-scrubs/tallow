@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { ContextUsage, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
+import { MEMORY_RELEASE_EVENTS } from "../../_shared/memory-release-events.js";
 import slashCommandBridge from "../index.js";
 
 // ── Setup ────────────────────────────────────────────────────────────────────
@@ -17,6 +18,10 @@ let harness: ExtensionHarness;
 beforeEach(async () => {
 	harness = ExtensionHarness.create();
 	await harness.loadExtension(slashCommandBridge);
+	await harness.fireEvent("session_before_switch", {
+		type: "session_before_switch",
+		reason: "switch",
+	});
 });
 
 // ── Registration ─────────────────────────────────────────────────────────────
@@ -36,10 +41,15 @@ describe("registration", () => {
 		expect(tool?.description).toContain("show-system-prompt");
 		expect(tool?.description).toContain("context");
 		expect(tool?.description).toContain("compact");
+		expect(tool?.description).toContain("release-memory");
 	});
 
 	test("registers before_agent_start handler", () => {
 		expect(harness.handlers.has("before_agent_start")).toBe(true);
+	});
+
+	test("registers /release-memory command", () => {
+		expect(harness.commands.has("release-memory")).toBe(true);
 	});
 });
 
@@ -256,6 +266,138 @@ describe("compact", () => {
 	});
 });
 
+// ── Command execution: release-memory ───────────────────────────────────────
+
+describe("release-memory", () => {
+	test("returns message instructing model to finish response", async () => {
+		const result = await executeTool({ command: "release-memory" }, buildContext());
+
+		expect(result.isError).toBeUndefined();
+		const text = result.content[0];
+		if (text?.type === "text") {
+			expect(text.text).toContain("memory release will begin after this response");
+			expect(text.text).toContain("Do NOT call any more tools");
+			expect(text.text).toContain("/rewind");
+		}
+	});
+
+	test("agent_end triggers deferred compact then emits memory-release event", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const events: Array<Record<string, unknown>> = [];
+		harness.eventBus.on(MEMORY_RELEASE_EVENTS.completed, (payload) => {
+			events.push(payload as Record<string, unknown>);
+		});
+
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		await executeTool({ command: "release-memory" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		expect(compactOptions).toBeDefined();
+		expect(events).toHaveLength(0);
+
+		compactOptions?.onComplete?.();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]?.command).toBe("release-memory");
+		expect(events[0]?.source).toBe("run_slash_command");
+	});
+
+	test("blocks release-memory when another deferred command is pending", async () => {
+		const toolCtx = buildContext({ compact: () => {} });
+		await executeTool({ command: "compact" }, toolCtx);
+
+		const result = await executeTool({ command: "release-memory" }, toolCtx);
+
+		expect(result.isError).toBe(true);
+		const text = result.content[0];
+		if (text?.type === "text") {
+			expect(text.text).toContain("already pending");
+		}
+	});
+
+	test("session_before_switch clears pending release-memory", async () => {
+		let compactCalled = false;
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: () => {
+				compactCalled = true;
+			},
+		});
+
+		await executeTool({ command: "release-memory" }, toolCtx);
+
+		await harness.fireEvent("session_before_switch", {
+			type: "session_before_switch",
+			reason: "switch",
+		});
+
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		expect(compactCalled).toBe(false);
+	});
+});
+
+// ── Slash command: /release-memory ───────────────────────────────────────────
+
+describe("/release-memory command", () => {
+	test("runs compact immediately and emits memory-release completion event", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const events: Array<Record<string, unknown>> = [];
+		harness.eventBus.on(MEMORY_RELEASE_EVENTS.completed, (payload) => {
+			events.push(payload as Record<string, unknown>);
+		});
+		const command = harness.commands.get("release-memory");
+		if (!command) throw new Error("release-memory command not registered");
+
+		const ctx = buildContext({
+			hasUI: true,
+			ui: {
+				notify: () => {},
+				setStatus: () => {},
+				setWorkingMessage: () => {},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		await command.handler("", ctx as never);
+		expect(compactOptions).toBeDefined();
+		expect(events).toHaveLength(0);
+
+		compactOptions?.onComplete?.();
+		expect(events).toHaveLength(1);
+		expect(events[0]?.command).toBe("release-memory");
+	});
+
+	test("shows warning when command runs while session is busy", async () => {
+		const notifications: string[] = [];
+		const command = harness.commands.get("release-memory");
+		if (!command) throw new Error("release-memory command not registered");
+
+		const ctx = buildContext({
+			hasUI: true,
+			isIdle: () => false,
+			ui: {
+				notify: (message: string) => {
+					notifications.push(message);
+				},
+				setStatus: () => {},
+				setWorkingMessage: () => {},
+			} as ExtensionContext["ui"],
+		});
+
+		await command.handler("", ctx as never);
+		expect(notifications[0]).toContain("Cannot release memory while the session is still busy");
+	});
+});
+
 // ── Error handling ───────────────────────────────────────────────────────────
 
 describe("error handling", () => {
@@ -272,6 +414,7 @@ describe("error handling", () => {
 			expect(text.text).toContain("show-system-prompt");
 			expect(text.text).toContain("context");
 			expect(text.text).toContain("compact");
+			expect(text.text).toContain("release-memory");
 		}
 	});
 
@@ -330,6 +473,7 @@ describe("context injection", () => {
 		expect(result?.message.content).toContain("/show-system-prompt");
 		expect(result?.message.content).toContain("/context");
 		expect(result?.message.content).toContain("/compact");
+		expect(result?.message.content).toContain("/release-memory");
 	});
 });
 

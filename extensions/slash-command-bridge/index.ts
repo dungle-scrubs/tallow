@@ -9,17 +9,27 @@
  * registration, with auto-generated tool schemas and full command handler access.
  */
 
-import type { ContextUsage, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import {
+	createMemoryReleaseCompletedEvent,
+	MEMORY_RELEASE_EVENTS,
+} from "../_shared/memory-release-events.js";
+
+/** Deferred slash command waiting for the current turn to finish. */
+interface DeferredCommand {
+	readonly command: "compact" | "release-memory";
+	readonly customInstructions?: string;
+}
 
 /**
- * Deferred compact request — set by the tool handler, consumed by the
+ * Deferred command request — set by the tool handler, consumed by the
  * `agent_end` hook. Deferring avoids the spinner-hang bug where
  * `ctx.compact()` aborts the agent mid-tool-call, orphaning the tool
  * execution UI component. See plans 95 and 98 for full analysis.
  */
-let pendingCompact: { customInstructions?: string } | null = null;
+let pendingCommand: DeferredCommand | null = null;
 
 /**
  * Commands the model is allowed to invoke.
@@ -32,6 +42,7 @@ const ALLOWED_COMMANDS: ReadonlyMap<string, boolean> = new Map([
 	["show-system-prompt", true],
 	["context", true],
 	["compact", true],
+	["release-memory", true],
 ]);
 
 /** Human-readable descriptions for each bridged command. */
@@ -39,6 +50,10 @@ const COMMAND_DESCRIPTIONS: ReadonlyMap<string, string> = new Map([
 	["show-system-prompt", "Returns the current system prompt text"],
 	["context", "Returns context window usage breakdown (tokens used/remaining per category)"],
 	["compact", "Triggers session compaction to free up context window space"],
+	[
+		"release-memory",
+		"Compacts session context, then signals extensions to release rebuildable in-memory caches",
+	],
 ]);
 
 /**
@@ -57,6 +72,42 @@ function formatContextUsage(usage: ContextUsage): string {
 	];
 
 	return lines.join("\n");
+}
+
+/**
+ * Attempt to queue a deferred command for agent_end execution.
+ *
+ * @param next - Command to queue
+ * @returns Error text when a command is already pending; otherwise undefined
+ */
+function queueDeferredCommand(next: DeferredCommand): string | undefined {
+	if (!pendingCommand) {
+		pendingCommand = next;
+		return undefined;
+	}
+
+	return (
+		`Cannot queue "/${next.command}" while "/${pendingCommand.command}" is already pending. ` +
+		"Finish the current response so the queued operation can run first."
+	);
+}
+
+/**
+ * Emit a lifecycle event after memory release completes.
+ *
+ * @param pi - Extension API event bus
+ * @param ctx - Extension context for warning notifications
+ * @returns void
+ */
+function emitMemoryReleaseCompleted(pi: ExtensionAPI, ctx: ExtensionContext): void {
+	try {
+		pi.events.emit(MEMORY_RELEASE_EVENTS.completed, createMemoryReleaseCompletedEvent());
+	} catch (_error) {
+		ctx.ui?.notify?.(
+			"Memory release completed, but extension cache cleanup handlers failed.",
+			"warning"
+		);
+	}
 }
 
 /**
@@ -81,7 +132,7 @@ ${commandList}
 WHEN TO USE:
 - Need to check the system prompt for debugging
 - Need to see context window usage before deciding to compact
-- Need to compact the session to free up context space
+- Need to compact or release memory to free up context space
 
 WHEN NOT TO USE:
 - The user already ran the command themselves
@@ -192,7 +243,17 @@ WHEN NOT TO USE:
 					// Don't call ctx.compact() here — it aborts the agent mid-tool-call,
 					// orphaning the tool execution spinner (plan 95/98). Defer to the
 					// agent_end hook so the tool completes normally first.
-					pendingCompact = { customInstructions: undefined };
+					const queueError = queueDeferredCommand({
+						command: "compact",
+						customInstructions: undefined,
+					});
+					if (queueError) {
+						return {
+							content: [{ type: "text", text: queueError }],
+							details: { command, error: "already_pending", pending: pendingCommand?.command },
+							isError: true,
+						};
+					}
 
 					return {
 						content: [
@@ -208,6 +269,34 @@ WHEN NOT TO USE:
 					};
 				}
 
+				case "release-memory": {
+					const queueError = queueDeferredCommand({
+						command: "release-memory",
+						customInstructions: undefined,
+					});
+					if (queueError) {
+						return {
+							content: [{ type: "text", text: queueError }],
+							details: { command, error: "already_pending", pending: pendingCommand?.command },
+							isError: true,
+						};
+					}
+
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									"Session memory release will begin after this response completes. " +
+									"tallow will compact context, then ask extensions to release " +
+									"rebuildable caches. Do NOT call any more tools — finish your " +
+									"response so memory release can start. If needed, use /rewind to recover.",
+							},
+						],
+						details: { command },
+					};
+				}
+
 				default: {
 					// Exhaustiveness guard — should never reach here
 					return {
@@ -217,6 +306,44 @@ WHEN NOT TO USE:
 					};
 				}
 			}
+		},
+	});
+
+	pi.registerCommand("release-memory", {
+		description: "Compact context and ask extensions to release rebuildable in-memory caches",
+		handler: async (_args, ctx) => {
+			if (!ctx.isIdle() || ctx.hasPendingMessages()) {
+				ctx.ui.notify(
+					"Cannot release memory while the session is still busy. Wait for the current turn to finish.",
+					"warning"
+				);
+				return;
+			}
+			if (pendingCommand) {
+				ctx.ui.notify(
+					`Cannot run /release-memory while /${pendingCommand.command} is pending.`,
+					"warning"
+				);
+				return;
+			}
+
+			ctx.ui.setWorkingMessage("Releasing session memory…");
+			ctx.ui.setStatus("release-memory", "🧹 releasing memory");
+			ctx.compact({
+				onComplete: () => {
+					emitMemoryReleaseCompleted(pi, ctx);
+					ctx.ui.setWorkingMessage();
+					ctx.ui.setStatus("release-memory", undefined);
+					ctx.ui.notify(
+						"Memory release completed. Use /rewind if you need to recover recent context.",
+						"info"
+					);
+				},
+				onError: () => {
+					ctx.ui.setWorkingMessage();
+					ctx.ui.setStatus("release-memory", undefined);
+				},
+			});
 		},
 	});
 
@@ -238,43 +365,54 @@ WHEN NOT TO USE:
 		};
 	});
 
-	// ── Deferred compact ─────────────────────────────────────────
+	// ── Deferred compact/release ────────────────────────────────
 
 	/**
-	 * Fires compact after the agent finishes its turn. This avoids the
-	 * spinner-hang caused by aborting the agent mid-tool-execution.
-	 * The tool sets `pendingCompact`, then agent_end picks it up.
+	 * Fires deferred compact/release after the agent finishes its turn.
+	 * This avoids the spinner-hang caused by aborting the agent
+	 * mid-tool-execution. The tool sets `pendingCommand`, then agent_end
+	 * picks it up.
 	 */
 	pi.on("agent_end", (_event, ctx) => {
-		if (!pendingCompact) return;
+		if (!pendingCommand) return;
 
-		const options = pendingCompact;
-		pendingCompact = null;
+		const command = pendingCommand;
+		pendingCommand = null;
 
-		// Show explicit UI feedback while compaction runs. Without this,
-		// users only see the deferred tool message and no live progress signal.
-		ctx.ui?.setWorkingMessage?.("Compacting session…");
-		ctx.ui?.setStatus?.("compact", "🧹 compacting");
+		const isReleaseMemory = command.command === "release-memory";
+		const statusKey = isReleaseMemory ? "release-memory" : "compact";
+
+		ctx.ui?.setWorkingMessage?.(
+			isReleaseMemory ? "Releasing session memory…" : "Compacting session…"
+		);
+		ctx.ui?.setStatus?.(statusKey, isReleaseMemory ? "🧹 releasing memory" : "🧹 compacting");
 
 		ctx.compact({
-			customInstructions: options.customInstructions,
+			customInstructions: command.customInstructions,
 			onComplete: () => {
+				if (isReleaseMemory) {
+					emitMemoryReleaseCompleted(pi, ctx);
+					ctx.ui?.notify?.(
+						"Memory release completed. Use /rewind if you need to recover recent context.",
+						"info"
+					);
+				}
 				ctx.ui?.setWorkingMessage?.();
-				ctx.ui?.setStatus?.("compact", undefined);
+				ctx.ui?.setStatus?.(statusKey, undefined);
 				// Framework's executeCompaction rebuilds the UI and
 				// shows the compaction summary. No extra action needed.
 			},
 			onError: () => {
 				ctx.ui?.setWorkingMessage?.();
-				ctx.ui?.setStatus?.("compact", undefined);
+				ctx.ui?.setStatus?.(statusKey, undefined);
 				// Framework's executeCompaction handles error/cancel
 				// display. No extra handling needed.
 			},
 		});
 	});
 
-	/** Clear pending compact if the session switches before the turn ends. */
+	/** Clear pending deferred command if the session switches before the turn ends. */
 	pi.on("session_before_switch", () => {
-		pendingCompact = null;
+		pendingCommand = null;
 	});
 }

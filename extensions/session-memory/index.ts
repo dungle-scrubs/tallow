@@ -19,6 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { MEMORY_RELEASE_EVENTS } from "../_shared/memory-release-events.js";
 import { buildCuratorPrompt } from "./curator-prompt.js";
 import { SessionIndexer } from "./indexer.js";
 import type { SearchResult } from "./types.js";
@@ -34,6 +35,45 @@ interface RecallDetails {
 
 /** Singleton indexer — created on first tool call, reused across invocations. */
 let indexer: SessionIndexer | null = null;
+
+/**
+ * Release the in-memory session indexer singleton.
+ *
+ * This closes the SQLite handle and drops the module-level reference so memory
+ * can be reclaimed. The next session_recall call lazily recreates the indexer.
+ *
+ * @returns True when an indexer existed and was released
+ */
+function releaseSessionMemoryIndexer(): boolean {
+	if (!indexer) return false;
+	try {
+		indexer.close();
+	} catch {
+		// Best-effort release — continue clearing the singleton reference.
+	}
+	indexer = null;
+	return true;
+}
+
+/**
+ * Read the current singleton indexer (test helper).
+ *
+ * @returns Active indexer reference or null
+ */
+export function getSessionMemoryIndexerForTests(): SessionIndexer | null {
+	return indexer;
+}
+
+/**
+ * Set the singleton indexer reference (test helper).
+ *
+ * @param nextIndexer - Indexer instance to set, or null to clear
+ * @returns void
+ */
+export function setSessionMemoryIndexerForTests(nextIndexer: SessionIndexer | null): void {
+	releaseSessionMemoryIndexer();
+	indexer = nextIndexer;
+}
 
 /**
  * Resolve the tallow config directory.
@@ -229,6 +269,14 @@ const SessionRecallParams = Type.Object({
  * @param pi - Extension API for registering tools
  */
 export default function (pi: ExtensionAPI) {
+	pi.events.on(MEMORY_RELEASE_EVENTS.completed, () => {
+		releaseSessionMemoryIndexer();
+	});
+
+	pi.on("session_shutdown", async () => {
+		releaseSessionMemoryIndexer();
+	});
+
 	pi.registerTool({
 		name: "session_recall",
 		label: "session_recall",
