@@ -133,6 +133,62 @@ describe("subagent presentation rendering", () => {
 		expect(rendered).toContain("<dim>Implement authentication flow with retry handling</dim>");
 	});
 
+	it("keeps long parallel call previews informative without dumping the full tail", () => {
+		const component = tool.renderCall?.(
+			{
+				tasks: [
+					{
+						agent: "planner",
+						task:
+							"Review auth middleware interactions and prepare patch notes " +
+							"KEEP_THIS_SEGMENT_VISIBLE before writing handoff notes " +
+							"and tagging END_MARKER_SHOULD_TRUNCATE",
+					},
+				],
+			},
+			theme
+		);
+		if (!component) throw new Error("subagent.renderCall returned undefined");
+
+		const rendered = renderComponent(component);
+		expect(rendered).toContain("<accent>parallel (1 tasks)</accent>");
+		expect(rendered).toContain("KEEP_THIS_SEGMENT_VISIBLE");
+		expect(rendered).not.toContain("END_MARKER_SHOULD_TRUNCATE");
+	});
+
+	it("widens collapsed parallel previews while keeping long output compact", () => {
+		const details: SubagentDetails = {
+			agentScope: "user",
+			mode: "parallel",
+			projectAgentsDir: null,
+			results: [
+				makeResult({
+					agent: "alpha",
+					exitCode: 0,
+					messages: [
+						assistantTextMessage(
+							"Scanned modules, verified lockfile drift, generated migration notes, " +
+								"and staged WIDEOK before writing the final appendix " +
+								"and tagging END_MARKER_SHOULD_TRUNCATE"
+						),
+					],
+					task: "Audit migration summary output",
+				}),
+			],
+		};
+
+		const component = tool.renderResult?.(
+			{ content: [{ text: "", type: "text" }], details },
+			{ expanded: false },
+			theme
+		);
+		if (!component) throw new Error("subagent.renderResult returned undefined");
+
+		const rendered = renderComponent(component);
+		expect(rendered).toContain("WIDEOK");
+		expect(rendered).not.toContain("END_MARKER_SHOULD_TRUNCATE");
+	});
+
 	it("keeps parallel running collapsed tree readable with short previews", () => {
 		const details: SubagentDetails = {
 			agentScope: "user",

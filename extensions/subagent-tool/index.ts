@@ -942,6 +942,15 @@ interface DisplayRenderOptions {
 }
 
 /**
+ * Shared preview budgets for compact subagent presentation lines.
+ */
+const SUBAGENT_PREVIEW_LIMITS = {
+	callCentipedeStep: 90,
+	callParallelTask: 90,
+	collapsedParallelResult: 88,
+} as const;
+
+/**
  * Build a compact single-line preview from raw text.
  *
  * @param text - Raw preview text (possibly multiline)
@@ -1157,7 +1166,10 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 
 		const previewLines = centipedeArr.slice(0, 3).map((step, index) => {
 			const task = step.task.replace(/\{previous\}/g, "").trim();
-			const preview = toCompactPreview(task || "(uses previous output)", 60);
+			const preview = toCompactPreview(
+				task || "(uses previous output)",
+				SUBAGENT_PREVIEW_LIMITS.callCentipedeStep
+			);
 			const modelTag = formatModelTag(theme, step.model);
 			const identity = modelTag
 				? `${formatSubagentIdentity(step.agent)} ${modelTag}`
@@ -1182,7 +1194,7 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 		if (metaLine) appendSection(lines, [metaLine]);
 
 		const previewLines = tasksArr.slice(0, 2).map((task, index) => {
-			const taskPreview = toCompactPreview(task.task, 58);
+			const taskPreview = toCompactPreview(task.task, SUBAGENT_PREVIEW_LIMITS.callParallelTask);
 			const modelTag = formatModelTag(theme, task.model);
 			const identity = modelTag
 				? `${formatSubagentIdentity(task.agent)} ${modelTag}`
@@ -1866,7 +1878,12 @@ function renderParallelResult(
 		lines.push(
 			`${branch} ${resultIcon} ${formatSubagentIdentity(result.agent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, statusRole, `(${resultStatus})`)}`
 		);
-		lines.push(`${stem}${formatCollapsedResultPreview(result, theme, 74)}`);
+		const collapsedPreview = formatCollapsedResultPreview(
+			result,
+			theme,
+			SUBAGENT_PREVIEW_LIMITS.collapsedParallelResult
+		);
+		lines.push(`${stem}${collapsedPreview}`);
 		if (!isRunning) {
 			const taskUsage = formatUsageStats(result.usage);
 			if (taskUsage) lines.push(`${stem}${formatPresentationText(theme, "meta", taskUsage)}`);
