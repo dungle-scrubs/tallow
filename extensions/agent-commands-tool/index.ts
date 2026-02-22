@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 export interface AgentFrontmatter {
 	name?: string;
@@ -237,14 +238,42 @@ export function getPackageAgentDirs(settingsPath: string): string[] {
 }
 
 /**
- * Loads agents from user, project, package, and .claude/ directories.
- * Priority: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
+ * Read plugin agent directories from the SDK-injected env var.
+ *
+ * SDK populates `TALLOW_PLUGIN_AGENTS_DIRS` with absolute `agents/` paths
+ * for resolved Claude-style plugins.
+ *
+ * @param envValue - Optional env value override for tests
+ * @returns Existing agent directories from the env var (deduplicated)
+ */
+export function getPluginAgentDirsFromEnv(envValue?: string): string[] {
+	const raw = (envValue ?? process.env.TALLOW_PLUGIN_AGENTS_DIRS ?? "").trim();
+	if (!raw) return [];
+
+	const seen = new Set<string>();
+	const dirs: string[] = [];
+	for (const dir of raw
+		.split(path.delimiter)
+		.map((v) => v.trim())
+		.filter(Boolean)) {
+		const normalized = path.resolve(dir);
+		if (!fs.existsSync(normalized) || seen.has(normalized)) continue;
+		seen.add(normalized);
+		dirs.push(normalized);
+	}
+
+	return dirs;
+}
+
+/**
+ * Loads agents from user, project, package/plugin, and .claude/ directories.
+ * Priority: bundled → packages/plugins → .claude/user → .tallow/user → .claude/project → .tallow/project
  * Last wins per name, so .tallow/ takes precedence over .claude/.
  *
  * @returns Merged array of unique agents
  */
 function loadAgents(): Agent[] {
-	const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".tallow");
+	const agentDir = getTallowHomeDir();
 	const userDir = path.join(agentDir, "agents");
 	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
 	const projectDir = path.join(process.cwd(), ".tallow", "agents");
@@ -262,11 +291,14 @@ function loadAgents(): Agent[] {
 	const globalSettingsPath = path.join(agentDir, "settings.json");
 	const projectSettingsPath = path.join(process.cwd(), ".tallow", "settings.json");
 	const packageDirs = [
-		...getPackageAgentDirs(globalSettingsPath),
-		...getPackageAgentDirs(projectSettingsPath),
+		...new Set([
+			...getPackageAgentDirs(globalSettingsPath),
+			...getPackageAgentDirs(projectSettingsPath),
+			...getPluginAgentDirsFromEnv(),
+		]),
 	];
 
-	// Load in priority order: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
+	// Load in priority order: bundled → packages/plugins → .claude/user → .tallow/user → .claude/project → .tallow/project
 	const agentMap = new Map<string, Agent>();
 	for (const agent of loadAgentsFromDir(bundledDir)) agentMap.set(agent.name, agent);
 	for (const dir of packageDirs) {

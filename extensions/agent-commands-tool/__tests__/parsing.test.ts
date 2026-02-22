@@ -5,9 +5,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import {
 	computeEffectiveTools,
+	getPluginAgentDirsFromEnv,
 	loadAgentsFromDir,
 	PI_BUILTIN_TOOLS,
 	parseAgent,
@@ -133,6 +134,44 @@ describe("resolvePath", () => {
 
 	it("trims whitespace", () => {
 		expect(resolvePath("  ~  ")).toBe(homedir());
+	});
+});
+
+// ── getPluginAgentDirsFromEnv ───────────────────────────────────────────────
+
+describe("getPluginAgentDirsFromEnv", () => {
+	it("returns empty array for empty input", () => {
+		expect(getPluginAgentDirsFromEnv("")).toEqual([]);
+		expect(getPluginAgentDirsFromEnv(undefined)).toEqual([]);
+	});
+
+	it("parses existing directories with platform delimiter", () => {
+		const root = mkdtempSync(join(tmpdir(), "agent-plugin-dirs-"));
+		try {
+			const a = join(root, "plugin-a", "agents");
+			const b = join(root, "plugin-b", "agents");
+			mkdirSync(a, { recursive: true });
+			mkdirSync(b, { recursive: true });
+
+			const dirs = getPluginAgentDirsFromEnv(`${a}${delimiter}${b}`);
+			expect(dirs).toEqual([resolve(a), resolve(b)]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("deduplicates and skips missing directories", () => {
+		const root = mkdtempSync(join(tmpdir(), "agent-plugin-dirs-"));
+		try {
+			const a = join(root, "plugin-a", "agents");
+			mkdirSync(a, { recursive: true });
+			const missing = join(root, "missing", "agents");
+
+			const dirs = getPluginAgentDirsFromEnv(`${a}${delimiter}${missing}${delimiter}${a}`);
+			expect(dirs).toEqual([resolve(a)]);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });
 
