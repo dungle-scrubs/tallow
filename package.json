@@ -1,6 +1,6 @@
 {
 	"name": "@dungle-scrubs/tallow",
-	"version": "0.8.7",
+	"version": "0.8.8",
 	"description": "An opinionated coding agent. Built on pi.",
 	"piConfig": {
 		"name": "tallow",
