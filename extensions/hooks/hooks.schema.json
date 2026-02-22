@@ -107,6 +107,14 @@
 					"$ref": "#/$defs/eventHooks",
 					"description": "When a subagent completes. Matcher filters on agent_type."
 				},
+				"worktree_create": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a managed worktree is created. Matcher filters on scope (session/subagent)."
+				},
+				"worktree_remove": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "When a managed worktree is removed. Matcher filters on scope (session/subagent)."
+				},
 				"notification": {
 					"$ref": "#/$defs/eventHooks",
 					"description": "When a notification is emitted via the event bus. Matcher filters on type."
@@ -155,6 +163,14 @@
 					"$ref": "#/$defs/eventHooks",
 					"description": "Claude Code alias for subagent_stop."
 				},
+				"WorktreeCreate": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for worktree_create."
+				},
+				"WorktreeRemove": {
+					"$ref": "#/$defs/eventHooks",
+					"description": "Claude Code alias for worktree_remove."
+				},
 				"Stop": {
 					"$ref": "#/$defs/eventHooks",
 					"description": "Claude Code alias for agent_end."
@@ -196,7 +212,7 @@
 			"properties": {
 				"matcher": {
 					"type": "string",
-					"description": "Regex pattern to filter events. Empty or '*' matches all. For tool_call/tool_result, matches toolName."
+					"description": "Regex pattern to filter events. Empty or '*' matches all. Uses event-specific fields (for example: tool_call/tool_result=toolName, task_completed=assignee, teammate_idle=teammate, worktree_create/worktree_remove=scope)."
 				},
 				"hooks": {
 					"type": "array",

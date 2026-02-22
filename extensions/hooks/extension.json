@@ -31,7 +31,9 @@
 			"tool_result",
 			"turn_end",
 			"turn_start",
-			"user_bash"
+			"user_bash",
+			"worktree_create",
+			"worktree_remove"
 		]
 	},
 	"permissionSurface": {
