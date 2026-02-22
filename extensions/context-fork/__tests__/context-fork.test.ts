@@ -2,7 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
 import { buildFrontmatterIndex } from "../frontmatter-index.js";
+import { registerContextForkExtension } from "../index.js";
 import { resolveModel } from "../model-resolver.js";
 import type { ForkOptions } from "../spawn.js";
 import { buildForkArgs } from "../spawn.js";
@@ -339,5 +341,91 @@ describe("agent resolution", () => {
 		const resolved = resolveModel(skillModel) ?? resolveModel(agentModel);
 		// "inherit" → undefined, falls back to agent model "opus"
 		expect(resolved).toBeDefined();
+	});
+});
+
+// ── Extension Lazy Initialization ──────────────────────────
+
+describe("context-fork lazy resource initialization", () => {
+	test("does not load resources on extension init or session_start", async () => {
+		let frontmatterLoads = 0;
+		let agentLoads = 0;
+		const harness = ExtensionHarness.create();
+
+		registerContextForkExtension(harness.api, {
+			buildFrontmatterIndex: () => {
+				frontmatterLoads += 1;
+				return new Map();
+			},
+			loadAllAgents: () => {
+				agentLoads += 1;
+				return new Map();
+			},
+		});
+
+		expect(frontmatterLoads).toBe(0);
+		expect(agentLoads).toBe(0);
+
+		await harness.fireEvent("session_start", { type: "session_start" });
+		expect(frontmatterLoads).toBe(0);
+		expect(agentLoads).toBe(0);
+	});
+
+	test("loads resources only on first slash input per session", async () => {
+		let frontmatterLoads = 0;
+		let agentLoads = 0;
+		const harness = ExtensionHarness.create();
+
+		registerContextForkExtension(harness.api, {
+			buildFrontmatterIndex: () => {
+				frontmatterLoads += 1;
+				return new Map();
+			},
+			loadAllAgents: () => {
+				agentLoads += 1;
+				return new Map();
+			},
+		});
+
+		const [nonSlashResult] = await harness.fireEvent("input", { text: "hello world" });
+		expect(nonSlashResult).toEqual({ action: "continue" });
+		expect(frontmatterLoads).toBe(0);
+		expect(agentLoads).toBe(0);
+
+		const [firstSlashResult] = await harness.fireEvent("input", { text: "/unknown" });
+		expect(firstSlashResult).toEqual({ action: "continue" });
+		expect(frontmatterLoads).toBe(1);
+		expect(agentLoads).toBe(1);
+
+		const [secondSlashResult] = await harness.fireEvent("input", { text: "/still-unknown" });
+		expect(secondSlashResult).toEqual({ action: "continue" });
+		expect(frontmatterLoads).toBe(1);
+		expect(agentLoads).toBe(1);
+	});
+
+	test("session_start resets lazy state for next slash command", async () => {
+		let frontmatterLoads = 0;
+		let agentLoads = 0;
+		const harness = ExtensionHarness.create();
+
+		registerContextForkExtension(harness.api, {
+			buildFrontmatterIndex: () => {
+				frontmatterLoads += 1;
+				return new Map();
+			},
+			loadAllAgents: () => {
+				agentLoads += 1;
+				return new Map();
+			},
+		});
+
+		await harness.fireEvent("input", { text: "/first" });
+		expect(frontmatterLoads).toBe(1);
+		expect(agentLoads).toBe(1);
+
+		await harness.fireEvent("session_start", { type: "session_start" });
+		await harness.fireEvent("input", { text: "/second" });
+		expect(frontmatterLoads).toBe(2);
+		expect(agentLoads).toBe(2);
 	});
 });

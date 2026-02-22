@@ -3,7 +3,13 @@
  * substitution, and outer command splitting.
  */
 import { describe, expect, it } from "bun:test";
-import { parseCommandArgs, splitOuterCommand, substituteArgs } from "../index.js";
+import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
+import {
+	parseCommandArgs,
+	registerCommandExpansionExtension,
+	splitOuterCommand,
+	substituteArgs,
+} from "../index.js";
 
 // ── parseCommandArgs ─────────────────────────────────────────────────────────
 
@@ -119,5 +125,82 @@ describe("splitOuterCommand", () => {
 
 	it("returns null for empty string", () => {
 		expect(splitOuterCommand("")).toBeNull();
+	});
+});
+
+// ── Extension Lazy Initialization ───────────────────────────────────────────
+
+describe("command-expansion lazy resource initialization", () => {
+	it("does not load resources on init/session_start or non-eligible input", async () => {
+		let skillLoads = 0;
+		let templateLoads = 0;
+		const harness = ExtensionHarness.create();
+
+		registerCommandExpansionExtension(harness.api, {
+			loadSkills: () => {
+				skillLoads += 1;
+				return { skills: [] };
+			},
+			loadPromptTemplates: () => {
+				templateLoads += 1;
+				return [];
+			},
+		});
+
+		expect(skillLoads).toBe(0);
+		expect(templateLoads).toBe(0);
+
+		await harness.fireEvent("session_start", { type: "session_start" });
+		expect(skillLoads).toBe(0);
+		expect(templateLoads).toBe(0);
+
+		const [plainResult] = await harness.fireEvent("input", { text: "hello world" });
+		expect(plainResult).toEqual({ action: "continue" });
+		expect(skillLoads).toBe(0);
+		expect(templateLoads).toBe(0);
+
+		const [noNestedResult] = await harness.fireEvent("input", { text: "/outer just words" });
+		expect(noNestedResult).toEqual({ action: "continue" });
+		expect(skillLoads).toBe(0);
+		expect(templateLoads).toBe(0);
+	});
+
+	it("loads once on first eligible input and reloads after session_start", async () => {
+		let skillLoads = 0;
+		let templateLoads = 0;
+		const harness = ExtensionHarness.create();
+
+		registerCommandExpansionExtension(harness.api, {
+			loadSkills: () => {
+				skillLoads += 1;
+				return { skills: [] };
+			},
+			loadPromptTemplates: () => {
+				templateLoads += 1;
+				return [
+					{
+						name: "tmpl",
+						content: "expanded-$1",
+						filePath: "/tmp/tmpl.md",
+					},
+				];
+			},
+		});
+
+		const [firstResult] = await harness.fireEvent("input", { text: "/outer /tmpl one" });
+		expect(firstResult).toEqual({ action: "transform", text: "/outer expanded-one" });
+		expect(skillLoads).toBe(1);
+		expect(templateLoads).toBe(1);
+
+		const [secondResult] = await harness.fireEvent("input", { text: "/outer /tmpl two" });
+		expect(secondResult).toEqual({ action: "transform", text: "/outer expanded-two" });
+		expect(skillLoads).toBe(1);
+		expect(templateLoads).toBe(1);
+
+		await harness.fireEvent("session_start", { type: "session_start" });
+		const [thirdResult] = await harness.fireEvent("input", { text: "/outer /tmpl three" });
+		expect(thirdResult).toEqual({ action: "transform", text: "/outer expanded-three" });
+		expect(skillLoads).toBe(2);
+		expect(templateLoads).toBe(2);
 	});
 });
