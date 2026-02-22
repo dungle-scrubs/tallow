@@ -15,6 +15,7 @@ import {
 	isHighRisk,
 	isNonInteractiveBypassEnabled,
 	isShellInterpolationEnabled,
+	resetPermissionCache,
 	runCommandSync,
 	runGitCommandSync,
 	runShellCommandSync,
@@ -64,10 +65,12 @@ function restoreEnv(): void {
 beforeEach(() => {
 	restoreEnv();
 	clearAuditTrail();
+	resetPermissionCache();
 });
 
 afterEach(() => {
 	restoreEnv();
+	resetPermissionCache();
 });
 
 describe("trust-level mapping", () => {
@@ -209,6 +212,70 @@ describe("policy evaluation", () => {
 		const blocked = evaluateCommand("node --version", "git-helper", process.cwd());
 		expect(blocked.allowed).toBe(false);
 		expect(blocked.reason).toContain("not allowlisted");
+	});
+});
+
+describe("permission-rule messaging alignment", () => {
+	test("deny verdict includes actionable permission reason", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "tallow-shell-perm-"));
+		try {
+			mkdirSync(join(cwd, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".tallow", "settings.json"),
+				JSON.stringify({
+					permissions: {
+						allow: ["Bash(git *)"],
+						deny: ["Bash(ssh *)"],
+					},
+				})
+			);
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+			resetPermissionCache();
+
+			const verdict = evaluateCommand("ssh root@example.com", "bash", cwd);
+			expect(verdict.allowed).toBe(false);
+			expect(verdict.reasonCode).toBe("rule_denied");
+			expect(verdict.reason).toContain("Action denied by permission rule");
+			expect(verdict.reason).toContain(".tallow/settings.json");
+			expect(verdict.reason).toContain("Hint:");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("ask verdict uses permission reason code and interactive guidance", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "tallow-shell-perm-ask-"));
+		try {
+			mkdirSync(join(cwd, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".tallow", "settings.json"),
+				JSON.stringify({
+					permissions: {
+						ask: ["Bash(docker *)"],
+					},
+				})
+			);
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+			resetPermissionCache();
+
+			const verdict = evaluateCommand("docker compose up", "bash", cwd);
+			expect(verdict.allowed).toBe(true);
+			expect(verdict.requiresConfirmation).toBe(true);
+			expect(verdict.reasonCode).toBe("rule_requires_confirmation");
+			expect(verdict.reason).toContain("Confirmation required by permission rule");
+
+			const blocked = await enforceExplicitPolicy(
+				"docker compose up",
+				"bash",
+				cwd,
+				false,
+				async () => true
+			);
+			expect(blocked?.block).toBe(true);
+			expect(blocked?.reason).toContain("Re-run interactively");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 });
 
