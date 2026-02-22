@@ -20,8 +20,10 @@ import {
 	type ExpansionVars,
 	evaluate,
 	extractAllAgentNames,
+	formatPermissionReason,
 	normalizeToolName,
 	type PermissionVerdict,
+	redactSensitiveReasonText,
 } from "../_shared/permissions.js";
 import { getPermissions, recordAudit, reloadPermissions } from "../_shared/shell-policy.js";
 
@@ -114,7 +116,7 @@ export default function (pi: ExtensionAPI): void {
 				const verdict = evaluate("subagent", { agent }, merged, vars, settingsDir);
 				if (verdict.action === "deny") {
 					recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
-					return { block: true, reason: verdict.reason ?? "Blocked by permission rule" };
+					return { block: true, reason: buildBlockReason(verdict) };
 				}
 				if (verdict.action === "ask") {
 					const confirmed = await confirmPermission(ctx, event.toolName, agent, verdict);
@@ -122,7 +124,7 @@ export default function (pi: ExtensionAPI): void {
 						recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
 						return {
 							block: true,
-							reason: `User denied permission for ${event.toolName} (${agent})`,
+							reason: `Permission request denied: ${buildBlockReason(verdict)}`,
 						};
 					}
 					recordPermissionAudit(event.toolName, cwd, "confirmed", verdict);
@@ -136,7 +138,7 @@ export default function (pi: ExtensionAPI): void {
 
 		if (verdict.action === "deny") {
 			recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
-			return { block: true, reason: verdict.reason ?? "Blocked by permission rule" };
+			return { block: true, reason: buildBlockReason(verdict) };
 		}
 
 		if (verdict.action === "ask") {
@@ -146,7 +148,7 @@ export default function (pi: ExtensionAPI): void {
 				recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
 				return {
 					block: true,
-					reason: `User denied permission for ${event.toolName}`,
+					reason: `Permission request denied: ${buildBlockReason(verdict)}`,
 				};
 			}
 			recordPermissionAudit(event.toolName, cwd, "confirmed", verdict);
@@ -197,6 +199,16 @@ export default function (pi: ExtensionAPI): void {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
+ * Build a concise deny reason for tool_call block responses.
+ *
+ * @param verdict - Permission verdict
+ * @returns Safe block reason for user/model consumption
+ */
+function buildBlockReason(verdict: PermissionVerdict): string {
+	return formatPermissionReason(verdict, { includeHints: true, maxHints: 2 });
+}
+
+/**
  * Record a permission decision in the shell audit trail.
  *
  * @param toolName - Tool that was checked
@@ -234,10 +246,15 @@ function getSpecifierDisplay(
 	input: Record<string, unknown>,
 	_cwd: string
 ): string {
-	if (typeof input.path === "string") return input.path;
-	if (typeof input.url === "string") return input.url;
+	if (typeof input.path === "string") {
+		return redactSensitiveReasonText(input.path);
+	}
+	if (typeof input.url === "string") {
+		return redactSensitiveReasonText(input.url);
+	}
 	if (typeof input.command === "string") {
-		return input.command.length > 60 ? `${input.command.slice(0, 57)}...` : input.command;
+		const redactedCommand = redactSensitiveReasonText(input.command);
+		return redactedCommand.length > 60 ? `${redactedCommand.slice(0, 57)}...` : redactedCommand;
 	}
 	return toolName;
 }
@@ -262,11 +279,15 @@ async function confirmPermission(
 		return false;
 	}
 
+	const reason = formatPermissionReason(verdict, { includeHints: true, maxHints: 1 });
+	const lines = [`Reason: ${reason}`, "", `Tool: ${toolName}`, `Input: ${specifier}`];
+	if (verdict.matchedRule) {
+		lines.push(`Rule: ${verdict.matchedRule}`);
+	}
+	lines.push("", "Allow this action?");
+
 	try {
-		const confirmed = await ctx.ui.confirm(
-			"Permission Required",
-			`${toolName} (${specifier})\n\nRule: ${verdict.matchedRule ?? "unknown"}\nAllow this action?`
-		);
+		const confirmed = await ctx.ui.confirm("Permission Required", lines.join("\n"));
 		return confirmed === true;
 	} catch {
 		return false;
@@ -340,8 +361,9 @@ function handleTest(ruleText: string, cwd: string, ctx: ExtensionContext): void 
 					? "✅"
 					: "⚪";
 
+	const formattedReason = formatPermissionReason(verdict, { includeHints: true, maxHints: 2 });
 	ctx.ui?.notify(
-		`${icon} ${ruleText}\n  Action: ${verdict.action}\n  ${verdict.reason ?? ""}${verdict.matchedRule ? `\n  Matched: ${verdict.matchedRule}` : ""}`,
+		`${icon} ${ruleText}\n  Action: ${verdict.action}\n  Reason: ${formattedReason}${verdict.matchedRule ? `\n  Matched: ${verdict.matchedRule}` : ""}`,
 		verdict.action === "deny" ? "error" : "info"
 	);
 }
