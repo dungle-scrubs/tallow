@@ -396,6 +396,10 @@ async function run(opts: {
 			console.error(`Error: Source session not found: ${opts.forkSession ?? "unknown"}`);
 			process.exit(1);
 		}
+		if (error instanceof Error && error.message.startsWith("Session ID ")) {
+			console.error(`Error: ${error.message}`);
+			process.exit(1);
+		}
 		throw error;
 	}
 
