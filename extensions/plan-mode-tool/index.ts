@@ -101,6 +101,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	let planModeEnabled = false;
 	let executionMode = false;
 	let todoItems: TodoItem[] = [];
+	let currentStepIndex: number | null = null;
 	let normalModeTools: string[] = [];
 
 	/**
@@ -147,6 +148,45 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		}
 		pi.setActiveTools(normalModeTools);
 		return normalModeTools;
+	}
+
+	/**
+	 * Computes the current step index from todo completion state.
+	 *
+	 * @param items - Ordered todo items
+	 * @returns Zero-based index of first incomplete step, or null when complete
+	 */
+	function computeCurrentStepIndex(items: readonly TodoItem[]): number | null {
+		const nextIndex = items.findIndex((item) => !item.completed);
+		return nextIndex >= 0 ? nextIndex : null;
+	}
+
+	/**
+	 * Synchronizes currentStepIndex with todo completion state.
+	 *
+	 * @returns Updated current step index
+	 */
+	function syncCurrentStepIndex(): number | null {
+		currentStepIndex = computeCurrentStepIndex(todoItems);
+		return currentStepIndex;
+	}
+
+	/**
+	 * Gets the current step item for execution guidance.
+	 *
+	 * @returns Current step todo item, or null if all steps are complete
+	 */
+	function getCurrentStep(): TodoItem | null {
+		if (todoItems.length === 0) return null;
+		if (
+			currentStepIndex === null ||
+			currentStepIndex < 0 ||
+			currentStepIndex >= todoItems.length ||
+			todoItems[currentStepIndex]?.completed
+		) {
+			syncCurrentStepIndex();
+		}
+		return currentStepIndex === null ? null : (todoItems[currentStepIndex] ?? null);
 	}
 
 	pi.registerFlag("plan", {
@@ -227,6 +267,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		planModeEnabled = !planModeEnabled;
 		executionMode = false;
 		todoItems = [];
+		currentStepIndex = null;
 
 		if (planModeEnabled) {
 			captureNormalModeTools();
@@ -249,6 +290,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			executing: executionMode,
 			normalTools: normalModeTools,
 			todos: todoItems,
+			currentStepIndex,
 		});
 	}
 
@@ -347,6 +389,7 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 			planModeEnabled = shouldEnable;
 			executionMode = false;
 			todoItems = [];
+			currentStepIndex = null;
 
 			let activeTools: string[];
 			if (planModeEnabled) {
@@ -455,18 +498,27 @@ Do NOT attempt to make changes - just describe what you would do.`,
 		}
 
 		if (executionMode && todoItems.length > 0) {
+			syncCurrentStepIndex();
+			const currentStep = getCurrentStep();
 			const remaining = todoItems.filter((t) => !t.completed);
 			const todoList = remaining.map((t) => `${t.step}. ${t.text}`).join("\n");
+			const currentStepText = currentStep
+				? `${currentStep.step}. ${currentStep.text}`
+				: "(all steps completed)";
 			return {
 				message: {
 					customType: "plan-execution-context",
 					content: `[EXECUTING PLAN - Full tool access enabled]
 
+Current step:
+${currentStepText}
+
 Remaining steps:
 ${todoList}
 
 Execute each step in order.
-After completing a step, include a [DONE:n] tag in your response.`,
+After completing a step, include a [DONE:n] tag in your response.
+If you receive [PLAN GUIDANCE — Step n: ...], treat it as user steering for that step and apply it before continuing.`,
 					display: false,
 				},
 			};
@@ -479,10 +531,57 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		if (!isAssistantMessage(event.message)) return;
 
 		const text = getTextContent(event.message);
-		if (markCompletedSteps(text, todoItems) > 0) {
+		const completedCount = markCompletedSteps(text, todoItems);
+		if (completedCount > 0) {
+			syncCurrentStepIndex();
 			updateStatus(ctx);
 		}
 		persistState();
+	});
+
+	// Offer user steering when a tool is blocked during tracked execution.
+	pi.on("tool_result", async (event, ctx) => {
+		if (!executionMode || !event.isError || !ctx.hasUI || todoItems.length === 0) return;
+
+		const currentStep = getCurrentStep();
+		if (!currentStep) return;
+
+		const errorText = Array.isArray(event.content)
+			? event.content
+					.filter((block): block is TextContent => block.type === "text")
+					.map((block) => block.text)
+					.join("\n")
+					.trim()
+			: "";
+
+		const shouldProvideGuidance = await ctx.ui.confirm(
+			"Plan step blocked",
+			[
+				`Tool "${event.toolName}" was blocked while executing step ${currentStep.step}.`,
+				"",
+				currentStep.text,
+				"",
+				`Error: ${errorText || "No error details provided."}`,
+				"",
+				"Provide guidance before execution continues?",
+			].join("\n")
+		);
+		if (!shouldProvideGuidance) return;
+
+		const guidance = await ctx.ui.editor(`Guidance for step ${currentStep.step}:`, "");
+		const trimmedGuidance = guidance?.trim();
+		if (!trimmedGuidance) return;
+
+		pi.sendUserMessage(
+			[
+				`[PLAN GUIDANCE — Step ${currentStep.step}: ${currentStep.text}]`,
+				`Tool "${event.toolName}" was blocked.`,
+				"",
+				"User guidance:",
+				trimmedGuidance,
+			].join("\n"),
+			{ deliverAs: "steer" }
+		);
 	});
 
 	// Handle plan completion and plan mode UI
@@ -501,6 +600,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 				);
 				executionMode = false;
 				todoItems = [];
+				currentStepIndex = null;
 				restoreNormalModeTools();
 				updateStatus(ctx);
 				persistState(); // Save cleared state so resume doesn't restore old execution mode
@@ -543,12 +643,19 @@ After completing a step, include a [DONE:n] tag in your response.`,
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;
 			executionMode = todoItems.length > 0;
+			if (executionMode) {
+				syncCurrentStepIndex();
+			} else {
+				currentStepIndex = null;
+			}
 			restoreNormalModeTools();
 			updateStatus(ctx);
+			persistState();
 
+			const currentStep = getCurrentStep();
 			const execMessage =
-				todoItems.length > 0
-					? `Execute the plan. Start with: ${todoItems[0].text}`
+				currentStep !== null
+					? `Execute the plan. Start with step ${currentStep.step}: ${currentStep.text}`
 					: "Execute the plan you just created.";
 			pi.sendMessage(
 				{ customType: "plan-mode-execute", content: execMessage, display: true },
@@ -587,6 +694,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 						executing?: boolean;
 						normalTools?: string[];
 						todos?: TodoItem[];
+						currentStepIndex?: number | null;
 					};
 			  }
 			| undefined;
@@ -596,6 +704,7 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			executionMode = planModeEntry.data.executing ?? executionMode;
 			normalModeTools = planModeEntry.data.normalTools ?? normalModeTools;
 			todoItems = planModeEntry.data.todos ?? todoItems;
+			currentStepIndex = planModeEntry.data.currentStepIndex ?? currentStepIndex;
 		}
 
 		// On resume: re-scan messages to rebuild completion state
@@ -626,6 +735,12 @@ After completing a step, include a [DONE:n] tag in your response.`,
 			}
 			const allText = messages.map(getTextContent).join("\n");
 			markCompletedSteps(allText, todoItems);
+		}
+
+		if (executionMode && todoItems.length > 0) {
+			syncCurrentStepIndex();
+		} else {
+			currentStepIndex = null;
 		}
 
 		if (normalModeTools.length === 0) {
