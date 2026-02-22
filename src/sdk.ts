@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import {
 	bashTool,
 	type CreateAgentSessionOptions,
@@ -1215,18 +1215,8 @@ export async function createTallowSession(
 
 		// Expose plugin commands/agents dirs as env vars for the command-prompt
 		// and agent-commands-tool extensions to discover at runtime.
-		if (pluginCommandsDirs.length > 0) {
-			const existing = process.env.TALLOW_PLUGIN_COMMANDS_DIRS;
-			process.env.TALLOW_PLUGIN_COMMANDS_DIRS = existing
-				? `${existing}:${pluginCommandsDirs.join(":")}`
-				: pluginCommandsDirs.join(":");
-		}
-		if (pluginAgentsDirs.length > 0) {
-			const existing = process.env.TALLOW_PLUGIN_AGENTS_DIRS;
-			process.env.TALLOW_PLUGIN_AGENTS_DIRS = existing
-				? `${existing}:${pluginAgentsDirs.join(":")}`
-				: pluginAgentsDirs.join(":");
-		}
+		appendPathListEnv("TALLOW_PLUGIN_COMMANDS_DIRS", pluginCommandsDirs);
+		appendPathListEnv("TALLOW_PLUGIN_AGENTS_DIRS", pluginAgentsDirs);
 	}
 
 	// ── Package AGENTS.md loading ────────────────────────────────────────────
@@ -1454,6 +1444,25 @@ export function collectPluginSpecs(
 	}
 
 	return [...specs];
+}
+
+/**
+ * Append filesystem paths to a path-list env var using platform delimiter.
+ *
+ * Existing values are preserved, new values are appended, and duplicates
+ * are removed while preserving first-seen order.
+ *
+ * @param key - Environment variable key
+ * @param values - Absolute directory paths to append
+ * @returns Nothing
+ */
+function appendPathListEnv(key: string, values: string[]): void {
+	if (values.length === 0) return;
+
+	const existingRaw = process.env[key];
+	const existing = existingRaw ? existingRaw.split(delimiter).filter((v) => v.length > 0) : [];
+	const merged = [...new Set([...existing, ...values])];
+	process.env[key] = merged.join(delimiter);
 }
 
 /** Context file loaded from a package directory. */

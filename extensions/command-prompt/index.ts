@@ -29,6 +29,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { delimiter } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { Key } from "@mariozechner/pi-tui";
@@ -328,6 +329,40 @@ function discoverPackagePromptSources(settingsPath: string): PackagePromptSource
 }
 
 /**
+ * Discover plugin command sources from a path-list environment variable.
+ *
+ * SDK populates `TALLOW_PLUGIN_COMMANDS_DIRS` with absolute `commands/`
+ * directories from resolved Claude-style plugins.
+ *
+ * @param envValue - Optional env value override for tests
+ * @returns Namespaced prompt sources inferred from plugin command dirs
+ */
+export function discoverPluginPromptSourcesFromEnv(envValue?: string): PackagePromptSource[] {
+	const raw = (envValue ?? process.env.TALLOW_PLUGIN_COMMANDS_DIRS ?? "").trim();
+	if (!raw) return [];
+
+	const seen = new Set<string>();
+	const sources: PackagePromptSource[] = [];
+
+	for (const dir of raw
+		.split(delimiter)
+		.map((v) => v.trim())
+		.filter(Boolean)) {
+		if (!fs.existsSync(dir)) continue;
+		const normalized = path.resolve(dir);
+		if (seen.has(normalized)) continue;
+		seen.add(normalized);
+
+		// commands/ lives at pluginRoot/commands → namespace = pluginRoot basename
+		const pluginRoot = path.dirname(normalized);
+		const namespace = path.basename(pluginRoot);
+		sources.push({ namespace, promptsDirs: [normalized] });
+	}
+
+	return sources;
+}
+
+/**
  * Discovers ALL prompts across multiple package directories (top-level +
  * one-deep subdirs). Merges results from all dirs, deduplicating by name
  * so that `prompts/` and `commands/` are treated as one source.
@@ -575,6 +610,7 @@ export default function (pi: ExtensionAPI): void {
 	const packageSources = [
 		...discoverPackagePromptSources(projectSettings),
 		...discoverPackagePromptSources(globalSettings),
+		...discoverPluginPromptSourcesFromEnv(),
 	];
 
 	for (const { namespace, promptsDirs } of packageSources) {
