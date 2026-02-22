@@ -552,11 +552,19 @@ async function executeCentipede(
 	}
 }
 
+/** Parallel-task payload for subagent parallel mode. */
+type ParallelTask = {
+	agent: string;
+	task: string;
+	cwd?: string;
+	model?: string;
+};
+
 /**
  * Execute parallel mode.
  */
 async function executeParallel(
-	tasks: { agent: string; task: string; cwd?: string; model?: string }[],
+	tasks: ParallelTask[],
 	params: { background?: boolean },
 	ctx: ExtensionContext,
 	agents: Parameters<typeof runSingleAgent>[1],
@@ -725,7 +733,94 @@ async function executeParallel(
 		ctx.ui.setWorkingMessage();
 	}
 
-	const counts = countParallelResultStates(results);
+	let counts = countParallelResultStates(results);
+	let stalledRetrySummary: string | undefined;
+
+	const initialStalledIndexes = collectParallelStateIndices(results, "stalled");
+	if (initialStalledIndexes.length > 0) {
+		const retrySummaryLines: string[] = [];
+		const totalRetries = initialStalledIndexes.length;
+
+		try {
+			ctx.ui.setWorkingMessage(
+				`Rerunning ${totalRetries} stalled worker${totalRetries === 1 ? "" : "s"} individually`
+			);
+
+			for (let retryIndex = 0; retryIndex < initialStalledIndexes.length; retryIndex++) {
+				const stalledIndex = initialStalledIndexes[retryIndex];
+				const stalledTask = tasks[stalledIndex];
+				const priorResult = allResults[stalledIndex];
+				const retryTask = buildStalledRetryTask(stalledTask.task);
+				const explicitRetryModel = stalledTask.model ?? priorResult.model ?? parentModelId;
+				const retryRoutingHints = explicitRetryModel ? undefined : routingHints;
+				const retryLabel = explicitRetryModel
+					? `model:${explicitRetryModel}`
+					: retryRoutingHints?.modelScope
+						? `modelScope:${retryRoutingHints.modelScope}`
+						: "auto-routing";
+
+				ctx.ui.setWorkingMessage(
+					`Retrying stalled worker ${retryIndex + 1}/${totalRetries}: ${stalledTask.agent}`
+				);
+
+				const retryResult = await runSingleAgent(
+					ctx.cwd,
+					agents,
+					stalledTask.agent,
+					retryTask,
+					stalledTask.cwd,
+					undefined,
+					signal,
+					(partial) => {
+						if (partial.details?.results[0]) {
+							const partialResult = {
+								...partial.details.results[0],
+								task: stalledTask.task,
+							};
+							allResults[stalledIndex] = partialResult;
+							emitParallelUpdate();
+						}
+					},
+					makeDetails("parallel"),
+					pi.events,
+					undefined,
+					explicitRetryModel,
+					parentModelId,
+					defaults,
+					retryRoutingHints
+				);
+
+				retryResult.task = stalledTask.task;
+				retryResult.stderr = appendStderrNote(
+					retryResult.stderr,
+					`[Auto-rerun] retried stalled worker individually (${retryLabel})`
+				);
+				allResults[stalledIndex] = retryResult;
+				retrySummaryLines.push(`- [${stalledTask.agent}] ${retryLabel}`);
+				emitParallelUpdate();
+			}
+		} finally {
+			ctx.ui.setWorkingMessage();
+		}
+
+		results = [...allResults];
+		counts = countParallelResultStates(results);
+		const remainingStalledIndexes = collectParallelStateIndices(results, "stalled");
+		const recoveredCount = totalRetries - remainingStalledIndexes.length;
+		const remainingAgents = remainingStalledIndexes.map((index) => results[index].agent).join(", ");
+		const lines = [
+			`Auto-rerun: retried ${totalRetries} stalled worker${totalRetries === 1 ? "" : "s"} individually with narrowed scope.`,
+			`Recovered ${recoveredCount}/${totalRetries}.`,
+		];
+		if (remainingStalledIndexes.length > 0) {
+			lines.push(`Still stalled: ${remainingAgents}.`);
+		}
+		stalledRetrySummary = lines.join(" ");
+		if (retrySummaryLines.length > 0) {
+			stalledRetrySummary += `\n${retrySummaryLines.join("\n")}`;
+		}
+	}
+
 	const summaries = results.map((result) => {
 		const output = getFinalOutput(result.messages);
 		const fallback = result.errorMessage || result.stderr || "(no output)";
@@ -737,7 +832,6 @@ async function executeParallel(
 		return `[${result.agent}] ${stateLabel}: ${preview}`;
 	});
 
-	const finishedNonStalled = counts.completed + counts.failed;
 	let isError = false;
 	let stalledRemediation: string | undefined;
 
@@ -748,41 +842,16 @@ async function executeParallel(
 		const stalledAgentList = stalledAgents.join(", ");
 		const remediation =
 			`Stalled workers: ${stalledAgentList}. ` +
-			"Rerun stalled tasks individually, reduce task scope, " +
-			"or set an explicit model/modelScope for those workers.";
-
-		if (ctx.hasUI && finishedNonStalled > 0) {
-			const continueWithPartials = await ctx.ui.confirm(
-				"Parallel workers stalled",
-				`${counts.stalled} worker${counts.stalled === 1 ? "" : "s"} stalled while ` +
-					`${finishedNonStalled} other task${finishedNonStalled === 1 ? "" : "s"} finished.\n\n` +
-					"Continue and return partial results from finished workers?\n\n" +
-					'Select "No" to abort now and rerun the stalled workers.'
-			);
-			if (!continueWithPartials) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text:
-								"Parallel run aborted because stalled workers were detected and " +
-								"you chose not to continue with partial results.\n\n" +
-								`${remediation}`,
-						},
-					],
-					details: makeDetails("parallel")(results),
-					isError: true,
-				};
-			}
-		} else {
-			isError = true;
-			stalledRemediation = ctx.hasUI
-				? "Parallel run finished with stalled workers and no completed non-stalled results.\n" +
-					`${remediation}`
-				: "Non-interactive mode: returning partial results and marking this " +
-					"parallel call as error because some workers stalled.\n" +
-					`${remediation}`;
-		}
+			"Automatic rerun already attempted once per stalled worker. " +
+			"Split task scope further, avoid confirmation-gated steps, " +
+			"or pin a different explicit model/modelScope.";
+		isError = true;
+		stalledRemediation = ctx.hasUI
+			? "Parallel run finished with unrecovered stalled workers after automatic reruns.\n" +
+				`${remediation}`
+			: "Non-interactive mode: returning partial results with error because " +
+				"workers remained stalled after automatic reruns.\n" +
+				`${remediation}`;
 	}
 
 	const batchNote =
@@ -796,6 +865,7 @@ async function executeParallel(
 		`(${counts.completed} completed, ${counts.failed} failed, ${counts.stalled} stalled)`;
 	const summaryText =
 		`${header}${batchNote}\n\n${summaries.join("\n\n")}` +
+		(stalledRetrySummary ? `\n\n${stalledRetrySummary}` : "") +
 		(stalledRemediation ? `\n\n${stalledRemediation}` : "");
 
 	return {
@@ -1136,6 +1206,63 @@ function countParallelResultStates(results: SingleResult[]): ParallelResultCount
 
 	counts.finished = counts.completed + counts.failed + counts.stalled;
 	return counts;
+}
+
+/**
+ * Retry directive appended to stalled-worker reruns.
+ *
+ * Instructs the worker to aggressively narrow scope so retried tasks
+ * are less likely to deadlock on long/interactive paths.
+ */
+const STALLED_RETRY_SCOPE_GUIDANCE =
+	"[Automatic retry after stall]\n" +
+	"Your previous parallel attempt stalled. Execute a narrower slice now: " +
+	"complete only the smallest high-confidence chunk you can finish quickly.\n" +
+	"If the original task is already small, complete it fully. " +
+	"If it is broad, finish one concrete slice and list remaining follow-ups.";
+
+/**
+ * Build the retry task text for a stalled parallel worker.
+ *
+ * @param task - Original worker task
+ * @returns Task text with explicit scope-narrowing retry guidance
+ */
+function buildStalledRetryTask(task: string): string {
+	const baseTask = task.trim();
+	if (baseTask.length === 0) return STALLED_RETRY_SCOPE_GUIDANCE;
+	return `${baseTask}\n\n${STALLED_RETRY_SCOPE_GUIDANCE}`;
+}
+
+/**
+ * Collect indexes of results that match a target parallel state.
+ *
+ * @param results - Parallel result list
+ * @param state - Target state to match
+ * @returns Zero-based indexes for matching rows
+ */
+function collectParallelStateIndices(
+	results: SingleResult[],
+	state: ParallelResultState
+): number[] {
+	const indexes: number[] = [];
+	for (let index = 0; index < results.length; index++) {
+		if (getParallelResultState(results[index]) === state) {
+			indexes.push(index);
+		}
+	}
+	return indexes;
+}
+
+/**
+ * Append a note to stderr while preserving existing diagnostics.
+ *
+ * @param stderr - Existing stderr text
+ * @param note - Diagnostic note to append
+ * @returns Combined stderr string
+ */
+function appendStderrNote(stderr: string, note: string): string {
+	if (!stderr.trim()) return note;
+	return `${stderr}\n${note}`;
 }
 
 /**
