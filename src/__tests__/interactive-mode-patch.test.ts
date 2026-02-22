@@ -8,16 +8,25 @@ interface FakeEvent {
 class FakeInteractiveMode {
 	defaultEditor: { onEscape?: () => void } = {};
 	escapeCalls = 0;
+	flushCalls = 0;
+	handleBashCommandCalls = 0;
 	handleEventCalls = 0;
 	lastRestoredAbort: boolean | undefined;
+	lifecycleCalls: string[] = [];
 	loadingAnimation: unknown;
+	notifyCalls: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
+	pendingBashComponents: unknown[] = [];
 	pendingWorkingMessage: unknown = "stale";
 	renderRequests = 0;
 	session = { isStreaming: false };
 	statusClears = 0;
-	notifyCalls: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
 	updateCalls = 0;
-	ui = { requestRender: () => this.renderRequests++ };
+	ui = {
+		requestRender: (): void => {
+			this.lifecycleCalls.push("ui.requestRender");
+			this.renderRequests++;
+		},
+	};
 
 	/**
 	 * Base handleEvent implementation used by the patch wrapper.
@@ -28,6 +37,24 @@ class FakeInteractiveMode {
 	async handleEvent(_event: FakeEvent): Promise<string> {
 		this.handleEventCalls++;
 		return "ok";
+	}
+
+	/**
+	 * Base handleBashCommand implementation used by the patch wrapper.
+	 *
+	 * @param _command - Bash command text
+	 * @param _excludeFromContext - Whether command output is excluded from context
+	 * @returns Promise resolved with marker text
+	 */
+	async handleBashCommand(_command: string, _excludeFromContext = false): Promise<string> {
+		this.handleBashCommandCalls++;
+		this.lifecycleCalls.push("handleBashCommand:start");
+		await Promise.resolve();
+		if (this.session.isStreaming) {
+			this.pendingBashComponents.push({ deferred: true });
+		}
+		this.lifecycleCalls.push("handleBashCommand:end");
+		return "bash-ok";
 	}
 
 	/**
@@ -62,16 +89,29 @@ class FakeInteractiveMode {
 	}
 
 	/**
+	 * Count deferred bash flush calls and move pending components to chat.
+	 *
+	 * @returns Nothing
+	 */
+	flushPendingBashComponents(): void {
+		this.flushCalls++;
+		this.lifecycleCalls.push("flushPendingBashComponents");
+		this.pendingBashComponents = [];
+	}
+
+	/**
 	 * Count display refresh calls.
 	 *
 	 * @returns Nothing
 	 */
 	updatePendingMessagesDisplay(): void {
+		this.lifecycleCalls.push("updatePendingMessagesDisplay");
 		this.updateCalls++;
 	}
 
 	statusContainer = {
 		clear: (): void => {
+			this.lifecycleCalls.push("statusContainer.clear");
 			this.statusClears++;
 		},
 	};
@@ -101,19 +141,52 @@ class FakeInteractiveMode {
 }
 
 describe("patchInteractiveModePrototype", () => {
-	it("applies agent_end cleanup without double-wrapping", async () => {
+	it("applies agent_end cleanup with bash flush before pending-message refresh", async () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 
 		const mode = new FakeInteractiveMode();
+		mode.pendingBashComponents = [{ deferred: true }];
 		const result = await mode.handleEvent({ type: "agent_end" });
 
 		expect(result).toBe("ok");
 		expect(mode.handleEventCalls).toBe(1);
+		expect(mode.flushCalls).toBe(1);
+		expect(mode.pendingBashComponents).toEqual([]);
 		expect(mode.pendingWorkingMessage).toBeUndefined();
 		expect(mode.statusClears).toBe(1);
 		expect(mode.updateCalls).toBe(1);
 		expect(mode.renderRequests).toBe(1);
+
+		const flushCallIndex = mode.lifecycleCalls.indexOf("flushPendingBashComponents");
+		const updateCallIndex = mode.lifecycleCalls.indexOf("updatePendingMessagesDisplay");
+		expect(flushCallIndex).toBeGreaterThanOrEqual(0);
+		expect(updateCallIndex).toBeGreaterThanOrEqual(0);
+		expect(flushCallIndex).toBeLessThan(updateCallIndex);
+	});
+
+	it("flushes deferred bash output after wrapped handleBashCommand and refreshes UI", async () => {
+		class BashCommandMode extends FakeInteractiveMode {}
+
+		patchInteractiveModePrototype(BashCommandMode.prototype as never);
+		const mode = new BashCommandMode();
+		mode.session.isStreaming = true;
+
+		const result = await mode.handleBashCommand("echo hi", false);
+
+		expect(result).toBe("bash-ok");
+		expect(mode.handleBashCommandCalls).toBe(1);
+		expect(mode.flushCalls).toBe(1);
+		expect(mode.updateCalls).toBeGreaterThanOrEqual(1);
+		expect(mode.renderRequests).toBeGreaterThanOrEqual(1);
+		expect(mode.pendingBashComponents).toEqual([]);
+
+		const bashEndIndex = mode.lifecycleCalls.indexOf("handleBashCommand:end");
+		const flushCallIndex = mode.lifecycleCalls.indexOf("flushPendingBashComponents");
+		const updateCallIndex = mode.lifecycleCalls.indexOf("updatePendingMessagesDisplay");
+		expect(bashEndIndex).toBeGreaterThanOrEqual(0);
+		expect(flushCallIndex).toBeGreaterThan(bashEndIndex);
+		expect(updateCallIndex).toBeGreaterThan(flushCallIndex);
 	});
 
 	it("restores queued messages on idle Escape", () => {
