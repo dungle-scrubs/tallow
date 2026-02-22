@@ -82,7 +82,7 @@ beforeEach(async () => {
 	harness = ExtensionHarness.create();
 	await harness.loadExtension(contextFilesExtension);
 
-	// Fire session_start so the extension initializes its state
+	// Fire session_start so the extension resets lazy state for this test
 	await harness.fireEvent("session_start", { type: "session_start" }, {
 		ui: createNotifyTracker(),
 		hasUI: false,
