@@ -138,6 +138,68 @@ export interface TallowSessionOptions {
 	settings?: Record<string, unknown>;
 }
 
+/** Marker key used on summarized historical tool results. */
+export const TOOL_RESULT_RETENTION_MARKER = "__tallow_summarized_tool_result__";
+
+/** Default retention policy for historical tool-result payloads. */
+const DEFAULT_TOOL_RESULT_RETENTION_POLICY = {
+	enabled: true,
+	keepRecentToolResults: 12,
+	maxRetainedBytesPerResult: 48 * 1024,
+	previewChars: 600,
+} as const;
+
+/** Resolved policy controlling when historical tool results are summarized. */
+export interface ToolResultRetentionPolicy {
+	readonly enabled: boolean;
+	readonly keepRecentToolResults: number;
+	readonly maxRetainedBytesPerResult: number;
+	readonly previewChars: number;
+}
+
+/** Optional settings payload accepted from settings.json / overrides. */
+interface ToolResultRetentionConfigInput {
+	readonly enabled?: unknown;
+	readonly keepRecentToolResults?: unknown;
+	readonly maxRetainedBytesPerResult?: unknown;
+	readonly previewChars?: unknown;
+}
+
+/** Marker payload attached to `toolResult.details` after summarization. */
+interface ToolResultRetentionMarkerDetails {
+	readonly [TOOL_RESULT_RETENTION_MARKER]: true;
+	readonly contentBytes: number;
+	readonly detailsBytes: number;
+	readonly originalBytes: number;
+	readonly summarizedAt: string;
+	readonly summaryChars: number;
+}
+
+/** Minimal shape used for in-place tool-result summarization. */
+interface ToolResultMessageLike {
+	role: "toolResult";
+	toolCallId: string;
+	toolName: string;
+	content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+	details?: unknown;
+	isError: boolean;
+	timestamp: number;
+}
+
+/** Byte-size metrics for a single tool-result payload. */
+interface ToolResultPayloadBytes {
+	readonly contentBytes: number;
+	readonly detailsBytes: number;
+	readonly totalBytes: number;
+}
+
+/** Aggregate stats from a retention pass over historical tool results. */
+export interface ToolResultRetentionRunStats {
+	readonly examinedCount: number;
+	readonly summarizedCount: number;
+	readonly summarizedBytes: number;
+}
+
 // ─── Tool Flag ───────────────────────────────────────────────────────────────
 
 // AgentTool has contravariant params, so typed tools don't assign to AgentTool<TSchema>.
@@ -211,6 +273,301 @@ export function parseToolFlag(toolString: string): ToolArray {
 	}
 
 	return tools;
+}
+
+/**
+ * Resolve the effective tool-result retention policy from layered settings.
+ *
+ * Precedence: global settings < project settings < runtime overrides.
+ *
+ * @param params - Layered settings inputs
+ * @returns Resolved retention policy with validated numeric bounds
+ */
+export function resolveToolResultRetentionPolicy(params: {
+	globalSettings?: Record<string, unknown>;
+	projectSettings?: Record<string, unknown>;
+	runtimeSettings?: Record<string, unknown>;
+}): ToolResultRetentionPolicy {
+	const globalConfig = readToolResultRetentionConfig(params.globalSettings);
+	const projectConfig = readToolResultRetentionConfig(params.projectSettings);
+	const runtimeConfig = readToolResultRetentionConfig(params.runtimeSettings);
+
+	const merged = {
+		...globalConfig,
+		...projectConfig,
+		...runtimeConfig,
+	};
+
+	return {
+		enabled:
+			typeof merged.enabled === "boolean"
+				? merged.enabled
+				: DEFAULT_TOOL_RESULT_RETENTION_POLICY.enabled,
+		keepRecentToolResults: toNonNegativeInt(
+			merged.keepRecentToolResults,
+			DEFAULT_TOOL_RESULT_RETENTION_POLICY.keepRecentToolResults,
+			500
+		),
+		maxRetainedBytesPerResult: toNonNegativeInt(
+			merged.maxRetainedBytesPerResult,
+			DEFAULT_TOOL_RESULT_RETENTION_POLICY.maxRetainedBytesPerResult,
+			10 * 1024 * 1024
+		),
+		previewChars: toNonNegativeInt(
+			merged.previewChars,
+			DEFAULT_TOOL_RESULT_RETENTION_POLICY.previewChars,
+			10_000
+		),
+	};
+}
+
+/**
+ * Summarize older oversized tool results in-place while keeping the newest N full.
+ *
+ * This mutates the provided message objects directly. It is intended for historical
+ * messages after a turn has finished, never during active tool-result synthesis.
+ *
+ * @param messages - Chronological message array from the active session branch
+ * @param policy - Resolved retention policy
+ * @returns Aggregate stats for the retention pass
+ */
+export function applyToolResultRetentionToMessages(
+	messages: unknown[],
+	policy: ToolResultRetentionPolicy
+): ToolResultRetentionRunStats {
+	if (!policy.enabled) {
+		return {
+			examinedCount: 0,
+			summarizedBytes: 0,
+			summarizedCount: 0,
+		};
+	}
+
+	const toolResults = messages.filter(isToolResultMessageLike);
+	if (toolResults.length <= policy.keepRecentToolResults) {
+		return {
+			examinedCount: toolResults.length,
+			summarizedBytes: 0,
+			summarizedCount: 0,
+		};
+	}
+
+	const mutableRangeEnd = Math.max(0, toolResults.length - policy.keepRecentToolResults);
+	let summarizedCount = 0;
+	let summarizedBytes = 0;
+
+	for (let i = 0; i < mutableRangeEnd; i++) {
+		const result = summarizeHistoricalToolResultInPlace(toolResults[i], policy);
+		if (result.wasSummarized) {
+			summarizedCount += 1;
+			summarizedBytes += result.originalBytes;
+		}
+	}
+
+	return {
+		examinedCount: toolResults.length,
+		summarizedBytes,
+		summarizedCount,
+	};
+}
+
+/**
+ * Read retention config from an arbitrary settings object.
+ *
+ * @param settings - Settings record that may include `toolResultRetention`
+ * @returns Partial retention config when present
+ */
+function readToolResultRetentionConfig(
+	settings: Record<string, unknown> | undefined
+): ToolResultRetentionConfigInput {
+	if (!settings) return {};
+	const config = settings.toolResultRetention;
+	return isObjectRecord(config) ? (config as ToolResultRetentionConfigInput) : {};
+}
+
+/**
+ * Clamp a numeric setting to a safe non-negative integer range.
+ *
+ * @param value - Unknown value from settings
+ * @param fallback - Fallback when value is invalid
+ * @param max - Maximum allowed value
+ * @returns Sanitized non-negative integer
+ */
+function toNonNegativeInt(value: unknown, fallback: number, max: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+	return Math.max(0, Math.min(max, Math.floor(value)));
+}
+
+/**
+ * Type guard for plain object records.
+ *
+ * @param value - Unknown value
+ * @returns True when value is a non-null, non-array object
+ */
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Estimate UTF-8 bytes for JSON-serializable details payloads.
+ *
+ * @param value - Any serializable details value
+ * @returns UTF-8 byte length of JSON representation, or 0 when unavailable
+ */
+function safeJsonByteLength(value: unknown): number {
+	if (value == null) return 0;
+	try {
+		return Buffer.byteLength(JSON.stringify(value), "utf-8");
+	} catch {
+		return 0;
+	}
+}
+
+/**
+ * Measure the approximate payload size for a tool result.
+ *
+ * @param result - Tool result message
+ * @returns Content/details/total byte counts
+ */
+function estimateToolResultPayloadBytes(result: ToolResultMessageLike): ToolResultPayloadBytes {
+	let contentBytes = 0;
+	for (const block of result.content) {
+		if (block.type === "text") {
+			contentBytes += Buffer.byteLength(block.text ?? "", "utf-8");
+			continue;
+		}
+		if (block.type === "image") {
+			contentBytes += Buffer.byteLength(block.data ?? "", "utf-8");
+			contentBytes += Buffer.byteLength(block.mimeType ?? "", "utf-8");
+		}
+	}
+
+	const detailsBytes = safeJsonByteLength(result.details);
+	return {
+		contentBytes,
+		detailsBytes,
+		totalBytes: contentBytes + detailsBytes,
+	};
+}
+
+/**
+ * Check whether a tool result was already summarized by retention.
+ *
+ * @param details - Tool result details payload
+ * @returns True when details include the retention marker
+ */
+function isRetentionSummarized(details: unknown): boolean {
+	if (!isObjectRecord(details)) return false;
+	return details[TOOL_RESULT_RETENTION_MARKER] === true;
+}
+
+/**
+ * Build a concise preview from a tool-result content array.
+ *
+ * @param content - Tool result content blocks
+ * @param maxChars - Maximum preview length
+ * @returns Truncated textual preview suitable for summary output
+ */
+function buildToolResultPreview(
+	content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
+	maxChars: number
+): string {
+	if (maxChars <= 0) return "[preview disabled]";
+
+	let preview = "";
+	for (const block of content) {
+		if (block.type === "text") {
+			preview += block.text ?? "";
+		} else if (block.type === "image") {
+			const mime = block.mimeType ?? "image/unknown";
+			preview += `\n[Image output omitted: ${mime}]\n`;
+		}
+
+		if (preview.length >= maxChars) break;
+	}
+
+	const normalized = preview.trim();
+	if (normalized.length === 0) return "[no textual output]";
+	if (normalized.length <= maxChars) return normalized;
+	return `${normalized.slice(0, maxChars)}…`;
+}
+
+/**
+ * Render byte counts in a short human-friendly format.
+ *
+ * @param value - Byte count
+ * @returns Formatted size string (e.g. 12.4KB)
+ */
+function formatBytesForSummary(value: number): string {
+	if (value < 1024) return `${value}B`;
+	if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)}KB`;
+	return `${(value / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
+ * Summarize one historical tool result in-place when policy thresholds are exceeded.
+ *
+ * @param result - Tool result to inspect and possibly mutate
+ * @param policy - Resolved retention policy
+ * @returns Whether summarization happened and original payload bytes
+ */
+function summarizeHistoricalToolResultInPlace(
+	result: ToolResultMessageLike,
+	policy: ToolResultRetentionPolicy
+): { originalBytes: number; wasSummarized: boolean } {
+	if (isRetentionSummarized(result.details)) {
+		return { originalBytes: 0, wasSummarized: false };
+	}
+
+	const sizes = estimateToolResultPayloadBytes(result);
+	if (sizes.totalBytes <= policy.maxRetainedBytesPerResult) {
+		return { originalBytes: 0, wasSummarized: false };
+	}
+
+	const preview = buildToolResultPreview(result.content, policy.previewChars);
+	const status = result.isError ? "error" : "ok";
+	const summaryText = [
+		`[summarized historical tool result]`,
+		`tool: ${result.toolName} (${status})`,
+		`original payload: ${formatBytesForSummary(sizes.totalBytes)}`,
+		"",
+		preview,
+		"",
+		"[full payload cleared by toolResultRetention policy to reduce long-session memory]",
+	].join("\n");
+
+	const markerDetails: ToolResultRetentionMarkerDetails = {
+		[TOOL_RESULT_RETENTION_MARKER]: true,
+		contentBytes: sizes.contentBytes,
+		detailsBytes: sizes.detailsBytes,
+		originalBytes: sizes.totalBytes,
+		summarizedAt: new Date().toISOString(),
+		summaryChars: summaryText.length,
+	};
+
+	result.content = [{ type: "text", text: summaryText }];
+	result.details = markerDetails;
+
+	return {
+		originalBytes: sizes.totalBytes,
+		wasSummarized: true,
+	};
+}
+
+/**
+ * Narrow unknown messages to tool-result messages.
+ *
+ * @param value - Candidate message object
+ * @returns True when value matches the minimal toolResult shape used by retention
+ */
+function isToolResultMessageLike(value: unknown): value is ToolResultMessageLike {
+	if (!isObjectRecord(value)) return false;
+	if (value.role !== "toolResult") return false;
+	if (typeof value.toolCallId !== "string") return false;
+	if (typeof value.toolName !== "string") return false;
+	if (typeof value.isError !== "boolean") return false;
+	if (typeof value.timestamp !== "number") return false;
+	return Array.isArray(value.content);
 }
 
 export interface TallowSession {
@@ -747,6 +1104,12 @@ export async function createTallowSession(
 		});
 	}
 
+	const toolResultRetentionPolicy = resolveToolResultRetentionPolicy({
+		globalSettings: settingsManager.getGlobalSettings() as Record<string, unknown>,
+		projectSettings: settingsManager.getProjectSettings() as Record<string, unknown>,
+		runtimeSettings: options.settings,
+	});
+
 	// ── Resource Loader ──────────────────────────────────────────────────────
 
 	const additionalExtensionPaths: string[] = [];
@@ -896,6 +1259,7 @@ export async function createTallowSession(
 		extensionFactories: [
 			rebrandSystemPrompt,
 			injectImageFilePaths,
+			createToolResultRetentionExtension(toolResultRetentionPolicy),
 			detectOutputTruncation,
 			createProjectTrustExtension(cwd, projectTrust),
 			...(options.extensionFactories ?? []),
@@ -1316,6 +1680,33 @@ function injectImageFilePaths(pi: ExtensionAPI): void {
 			setNextImageFilePath(filePath);
 		}
 	});
+}
+
+/**
+ * Create a built-in extension that summarizes oversized historical tool results.
+ *
+ * Runs at turn end (after response synthesis) to avoid mutating active-turn
+ * tool results while the model is still reasoning.
+ *
+ * @param policy - Resolved retention policy
+ * @returns Extension factory
+ */
+function createToolResultRetentionExtension(policy: ToolResultRetentionPolicy): ExtensionFactory {
+	return (pi: ExtensionAPI): void => {
+		if (!policy.enabled) return;
+
+		pi.on("turn_end", async (_event, ctx) => {
+			const messages: Array<Record<string, unknown>> = [];
+			for (const entry of ctx.sessionManager.getBranch()) {
+				if (entry.type !== "message") continue;
+				if (!isObjectRecord(entry.message)) continue;
+				messages.push(entry.message);
+			}
+			if (messages.length === 0) return;
+
+			applyToolResultRetentionToMessages(messages, policy);
+		});
+	};
 }
 
 /**
