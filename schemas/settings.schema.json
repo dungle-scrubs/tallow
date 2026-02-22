@@ -351,6 +351,18 @@
 			},
 			"additionalProperties": false
 		},
+		"lsp": {
+			"type": "object",
+			"description": "Language Server Protocol settings.",
+			"properties": {
+				"startupTimeoutMs": {
+					"type": "number",
+					"description": "Milliseconds to wait for language server startup before timing out.",
+					"minimum": 1
+				}
+			},
+			"additionalProperties": false
+		},
 		"disabledExtensions": {
 			"type": "array",
 			"items": { "type": "string" },

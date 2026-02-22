@@ -13,3 +13,27 @@ can catch type errors and lint issues without you asking.
 
 Startup and request operations are time-bounded with automatic cleanup,
 so stalled language servers fail fast instead of hanging a tool call.
+
+## Configuration
+
+### `lsp.startupTimeoutMs`
+
+Controls how long tallow waits for a language server to start (process spawn,
+server readiness, and initial LSP handshake) before timing out and cleaning up.
+
+Default: `10000` ms.
+
+```json
+// .tallow/settings.json
+{
+  "lsp": {
+    "startupTimeoutMs": 15000
+  }
+}
+```
+
+Effective precedence:
+
+1. `.tallow/settings.json` (project)
+2. `~/.tallow/settings.json` (user)
+3. built-in default (`10000`)
