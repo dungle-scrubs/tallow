@@ -81,6 +81,8 @@ function firstText(result: { content: Array<{ text?: string; type: string }> }):
 describe("lsp tool behavior with timeout guards", () => {
 	let harness: ExtensionHarness;
 	let projectDir: string;
+	let agentDir: string;
+	let previousAgentDirEnv: string | undefined;
 
 	beforeAll(async () => {
 		runtime = setupLspMockRuntime();
@@ -101,7 +103,11 @@ describe("lsp tool behavior with timeout guards", () => {
 		resetLspStateForTests();
 		setLspProtocolBindingsForTests(runtime.protocol);
 		setLspSpawnForTests(runtime.spawn);
-		setLspTimeoutsForTests({ requestMs: 40, startupMs: 50 });
+		setLspTimeoutsForTests({ requestMs: 40 });
+
+		agentDir = mkdtempSync(join(tmpdir(), "tallow-lsp-tools-agent-"));
+		previousAgentDirEnv = process.env.TALLOW_CODING_AGENT_DIR;
+		process.env.TALLOW_CODING_AGENT_DIR = agentDir;
 
 		projectDir = mkdtempSync(join(tmpdir(), "tallow-lsp-tools-"));
 		harness = ExtensionHarness.create();
@@ -118,6 +124,16 @@ describe("lsp tool behavior with timeout guards", () => {
 			resetLspStateForTests();
 		} catch {
 			// Ignore state cleanup errors in tests
+		}
+		if (previousAgentDirEnv === undefined) {
+			delete process.env.TALLOW_CODING_AGENT_DIR;
+		} else {
+			process.env.TALLOW_CODING_AGENT_DIR = previousAgentDirEnv;
+		}
+		try {
+			rmSync(agentDir, { force: true, recursive: true });
+		} catch {
+			// Ignore temp-dir cleanup errors
 		}
 		try {
 			rmSync(projectDir, { force: true, recursive: true });

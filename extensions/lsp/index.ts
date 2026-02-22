@@ -13,6 +13,7 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import { homedir } from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -156,8 +157,8 @@ const LSP_STARTUP_TIMEOUT_MS = 10_000;
 /** Milliseconds to wait for individual LSP requests (definition, hover, etc.). */
 const LSP_REQUEST_TIMEOUT_MS = 8_000;
 
-/** Active startup timeout. Test hooks can temporarily override this value. */
-let lspStartupTimeoutMs = LSP_STARTUP_TIMEOUT_MS;
+/** Optional startup-timeout override used by tests. */
+let lspStartupTimeoutOverrideMs: number | null = null;
 /** Active request timeout. Test hooks can temporarily override this value. */
 let lspRequestTimeoutMs = LSP_REQUEST_TIMEOUT_MS;
 
@@ -173,7 +174,7 @@ export function setLspTimeoutsForTests(overrides: {
 	startupMs?: number;
 }): void {
 	if (typeof overrides.startupMs === "number" && Number.isFinite(overrides.startupMs)) {
-		lspStartupTimeoutMs = Math.max(1, overrides.startupMs);
+		lspStartupTimeoutOverrideMs = Math.max(1, overrides.startupMs);
 	}
 	if (typeof overrides.requestMs === "number" && Number.isFinite(overrides.requestMs)) {
 		lspRequestTimeoutMs = Math.max(1, overrides.requestMs);
@@ -214,10 +215,113 @@ export function resetLspStateForTests(): void {
 	}
 	connections.clear();
 	failedLanguages.clear();
-	lspStartupTimeoutMs = LSP_STARTUP_TIMEOUT_MS;
+	lspStartupTimeoutOverrideMs = null;
 	lspRequestTimeoutMs = LSP_REQUEST_TIMEOUT_MS;
 	spawnProcess = spawn;
 	protocolBindings = DEFAULT_PROTOCOL_BINDINGS;
+}
+
+/**
+ * Checks whether a value is a plain object record.
+ *
+ * @param value - Unknown value to inspect
+ * @returns True when value is a non-null, non-array object
+ */
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads a settings file and returns an object payload when valid.
+ *
+ * @param settingsPath - Absolute path to settings.json
+ * @returns Parsed settings object, or an empty object on failure
+ */
+function readSettingsObject(settingsPath: string): Record<string, unknown> {
+	if (!fs.existsSync(settingsPath)) {
+		return {};
+	}
+
+	try {
+		const raw = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as unknown;
+		return isObjectRecord(raw) ? raw : {};
+	} catch {
+		return {};
+	}
+}
+
+/**
+ * Reads `lsp.startupTimeoutMs` from a settings object when present and valid.
+ *
+ * @param settings - Parsed settings object
+ * @returns Startup timeout in milliseconds, or null when missing/invalid
+ */
+function readStartupTimeoutFromSettings(settings: Record<string, unknown>): number | null {
+	const lspSettings = settings.lsp;
+	if (!isObjectRecord(lspSettings)) {
+		return null;
+	}
+
+	const startupTimeoutMs = lspSettings.startupTimeoutMs;
+	if (
+		typeof startupTimeoutMs !== "number" ||
+		!Number.isFinite(startupTimeoutMs) ||
+		startupTimeoutMs <= 0
+	) {
+		return null;
+	}
+
+	return startupTimeoutMs;
+}
+
+/**
+ * Resolves the global settings.json path.
+ *
+ * @returns Absolute path to the user-level settings file
+ */
+function getGlobalSettingsPath(): string {
+	const configuredAgentDir = process.env.TALLOW_CODING_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR;
+	if (typeof configuredAgentDir === "string" && configuredAgentDir.trim().length > 0) {
+		return path.join(configuredAgentDir, "settings.json");
+	}
+
+	return path.join(homedir(), ".tallow", "settings.json");
+}
+
+/**
+ * Resolves startup timeout with precedence: project > user > default.
+ *
+ * @param cwd - Working directory used for project-level settings lookup
+ * @returns Startup timeout in milliseconds
+ */
+function resolveStartupTimeoutFromSettings(cwd: string): number {
+	const projectSettings = readSettingsObject(path.join(cwd, ".tallow", "settings.json"));
+	const projectTimeoutMs = readStartupTimeoutFromSettings(projectSettings);
+	if (projectTimeoutMs !== null) {
+		return projectTimeoutMs;
+	}
+
+	const userSettings = readSettingsObject(getGlobalSettingsPath());
+	const userTimeoutMs = readStartupTimeoutFromSettings(userSettings);
+	if (userTimeoutMs !== null) {
+		return userTimeoutMs;
+	}
+
+	return LSP_STARTUP_TIMEOUT_MS;
+}
+
+/**
+ * Returns the effective startup timeout for this invocation.
+ *
+ * @param cwd - Working directory used for settings lookup
+ * @returns Startup timeout in milliseconds
+ */
+function getEffectiveStartupTimeoutMs(cwd: string): number {
+	if (lspStartupTimeoutOverrideMs !== null) {
+		return lspStartupTimeoutOverrideMs;
+	}
+
+	return resolveStartupTimeoutFromSettings(cwd);
 }
 
 /**
@@ -453,6 +557,7 @@ async function getOrCreateConnectionForFile(
 	options?: {
 		onStarting?: (language: string) => void;
 		signal?: AbortSignal;
+		settingsCwd?: string;
 	}
 ): Promise<LSPConnection | null> {
 	const absolutePath = path.resolve(filePath);
@@ -464,7 +569,10 @@ async function getOrCreateConnectionForFile(
 		options.onStarting(language);
 	}
 
-	return getOrCreateConnection(language, projectRoot, { signal: options?.signal });
+	return getOrCreateConnection(language, projectRoot, {
+		settingsCwd: options?.settingsCwd,
+		signal: options?.signal,
+	});
 }
 
 /**
@@ -477,7 +585,10 @@ async function getOrCreateConnectionForFile(
 async function getOrCreateConnection(
 	language: string,
 	rootPath: string,
-	options?: { signal?: AbortSignal }
+	options?: {
+		signal?: AbortSignal;
+		settingsCwd?: string;
+	}
 ): Promise<LSPConnection | null> {
 	const key = `${language}:${rootPath}`;
 
@@ -487,6 +598,7 @@ async function getOrCreateConnection(
 	}
 
 	const signal = options?.signal;
+	const startupTimeoutMs = getEffectiveStartupTimeoutMs(options?.settingsCwd ?? process.cwd());
 
 	// Try primary config first, then fallback
 	const configsToTry = [language];
@@ -511,7 +623,7 @@ async function getOrCreateConnection(
 						which.on("error", reject);
 					}),
 				{
-					timeoutMs: lspStartupTimeoutMs,
+					timeoutMs: startupTimeoutMs,
 					signal,
 					description: `Checking availability of ${c.command}`,
 					onTimeout: () => {
@@ -606,7 +718,7 @@ async function getOrCreateConnection(
 					initParams as never
 				) as Promise<unknown>,
 			{
-				timeoutMs: lspStartupTimeoutMs,
+				timeoutMs: startupTimeoutMs,
 				signal,
 				description: `${actualLanguage} language server initialization`,
 			}
@@ -889,6 +1001,7 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 			try {
 				conn = await getOrCreateConnectionForFile(language, filePath, {
 					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					settingsCwd: ctx.cwd,
 					signal,
 				});
 			} catch (error) {
@@ -1017,6 +1130,7 @@ WHEN TO USE:
 			try {
 				conn = await getOrCreateConnectionForFile(language, filePath, {
 					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					settingsCwd: ctx.cwd,
 					signal,
 				});
 			} catch (error) {
@@ -1140,6 +1254,7 @@ WHEN TO USE:
 			try {
 				conn = await getOrCreateConnectionForFile(language, filePath, {
 					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					settingsCwd: ctx.cwd,
 					signal,
 				});
 			} catch (error) {
@@ -1254,6 +1369,7 @@ WHEN TO USE:
 			try {
 				conn = await getOrCreateConnectionForFile(language, filePath, {
 					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+					settingsCwd: ctx.cwd,
 					signal,
 				});
 			} catch (error) {
@@ -1440,8 +1556,9 @@ WHEN TO USE:
 		label: "lsp_status",
 		description: "Check which language servers are running and their capabilities.",
 		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, signal, _onUpdate, _ctx) {
+		async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
 			const lines: string[] = ["LSP Server Status:"];
+			const startupTimeoutMs = getEffectiveStartupTimeoutMs(ctx.cwd);
 
 			// Show running connections
 			if (connections.size === 0) {
@@ -1488,7 +1605,7 @@ WHEN TO USE:
 								which.on("error", () => resolve(false));
 							}),
 						{
-							timeoutMs: lspStartupTimeoutMs,
+							timeoutMs: startupTimeoutMs,
 							signal,
 							description: `Checking availability of ${config.command}`,
 							onTimeout: () => {

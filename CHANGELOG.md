@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **extensions:** lazy-initialize command expansion, context scanning, context fork indexing, and MCP startup connections behind first-use triggers
+- **lsp:** allow configuring language-server startup timeout via `lsp.startupTimeoutMs` with project-over-user precedence
 - **permissions:** add structured deny/ask reason metadata with redaction-safe messaging and shell-policy alignment
 - **subagent-tool:** compact completed background-agent histories with retained final output, bounded debug tails, and stale-record cleanup
 - **teams-tool:** enforce ring-buffer retention for team message logs with debug and limit env overrides
