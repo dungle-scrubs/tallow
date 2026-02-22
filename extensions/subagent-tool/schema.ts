@@ -7,6 +7,14 @@ import { Type } from "@sinclair/typebox";
 
 // ── Parameter Schemas ────────────────────────────────────────────────────────
 
+export const IsolationModeSchema = StringEnum(["worktree"] as const, {
+	description:
+		'Isolation strategy for subagent execution. "worktree" runs the subagent in a temporary detached git worktree.',
+});
+
+/** Isolation mode supported by the subagent tool. */
+export type IsolationMode = "worktree";
+
 export const TaskItem = Type.Object({
 	agent: Type.String({ description: "Name of the agent to invoke" }),
 	task: Type.String({ description: "Task to delegate to the agent" }),
@@ -14,6 +22,7 @@ export const TaskItem = Type.Object({
 	model: Type.Optional(
 		Type.String({ description: "Model ID to use for this agent (overrides agent default)" })
 	),
+	isolation: Type.Optional(IsolationModeSchema),
 });
 
 export const CentipedeItem = Type.Object({
@@ -25,6 +34,7 @@ export const CentipedeItem = Type.Object({
 	model: Type.Optional(
 		Type.String({ description: "Model ID to use for this step (overrides agent default)" })
 	),
+	isolation: Type.Optional(IsolationModeSchema),
 });
 
 export const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
@@ -58,6 +68,7 @@ export const SubagentParams = Type.Object({
 	cwd: Type.Optional(
 		Type.String({ description: "Working directory for the agent process (single mode)" })
 	),
+	isolation: Type.Optional(IsolationModeSchema),
 	background: Type.Optional(
 		Type.Boolean({
 			description: "Run in background, return immediately. Use subagent_status to check.",
