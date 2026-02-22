@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.6...tallow-v0.8.7) (2026-02-22)
+
+
+### Added
+
+* **commands:** add --worktree workflow to implement template ([b4bbf92](https://github.com/dungle-scrubs/tallow/commit/b4bbf925fa968b7acd4f1cf24d865a7b793a251a))
+* **core:** add extension catalog and exclusive loading ([b61e8b7](https://github.com/dungle-scrubs/tallow/commit/b61e8b7c03569793c5fa9b187fef155fd83ed19a))
+* **debug:** rename /diag to /diagnostics ([3648538](https://github.com/dungle-scrubs/tallow/commit/36485386f26cf03481d1901ae9431679fa323052))
+* **extensions:** add catalog metadata to bundled manifests ([680ca55](https://github.com/dungle-scrubs/tallow/commit/680ca556e784c3268de766c542b82dfe2c4fae16))
+* **lsp:** add configurable startup timeout ([355c4f3](https://github.com/dungle-scrubs/tallow/commit/355c4f39b6f8b6942e7437018f9183b984ebbdc2))
+* **startup:** add headless startup profile fast path ([8d676a1](https://github.com/dungle-scrubs/tallow/commit/8d676a1a1de6fe23ae6fbccaa4969b55bb4dd79a))
+* **subagent-tool:** add routing mode and signals config support ([365c73a](https://github.com/dungle-scrubs/tallow/commit/365c73a6bcb0dc28a36a8dade0ec18cacd1512b6))
+* **subagent-tool:** add stalled-worker watchdog and recovery flow ([adb97a9](https://github.com/dungle-scrubs/tallow/commit/adb97a93b9149eaaf61a99d3b2832eaa704b450b))
+* **tasks:** surface stalled subagent status in widget ([5b8955b](https://github.com/dungle-scrubs/tallow/commit/5b8955bd9c773729fc594b97a3d6c8f6a9d594cb))
+* **trust:** box project trust warning with clearer risk copy ([91af699](https://github.com/dungle-scrubs/tallow/commit/91af699c184bf61fc8c6583fe5505354ae0b2679))
+
+
+### Fixed
+
+* **core:** flush deferred bash output on interactive updates ([d4bee77](https://github.com/dungle-scrubs/tallow/commit/d4bee774a53bba51622c85ea277b834ad49c6a37))
+* **core:** update fatal banner diagnostics hint ([32ef553](https://github.com/dungle-scrubs/tallow/commit/32ef5533fa8320f97c3f370822c93733c295b18a))
+* **permissions:** clarify deny and ask reasons ([a671024](https://github.com/dungle-scrubs/tallow/commit/a671024f1b975851a0f158c587a1f11ba9b25a27))
+* **subagent-tool:** align routing signal types with synapse ([3a49aaa](https://github.com/dungle-scrubs/tallow/commit/3a49aaa9db567541e1bd9612695fb9f74e429f3e))
+* **subagent-tool:** relax truncation for parallel previews ([6dd6073](https://github.com/dungle-scrubs/tallow/commit/6dd607364a83056e88afb57728999d93d643d5fa))
+* **subagent:** honor provider-scoped explicit model overrides ([2659853](https://github.com/dungle-scrubs/tallow/commit/265985374210d03fca406c8c1f1ec2e08046f9c9))
+* **tasks:** split subagent widget by blocking mode ([7510cc2](https://github.com/dungle-scrubs/tallow/commit/7510cc2814b475dd259ffff596e1e971049bd3dd))
+* **teams-tool:** dedupe noisy dashboard feed and refine dashboard rendering ([8dc97eb](https://github.com/dungle-scrubs/tallow/commit/8dc97eb1959274f9895a29eae108299589f67fe7))
+* **tui:** realign diff viewport basis after shrink ([441f688](https://github.com/dungle-scrubs/tallow/commit/441f688b6691c8d0b9cbedbe778141cdc2125c10))
+* **ui:** avoid duplicate Error prefix for icon-led extension notifications ([97811bc](https://github.com/dungle-scrubs/tallow/commit/97811bcc52bab8d6bf368eb1c3502b53edbb0f45))
+* **wezterm-notify:** stabilize lifecycle signaling and spinner updates ([315a5f6](https://github.com/dungle-scrubs/tallow/commit/315a5f6ca19efb7d7abfcd40797baf6053f38f1c))
+
+
+### Changed
+
+* **commands:** lazy-load command expansion and fork indexes ([a5e4a54](https://github.com/dungle-scrubs/tallow/commit/a5e4a549d546d16804f8ca767591f30bd02445eb))
+* **context-files:** defer context scan to first use ([e2a7f39](https://github.com/dungle-scrubs/tallow/commit/e2a7f39dc808eee857658db49bd2ce43e2f4249c))
+* **mcp-adapter:** lazy-initialize server connections ([79d490b](https://github.com/dungle-scrubs/tallow/commit/79d490b64cafa918a0f4a51c0282f79006288e79))
+* **shared:** add reusable lazy initializer helper ([4fdfea0](https://github.com/dungle-scrubs/tallow/commit/4fdfea021eb381b3d81c324e448cf2685c981d2f))
+* **subagent,teams:** bound history retention and cleanup ([c0cb6e3](https://github.com/dungle-scrubs/tallow/commit/c0cb6e3f333c473cbf11fac1d53b56bcb75ceb19))
+* **tasks-subagent:** share identity styling and model metadata ([21c5179](https://github.com/dungle-scrubs/tallow/commit/21c5179f5f545ba0b44db63e068e0106581c40d5))
+* **tool-display:** add semantic presentation roles for tool output ([95bc7a5](https://github.com/dungle-scrubs/tallow/commit/95bc7a54cdb95ac060f997d6c7a28681efe7ab73))
+
+
+### Documentation
+
+* add autocomplete guide covering structural and LLM completions ([1b8d6fb](https://github.com/dungle-scrubs/tallow/commit/1b8d6fb99661dd0f751ad0767f5ff87d4aff2890))
+* **changelog:** note tui border regression fix ([1d5e600](https://github.com/dungle-scrubs/tallow/commit/1d5e600447143947223108e153a029b16c28e87f))
+* **changelog:** record lazy startup initialization refactor ([01c1ac9](https://github.com/dungle-scrubs/tallow/commit/01c1ac949548af75e27f294eeb04375d042875a7))
+* **debug:** clarify diagnostics vs /debug usage ([0a2261f](https://github.com/dungle-scrubs/tallow/commit/0a2261fa4e9b9bc8ea295284bb90e34cf3077be8))
+* enrich prompt-suggestions with model fallback chain and context details ([45f0d0e](https://github.com/dungle-scrubs/tallow/commit/45f0d0e26b9451952cf704f7fe8d5a2093f38710))
+* **extensions:** document catalog commands and metadata fields ([38f1c13](https://github.com/dungle-scrubs/tallow/commit/38f1c13b3e1a449cf965d80f0f383d415ba82a8e))
+* **extensions:** document shared presentation roles ([a9f3925](https://github.com/dungle-scrubs/tallow/commit/a9f392561610ca924459a393353eff99d4693e58))
+* **permissions:** add reason clarity examples ([31b516f](https://github.com/dungle-scrubs/tallow/commit/31b516fe4700bba041144bafa6ab8234503d8660))
+* **readme:** add annotated screenshot asset ([faae932](https://github.com/dungle-scrubs/tallow/commit/faae9323639b0e3d2dc5bd982f3a4f2f728979c7))
+* **wezterm-notify:** update working-session lifecycle guide ([7b17c12](https://github.com/dungle-scrubs/tallow/commit/7b17c1256bb22ba4e9f651c19a67ad9ff5054ffa))
+
+
+### Maintenance
+
+* **dep-check:** add failure notification on build break ([2ab2063](https://github.com/dungle-scrubs/tallow/commit/2ab206372e67e5bed7b0086cc3860cea902ce83e))
+* **deps:** bump @dungle-scrubs/synapse to 0.1.4 ([8740bdc](https://github.com/dungle-scrubs/tallow/commit/8740bdca689289b8874494a753d1d7eb78c63788))
+* **deps:** bump pi-* dependencies to 0.54.0 ([c5ad469](https://github.com/dungle-scrubs/tallow/commit/c5ad469397d4b1fac8d793d43babbc567b8a5c47))
+* **permissions:** cover reason metadata and messaging ([eaff3a0](https://github.com/dungle-scrubs/tallow/commit/eaff3a0ae13f068c32c39bfd8889cebf4e769d7a))
+* **startup:** add startup benchmark scripts ([21f3a76](https://github.com/dungle-scrubs/tallow/commit/21f3a766f15aa7585983f52e5751c938bf5e14db))
+* **startup:** add startup profile regression coverage ([c59f40e](https://github.com/dungle-scrubs/tallow/commit/c59f40efa6d88bd8c1df3e533838fc5adda213b5))
+* **subagent-tool:** cover routing config and selection options ([4950d58](https://github.com/dungle-scrubs/tallow/commit/4950d587975cfc621d6a7bc50dc02f6a020319f1))
+* **subagent:** fix auto-cheap routing determinism in CI ([f3d9a8d](https://github.com/dungle-scrubs/tallow/commit/f3d9a8dfe458bb760fb2c139d46725e21a6457e2))
+* **subagent:** isolate auto-cheap routing tests from home config ([29288cd](https://github.com/dungle-scrubs/tallow/commit/29288cdc571550f747dbb1cd7ff3d1d5fe3497bc))
+* **subagent:** relax auto-cheap assertions across provider prefs ([49946d8](https://github.com/dungle-scrubs/tallow/commit/49946d8ff778fe66045fcdca8bcedca1063bdd2e))
+* **trust:** cover boxed project trust banner and payload ([8dc3878](https://github.com/dungle-scrubs/tallow/commit/8dc38781adad6df55618e53529eddd5b4a1a9c3f))
+* **tui:** add border and shrink-regression coverage ([f946979](https://github.com/dungle-scrubs/tallow/commit/f946979a3fd543723e84833e3f5811bed7133f88))
+
 ## [Unreleased]
 
 ### Changed
