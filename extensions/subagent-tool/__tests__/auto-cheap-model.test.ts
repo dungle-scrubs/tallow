@@ -58,10 +58,12 @@ mockScope.module("../task-classifier.js", () => ({
 
 let parseRoutingKeyword!: typeof import("../model-router.js").parseRoutingKeyword;
 let routeModel!: typeof import("../model-router.js").routeModel;
+let isolatedCwdDir = "";
 let isolatedHomeDir = "";
 const originalHome = process.env.HOME;
 
 beforeAll(async () => {
+	isolatedCwdDir = mkdtempSync(join(tmpdir(), "tallow-route-keyword-cwd-"));
 	isolatedHomeDir = mkdtempSync(join(tmpdir(), "tallow-route-keyword-home-"));
 	mkdirSync(join(isolatedHomeDir, ".tallow"), { recursive: true });
 	process.env.HOME = isolatedHomeDir;
@@ -77,6 +79,9 @@ afterAll(() => {
 		delete process.env.HOME;
 	} else {
 		process.env.HOME = originalHome;
+	}
+	if (isolatedCwdDir) {
+		rmSync(isolatedCwdDir, { force: true, recursive: true });
 	}
 	if (isolatedHomeDir) {
 		rmSync(isolatedHomeDir, { force: true, recursive: true });
@@ -130,7 +135,10 @@ describe("routeModel with auto-cheap", () => {
 			"find all API routes in src/",
 			undefined,
 			"auto-cheap",
-			"claude-opus-4-6"
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
@@ -140,30 +148,25 @@ describe("routeModel with auto-cheap", () => {
 	});
 
 	it("routing keyword still forces auto-routing when routing.enabled is false", async () => {
-		const testCwd = mkdtempSync(join(tmpdir(), "tallow-route-keyword-cwd-"));
+		writeJson(join(isolatedHomeDir, ".tallow", "settings.json"), {
+			routing: { enabled: false },
+		});
+		const result = await routeModel(
+			"find all API routes in src/",
+			undefined,
+			"auto-cheap",
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
+		);
 
-		try {
-			writeJson(join(isolatedHomeDir, ".tallow", "settings.json"), {
-				routing: { enabled: false },
-			});
-			const result = await routeModel(
-				"find all API routes in src/",
-				undefined,
-				"auto-cheap",
-				"claude-opus-4-6",
-				undefined,
-				undefined,
-				testCwd
-			);
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.reason).toBe("auto-routed");
+		expect(result.model.id).toBe("gemini-3-flash");
 
-			expect(result.ok).toBe(true);
-			if (!result.ok) return;
-			expect(result.reason).toBe("auto-routed");
-			expect(result.model.id).toBe("gemini-3-flash");
-		} finally {
-			rmSync(testCwd, { force: true, recursive: true });
-			writeJson(join(isolatedHomeDir, ".tallow", "settings.json"), {});
-		}
+		writeJson(join(isolatedHomeDir, ".tallow", "settings.json"), {});
 	});
 
 	it("auto-premium routes in premium mode", async () => {
@@ -171,7 +174,10 @@ describe("routeModel with auto-cheap", () => {
 			"design system architecture",
 			undefined,
 			"auto-premium",
-			"claude-opus-4-6"
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
@@ -186,7 +192,8 @@ describe("routeModel with auto-cheap", () => {
 			"auto-cheap",
 			"claude-opus-4-6",
 			undefined,
-			{ costPreference: "premium" }
+			{ costPreference: "premium" },
+			isolatedCwdDir
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
@@ -194,7 +201,10 @@ describe("routeModel with auto-cheap", () => {
 			"complex task",
 			undefined,
 			"auto-premium",
-			"claude-opus-4-6"
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
 		);
 		expect(premiumResult.ok).toBe(true);
 		if (!premiumResult.ok) return;
@@ -207,7 +217,10 @@ describe("routeModel with auto-cheap", () => {
 			"some task",
 			"claude-haiku-4-5-20250514",
 			"auto-premium",
-			"claude-opus-4-6"
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
@@ -217,7 +230,15 @@ describe("routeModel with auto-cheap", () => {
 	});
 
 	it("provides fallback candidates in ranking order", async () => {
-		const result = await routeModel("find files", undefined, "auto-cheap", "claude-opus-4-6");
+		const result = await routeModel(
+			"find files",
+			undefined,
+			"auto-cheap",
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
+		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
 		// Should have fallbacks after the top pick
@@ -231,7 +252,10 @@ describe("routeModel with auto-cheap", () => {
 			"some task",
 			undefined,
 			"claude-haiku-4-5-20250514",
-			"claude-opus-4-6"
+			"claude-opus-4-6",
+			undefined,
+			undefined,
+			isolatedCwdDir
 		);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
