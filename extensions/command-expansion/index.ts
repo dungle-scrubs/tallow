@@ -20,6 +20,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills, stripFrontmatter } from "@mariozechner/pi-coding-agent";
+import { createLazyInitializer } from "../_shared/lazy-init.js";
 
 interface PromptTemplate {
 	name: string;
@@ -33,6 +34,26 @@ interface Skill {
 	baseDir: string;
 	description: string;
 }
+
+/** Minimal skill record returned by loadSkills(). */
+interface LoadedSkill {
+	name: string;
+	filePath: string;
+	baseDir: string;
+	description?: string;
+}
+
+/** Dependencies used by command-expansion at runtime. */
+interface CommandExpansionDependencies {
+	readonly loadSkills: () => { skills: LoadedSkill[] };
+	readonly loadPromptTemplates: () => PromptTemplate[];
+}
+
+/** Default dependency implementation for production runtime. */
+const DEFAULT_COMMAND_EXPANSION_DEPENDENCIES: CommandExpansionDependencies = {
+	loadSkills,
+	loadPromptTemplates,
+};
 
 /**
  * Parse command arguments respecting quoted strings (bash-style).
@@ -102,6 +123,8 @@ export function substituteArgs(content: string, args: string[]): string {
 
 /**
  * Load prompt templates from ~/.tallow/prompts/ and .tallow/prompts/
+ *
+ * @returns Loaded prompt templates in search order
  */
 function loadPromptTemplates(): PromptTemplate[] {
 	const templates: PromptTemplate[] = [];
@@ -144,6 +167,52 @@ function loadPromptTemplates(): PromptTemplate[] {
 	}
 
 	return templates;
+}
+
+/**
+ * Normalize raw skill records into command-expansion skill shape.
+ *
+ * @param loadedSkills - Raw skills loaded from the framework helper
+ * @returns Normalized skill array
+ */
+function normalizeSkills(loadedSkills: LoadedSkill[]): Skill[] {
+	return loadedSkills.map((skill) => ({
+		name: skill.name,
+		filePath: skill.filePath,
+		baseDir: skill.baseDir,
+		description: skill.description || "",
+	}));
+}
+
+/**
+ * Load skills defensively and return an empty array on failure.
+ *
+ * @param loader - Skill loader dependency
+ * @returns Normalized skills
+ */
+function loadSkillsSafe(loader: CommandExpansionDependencies["loadSkills"]): Skill[] {
+	try {
+		const loadedSkills = loader();
+		return normalizeSkills(loadedSkills.skills);
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Load templates defensively and return an empty array on failure.
+ *
+ * @param loader - Template loader dependency
+ * @returns Loaded templates
+ */
+function loadTemplatesSafe(
+	loader: CommandExpansionDependencies["loadPromptTemplates"]
+): PromptTemplate[] {
+	try {
+		return loader();
+	} catch {
+		return [];
+	}
 }
 
 /**
@@ -282,33 +351,65 @@ export function splitOuterCommand(text: string): { outerCommand: string; args: s
 	};
 }
 
-export default function (pi: ExtensionAPI) {
-	// Load skills and templates once at startup
+/**
+ * Register the command-expansion extension.
+ *
+ * @param pi - Extension API
+ * @param dependencyOverrides - Optional dependency overrides for tests
+ * @returns Nothing
+ */
+export function registerCommandExpansionExtension(
+	pi: ExtensionAPI,
+	dependencyOverrides: Partial<CommandExpansionDependencies> = {}
+): void {
+	const dependencies: CommandExpansionDependencies = {
+		...DEFAULT_COMMAND_EXPANSION_DEPENDENCIES,
+		...dependencyOverrides,
+	};
+
 	let skills: Skill[] = [];
 	let templates: PromptTemplate[] = [];
 
-	function reloadResources() {
-		try {
-			const loadedSkills = loadSkills();
-			skills = loadedSkills.skills.map((s) => ({
-				name: s.name,
-				filePath: s.filePath,
-				baseDir: s.baseDir,
-				description: s.description || "",
-			}));
-		} catch {
-			skills = [];
-		}
+	const resourceInitializer = createLazyInitializer<{ outerCommand: string }>({
+		name: "command-expansion",
+		initialize: async () => {
+			skills = loadSkillsSafe(dependencies.loadSkills);
+			templates = loadTemplatesSafe(dependencies.loadPromptTemplates);
+		},
+	});
 
-		templates = loadPromptTemplates();
+	/**
+	 * Clear loaded resources so the next eligible input reinitializes lazily.
+	 *
+	 * @returns Nothing
+	 */
+	function resetResources(): void {
+		resourceInitializer.reset();
+		skills = [];
+		templates = [];
 	}
 
-	// Initial load
-	reloadResources();
+	/**
+	 * Ensure expansion resources are loaded for command processing.
+	 *
+	 * @param outerCommand - Outer command currently being processed
+	 * @returns True when resources are ready
+	 */
+	async function ensureResources(outerCommand: string): Promise<boolean> {
+		try {
+			await resourceInitializer.ensureInitialized({
+				trigger: "input",
+				context: { outerCommand },
+			});
+			return true;
+		} catch {
+			return false;
+		}
+	}
 
-	// Reload on session start (in case resources changed)
+	// Reset lazy state on each session start so changes are picked up on first use.
 	pi.on("session_start", async () => {
-		reloadResources();
+		resetResources();
 	});
 
 	// Intercept input and expand nested commands
@@ -326,6 +427,11 @@ export default function (pi: ExtensionAPI) {
 			return { action: "continue" as const };
 		}
 
+		const initialized = await ensureResources(split.outerCommand);
+		if (!initialized) {
+			return { action: "continue" as const };
+		}
+
 		// Expand nested commands in the arguments
 		const expandedArgs = expandCommands(split.args, skills, templates, 0);
 
@@ -338,4 +444,14 @@ export default function (pi: ExtensionAPI) {
 		const newText = `${split.outerCommand} ${expandedArgs}`;
 		return { action: "transform" as const, text: newText };
 	});
+}
+
+/**
+ * Default command-expansion extension export.
+ *
+ * @param pi - Extension API
+ * @returns Nothing
+ */
+export default function commandExpansionExtension(pi: ExtensionAPI): void {
+	registerCommandExpansionExtension(pi);
 }

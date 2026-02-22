@@ -23,6 +23,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { createLazyInitializer } from "../_shared/lazy-init.js";
 import { isShellInterpolationEnabled } from "../_shared/shell-policy.js";
 import { expandShellCommands } from "../shell-interpolation/index.js";
 import type { FrontmatterIndex } from "./frontmatter-index.js";
@@ -276,11 +277,48 @@ interface ForkResultDetails {
 	duration: number;
 }
 
+/** Dependencies used by context-fork at runtime. */
+interface ContextForkDependencies {
+	readonly buildFrontmatterIndex: typeof buildFrontmatterIndex;
+	readonly loadAllAgents: () => Map<string, AgentConfig>;
+	readonly isShellInterpolationEnabled: typeof isShellInterpolationEnabled;
+	readonly expandShellCommands: typeof expandShellCommands;
+	readonly resolveModel: typeof resolveModel;
+	readonly routeForkedModel: typeof routeForkedModel;
+	readonly spawnForkSubprocess: typeof spawnForkSubprocess;
+}
+
+/** Default dependency implementation for production runtime. */
+const DEFAULT_CONTEXT_FORK_DEPENDENCIES: ContextForkDependencies = {
+	buildFrontmatterIndex,
+	loadAllAgents,
+	isShellInterpolationEnabled,
+	expandShellCommands,
+	resolveModel,
+	routeForkedModel,
+	spawnForkSubprocess,
+};
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-export default function (pi: ExtensionAPI): void {
+/**
+ * Register the context-fork extension.
+ *
+ * @param pi - Extension API
+ * @param dependencyOverrides - Optional dependency overrides for tests
+ * @returns Nothing
+ */
+export function registerContextForkExtension(
+	pi: ExtensionAPI,
+	dependencyOverrides: Partial<ContextForkDependencies> = {}
+): void {
+	const dependencies: ContextForkDependencies = {
+		...DEFAULT_CONTEXT_FORK_DEPENDENCIES,
+		...dependencyOverrides,
+	};
+
 	let frontmatterIndex: FrontmatterIndex = new Map();
 	let agents: Map<string, AgentConfig> = new Map();
 
@@ -290,22 +328,49 @@ export default function (pi: ExtensionAPI): void {
 		}
 	};
 
+	const resourceInitializer = createLazyInitializer<{ commandName: string }>({
+		name: "context-fork",
+		initialize: async () => {
+			frontmatterIndex = dependencies.buildFrontmatterIndex(debug);
+			agents = dependencies.loadAllAgents();
+			debug(`loaded ${agents.size} agents`);
+		},
+	});
+
 	/**
-	 * Rebuilds the frontmatter index and agent map.
-	 * Called on session_start and reload.
+	 * Clear loaded state so the next command reinitializes resources lazily.
+	 *
+	 * @returns Nothing
 	 */
-	function rebuildIndex(): void {
-		frontmatterIndex = buildFrontmatterIndex(debug);
-		agents = loadAllAgents();
-		debug(`loaded ${agents.size} agents`);
+	function resetResources(): void {
+		resourceInitializer.reset();
+		frontmatterIndex = new Map();
+		agents = new Map();
 	}
 
-	// Build index at extension load time
-	rebuildIndex();
+	/**
+	 * Ensure frontmatter and agent resources are loaded before slash processing.
+	 *
+	 * @param commandName - Command currently being processed
+	 * @returns True when resources are ready
+	 */
+	async function ensureResources(commandName: string): Promise<boolean> {
+		try {
+			await resourceInitializer.ensureInitialized({
+				trigger: "input",
+				context: { commandName },
+			});
+			return true;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			debug(`failed to initialize resources for /${commandName}: ${message}`);
+			return false;
+		}
+	}
 
-	// Rebuild on session start and reload
+	// Reset lazy state on each session start so resources reflect on-disk changes.
 	pi.on("session_start", async () => {
-		rebuildIndex();
+		resetResources();
 	});
 
 	// Register custom message renderer for fork results
@@ -350,6 +415,11 @@ export default function (pi: ExtensionAPI): void {
 		// Also check for skill: prefix
 		const lookupName = commandName.startsWith("skill:") ? commandName.slice(6) : commandName;
 
+		const initialized = await ensureResources(commandName);
+		if (!initialized) {
+			return { action: "continue" as const };
+		}
+
 		// Check frontmatter index
 		const fm = frontmatterIndex.get(lookupName) ?? frontmatterIndex.get(commandName);
 		if (!fm) {
@@ -383,8 +453,8 @@ export default function (pi: ExtensionAPI): void {
 
 		// Expand shell commands at the template boundary only when explicitly enabled.
 		// Commands still run through implicit policy checks (allowlist/denylist + audit).
-		if (isShellInterpolationEnabled(ctx.cwd)) {
-			content = expandShellCommands(content, ctx.cwd, {
+		if (dependencies.isShellInterpolationEnabled(ctx.cwd)) {
+			content = dependencies.expandShellCommands(content, ctx.cwd, {
 				source: "context-fork",
 				enforcePolicy: true,
 			});
@@ -406,8 +476,8 @@ export default function (pi: ExtensionAPI): void {
 		// Resolve model: explicit model → fuzzy pick, otherwise → auto-route
 		const explicitModel = fm.model ?? agentConfig?.model;
 		const resolvedModel = explicitModel
-			? resolveModel(explicitModel)
-			: await routeForkedModel(content, undefined, ctx.model?.id, undefined, ctx.cwd);
+			? dependencies.resolveModel(explicitModel)
+			: await dependencies.routeForkedModel(content, undefined, ctx.model?.id, undefined, ctx.cwd);
 
 		// Show working indicator
 		const workingParts = [`🔀 forking: /${commandName}`];
@@ -430,7 +500,7 @@ export default function (pi: ExtensionAPI): void {
 
 		// Mark as handled — prevent command-prompt/minimal-skill-display from processing
 		// We continue the fork asynchronously via the promise below
-		const forkPromise = spawnForkSubprocess({
+		const forkPromise = dependencies.spawnForkSubprocess({
 			content,
 			cwd: ctx.cwd,
 			tools: agentConfig?.tools,
@@ -482,4 +552,14 @@ export default function (pi: ExtensionAPI): void {
 
 		return { action: "handled" as const };
 	});
+}
+
+/**
+ * Default context-fork extension export.
+ *
+ * @param pi - Extension API
+ * @returns Nothing
+ */
+export default function contextForkExtension(pi: ExtensionAPI): void {
+	registerContextForkExtension(pi);
 }
