@@ -238,25 +238,15 @@ export function registerTasksExtension(
 	function renderSubagentLines(
 		ctx: ExtensionContext,
 		spinner: string,
-		fgRunning: Array<{
-			id: string;
-			agent: string;
-			model?: string;
-			task: string;
-			startTime: number;
-		}>,
-		bgRunning: Array<{
-			id: string;
-			agent: string;
-			model?: string;
-			task: string;
-			startTime: number;
-		}>,
+		foreground: SubagentView[],
+		background: SubagentView[],
 		maxTaskPreviewLen: number,
 		_standalone: boolean
 	): string[] {
-		const allRunning = [...fgRunning, ...bgRunning];
-		if (allRunning.length === 0) return [];
+		const activeSubagents = [...foreground, ...background].filter(
+			(subagent) => subagent.status === "running" || subagent.status === "stalled"
+		);
+		if (activeSubagents.length === 0) return [];
 
 		/**
 		 * Build a compact model label for widget rows.
@@ -270,7 +260,23 @@ export function registerTasksExtension(
 			return ` ${formatWidgetRole(ctx, "hint", `(${shortModel})`)}`;
 		}
 
-		const models = [...new Set(allRunning.map((sub) => sub.model).filter(Boolean))];
+		/**
+		 * Collapse whitespace and truncate preview content to a fixed budget.
+		 * @param value - Raw preview text
+		 * @param budget - Maximum preview length
+		 * @returns Single-line bounded preview
+		 */
+		function toBoundedPreview(value: string, budget: number): string {
+			const compact = value
+				.replace(/\n+/g, " ")
+				.replace(/\s{2,}/g, " ")
+				.trim();
+			const maxLen = Math.max(8, budget);
+			if (compact.length <= maxLen) return compact;
+			return `${compact.slice(0, maxLen - 3)}...`;
+		}
+
+		const models = [...new Set(activeSubagents.map((subagent) => subagent.model).filter(Boolean))];
 		const modelSummary =
 			models.length > 0
 				? formatWidgetRole(
@@ -285,46 +291,53 @@ export function registerTasksExtension(
 					)
 				: "";
 
-		const lines: string[] = [];
-		const count = allRunning.length;
-		lines.push(`${formatWidgetRole(ctx, "title", `Subagents (${count} running)`)}${modelSummary}`);
+		const runningCount = activeSubagents.filter((subagent) => subagent.status === "running").length;
+		const stalledCount = activeSubagents.filter((subagent) => subagent.status === "stalled").length;
+		const statusSummary =
+			runningCount > 0 && stalledCount > 0
+				? `${runningCount} running · ${stalledCount} stalled`
+				: runningCount > 0
+					? `${runningCount} running`
+					: `${stalledCount} stalled`;
 
-		for (let i = 0; i < allRunning.length; i++) {
-			const sub = allRunning[i];
-			const isLast = i === allRunning.length - 1;
+		const lines: string[] = [];
+		lines.push(`${formatWidgetRole(ctx, "title", `Subagents (${statusSummary})`)}${modelSummary}`);
+
+		for (let i = 0; i < activeSubagents.length; i++) {
+			const subagent = activeSubagents[i];
+			const isLast = i === activeSubagents.length - 1;
 			const treeChar = isLast ? "└─" : "├─";
 			const contChar = isLast ? " " : "│";
-			const ms = Date.now() - sub.startTime;
+			const ms = Date.now() - subagent.startTime;
 			const secs = Math.floor(ms / 1000);
 			const duration = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
 
-			// Line 1: spinner + @display-name + model + role + duration.
-			const identity = agentIdentities.get(sub.id);
-			const displayName = identity?.displayName ?? sub.agent;
+			const identity = agentIdentities.get(subagent.id);
+			const displayName = identity?.displayName ?? subagent.agent;
 			const typeSuffix = identity?.typeLabel
 				? ` ${formatWidgetRole(ctx, "meta", `(${identity.typeLabel})`)}`
 				: "";
+			const isRunning = subagent.status === "running";
+			const statusIcon = isRunning
+				? formatWidgetRole(ctx, "status_warning", spinner)
+				: formatWidgetRole(ctx, "status_warning", getIcon("blocked"));
+			const statusSuffix = isRunning
+				? formatWidgetRole(ctx, "meta", `· ${duration}`)
+				: `${formatWidgetRole(ctx, "meta", "·")} ${formatWidgetRole(ctx, "status_warning", "stalled")} ${formatWidgetRole(ctx, "meta", `· ${duration}`)}`;
 			lines.push(
-				`${formatWidgetRole(ctx, "meta", treeChar)} ${formatWidgetRole(ctx, "status_warning", spinner)} ${formatWidgetIdentity(displayName)}${getModelLabel(sub.model)}${typeSuffix} ${formatWidgetRole(ctx, "meta", `· ${duration}`)}`
+				`${formatWidgetRole(ctx, "meta", treeChar)} ${statusIcon} ${formatWidgetIdentity(displayName)}${getModelLabel(subagent.model)}${typeSuffix} ${statusSuffix}`
 			);
 
-			// Line 2: assigned action preview.
-			const flatTask = sub.task.replace(/\n+/g, " ").replace(/\s{2,}/g, " ");
-			const taskPreview =
-				flatTask.length > maxTaskPreviewLen
-					? `${flatTask.slice(0, maxTaskPreviewLen - 3)}...`
-					: flatTask;
+			const taskPreviewBudget = isRunning ? maxTaskPreviewLen : Math.max(8, maxTaskPreviewLen - 10);
+			const taskPreview = toBoundedPreview(subagent.task, taskPreviewBudget);
+			const taskPreviewRole: PresentationRole = isRunning ? "action" : "hint";
 			lines.push(
-				`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, "action", taskPreview)}`
+				`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, taskPreviewRole, taskPreview)}`
 			);
 
-			// Line 3: live tool chatter (subdued vs identity + action context).
-			const activity = agentActivity.get(sub.id);
+			const activity = agentActivity.get(subagent.id);
 			if (activity) {
-				const activityText =
-					activity.summary.length > maxTaskPreviewLen
-						? `${activity.summary.slice(0, maxTaskPreviewLen - 3)}...`
-						: activity.summary;
+				const activityText = toBoundedPreview(activity.summary, maxTaskPreviewLen);
 				lines.push(
 					`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, "process_output", activityText)}`
 				);
@@ -456,9 +469,13 @@ export function registerTasksExtension(
 	function updateAgentBar(ctx: ExtensionContext): void {
 		if (isSubagent) return;
 
-		const fgRunning = foregroundSubagents.filter((subagent) => subagent.status === "running");
-		const bgRunning = backgroundSubagents.filter((subagent) => subagent.status === "running");
-		const allAgents = [...fgRunning, ...bgRunning];
+		const fgActive = foregroundSubagents.filter(
+			(subagent) => subagent.status === "running" || subagent.status === "stalled"
+		);
+		const bgActive = backgroundSubagents.filter(
+			(subagent) => subagent.status === "running" || subagent.status === "stalled"
+		);
+		const allAgents = [...fgActive, ...bgActive];
 
 		// Collect team teammate names
 		const teamMates: Array<{ name: string; status: string }> = [];
@@ -519,11 +536,15 @@ export function registerTasksExtension(
 			return;
 		}
 
-		const fgRunning = foregroundSubagents.filter((subagent) => subagent.status === "running");
-		const bgRunning = backgroundSubagents.filter((subagent) => subagent.status === "running");
+		const fgSubagents = foregroundSubagents.filter(
+			(subagent) => subagent.status === "running" || subagent.status === "stalled"
+		);
+		const bgSubagents = backgroundSubagents.filter(
+			(subagent) => subagent.status === "running" || subagent.status === "stalled"
+		);
 		const runningBgTasks = backgroundTasks.filter((task) => task.status === "running");
 
-		const hasSubagents = fgRunning.length > 0 || bgRunning.length > 0;
+		const hasSubagents = fgSubagents.length > 0 || bgSubagents.length > 0;
 		const hasBgTasks = runningBgTasks.length > 0;
 		const hasTeams = activeTeams.length > 0;
 		const hasRightColumn = hasSubagents || hasBgTasks || hasTeams;
@@ -541,8 +562,8 @@ export function registerTasksExtension(
 
 		// Build stable key for structure changes
 		const taskStates = state.tasks.map((t) => `${t.id}:${t.status}`).join(",");
-		const fgIds = fgRunning.map((s) => s.id).join(",");
-		const bgIds = bgRunning.map((s) => s.id).join(",");
+		const fgIds = fgSubagents.map((s) => `${s.id}:${s.status}`).join(",");
+		const bgIds = bgSubagents.map((s) => `${s.id}:${s.status}`).join(",");
 		const bgTaskIds = runningBgTasks.map((t) => t.id).join(",");
 		const teamKey = activeTeams
 			.map(
@@ -592,7 +613,14 @@ export function registerTasksExtension(
 					if (hasSubagents) {
 						if (rightLines.length > 0) rightLines.push(""); // Spacer
 						rightLines.push(
-							...renderSubagentLines(ctx, spinner, fgRunning, bgRunning, maxTaskPreviewLen, true)
+							...renderSubagentLines(
+								ctx,
+								spinner,
+								fgSubagents,
+								bgSubagents,
+								maxTaskPreviewLen,
+								true
+							)
 						);
 					}
 					if (hasBgTasks) {
@@ -622,7 +650,14 @@ export function registerTasksExtension(
 				if (hasSubagents) {
 					if (lines.length > 0) lines.push(""); // Spacer
 					lines.push(
-						...renderSubagentLines(ctx, spinner, fgRunning, bgRunning, maxTaskPreviewLen, !hasTasks)
+						...renderSubagentLines(
+							ctx,
+							spinner,
+							fgSubagents,
+							bgSubagents,
+							maxTaskPreviewLen,
+							!hasTasks
+						)
 					);
 				}
 
@@ -1724,14 +1759,19 @@ EXAMPLES:
 
 		// Auto-clear stale tasks when conversation drifts to a new topic:
 		// if the LLM hasn't touched manage_tasks in STALE_TURN_THRESHOLD turns,
-		// no subagents are running, AND tasks are old enough to be considered
-		// abandoned. Cancel/abort is handled by the agent_end handler above.
+		// no subagents are active (running/stalled), AND tasks are old enough to
+		// be considered abandoned. Cancel/abort is handled by the agent_end
+		// handler above.
 		if (state.tasks.length > 0 && turnsSinceLastTaskTool >= STALE_TURN_THRESHOLD) {
-			const hasRunningAgents =
-				foregroundSubagents.some((subagent) => subagent.status === "running") ||
-				backgroundSubagents.some((subagent) => subagent.status === "running");
+			const hasActiveSubagents =
+				foregroundSubagents.some(
+					(subagent) => subagent.status === "running" || subagent.status === "stalled"
+				) ||
+				backgroundSubagents.some(
+					(subagent) => subagent.status === "running" || subagent.status === "stalled"
+				);
 
-			if (!hasRunningAgents) {
+			if (!hasActiveSubagents) {
 				const hasActiveTasks = state.tasks.some(
 					(t) => t.status === "pending" || t.status === "in_progress"
 				);
@@ -1923,11 +1963,11 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 
 			if (tasksAnimationInterval) clearInterval(tasksAnimationInterval);
 			tasksAnimationInterval = setInterval(() => {
-				const fgRunning = foregroundSubagents.filter(
-					(subagent) => subagent.status === "running"
+				const fgActive = foregroundSubagents.filter(
+					(subagent) => subagent.status === "running" || subagent.status === "stalled"
 				).length;
-				const bgRunning = backgroundSubagents.filter(
-					(subagent) => subagent.status === "running"
+				const bgActive = backgroundSubagents.filter(
+					(subagent) => subagent.status === "running" || subagent.status === "stalled"
 				).length;
 				const bgTaskRunning = backgroundTasks.filter((task) => task.status === "running").length;
 				const hasActiveTask = state.tasks.some((task) => task.status === "in_progress");
@@ -1935,15 +1975,11 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 					team.teammates.some((teammate) => teammate.status === "working")
 				);
 				const hasRunning =
-					fgRunning > 0 ||
-					bgRunning > 0 ||
-					bgTaskRunning > 0 ||
-					hasActiveTask ||
-					hasWorkingTeammates;
+					fgActive > 0 || bgActive > 0 || bgTaskRunning > 0 || hasActiveTask || hasWorkingTeammates;
 
-				if (hasRunning || bgRunning !== lastBgCount || bgTaskRunning !== lastBgTaskCount) {
+				if (hasRunning || bgActive !== lastBgCount || bgTaskRunning !== lastBgTaskCount) {
 					spinnerFrame++;
-					lastBgCount = bgRunning;
+					lastBgCount = bgActive;
 					lastBgTaskCount = bgTaskRunning;
 					updateWidget(ctx);
 					updateAgentBar(ctx);
