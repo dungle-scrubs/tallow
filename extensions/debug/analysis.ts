@@ -20,6 +20,9 @@ interface ToolTimingStats {
 	avgMs: number;
 	p50Ms: number;
 	p95Ms: number;
+	totalPayloadBytes: number;
+	avgPayloadBytes: number;
+	summarizedCount: number;
 }
 
 /**
@@ -36,6 +39,18 @@ function percentile(sorted: number[], p: number): number {
 }
 
 /**
+ * Format bytes with compact units for table output.
+ *
+ * @param count - Byte count
+ * @returns Human-readable byte string
+ */
+function formatBytes(count: number): string {
+	if (count < 1024) return `${count}B`;
+	if (count < 1024 * 1024) return `${(count / 1024).toFixed(1)}KB`;
+	return `${(count / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
  * Computes per-tool timing statistics from tool result log entries.
  *
  * Only considers entries with a valid `durationMs` field. Tools with
@@ -45,35 +60,53 @@ function percentile(sorted: number[], p: number): number {
  * @returns Array of timing stats sorted by total time descending
  */
 export function summarizeToolTimings(entries: LogEntry[]): ToolTimingStats[] {
-	const timingsByTool = new Map<string, number[]>();
+	const timingsByTool = new Map<
+		string,
+		{ durations: number[]; payloadBytes: number; summarizedCount: number }
+	>();
 
 	for (const entry of entries) {
 		if (entry.cat !== "tool" || entry.evt !== "result") continue;
-		const { name, durationMs } = entry.data as { name?: string; durationMs?: number };
+		const { durationMs, name, payloadBytes, summarizedByRetention } = entry.data as {
+			durationMs?: number;
+			name?: string;
+			payloadBytes?: number;
+			summarizedByRetention?: boolean;
+		};
 		if (!name || durationMs == null) continue;
 
 		const existing = timingsByTool.get(name);
 		if (existing) {
-			existing.push(durationMs);
+			existing.durations.push(durationMs);
+			existing.payloadBytes += typeof payloadBytes === "number" ? Math.max(0, payloadBytes) : 0;
+			existing.summarizedCount += summarizedByRetention ? 1 : 0;
 		} else {
-			timingsByTool.set(name, [durationMs]);
+			timingsByTool.set(name, {
+				durations: [durationMs],
+				payloadBytes: typeof payloadBytes === "number" ? Math.max(0, payloadBytes) : 0,
+				summarizedCount: summarizedByRetention ? 1 : 0,
+			});
 		}
 	}
 
 	const stats: ToolTimingStats[] = [];
-	for (const [name, durations] of timingsByTool) {
-		durations.sort((a, b) => a - b);
-		const totalMs = durations.reduce((sum, d) => sum + d, 0);
+	for (const [name, values] of timingsByTool) {
+		values.durations.sort((a, b) => a - b);
+		const totalMs = values.durations.reduce((sum, d) => sum + d, 0);
 
 		stats.push({
 			name,
-			callCount: durations.length,
+			callCount: values.durations.length,
 			totalMs,
-			minMs: durations[0],
-			maxMs: durations[durations.length - 1],
-			avgMs: Math.round(totalMs / durations.length),
-			p50Ms: percentile(durations, 50),
-			p95Ms: percentile(durations, 95),
+			minMs: values.durations[0],
+			maxMs: values.durations[values.durations.length - 1],
+			avgMs: Math.round(totalMs / values.durations.length),
+			p50Ms: percentile(values.durations, 50),
+			p95Ms: percentile(values.durations, 95),
+			totalPayloadBytes: values.payloadBytes,
+			avgPayloadBytes:
+				values.durations.length > 0 ? Math.round(values.payloadBytes / values.durations.length) : 0,
+			summarizedCount: values.summarizedCount,
 		});
 	}
 
@@ -92,13 +125,13 @@ export function formatToolTimings(stats: ToolTimingStats[]): string {
 	if (stats.length === 0) return "No tool timing data found.";
 
 	const lines = [
-		"| Tool | Calls | Total (ms) | Avg (ms) | p50 (ms) | p95 (ms) | Max (ms) |",
-		"|------|-------|------------|----------|----------|----------|----------|",
+		"| Tool | Calls | Total (ms) | Avg (ms) | p50 (ms) | p95 (ms) | Max (ms) | Avg payload | Summarized |",
+		"|------|-------|------------|----------|----------|----------|----------|-------------|------------|",
 	];
 
 	for (const s of stats) {
 		lines.push(
-			`| ${s.name} | ${s.callCount} | ${s.totalMs} | ${s.avgMs} | ${s.p50Ms} | ${s.p95Ms} | ${s.maxMs} |`
+			`| ${s.name} | ${s.callCount} | ${s.totalMs} | ${s.avgMs} | ${s.p50Ms} | ${s.p95Ms} | ${s.maxMs} | ${formatBytes(s.avgPayloadBytes)} | ${s.summarizedCount} |`
 		);
 	}
 
@@ -281,7 +314,11 @@ export function formatEntries(entries: LogEntry[]): string {
 		const highlights: string[] = [];
 		if (data.name) highlights.push(`name=${data.name}`);
 		if (data.durationMs != null) highlights.push(`${data.durationMs}ms`);
+		if (typeof data.payloadBytes === "number") {
+			highlights.push(`payload=${formatBytes(Math.max(0, data.payloadBytes))}`);
+		}
 		if (data.ok !== undefined) highlights.push(data.ok ? "ok" : "FAILED");
+		if (data.summarizedByRetention === true) highlights.push("summarized");
 		if (data.message) highlights.push(`"${String(data.message).slice(0, 80)}"`);
 		if (data.agentId) highlights.push(`agent=${data.agentId}`);
 		if (data.exitCode !== undefined) highlights.push(`exit=${data.exitCode}`);

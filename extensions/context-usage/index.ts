@@ -29,12 +29,31 @@ const GRID_COLS = 10;
 /** Chars/4 heuristic for token estimation */
 const CHARS_PER_TOKEN = 4;
 
+/** Marker key attached by sdk tool-result retention summarization. */
+const TOOL_RESULT_RETENTION_MARKER = "__tallow_summarized_tool_result__";
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 interface CompactionConfig {
 	readonly enabled: boolean;
 	readonly reserveTokens: number;
 }
+
+/** Tool-result payload memory summary for the active branch. */
+export interface ToolResultMemoryStats {
+	readonly reclaimedBytes: number;
+	readonly retainedBytes: number;
+	readonly summarizedResults: number;
+	readonly totalResults: number;
+}
+
+/** Zero-value fallback for tool-result memory stats. */
+const EMPTY_TOOL_RESULT_MEMORY_STATS: ToolResultMemoryStats = {
+	reclaimedBytes: 0,
+	retainedBytes: 0,
+	summarizedResults: 0,
+	totalResults: 0,
+};
 
 /**
  * Reads compaction settings from ~/.tallow/settings.json.
@@ -172,6 +191,102 @@ function estimateToolTokens(
 	return total;
 }
 
+/**
+ * Estimate UTF-8 bytes for a JSON-serializable value.
+ *
+ * @param value - Any serializable value
+ * @returns Byte length of JSON representation, or 0 when unavailable
+ */
+function safeJsonBytes(value: unknown): number {
+	if (value == null) return 0;
+	try {
+		return Buffer.byteLength(JSON.stringify(value), "utf-8");
+	} catch {
+		return 0;
+	}
+}
+
+/**
+ * Type guard for plain object records.
+ *
+ * @param value - Unknown value
+ * @returns True when value is a non-null object and not an array
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Estimate current in-memory payload bytes for a tool-result message.
+ *
+ * @param message - Candidate message object
+ * @returns Estimated payload bytes for content + details
+ */
+function estimateToolResultMessageBytes(message: Record<string, unknown>): number {
+	const content = Array.isArray(message.content) ? message.content : [];
+	let contentBytes = 0;
+
+	for (const block of content) {
+		if (!isRecord(block)) continue;
+		if (block.type === "text") {
+			contentBytes += Buffer.byteLength(typeof block.text === "string" ? block.text : "", "utf-8");
+			continue;
+		}
+		if (block.type === "image") {
+			contentBytes += Buffer.byteLength(typeof block.data === "string" ? block.data : "", "utf-8");
+			contentBytes += Buffer.byteLength(
+				typeof block.mimeType === "string" ? block.mimeType : "",
+				"utf-8"
+			);
+		}
+	}
+
+	const detailsBytes = safeJsonBytes(message.details);
+	return contentBytes + detailsBytes;
+}
+
+/**
+ * Compute tool-result payload memory stats from branch entries.
+ *
+ * @param branchEntries - Session branch entries from `sessionManager.getBranch()`
+ * @returns Aggregated tool-result memory stats
+ */
+export function computeToolResultMemoryStats(
+	branchEntries: Array<{ type: string; message?: unknown }>
+): ToolResultMemoryStats {
+	if (branchEntries.length === 0) return EMPTY_TOOL_RESULT_MEMORY_STATS;
+
+	let reclaimedBytes = 0;
+	let retainedBytes = 0;
+	let summarizedResults = 0;
+	let totalResults = 0;
+
+	for (const entry of branchEntries) {
+		if (entry.type !== "message" || !isRecord(entry.message)) continue;
+		if (entry.message.role !== "toolResult") continue;
+
+		totalResults += 1;
+		const currentBytes = estimateToolResultMessageBytes(entry.message);
+		retainedBytes += currentBytes;
+
+		const details = entry.message.details;
+		if (!isRecord(details) || details[TOOL_RESULT_RETENTION_MARKER] !== true) continue;
+		summarizedResults += 1;
+		const originalBytes =
+			typeof details.originalBytes === "number" && Number.isFinite(details.originalBytes)
+				? Math.max(0, details.originalBytes)
+				: 0;
+		reclaimedBytes += Math.max(0, originalBytes - currentBytes);
+	}
+
+	return {
+		reclaimedBytes,
+		retainedBytes,
+		summarizedResults,
+		totalResults,
+	};
+}
+
 // ── System prompt parsing ────────────────────────────────────────────────────
 
 /** @internal */
@@ -248,6 +363,18 @@ export function formatTokens(count: number): string {
 }
 
 /**
+ * Formats byte counts with compact units.
+ *
+ * @param count - Byte count
+ * @returns Human-readable byte string
+ */
+function formatBytes(count: number): string {
+	if (count < 1024) return `${count}B`;
+	if (count < 1024 * 1024) return `${(count / 1024).toFixed(1)}KB`;
+	return `${(count / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+/**
  * Renders the waffle chart grid.
  * Each cell represents a proportional slice of the context window.
  *
@@ -302,7 +429,8 @@ function buildLegend(
 	contextWindow: number,
 	modelId: string,
 	usedTokens: number,
-	usedPercent: number
+	usedPercent: number,
+	toolResultMemory: ToolResultMemoryStats
 ): string[] {
 	const lines: string[] = [];
 
@@ -321,6 +449,23 @@ function buildLegend(
 		lines.push(
 			`${cat.color}${cat.icon}${RESET} ${cat.name}: ${formatTokens(cat.tokens)} tokens (${percentStr}%)`
 		);
+	}
+
+	if (toolResultMemory.totalResults > 0) {
+		lines.push("");
+		lines.push(`${DIM}Historical tool-result payloads${RESET}`);
+		lines.push(
+			`${getIcon("in_progress")} results: ${toolResultMemory.totalResults} total, ` +
+				`${toolResultMemory.summarizedResults} summarized`
+		);
+		lines.push(
+			`${getIcon("in_progress")} retained bytes: ${formatBytes(toolResultMemory.retainedBytes)}`
+		);
+		if (toolResultMemory.reclaimedBytes > 0) {
+			lines.push(
+				`${getIcon("success")} reclaimed bytes: ${formatBytes(toolResultMemory.reclaimedBytes)}`
+			);
+		}
 	}
 
 	return lines;
@@ -342,6 +487,7 @@ interface ContextUsageDetails {
 		readonly emptyChar: string;
 		readonly tokens: number;
 	}>;
+	readonly toolResultMemory: ToolResultMemoryStats;
 }
 
 /**
@@ -386,8 +532,12 @@ export default function contextUsageExtension(pi: ExtensionAPI): void {
 			const systemPrompt = ctx.getSystemPrompt();
 			const tools = pi.getAllTools();
 			const modelId = ctx.model?.id ?? "unknown-model";
+			const branchEntries = ctx.sessionManager.getBranch() as Array<{
+				type: string;
+				message?: unknown;
+			}>;
 
-			const details = buildDetails(usage, systemPrompt, tools, modelId);
+			const details = buildDetails(usage, systemPrompt, tools, modelId, branchEntries);
 
 			pi.sendMessage({
 				customType: "context-usage",
@@ -405,13 +555,15 @@ export default function contextUsageExtension(pi: ExtensionAPI): void {
  * @param systemPrompt - Current system prompt
  * @param tools - Registered tools
  * @param modelId - Current model identifier
+ * @param branchEntries - Current session branch entries
  * @returns Details object for the message renderer
  */
 function buildDetails(
 	usage: ContextUsage,
 	systemPrompt: string,
 	tools: Array<{ name: string; description: string; parameters: unknown }>,
-	modelId: string
+	modelId: string,
+	branchEntries: Array<{ type: string; message?: unknown }>
 ): ContextUsageDetails {
 	const compaction = readCompactionConfig();
 	const includeAutocompact = compaction.enabled;
@@ -440,6 +592,8 @@ function buildDetails(
 	const freeTokens = Math.max(0, contextWindow - usedTokens - reserveTokens);
 	categories[5].tokens = freeTokens;
 
+	const toolResultMemory = computeToolResultMemoryStats(branchEntries);
+
 	return {
 		modelId,
 		contextWindow,
@@ -452,6 +606,7 @@ function buildDetails(
 			emptyChar: c.emptyChar,
 			tokens: c.tokens,
 		})),
+		toolResultMemory,
 	};
 }
 
@@ -461,7 +616,7 @@ function buildDetails(
  * @returns Array of rendered lines
  */
 function renderFromDetails(details: ContextUsageDetails): string[] {
-	const { categories, contextWindow, modelId, usedTokens } = details;
+	const { categories, contextWindow, modelId, toolResultMemory, usedTokens } = details;
 	const usedPercent = contextWindow > 0 ? (usedTokens / contextWindow) * 100 : 0;
 
 	const lines: string[] = [];
@@ -469,7 +624,14 @@ function renderFromDetails(details: ContextUsageDetails): string[] {
 	lines.push(`  ${BOLD}Context Usage${RESET}`);
 
 	const chartLines = renderWaffleChart(categories, contextWindow);
-	const legendLines = buildLegend(categories, contextWindow, modelId, usedTokens, usedPercent);
+	const legendLines = buildLegend(
+		categories,
+		contextWindow,
+		modelId,
+		usedTokens,
+		usedPercent,
+		toolResultMemory
+	);
 
 	const maxLines = Math.max(chartLines.length, legendLines.length);
 	for (let i = 0; i < maxLines; i++) {
