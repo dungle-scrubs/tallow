@@ -36,6 +36,7 @@ import {
 	publishSubagentSnapshot,
 	registerForegroundSubagent,
 	setForegroundSubagentStatus,
+	startBackgroundSubagentCleanupLoop,
 	startWidgetUpdates,
 	uiContext,
 	updateWidget,
@@ -80,6 +81,20 @@ const DENIAL_PATTERNS = [
 	"user rejected",
 	"request denied",
 ];
+
+/** Env flag that disables background-history compaction for debugging. */
+export const SUBAGENT_KEEP_FULL_HISTORY_ENV = "TALLOW_SUBAGENT_KEEP_FULL_HISTORY";
+
+/** Env var to tune retained background-message tail length after completion. */
+export const SUBAGENT_HISTORY_TAIL_MESSAGES_ENV = "TALLOW_SUBAGENT_HISTORY_TAIL_MESSAGES";
+
+/** Default retained message tail length for completed background subagents. */
+export const SUBAGENT_HISTORY_TAIL_MESSAGES_DEFAULT = 24;
+
+/** Max retained message tail length for completed background subagents. */
+export const SUBAGENT_HISTORY_TAIL_MESSAGES_MAX = 200;
+
+type EnvLookup = Readonly<Record<string, string | undefined>>;
 
 // ── Helper Functions ─────────────────────────────────────────────────────────
 
@@ -126,6 +141,129 @@ function isToolDenialEvent(eventMessage: Record<string, unknown>): boolean {
 	}
 
 	return false;
+}
+
+/**
+ * Parse truthy env-flag values.
+ * @param rawValue - Raw env value
+ * @returns true when value enables the feature
+ */
+function isTruthyEnvFlag(rawValue: string | undefined): boolean {
+	if (!rawValue) return false;
+	const normalized = rawValue.trim().toLowerCase();
+	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+/**
+ * Check whether background subagent history compaction is disabled.
+ * @param env - Environment lookup map
+ * @returns true when full-history mode is enabled
+ */
+export function shouldKeepFullBackgroundSubagentHistory(env: EnvLookup = process.env): boolean {
+	return isTruthyEnvFlag(env[SUBAGENT_KEEP_FULL_HISTORY_ENV]);
+}
+
+/**
+ * Parse a bounded positive retained-tail count from an env var.
+ * @param rawValue - Raw env value
+ * @returns Parsed retained-tail count, or undefined when invalid
+ */
+function parseRetainedTailCount(rawValue: string | undefined): number | undefined {
+	if (!rawValue) return undefined;
+	const parsed = Number.parseInt(rawValue, 10);
+	if (Number.isNaN(parsed) || !Number.isFinite(parsed)) return undefined;
+	if (parsed < 0) return undefined;
+	return Math.min(parsed, SUBAGENT_HISTORY_TAIL_MESSAGES_MAX);
+}
+
+/**
+ * Resolve retained message-tail count for compacted background histories.
+ * @param env - Environment lookup map
+ * @returns Number of tail messages to keep
+ */
+export function getBackgroundHistoryTailMessageLimit(env: EnvLookup = process.env): number {
+	const parsed = parseRetainedTailCount(env[SUBAGENT_HISTORY_TAIL_MESSAGES_ENV]);
+	return parsed ?? SUBAGENT_HISTORY_TAIL_MESSAGES_DEFAULT;
+}
+
+/**
+ * Locate the last assistant message that contains text output.
+ * @param messages - Message history
+ * @returns Final assistant text message when present
+ */
+function getFinalAssistantTextMessage(messages: Message[]): Message | undefined {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (message.role !== "assistant") continue;
+		if (message.content.some((part) => part.type === "text")) {
+			return message;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * Compact a background subagent message history to a bounded debug tail.
+ * Always preserves final assistant output text.
+ * @param messages - Full message history
+ * @param retainedTailLimit - Maximum tail size to keep
+ * @returns Compacted-message payload with counts and final output text
+ */
+export function compactBackgroundMessages(
+	messages: Message[],
+	retainedTailLimit: number
+): {
+	compactedMessages: Message[];
+	finalOutput: string;
+	originalMessageCount: number;
+	retainedMessageCount: number;
+} {
+	const originalMessageCount = messages.length;
+	const finalOutput = getFinalOutput(messages);
+	const boundedTailLimit = Math.max(
+		0,
+		Math.min(SUBAGENT_HISTORY_TAIL_MESSAGES_MAX, Math.floor(retainedTailLimit))
+	);
+	const compactedMessages = boundedTailLimit > 0 ? messages.slice(-boundedTailLimit) : [];
+	const finalAssistantMessage = getFinalAssistantTextMessage(messages);
+	if (finalAssistantMessage && !compactedMessages.includes(finalAssistantMessage)) {
+		compactedMessages.push(finalAssistantMessage);
+	}
+	return {
+		compactedMessages,
+		finalOutput,
+		originalMessageCount,
+		retainedMessageCount: compactedMessages.length,
+	};
+}
+
+/**
+ * Apply retention policy to completed background-subagent history.
+ * @param subagent - Background subagent record to compact
+ * @param env - Environment lookup map
+ */
+export function applyBackgroundResultRetention(
+	subagent: BackgroundSubagent,
+	env: EnvLookup = process.env
+): void {
+	const originalMessages = subagent.result.messages;
+	if (shouldKeepFullBackgroundSubagentHistory(env)) {
+		subagent.retainedFinalOutput = getFinalOutput(originalMessages);
+		subagent.historyCompacted = false;
+		subagent.historyOriginalMessageCount = originalMessages.length;
+		subagent.historyRetainedMessageCount = originalMessages.length;
+		return;
+	}
+
+	const compacted = compactBackgroundMessages(
+		originalMessages,
+		getBackgroundHistoryTailMessageLimit(env)
+	);
+	subagent.result.messages = compacted.compactedMessages;
+	subagent.retainedFinalOutput = compacted.finalOutput;
+	subagent.historyCompacted = compacted.retainedMessageCount < compacted.originalMessageCount;
+	subagent.historyOriginalMessageCount = compacted.originalMessageCount;
+	subagent.historyRetainedMessageCount = compacted.retainedMessageCount;
 }
 
 /**
@@ -501,6 +639,7 @@ export async function spawnBackgroundSubagent(
 
 	backgroundSubagents.set(id, bgSubagent);
 	publishSubagentSnapshot(piEvents);
+	startBackgroundSubagentCleanupLoop(piEvents);
 
 	// Collect output
 	let buffer = "";
@@ -586,9 +725,13 @@ export async function spawnBackgroundSubagent(
 				/* ignore */
 			}
 		}
+		const finalOutput = getFinalOutput(result.messages);
 		result.exitCode = code ?? 0;
+		bgSubagent.completedAt = Date.now();
 		bgSubagent.status = code === 0 ? "completed" : "failed";
+		applyBackgroundResultRetention(bgSubagent);
 		publishSubagentSnapshot(piEvents);
+		startBackgroundSubagentCleanupLoop(piEvents);
 
 		// Emit subagent_stop event
 		piEvents?.emit("subagent_stop", {
@@ -596,7 +739,7 @@ export async function spawnBackgroundSubagent(
 			agent_type: agentName,
 			task,
 			exit_code: code ?? 0,
-			result: getFinalOutput(result.messages),
+			result: finalOutput,
 			background: true,
 		} satisfies SubagentStopEvent);
 
@@ -619,7 +762,6 @@ export async function spawnBackgroundSubagent(
 		// Post inline result for background subagent completion
 		if (_piRef && isInlineResultsEnabled()) {
 			const duration = formatDuration(Date.now() - bgSubagent.startTime);
-			const finalOutput = getFinalOutput(result.messages);
 			const preview = extractPreview(finalOutput, 3, 80);
 
 			_piRef.sendMessage({

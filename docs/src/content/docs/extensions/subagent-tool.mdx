@@ -58,6 +58,23 @@ in the widget but in separate sections.
   { src: "/screenshots/extensions/subagent/background-agents.png", alt: "Five background agents running alongside a background task" },
 ]} />
 
+## Background history retention
+
+Completed background subagents are compacted to keep memory bounded:
+
+- final output text is always retained for `subagent_status`
+- a bounded tail of recent messages is kept for debugging
+- full message history is dropped after completion unless explicitly overridden
+- stale completed records are removed automatically after a retention window
+
+### Tuning knobs
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `TALLOW_SUBAGENT_KEEP_FULL_HISTORY` | unset | set to `1` to keep full message histories (debug mode) |
+| `TALLOW_SUBAGENT_HISTORY_TAIL_MESSAGES` | `24` | number of recent messages to retain after compaction |
+| `TALLOW_SUBAGENT_COMPLETED_RETENTION_MINUTES` | `30` | how long completed/failed background records remain in memory |
+
 ## Foreground vs background agents
 
 Subagents run in two modes:

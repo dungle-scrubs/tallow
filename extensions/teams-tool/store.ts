@@ -65,6 +65,20 @@ export interface ArchivedTeam {
 const teams = new Map<string, Team>();
 const archivedTeams = new Map<string, ArchivedTeam>();
 
+/** Default per-team message retention cap (ring-buffer style). */
+export const TEAM_MESSAGE_RETENTION_LIMIT_DEFAULT = 256;
+
+/** Max allowed per-team message retention cap from env configuration. */
+export const TEAM_MESSAGE_RETENTION_LIMIT_MAX = 5000;
+
+/** Env var for overriding per-team message retention cap. */
+export const TEAM_MESSAGE_RETENTION_LIMIT_ENV = "TALLOW_TEAMS_MESSAGE_RETENTION_LIMIT";
+
+/** Env flag that disables retention and keeps full team message histories. */
+export const TEAM_MESSAGE_KEEP_FULL_HISTORY_ENV = "TALLOW_TEAMS_KEEP_FULL_HISTORY";
+
+type EnvLookup = Readonly<Record<string, string | undefined>>;
+
 /** @returns The team, or undefined if not found */
 export function getTeam(name: string): Team | undefined {
 	return teams.get(name);
@@ -136,6 +150,7 @@ export function restoreArchivedTeam(name: string): Team | undefined {
 		messages: [...archived.messages],
 		taskCounter: archived.taskCounter,
 	};
+	retainRecentTeamMessages(team, getTeamMessageRetentionLimit());
 	teams.set(name, team);
 	archivedTeams.delete(name);
 	return team;
@@ -254,7 +269,71 @@ export function getTeammatesByStatus<T extends TeammateRecord>(
 // ════════════════════════════════════════════════════════════════
 
 /**
+ * Parse truthy env-flag values.
+ * @param rawValue - Raw env value
+ * @returns true when the value enables a feature
+ */
+function isTruthyEnvFlag(rawValue: string | undefined): boolean {
+	if (!rawValue) return false;
+	const normalized = rawValue.trim().toLowerCase();
+	return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+/**
+ * Parse a bounded positive message-retention limit.
+ * @param rawValue - Raw env value
+ * @returns Parsed retention limit, or undefined when invalid
+ */
+function parseRetentionLimit(rawValue: string | undefined): number | undefined {
+	if (!rawValue) return undefined;
+	const parsed = Number.parseInt(rawValue, 10);
+	if (Number.isNaN(parsed) || !Number.isFinite(parsed)) return undefined;
+	if (parsed < 0) return undefined;
+	return Math.min(parsed, TEAM_MESSAGE_RETENTION_LIMIT_MAX);
+}
+
+/**
+ * Check whether message-retention trimming should be disabled for debugging.
+ * @param env - Environment lookup map
+ * @returns true when full-history mode is enabled
+ */
+export function shouldKeepFullTeamMessageHistory(env: EnvLookup = process.env): boolean {
+	return isTruthyEnvFlag(env[TEAM_MESSAGE_KEEP_FULL_HISTORY_ENV]);
+}
+
+/**
+ * Resolve effective team-message retention limit.
+ * @param env - Environment lookup map
+ * @returns Maximum retained team messages (Infinity when full-history mode is enabled)
+ */
+export function getTeamMessageRetentionLimit(env: EnvLookup = process.env): number {
+	if (shouldKeepFullTeamMessageHistory(env)) {
+		return Number.POSITIVE_INFINITY;
+	}
+	const parsed = parseRetentionLimit(env[TEAM_MESSAGE_RETENTION_LIMIT_ENV]);
+	return parsed ?? TEAM_MESSAGE_RETENTION_LIMIT_DEFAULT;
+}
+
+/**
+ * Enforce ring-buffer retention on a team's message log.
+ * @param team - Team whose messages are trimmed in-place
+ * @param maxMessages - Maximum retained messages
+ * @returns Number of evicted oldest messages
+ */
+export function retainRecentTeamMessages(team: Team, maxMessages: number): number {
+	if (!Number.isFinite(maxMessages)) return 0;
+	const safeLimit = Math.max(0, Math.floor(maxMessages));
+	const overflow = team.messages.length - safeLimit;
+	if (overflow <= 0) return 0;
+	team.messages.splice(0, overflow);
+	return overflow;
+}
+
+/**
  * Add a message to the team's message log.
+ * Applies ring-buffer retention to prevent unbounded memory growth.
+ *
+ * Debug override: set TALLOW_TEAMS_KEEP_FULL_HISTORY=1 to skip trimming.
  * @param team - Team to add message to
  * @param from - Sender name
  * @param to - Recipient name or "all"
@@ -264,6 +343,7 @@ export function getTeammatesByStatus<T extends TeammateRecord>(
 export function addTeamMessage(team: Team, from: string, to: string, content: string): TeamMessage {
 	const msg: TeamMessage = { from, to, content, timestamp: Date.now(), readBy: new Set() };
 	team.messages.push(msg);
+	retainRecentTeamMessages(team, getTeamMessageRetentionLimit());
 	return msg;
 }
 

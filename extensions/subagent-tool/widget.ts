@@ -15,7 +15,7 @@ import {
 	type InteropSubagentStatus,
 	type InteropSubagentView,
 } from "../_shared/interop-events.js";
-import type { SingleResult } from "./formatting.js";
+import { getFinalOutput, type SingleResult } from "./formatting.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,14 +31,19 @@ export interface RunningSubagent {
 
 /** Tracks a background subagent running as a detached process. */
 export interface BackgroundSubagent {
-	id: string;
 	agent: string;
+	completedAt?: number;
+	historyCompacted?: boolean;
+	historyOriginalMessageCount?: number;
+	historyRetainedMessageCount?: number;
+	id: string;
 	model?: string;
-	task: string;
-	startTime: number;
 	process: ReturnType<typeof spawn>;
 	result: SingleResult;
+	retainedFinalOutput?: string;
+	startTime: number;
 	status: InteropSubagentStatus;
+	task: string;
 	tmpPromptDir?: string;
 	tmpPromptPath?: string;
 }
@@ -51,6 +56,21 @@ export const SPINNER_FRAMES = getSpinner();
 export const runningSubagents = new Map<string, RunningSubagent>();
 export const backgroundSubagents = new Map<string, BackgroundSubagent>();
 export let interopStateRequestCleanup: (() => void) | undefined;
+
+/** Env var that controls how long completed background subagents are retained. */
+export const SUBAGENT_COMPLETED_RETENTION_MINUTES_ENV =
+	"TALLOW_SUBAGENT_COMPLETED_RETENTION_MINUTES";
+
+/** Default completed background-subagent retention window in minutes. */
+export const SUBAGENT_COMPLETED_RETENTION_MINUTES_DEFAULT = 30;
+
+/** Maximum completed background-subagent retention window in minutes. */
+export const SUBAGENT_COMPLETED_RETENTION_MINUTES_MAX = 24 * 60;
+
+/** Background cleanup cadence for stale completed subagent records. */
+const SUBAGENT_COMPLETED_CLEANUP_INTERVAL_MS = 60_000;
+
+type EnvLookup = Readonly<Record<string, string | undefined>>;
 
 /** Reference to the current UI extension context. */
 export let uiContext: ExtensionContext | null = null;
@@ -73,14 +93,125 @@ export function setInteropStateRequestCleanup(cleanup: (() => void) | undefined)
 
 // ── Globals (survive reloads) ────────────────────────────────────────────────
 
-// Store interval on globalThis to clear across reloads
-const G = globalThis;
+// Store intervals on globalThis to clear across reloads
+const G = globalThis as typeof globalThis & {
+	__piSubagentHistoryCleanupInterval?: ReturnType<typeof setInterval> | null;
+};
 if (G.__piSubagentWidgetInterval) {
 	clearInterval(G.__piSubagentWidgetInterval);
 	G.__piSubagentWidgetInterval = null;
 }
+if (G.__piSubagentHistoryCleanupInterval) {
+	clearInterval(G.__piSubagentHistoryCleanupInterval);
+	G.__piSubagentHistoryCleanupInterval = null;
+}
 
 // ── Functions ────────────────────────────────────────────────────────────────
+
+/**
+ * Parse a positive integer minute value from an env var.
+ * @param rawValue - Raw env var value
+ * @returns Parsed minute value, or undefined when invalid
+ */
+function parsePositiveMinutes(rawValue: string | undefined): number | undefined {
+	if (!rawValue) return undefined;
+	const parsed = Number.parseInt(rawValue, 10);
+	if (!Number.isFinite(parsed) || Number.isNaN(parsed)) return undefined;
+	if (parsed < 0) return undefined;
+	return Math.min(parsed, SUBAGENT_COMPLETED_RETENTION_MINUTES_MAX);
+}
+
+/**
+ * Resolve completed background-subagent retention window.
+ * @param env - Environment lookup map
+ * @returns Retention window in milliseconds
+ */
+export function getCompletedBackgroundRetentionMs(env: EnvLookup = process.env): number {
+	const parsedMinutes = parsePositiveMinutes(env[SUBAGENT_COMPLETED_RETENTION_MINUTES_ENV]);
+	const retentionMinutes = parsedMinutes ?? SUBAGENT_COMPLETED_RETENTION_MINUTES_DEFAULT;
+	return retentionMinutes * 60_000;
+}
+
+/**
+ * Get the best available output text for a background subagent.
+ * @param subagent - Background subagent record
+ * @returns Final output text if present
+ */
+export function getBackgroundSubagentOutput(subagent: BackgroundSubagent): string {
+	if (subagent.retainedFinalOutput !== undefined) return subagent.retainedFinalOutput;
+	return getFinalOutput(subagent.result.messages);
+}
+
+/**
+ * Determine whether a background subagent has reached a terminal state.
+ * @param status - Subagent status
+ * @returns true when the status is terminal
+ */
+function isTerminalBackgroundStatus(status: InteropSubagentStatus): boolean {
+	return status === "completed" || status === "failed";
+}
+
+/**
+ * Remove completed background subagents that exceeded retention window.
+ * @param piEvents - Shared event bus for snapshot publication
+ * @param nowMs - Current timestamp in milliseconds
+ * @param retentionMs - Retention window in milliseconds
+ * @returns Number of removed stale records
+ */
+export function cleanupCompletedBackgroundSubagents(
+	piEvents?: ExtensionAPI["events"],
+	nowMs = Date.now(),
+	retentionMs = getCompletedBackgroundRetentionMs()
+): number {
+	if (backgroundSubagents.size === 0) {
+		stopBackgroundSubagentCleanupLoop();
+		return 0;
+	}
+
+	const ttlMs = Math.max(0, Math.floor(retentionMs));
+	const staleBefore = nowMs - ttlMs;
+	let removed = 0;
+
+	for (const [id, subagent] of backgroundSubagents) {
+		if (!isTerminalBackgroundStatus(subagent.status)) continue;
+		const completedAt = subagent.completedAt ?? subagent.startTime;
+		if (completedAt > staleBefore) continue;
+		backgroundSubagents.delete(id);
+		removed++;
+	}
+
+	if (removed > 0) {
+		publishSubagentSnapshot(piEvents);
+		updateWidget();
+	}
+
+	if (backgroundSubagents.size === 0) {
+		stopBackgroundSubagentCleanupLoop();
+	}
+
+	return removed;
+}
+
+/**
+ * Stop periodic cleanup of completed background subagent records.
+ */
+export function stopBackgroundSubagentCleanupLoop(): void {
+	if (!G.__piSubagentHistoryCleanupInterval) return;
+	clearInterval(G.__piSubagentHistoryCleanupInterval);
+	G.__piSubagentHistoryCleanupInterval = null;
+}
+
+/**
+ * Start periodic cleanup of completed background subagent records.
+ * @param piEvents - Shared event bus for snapshot publication after cleanup
+ */
+export function startBackgroundSubagentCleanupLoop(piEvents?: ExtensionAPI["events"]): void {
+	if (G.__piSubagentHistoryCleanupInterval) return;
+	cleanupCompletedBackgroundSubagents(piEvents);
+	G.__piSubagentHistoryCleanupInterval = setInterval(() => {
+		cleanupCompletedBackgroundSubagents(piEvents);
+	}, SUBAGENT_COMPLETED_CLEANUP_INTERVAL_MS);
+}
 
 /**
  * Build the current typed subagent snapshot for cross-extension consumers.
@@ -139,6 +270,9 @@ export function updateWidget(): void {
 	if (bgRunning.length === 0 && G.__piSubagentWidgetInterval) {
 		clearInterval(G.__piSubagentWidgetInterval);
 		G.__piSubagentWidgetInterval = null;
+	}
+	if (backgroundSubagents.size === 0) {
+		stopBackgroundSubagentCleanupLoop();
 	}
 }
 
