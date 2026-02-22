@@ -70,6 +70,21 @@ Every event you can hook into:
 | `subagent_start` | When a subagent spawns | `agent_type` | No |
 | `subagent_stop` | When a subagent completes | `agent_type` | No |
 
+### Worktree lifecycle
+
+| Event | Description | Matcher field | Can block? |
+|-------|-------------|---------------|------------|
+| `worktree_create` | When a managed worktree is created | `scope` | No |
+| `worktree_remove` | When a managed worktree is removed | `scope` | No |
+
+Claude-compatible aliases are also supported in translated `.claude` hooks:
+
+- `WorktreeCreate` → `worktree_create`
+- `WorktreeRemove` → `worktree_remove`
+
+Worktree payloads include `worktreePath`, `repoRoot`, `scope`, `timestamp`,
+and optional `agentId` for subagent-scoped events.
+
 ### Session lifecycle
 
 | Event | Description | Matcher field | Can block? |

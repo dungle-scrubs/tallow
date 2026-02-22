@@ -142,6 +142,38 @@ Subagents inherit the parent session's model by default. Precedence:
 This means you don't need to specify a model in most cases — agents
 use whatever model you're running in the main session.
 
+### Isolation modes
+
+Subagents can run in detached temporary git worktrees by setting:
+
+- single mode: top-level `isolation: "worktree"`
+- parallel mode: per-task `tasks[i].isolation: "worktree"`
+- centipede mode: per-step `centipede[i].isolation: "worktree"`
+
+Frontmatter defaults also support isolation:
+
+```yaml
+---
+name: reviewer
+description: review code changes
+isolation: worktree
+---
+```
+
+`_defaults.md` can set a fallback isolation for all agents:
+
+```yaml
+---
+isolation: worktree
+---
+```
+
+Isolation precedence is:
+
+1. per-call parameter
+2. agent frontmatter
+3. `_defaults.md` frontmatter
+
 ### Routing keywords
 
 Instead of specifying a concrete model in agent frontmatter, you can
