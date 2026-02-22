@@ -49,6 +49,7 @@ import {
 	resolveExtensionSelectors,
 	type TallowSessionOptions,
 } from "./sdk.js";
+import { resolveStartupProfile } from "./startup-profile.js";
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -317,6 +318,10 @@ async function run(opts: {
 
 	// Will this invocation produce output (print mode) rather than start a TUI?
 	const hasPrintInput = Boolean(opts.print || stdinContent);
+	sessionOpts.startupProfile = resolveStartupProfile({
+		hasPrintInput,
+		mode: opts.mode,
+	});
 
 	// Guard: block nested interactive sessions (two TUIs on one terminal)
 	// Do this before session setup so it fails fast without requiring model/auth resolution.

@@ -15,6 +15,7 @@ import {
 	editTool,
 	findTool,
 	grepTool,
+	type LoadExtensionsResult,
 	lsTool,
 	ModelRegistry,
 	type PromptTemplate,
@@ -49,12 +50,28 @@ import {
 import { buildProjectTrustBannerPayload } from "./project-trust-banner.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
+import { normalizeStartupProfile, type StartupProfile } from "./startup-profile.js";
+import { emitStartupTiming, isStartupTimingEnabled } from "./startup-timing.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+/**
+ * Startup behavior profile used to optimize session initialization.
+ *
+ * - `interactive`: full TUI-oriented startup path
+ * - `headless`: optimized startup for print/json/rpc workflows
+ */
+export type TallowStartupProfile = StartupProfile;
 
 export interface TallowSessionOptions {
 	/** Working directory. Default: process.cwd() */
 	cwd?: string;
+
+	/**
+	 * Startup profile that controls interactive-vs-headless initialization behavior.
+	 * Defaults to "interactive" when omitted.
+	 */
+	startupProfile?: TallowStartupProfile;
 
 	/** Pre-resolved Model object. Takes precedence over provider/modelId strings. */
 	model?: CreateAgentSessionOptions["model"];
@@ -247,6 +264,22 @@ export interface ExtensionSelectorResolution {
 
 /** Number of bundled extension IDs to include in unknown-ID errors. */
 const EXTENSION_ID_SUGGESTION_LIMIT = 10;
+
+/** Startup timing milestones emitted when timing instrumentation is enabled. */
+type StartupTimingStage = "create-session" | "bind-extensions" | "first-token";
+
+/** Runtime state for startup timing instrumentation. */
+interface StartupTimingLogger {
+	readonly enabled: boolean;
+	mark(stage: StartupTimingStage, stageStartedAtMs?: number): void;
+}
+
+/** Options for startup-time extension filtering policies. */
+interface ExtensionStartupPolicyOptions {
+	readonly blockProjectExtensions: boolean;
+	readonly projectExtensionsDir: string;
+	readonly startupProfile: TallowStartupProfile;
+}
 
 /**
  * Return all bundled extension manifests keyed by extension directory name.
@@ -448,6 +481,185 @@ function normalizeSkillNames<D extends { message: string }>(result: {
 	return { skills, diagnostics };
 }
 
+/**
+ * Create a startup timing logger controlled by `TALLOW_STARTUP_TIMING`.
+ *
+ * @param startupProfile - Active startup profile for log context
+ * @returns Startup timing logger (no-op when disabled)
+ */
+function createStartupTimingLogger(startupProfile: TallowStartupProfile): StartupTimingLogger {
+	const enabled = isStartupTimingEnabled();
+	const startupStartedAtMs = Date.now();
+	const emittedStages = new Set<StartupTimingStage>();
+
+	return {
+		enabled,
+		mark(stage, stageStartedAtMs) {
+			if (!enabled || emittedStages.has(stage)) {
+				return;
+			}
+
+			emittedStages.add(stage);
+			const nowMs = Date.now();
+			emitStartupTiming(stage, nowMs - startupStartedAtMs, {
+				phaseMilliseconds: stageStartedAtMs === undefined ? undefined : nowMs - stageStartedAtMs,
+				profile: startupProfile,
+			});
+		},
+	};
+}
+
+/**
+ * Check whether an assistant stream event represents token emission.
+ *
+ * @param assistantEventType - Assistant stream event type string
+ * @returns True for delta events that indicate model output has started
+ */
+function isTokenDeltaEventType(assistantEventType: string): boolean {
+	return (
+		assistantEventType === "text_delta" ||
+		assistantEventType === "thinking_delta" ||
+		assistantEventType === "toolcall_delta"
+	);
+}
+
+/**
+ * Attach startup timing instrumentation for bind-extensions and first-token milestones.
+ *
+ * @param session - Agent session instance returned from createAgentSession
+ * @param timing - Startup timing logger
+ * @returns Nothing
+ */
+function instrumentSessionStartupTimings(
+	session: CreateAgentSessionResult["session"],
+	timing: StartupTimingLogger
+): void {
+	if (!timing.enabled) {
+		return;
+	}
+
+	let bindExtensionsLogged = false;
+	const originalBindExtensions = session.bindExtensions.bind(session);
+	session.bindExtensions = async (bindings) => {
+		const bindStartedAtMs = Date.now();
+		try {
+			await originalBindExtensions(bindings);
+		} finally {
+			if (!bindExtensionsLogged) {
+				bindExtensionsLogged = true;
+				timing.mark("bind-extensions", bindStartedAtMs);
+			}
+		}
+	};
+
+	let unsubscribeFirstToken: (() => void) | undefined;
+	unsubscribeFirstToken = session.subscribe((event) => {
+		if (event.type !== "message_update") {
+			return;
+		}
+		if (!isTokenDeltaEventType(event.assistantMessageEvent.type)) {
+			return;
+		}
+
+		timing.mark("first-token");
+		unsubscribeFirstToken?.();
+		unsubscribeFirstToken = undefined;
+	});
+}
+
+/**
+ * Check whether an extension path belongs to project-local `.tallow/extensions`.
+ *
+ * @param extensionPath - Candidate extension path
+ * @param projectExtensionsDir - Canonical project extensions directory
+ * @returns True when extensionPath points to the project extensions tree
+ */
+function isProjectExtensionPath(extensionPath: string, projectExtensionsDir: string): boolean {
+	const normalizedPath = resolve(extensionPath);
+	return (
+		normalizedPath === projectExtensionsDir ||
+		normalizedPath.startsWith(`${projectExtensionsDir}${sep}`)
+	);
+}
+
+/**
+ * Determine whether an extension is a purely interactive UI extension in headless mode.
+ *
+ * Tool availability is always preserved: extensions that register tools at runtime,
+ * or declare tools in extension.json, are never skipped.
+ *
+ * @param extensionPath - Absolute path to the extension directory or file
+ * @param runtimeToolCount - Number of tools registered by the loaded extension
+ * @returns True when the extension should be skipped in headless mode
+ */
+function shouldSkipInteractiveUiExtensionInHeadless(
+	extensionPath: string,
+	runtimeToolCount: number
+): boolean {
+	if (runtimeToolCount > 0) {
+		return false;
+	}
+
+	const manifest = readPluginManifest(
+		extensionPath,
+		"tallow-extension"
+	) as TallowExtensionManifest | null;
+	if (!manifest) {
+		return false;
+	}
+
+	const declaredToolCount = manifest.capabilities?.tools?.length ?? 0;
+	if (declaredToolCount > 0) {
+		return false;
+	}
+
+	return manifest.category?.toLowerCase() === "ui";
+}
+
+/**
+ * Apply startup-time extension filtering policies for trust and headless mode.
+ *
+ * @param base - Loaded extension result from the framework resource loader
+ * @param options - Startup policy options
+ * @returns Filtered extension result with original ordering preserved
+ */
+function applyExtensionStartupPolicies(
+	base: LoadExtensionsResult,
+	options: ExtensionStartupPolicyOptions
+): LoadExtensionsResult {
+	let filteredExtensions = base.extensions;
+	let changed = false;
+
+	if (options.blockProjectExtensions) {
+		const blocked = filteredExtensions.filter(
+			(ext) => !isProjectExtensionPath(ext.path, options.projectExtensionsDir)
+		);
+		if (blocked.length !== filteredExtensions.length) {
+			filteredExtensions = blocked;
+			changed = true;
+		}
+	}
+
+	if (options.startupProfile === "headless") {
+		const policyFiltered = filteredExtensions.filter(
+			(ext) => !shouldSkipInteractiveUiExtensionInHeadless(ext.path, ext.tools.size)
+		);
+		if (policyFiltered.length !== filteredExtensions.length) {
+			filteredExtensions = policyFiltered;
+			changed = true;
+		}
+	}
+
+	if (!changed) {
+		return base;
+	}
+
+	return {
+		...base,
+		extensions: filteredExtensions,
+	};
+}
+
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
 /**
@@ -471,10 +683,16 @@ function normalizeSkillNames<D extends { message: string }>(result: {
 export async function createTallowSession(
 	options: TallowSessionOptions = {}
 ): Promise<TallowSession> {
+	const startupProfile = normalizeStartupProfile(options.startupProfile);
+	const startupTiming = createStartupTimingLogger(startupProfile);
+	const createSessionStartedAtMs = Date.now();
+
 	// Ensure env is configured before any framework internals resolve paths
 	bootstrap();
-	ensureTallowHome();
-	await applyInteractiveModeStaleUiPatch();
+	ensureTallowHome(startupProfile);
+	if (startupProfile === "interactive") {
+		await applyInteractiveModeStaleUiPatch();
+	}
 
 	// Resolve any op:// secrets not loaded from cache during bootstrap.
 	// Runs in parallel (~2.4s for all) instead of sequential (~2.4s each).
@@ -663,6 +881,8 @@ export async function createTallowSession(
 	}
 
 	const dedupedExtensionPaths = [...new Set(additionalExtensionPaths)];
+	const shouldApplyExtensionStartupPolicies =
+		shouldBlockProjectExtensions || startupProfile === "headless";
 
 	const loader = new DefaultResourceLoader({
 		cwd,
@@ -681,20 +901,13 @@ export async function createTallowSession(
 			...(options.extensionFactories ?? []),
 		],
 		noExtensions: extensionsOnly,
-		extensionsOverride: shouldBlockProjectExtensions
-			? (base) => {
-					const filtered = base.extensions.filter((ext) => {
-						const normalizedPath = resolve(ext.path);
-						return !(
-							normalizedPath === projectExtensionsDir ||
-							normalizedPath.startsWith(`${projectExtensionsDir}${sep}`)
-						);
-					});
-					return {
-						...base,
-						extensions: filtered,
-					};
-				}
+		extensionsOverride: shouldApplyExtensionStartupPolicies
+			? (base) =>
+					applyExtensionStartupPolicies(base, {
+						blockProjectExtensions: shouldBlockProjectExtensions,
+						projectExtensionsDir,
+						startupProfile,
+					})
 			: undefined,
 		systemPromptOverride: options.systemPrompt ? () => options.systemPrompt : undefined,
 		appendSystemPromptOverride: options.appendSystemPrompt
@@ -808,6 +1021,9 @@ export async function createTallowSession(
 		tools: options.tools,
 		customTools: options.customTools,
 	});
+
+	startupTiming.mark("create-session", createSessionStartedAtMs);
+	instrumentSessionStartupTimings(result.session, startupTiming);
 
 	return {
 		session: result.session,
@@ -1125,7 +1341,13 @@ function detectOutputTruncation(pi: ExtensionAPI): void {
 	});
 }
 
-function ensureTallowHome(): void {
+/**
+ * Ensure the tallow home directory structure and startup housekeeping are ready.
+ *
+ * @param startupProfile - Startup profile controlling interactive-only setup
+ * @returns Nothing
+ */
+function ensureTallowHome(startupProfile: TallowStartupProfile): void {
 	const dirs = [TALLOW_HOME, join(TALLOW_HOME, "sessions"), join(TALLOW_HOME, "extensions")];
 
 	for (const dir of dirs) {
@@ -1145,7 +1367,9 @@ function ensureTallowHome(): void {
 		);
 	}
 
-	ensureKeybindings();
+	if (startupProfile === "interactive") {
+		ensureKeybindings();
+	}
 }
 
 /**

@@ -221,6 +221,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CLAUDE.md` → `AGENTS.md` migration in `/init`
 - **trust:** per-project trust store with config fingerprinting and
   `/trust-project`, `/untrust-project`, `/trust-status` commands
+- **startup:** add `startupProfile` (`interactive`/`headless`) session option,
+  headless UI-extension skip policy, and `TALLOW_STARTUP_TIMING` metrics for
+  create-session, bind-extensions, and first-token
 
 ### Changed
 
