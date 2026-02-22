@@ -36,6 +36,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { createLazyInitializer, type LazyInitInput } from "../_shared/lazy-init.js";
 import {
 	getProjectSettingsTrustDecision,
 	type ProjectTrustStatus,
@@ -1440,13 +1441,16 @@ export function mapContent(items: McpContentItem[]): PiContentItem[] {
 
 /**
  * MCP Adapter extension. Reads mcpServers config from settings.json,
- * connects to servers at session start (STDIO, SSE, or Streamable HTTP),
+ * lazily connects to servers on first use (STDIO, SSE, or Streamable HTTP),
  * registers discovered tools, and provides a /mcp command for status.
  *
  * @param pi - Extension API
  */
 export default function mcpAdapter(pi: ExtensionAPI) {
 	const servers = new Map<string, McpServer>();
+	let cachedConfigCwd: string | null = null;
+	let cachedConfig: Record<string, McpServerConfig> | null = null;
+	let cachedSkippedProjectConfig: SkippedProjectMcpConfig | null = null;
 
 	/**
 	 * Initializes a server and registers its discovered tools with pi-code.
@@ -1529,40 +1533,63 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 		}
 	}
 
-	// ── Lifecycle ────────────────────────────────────────────────────────────
-
-	pi.on("session_start", async (_event, ctx) => {
-		const configResult = loadMcpConfigWithMetadata(ctx.cwd);
-		if (configResult.skippedProjectConfig) {
-			ctx.ui.notify(
-				formatSkippedProjectMcpNotice(
-					configResult.skippedProjectConfig.path,
-					configResult.skippedProjectConfig.trustStatus
-				),
-				"warning"
-			);
-		}
-
-		const mcpConfig = configResult.config;
-		let serverNames = Object.keys(mcpConfig);
-		if (serverNames.length === 0) return;
-
-		// Filter servers if PI_MCP_SERVERS env var is set (agent-scoped MCP)
+	/**
+	 * Filters configured server names using the optional agent-scoped allowlist.
+	 *
+	 * @param serverNames - Configured MCP server names
+	 * @returns Server names allowed by PI_MCP_SERVERS (or all names when unset)
+	 */
+	function filterServerNames(serverNames: string[]): string[] {
 		const allowedServers = process.env.PI_MCP_SERVERS;
-		if (allowedServers !== undefined && allowedServers !== "") {
-			const allowed = new Set(
-				allowedServers
-					.split(",")
-					.map((s) => s.trim())
-					.filter(Boolean)
-			);
-			serverNames = serverNames.filter((name) => allowed.has(name));
-			if (serverNames.length === 0) return;
+		if (allowedServers === undefined || allowedServers === "") {
+			return serverNames;
 		}
 
-		// Create server instances with appropriate transports
+		const allowed = new Set(
+			allowedServers
+				.split(",")
+				.map((name) => name.trim())
+				.filter(Boolean)
+		);
+		return serverNames.filter((name) => allowed.has(name));
+	}
+
+	/**
+	 * Loads MCP config once per session cwd and memoizes trust-gate metadata.
+	 *
+	 * @param cwd - Session working directory
+	 * @returns Cached or newly loaded config result
+	 */
+	function getCachedConfigResult(cwd: string): McpConfigLoadResult {
+		if (cachedConfig && cachedConfigCwd === cwd) {
+			return {
+				config: cachedConfig,
+				skippedProjectConfig: cachedSkippedProjectConfig,
+			};
+		}
+
+		const result = loadMcpConfigWithMetadata(cwd);
+		cachedConfigCwd = cwd;
+		cachedConfig = result.config;
+		cachedSkippedProjectConfig = result.skippedProjectConfig;
+		return result;
+	}
+
+	/**
+	 * Creates in-memory server instances from config without connecting.
+	 *
+	 * @param cwd - Session working directory
+	 * @returns Nothing
+	 */
+	function ensureServerDefinitions(cwd: string): void {
+		if (servers.size > 0) {
+			return;
+		}
+
+		const configResult = getCachedConfigResult(cwd);
+		const serverNames = filterServerNames(Object.keys(configResult.config));
 		for (const name of serverNames) {
-			const config = mcpConfig[name];
+			const config = configResult.config[name];
 			servers.set(name, {
 				name,
 				config,
@@ -1575,22 +1602,90 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 				reconnectPromise: null,
 			});
 		}
+	}
 
-		// Connect all servers concurrently
+	/**
+	 * Performs one-time MCP setup: connect all configured servers and register tools.
+	 *
+	 * @param input - Lazy initialization trigger and extension context
+	 * @returns Nothing
+	 */
+	async function initializeMcpServers(input: LazyInitInput<ExtensionContext>): Promise<void> {
+		const { context } = input;
+		ensureServerDefinitions(context.cwd);
+		if (servers.size === 0) {
+			return;
+		}
+
 		const serverCount = servers.size;
-		ctx.ui.setWorkingMessage(
+		context.ui.setWorkingMessage(
 			`Connecting to ${serverCount} MCP server${serverCount > 1 ? "s" : ""}`
 		);
-		const connectPromises: Promise<void>[] = [];
-		for (const server of servers.values()) {
-			connectPromises.push(connectAndRegisterTools(server, ctx));
+		try {
+			const connectPromises: Promise<void>[] = [];
+			for (const server of servers.values()) {
+				connectPromises.push(connectAndRegisterTools(server, context));
+			}
+			await Promise.allSettled(connectPromises);
+		} finally {
+			context.ui.setWorkingMessage();
 		}
-		await Promise.allSettled(connectPromises);
-		ctx.ui.setWorkingMessage();
+	}
+
+	/**
+	 * Ensures lazy MCP initialization has completed before a feature uses MCP.
+	 *
+	 * @param trigger - Caller identifier for telemetry and debugging
+	 * @param ctx - Extension context for initialization
+	 * @returns Nothing
+	 */
+	async function ensureMcpInitialized(trigger: string, ctx: ExtensionContext): Promise<void> {
+		await lazyInitializer.ensureInitialized({ trigger, context: ctx });
+	}
+
+	const lazyInitializer = createLazyInitializer<ExtensionContext>({
+		name: "mcp-adapter-tool",
+		initialize: initializeMcpServers,
+	});
+
+	/**
+	 * Reset runtime state so the next lazy initialization uses fresh config.
+	 *
+	 * @returns Nothing
+	 */
+	function resetRuntimeState(): void {
+		for (const server of servers.values()) {
+			if (server.transport) {
+				server.transport.stop();
+			}
+		}
+		servers.clear();
+		lazyInitializer.reset();
+		cachedConfig = null;
+		cachedConfigCwd = null;
+		cachedSkippedProjectConfig = null;
+	}
+
+	// ── Lifecycle ────────────────────────────────────────────────────────────
+
+	pi.on("session_start", async (_event, ctx) => {
+		resetRuntimeState();
+
+		const configResult = getCachedConfigResult(ctx.cwd);
+		if (configResult.skippedProjectConfig) {
+			ctx.ui.notify(
+				formatSkippedProjectMcpNotice(
+					configResult.skippedProjectConfig.path,
+					configResult.skippedProjectConfig.trustStatus
+				),
+				"warning"
+			);
+		}
 	});
 
 	// Inject MCP context and usage instructions into system prompt
-	pi.on("before_agent_start", async (event) => {
+	pi.on("before_agent_start", async (event, ctx) => {
+		await ensureMcpInitialized("before_agent_start", ctx);
 		const connectedServers = [...servers.values()].filter((s) => s.ready);
 		if (connectedServers.length === 0) return;
 
@@ -1658,12 +1753,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown" as never, async () => {
-		for (const server of servers.values()) {
-			if (server.transport) {
-				server.transport.stop();
-			}
-		}
-		servers.clear();
+		resetRuntimeState();
 	});
 
 	// ── /mcp Command ─────────────────────────────────────────────────────────
@@ -1671,6 +1761,8 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 	pi.registerCommand("mcp", {
 		description: "List connected MCP servers and their tools",
 		handler: async (_args, ctx) => {
+			await ensureMcpInitialized("command:mcp", ctx);
+
 			if (servers.size === 0) {
 				ctx.ui.notify(
 					"No MCP servers configured. Add mcpServers to .tallow/settings.json or ~/.tallow/settings.json.",
