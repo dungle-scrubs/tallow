@@ -273,8 +273,8 @@ afterEach(() => {
 });
 
 describe("tasks widget subagent sections", () => {
-	it("labels a foreground-only snapshot as blocking foreground subagents", async () => {
-		const fixture = await createFixture();
+	it("omits subagent sections for foreground-only snapshots", async () => {
+		const fixture = await createFixture("Keep task list visible");
 		try {
 			emitSubagentsSnapshot(fixture.harness, {
 				foreground: [
@@ -289,9 +289,30 @@ describe("tasks widget subagent sections", () => {
 
 			const lines = renderWidget(fixture.captured, 90);
 			const text = stripAnsi(lines.join("\n"));
-			expect(text).toContain("Foreground Subagents (blocking · 1 running)");
+			expect(text).toContain("Tasks (0/1)");
+			expect(text).not.toContain("Foreground Subagents (blocking");
 			expect(text).not.toContain("Background Subagents (non-blocking");
 			expectLinesWithinWidth(lines, 90);
+		} finally {
+			await shutdownFixture(fixture);
+		}
+	});
+
+	it("does not mount the widget when foreground subagents are the only activity", async () => {
+		const fixture = await createFixture();
+		try {
+			emitSubagentsSnapshot(fixture.harness, {
+				foreground: [
+					createSubagent({
+						agent: "reviewer",
+						id: "fg_only",
+						status: "running",
+						task: "Review changed files",
+					}),
+				],
+			});
+
+			expect(fixture.captured.render).toBeNull();
 		} finally {
 			await shutdownFixture(fixture);
 		}
@@ -321,7 +342,7 @@ describe("tasks widget subagent sections", () => {
 		}
 	});
 
-	it("renders separate foreground/background sections with distinct per-section counts", async () => {
+	it("renders only the background heading for mixed foreground/background snapshots", async () => {
 		const fixture = await createFixture();
 		try {
 			emitSubagentsSnapshot(fixture.harness, {
@@ -345,8 +366,8 @@ describe("tasks widget subagent sections", () => {
 
 			const lines = renderWidget(fixture.captured, 95);
 			const text = stripAnsi(lines.join("\n"));
-			expect(text).toContain("Foreground Subagents (blocking · 1 running)");
 			expect(text).toContain("Background Subagents (non-blocking · 1 stalled)");
+			expect(text).not.toContain("Foreground Subagents (blocking");
 			expect(text).not.toContain("Subagents (1 running · 1 stalled)");
 			expectLinesWithinWidth(lines, 95);
 		} finally {
@@ -363,10 +384,10 @@ describe("tasks widget subagent sections", () => {
 
 		try {
 			emitSubagentsSnapshot(fixture.harness, {
-				foreground: [
+				background: [
 					createSubagent({
 						agent: "widthprobe",
-						id: "width_fg",
+						id: "width_bg",
 						status: "running",
 						task: longTask,
 					}),

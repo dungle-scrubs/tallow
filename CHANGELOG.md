@@ -96,6 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **tasks:** render foreground subagents inline-only while keeping bottom widget lanes background-only
 - **tui:** realign differential-render viewport coordinates after shrink churn to prevent input editor border lines from being cleared
 
 ### Documentation
