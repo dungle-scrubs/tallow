@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type {
+	CandidateModel,
 	ClassificationResult,
 	CostPreference,
 	ResolvedModel,
@@ -751,6 +752,129 @@ function costPreferenceToRoutingMode(costPreference: CostPreference): RoutingMod
 	return "balanced";
 }
 
+/** Environment keys that indicate direct-provider API access. */
+const DIRECT_PROVIDER_ENV_KEYS: Readonly<Record<string, readonly string[]>> = {
+	anthropic: ["ANTHROPIC_API_KEY"],
+	google: ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+	minimax: ["MINIMAX_API_KEY"],
+	"minimax-cn": ["MINIMAX_CN_API_KEY"],
+	openai: ["OPENAI_API_KEY"],
+	xai: ["XAI_API_KEY"],
+	zai: ["ZAI_API_KEY"],
+};
+
+/** Environment keys that indicate aggregator-provider API access. */
+const AGGREGATOR_PROVIDER_ENV_KEYS: Readonly<Record<string, readonly string[]>> = {
+	opencode: ["OPENCODE_API_KEY"],
+	openrouter: ["OPENROUTER_API_KEY"],
+	"vercel-ai-gateway": ["VERCEL_AI_GATEWAY_API_KEY", "VERCEL_API_KEY"],
+};
+
+/** Provider aliases accepted in explicit provider/model input. */
+const PROVIDER_ALIASES: Readonly<Record<string, string>> = {
+	"mini-max": "minimax",
+	"z-ai": "zai",
+	"z.ai": "zai",
+	zhipu: "zai",
+};
+
+/**
+ * Check whether any environment key in a list is set.
+ *
+ * @param envKeys - Candidate environment variable names
+ * @returns True when at least one key is present and non-empty
+ */
+function hasAnyEnvKey(envKeys: readonly string[]): boolean {
+	return envKeys.some((key) => {
+		const value = process.env[key];
+		return typeof value === "string" && value.trim().length > 0;
+	});
+}
+
+/**
+ * Build provider preference list from available API-key and OAuth auth.
+ *
+ * Order: OAuth providers first, then direct API providers, then aggregators.
+ *
+ * @returns Ordered provider-preference list
+ */
+function getResolutionPreferredProviders(): string[] {
+	const fromOAuth = getSubscriptionProviders();
+	const fromDirectApiKeys = Object.entries(DIRECT_PROVIDER_ENV_KEYS)
+		.filter(([, envKeys]) => hasAnyEnvKey(envKeys))
+		.map(([provider]) => provider);
+	const fromAggregatorApiKeys = Object.entries(AGGREGATOR_PROVIDER_ENV_KEYS)
+		.filter(([, envKeys]) => hasAnyEnvKey(envKeys))
+		.map(([provider]) => provider);
+	return [...new Set([...fromOAuth, ...fromDirectApiKeys, ...fromAggregatorApiKeys])];
+}
+
+/**
+ * Normalize provider names from user input.
+ *
+ * @param provider - Raw provider string
+ * @returns Normalized provider name
+ */
+function normalizeProviderAlias(provider: string): string {
+	const normalized = provider.trim().toLowerCase();
+	return PROVIDER_ALIASES[normalized] ?? normalized;
+}
+
+/**
+ * Resolve an explicit `provider/model` choice strictly within one provider.
+ *
+ * @param provider - Normalized provider name
+ * @param modelQuery - Model query scoped to the provider
+ * @returns Provider-scoped resolved model when matched
+ */
+function resolveProviderScopedModel(
+	provider: string,
+	modelQuery: string
+): ResolvedModel | undefined {
+	const providerCandidates = resolveModelCandidates(modelQuery).filter(
+		(candidate) => candidate.provider.toLowerCase() === provider
+	);
+	if (providerCandidates.length === 0) return undefined;
+
+	const scopedModelSource = (): CandidateModel[] =>
+		providerCandidates.map((candidate) => ({
+			id: candidate.id,
+			name: candidate.id,
+			provider: candidate.provider,
+		}));
+
+	return resolveModelFuzzy(modelQuery, scopedModelSource, [provider]) ?? providerCandidates[0];
+}
+
+/**
+ * Resolve an explicit model choice without classification.
+ *
+ * Supports both:
+ * - shorthand model queries (`glm5`, `opus`)
+ * - strict provider-scoped queries (`zai/glm-5`, `minimax/MiniMax-M2.1`)
+ *
+ * @param query - Explicit model query
+ * @param preferredProviders - Optional provider preferences for shorthand queries
+ * @returns Resolved model or undefined when unmatched
+ */
+function resolveExplicitModelChoice(
+	query: string,
+	preferredProviders?: string[]
+): ResolvedModel | undefined {
+	const trimmed = query.trim();
+	if (trimmed.length === 0) return undefined;
+
+	const slashIndex = trimmed.indexOf("/");
+	if (slashIndex > 0 && slashIndex < trimmed.length - 1) {
+		const provider = normalizeProviderAlias(trimmed.slice(0, slashIndex));
+		const modelQuery = trimmed.slice(slashIndex + 1).trim();
+		const providerScoped = resolveProviderScopedModel(provider, modelQuery);
+		if (providerScoped) return providerScoped;
+	}
+
+	return resolveModelFuzzy(trimmed, undefined, preferredProviders);
+}
+
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
 /**
@@ -769,8 +893,10 @@ function resolveFallback(parentModelId: string): ResolvedModel {
  * Route a subagent task to the best model(s).
  *
  * Decision flow:
- * 1. If modelOverride provided → fuzzy resolve it, return as "explicit"
- * 2. If agentModel provided (from frontmatter) → fuzzy resolve, return as "agent-frontmatter"
+ * 1. If modelOverride provided → direct resolve (no classification), return as "explicit"
+ * 2. If agentModel provided (from frontmatter):
+ *    - routing keyword (`auto-*`) → auto-route path
+ *    - otherwise direct resolve (no classification), return as "agent-frontmatter"
  * 3. If routing disabled → return parentModel as "fallback"
  * 4. Auto-route: classify task (or use per-call hints), select ranked
  *    candidates, return top pick + fallbacks as "auto-routed"
@@ -799,9 +925,11 @@ export async function routeModel(
 	hints?: RoutingHints,
 	cwd?: string
 ): Promise<RoutingResult> {
-	// 1. Explicit per-call model override — fuzzy resolve to best match
+	const resolutionPreferredProviders = getResolutionPreferredProviders();
+
+	// 1. Explicit per-call model override — direct resolve with no classification
 	if (modelOverride) {
-		const resolved = resolveModelFuzzy(modelOverride);
+		const resolved = resolveExplicitModelChoice(modelOverride, resolutionPreferredProviders);
 		if (resolved) return { ok: true, model: resolved, fallbacks: [], reason: "explicit" };
 		const available = listAvailableModels().slice(0, 15).join(", ");
 		return {
@@ -811,16 +939,16 @@ export async function routeModel(
 		};
 	}
 
-	// 2. Agent frontmatter model — resolve as routing keyword, fuzzy match, or fall through
+	// 2. Agent frontmatter model — routing keyword or direct explicit resolve
 	let routingKeywordCostPref: CostPreference | undefined;
 	if (agentModel) {
 		const keyword = parseRoutingKeyword(agentModel);
 		if (keyword) {
-			// Routing keyword (e.g. "auto-cheap") — skip fuzzy resolution,
-			// force auto-routing with the keyword's cost preference
+			// Routing keyword (e.g. "auto-cheap") — skip direct resolution,
+			// force auto-routing with the keyword's cost preference.
 			routingKeywordCostPref = keyword;
 		} else {
-			const resolved = resolveModelFuzzy(agentModel);
+			const resolved = resolveExplicitModelChoice(agentModel, resolutionPreferredProviders);
 			if (resolved)
 				return { ok: true, model: resolved, fallbacks: [], reason: "agent-frontmatter" };
 		}
