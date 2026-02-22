@@ -58,8 +58,13 @@ mockScope.module("../task-classifier.js", () => ({
 
 let parseRoutingKeyword!: typeof import("../model-router.js").parseRoutingKeyword;
 let routeModel!: typeof import("../model-router.js").routeModel;
+let isolatedHomeDir = "";
+const originalHome = process.env.HOME;
 
 beforeAll(async () => {
+	isolatedHomeDir = mkdtempSync(join(tmpdir(), "tallow-route-keyword-home-"));
+	mkdirSync(join(isolatedHomeDir, ".tallow"), { recursive: true });
+	process.env.HOME = isolatedHomeDir;
 	mockScope.install();
 	const mod = await import(`../model-router.js?t=${Date.now()}`);
 	parseRoutingKeyword = mod.parseRoutingKeyword;
@@ -68,6 +73,14 @@ beforeAll(async () => {
 
 afterAll(() => {
 	mockScope.teardown();
+	if (originalHome === undefined) {
+		delete process.env.HOME;
+	} else {
+		process.env.HOME = originalHome;
+	}
+	if (isolatedHomeDir) {
+		rmSync(isolatedHomeDir, { force: true, recursive: true });
+	}
 });
 
 /**
@@ -128,12 +141,9 @@ describe("routeModel with auto-cheap", () => {
 
 	it("routing keyword still forces auto-routing when routing.enabled is false", async () => {
 		const testCwd = mkdtempSync(join(tmpdir(), "tallow-route-keyword-cwd-"));
-		const testHome = mkdtempSync(join(tmpdir(), "tallow-route-keyword-home-"));
-		const previousHome = process.env.HOME;
-		process.env.HOME = testHome;
 
 		try {
-			writeJson(join(testHome, ".tallow", "settings.json"), {
+			writeJson(join(isolatedHomeDir, ".tallow", "settings.json"), {
 				routing: { enabled: false },
 			});
 			const result = await routeModel(
@@ -151,13 +161,8 @@ describe("routeModel with auto-cheap", () => {
 			expect(result.reason).toBe("auto-routed");
 			expect(result.model.id).toBe("gemini-3-flash");
 		} finally {
-			if (previousHome === undefined) {
-				delete process.env.HOME;
-			} else {
-				process.env.HOME = previousHome;
-			}
 			rmSync(testCwd, { force: true, recursive: true });
-			rmSync(testHome, { force: true, recursive: true });
+			writeJson(join(isolatedHomeDir, ".tallow", "settings.json"), {});
 		}
 	});
 
