@@ -10,10 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **extensions:** lazy-initialize command expansion, context scanning, context fork indexing, and MCP startup connections behind first-use triggers
+- **permissions:** add structured deny/ask reason metadata with redaction-safe messaging and shell-policy alignment
 
 ### Documentation
 
 - **agents:** add extension startup policy guidance for minimal `session_start` handlers and shared lazy initialization
+- **permissions:** add allow/ask/deny reason examples with redaction behavior
 
 ## [0.8.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.5...tallow-v0.8.6) (2026-02-20)
 

@@ -57,6 +57,39 @@ Rules follow `Tool(specifier)` or bare `Tool` (matches all uses):
 
 Hardcoded safety denylists (fork bombs, `rm -rf /`) are never overridable.
 
+## Allow / ask / deny outcomes
+
+Permission checks now return structured reason metadata (`reasonCode`,
+`reasonMessage`, `matchedRule`, source scope/path) and surface concise,
+actionable messages.
+
+### Deny example
+
+```text
+Action denied by permission rule Bash(ssh *).
+Source: .tallow/settings.json.
+Hint: Allowed patterns: git *.
+```
+
+### Ask example
+
+```text
+Reason: Confirmation required by permission rule Bash(docker *).
+Tool: bash
+Input: docker compose up
+Rule: Bash(docker *)
+Allow this action?
+```
+
+### Redaction behavior
+
+Sensitive values are redacted before surfacing reasons:
+
+```text
+Bash(export API_KEY=[REDACTED])
+op://[REDACTED]
+```
+
 ## Tool name casing
 
 Both Claude Code and tallow casing work:
