@@ -12,6 +12,7 @@ import { getSpinner } from "../_icons/index.js";
 import {
 	emitInteropEvent,
 	INTEROP_EVENT_NAMES,
+	type InteropSubagentStatus,
 	type InteropSubagentView,
 } from "../_shared/interop-events.js";
 import type { SingleResult } from "./formatting.js";
@@ -25,6 +26,7 @@ export interface RunningSubagent {
 	model?: string;
 	task: string;
 	startTime: number;
+	status: Extract<InteropSubagentStatus, "running" | "stalled">;
 }
 
 /** Tracks a background subagent running as a detached process. */
@@ -36,7 +38,7 @@ export interface BackgroundSubagent {
 	startTime: number;
 	process: ReturnType<typeof spawn>;
 	result: SingleResult;
-	status: "running" | "completed" | "failed";
+	status: InteropSubagentStatus;
 	tmpPromptDir?: string;
 	tmpPromptPath?: string;
 }
@@ -102,7 +104,7 @@ export function buildSubagentSnapshot(): {
 		id: subagent.id,
 		model: subagent.model,
 		startTime: subagent.startTime,
-		status: "running",
+		status: subagent.status,
 		task: subagent.task,
 	}));
 	return { background, foreground };
@@ -190,9 +192,28 @@ export function registerForegroundSubagent(
 	piEvents?: ExtensionAPI["events"],
 	model?: string
 ): void {
-	runningSubagents.set(id, { id, agent, model, task, startTime });
+	runningSubagents.set(id, { id, agent, model, task, startTime, status: "running" });
 	publishSubagentSnapshot(piEvents);
 	startWidgetUpdates();
+}
+
+/**
+ * Update a foreground subagent status and publish snapshot updates.
+ *
+ * @param id - Subagent tracking ID
+ * @param status - New liveness status
+ * @param piEvents - Shared event bus for snapshot updates
+ */
+export function setForegroundSubagentStatus(
+	id: string,
+	status: Extract<InteropSubagentStatus, "running" | "stalled">,
+	piEvents?: ExtensionAPI["events"]
+): void {
+	const existing = runningSubagents.get(id);
+	if (!existing || existing.status === status) return;
+	runningSubagents.set(id, { ...existing, status });
+	publishSubagentSnapshot(piEvents);
+	updateWidget();
 }
 
 /**

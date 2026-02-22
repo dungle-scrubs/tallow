@@ -35,6 +35,7 @@ import {
 	generateId,
 	publishSubagentSnapshot,
 	registerForegroundSubagent,
+	setForegroundSubagentStatus,
 	startWidgetUpdates,
 	uiContext,
 	updateWidget,
@@ -169,6 +170,189 @@ export async function mapWithConcurrencyLimit<TIn, TOut>(
 	});
 	await Promise.all(workers);
 	return results;
+}
+
+/** Liveness watchdog thresholds for foreground subagent workers. */
+export interface ForegroundWatchdogThresholds {
+	readonly inactivityTimeoutMs: number;
+	readonly killGraceMs: number;
+	readonly startupTimeoutMs: number;
+}
+
+/** Heartbeat state tracked by the foreground subagent liveness watchdog. */
+export interface WatchdogHeartbeatState {
+	readonly lastHeartbeatAtMs: number | null;
+	readonly startedAtMs: number;
+}
+
+/** Liveness watchdog status for a foreground subagent worker. */
+export type WatchdogStatus =
+	| { readonly kind: "healthy" }
+	| {
+			readonly elapsedMs: number;
+			readonly kind: "stalled";
+			readonly phase: "inactivity" | "startup";
+			readonly timeoutMs: number;
+	  };
+
+/** Default watchdog thresholds used by foreground subagents in runSingleAgent. */
+export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
+	inactivityTimeoutMs: 90_000,
+	killGraceMs: 5_000,
+	startupTimeoutMs: 30_000,
+};
+
+/** How often the foreground watchdog checks for stalled subagents. */
+const FOREGROUND_WATCHDOG_CHECK_INTERVAL_MS = 500;
+
+/**
+ * Create initial watchdog heartbeat state.
+ * @param nowMs - Current wall-clock timestamp in milliseconds
+ * @returns Initial heartbeat state with no heartbeat yet
+ */
+export function createWatchdogHeartbeatState(nowMs: number): WatchdogHeartbeatState {
+	return {
+		lastHeartbeatAtMs: null,
+		startedAtMs: nowMs,
+	};
+}
+
+/**
+ * Record a watchdog heartbeat timestamp.
+ * @param state - Existing watchdog heartbeat state
+ * @param nowMs - Current wall-clock timestamp in milliseconds
+ * @returns Updated heartbeat state
+ */
+export function recordWatchdogHeartbeat(
+	state: WatchdogHeartbeatState,
+	nowMs: number
+): WatchdogHeartbeatState {
+	return {
+		...state,
+		lastHeartbeatAtMs: nowMs,
+	};
+}
+
+/**
+ * Evaluate current liveness state against watchdog thresholds.
+ * @param state - Current heartbeat state
+ * @param nowMs - Current wall-clock timestamp in milliseconds
+ * @param thresholds - Timeout thresholds for startup/inactivity checks
+ * @returns Healthy or stalled watchdog status
+ */
+export function evaluateWatchdogStatus(
+	state: WatchdogHeartbeatState,
+	nowMs: number,
+	thresholds: ForegroundWatchdogThresholds
+): WatchdogStatus {
+	if (state.lastHeartbeatAtMs === null) {
+		const startupElapsedMs = nowMs - state.startedAtMs;
+		if (startupElapsedMs >= thresholds.startupTimeoutMs) {
+			return {
+				elapsedMs: startupElapsedMs,
+				kind: "stalled",
+				phase: "startup",
+				timeoutMs: thresholds.startupTimeoutMs,
+			};
+		}
+		return { kind: "healthy" };
+	}
+
+	const inactivityElapsedMs = nowMs - state.lastHeartbeatAtMs;
+	if (inactivityElapsedMs >= thresholds.inactivityTimeoutMs) {
+		return {
+			elapsedMs: inactivityElapsedMs,
+			kind: "stalled",
+			phase: "inactivity",
+			timeoutMs: thresholds.inactivityTimeoutMs,
+		};
+	}
+	return { kind: "healthy" };
+}
+
+/**
+ * Build a clear actionable error for stalled foreground subagents.
+ * @param stalledStatus - The stalled watchdog classification
+ * @returns User-facing error message with remediation guidance
+ */
+export function createStalledSubagentErrorMessage(
+	stalledStatus: Extract<WatchdogStatus, { kind: "stalled" }>
+): string {
+	const timeoutSeconds = Math.max(1, Math.round(stalledStatus.timeoutMs / 1000));
+	const phaseDescription =
+		stalledStatus.phase === "startup"
+			? "no startup heartbeat was received"
+			: `no heartbeat was received for ${timeoutSeconds}s`;
+	return `Subagent stalled (${phaseDescription}). Likely deadlock: waiting for an interactive confirmation path unavailable in subagent JSON mode. Action: avoid confirmation-gated steps, pre-authorize required tools, or run this step in the parent agent.`;
+}
+
+/**
+ * Mark a subagent result as stalled with consistent diagnostics.
+ * @param result - Mutable execution result object to annotate
+ * @param stalledStatus - Watchdog stalled classification details
+ * @returns Nothing
+ */
+export function applyStalledClassification(
+	result: SingleResult,
+	stalledStatus: Extract<WatchdogStatus, { kind: "stalled" }>
+): void {
+	const watchdogNote = `[Watchdog: ${stalledStatus.phase} timeout after ${stalledStatus.timeoutMs}ms]`;
+	result.errorMessage = createStalledSubagentErrorMessage(stalledStatus);
+	result.stderr = result.stderr ? `${result.stderr}\n${watchdogNote}` : watchdogNote;
+	result.stopReason = "stalled";
+}
+
+type TimerHandle = ReturnType<typeof setTimeout>;
+type TimerClearFn = (timer: TimerHandle) => void;
+type TimerSetFn = (callback: () => void, delayMs: number) => TimerHandle;
+
+/** Minimal process contract needed for deterministic termination escalation. */
+export interface KillableProcess {
+	exitCode: number | null;
+	kill(signal?: NodeJS.Signals): boolean;
+}
+
+/** Configuration for graceful process termination with SIGKILL fallback. */
+export interface GracefulTerminationOptions {
+	readonly clearTimeoutFn?: TimerClearFn;
+	readonly killGraceMs: number;
+	readonly onForceResolve: () => void;
+	readonly setTimeoutFn?: TimerSetFn;
+}
+
+/** Cancellation handle for graceful termination escalation timers. */
+export interface GracefulTerminationHandle {
+	cancel: () => void;
+}
+
+/**
+ * Request process termination with deterministic SIGTERM → SIGKILL escalation.
+ * @param proc - Child process handle
+ * @param options - Termination and timer options
+ * @returns Handle to cancel pending escalation timer
+ */
+export function terminateProcessWithGrace(
+	proc: KillableProcess,
+	options: GracefulTerminationOptions
+): GracefulTerminationHandle {
+	const clearTimeoutFn = options.clearTimeoutFn ?? clearTimeout;
+	const setTimeoutFn = options.setTimeoutFn ?? setTimeout;
+
+	proc.kill("SIGTERM");
+	const killTimer = setTimeoutFn(() => {
+		if (proc.exitCode !== null) return;
+		proc.kill("SIGKILL");
+		options.onForceResolve();
+	}, options.killGraceMs);
+
+	let cancelled = false;
+	return {
+		cancel: () => {
+			if (cancelled) return;
+			cancelled = true;
+			clearTimeoutFn(killTimer);
+		},
+	};
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -672,7 +856,47 @@ export async function runSingleAgent(
 				stdio: ["ignore", "pipe", "pipe"],
 				env: fgChildEnv,
 			});
+
+			let abortListener: (() => void) | null = null;
 			let buffer = "";
+			let heartbeatState = createWatchdogHeartbeatState(Date.now());
+			let isResolved = false;
+			let stopHandle: GracefulTerminationHandle | null = null;
+			let stopRequested = false;
+			let watchdogInterval: ReturnType<typeof setInterval> | null = null;
+
+			const cleanupProcessLifecycle = () => {
+				if (watchdogInterval) {
+					clearInterval(watchdogInterval);
+					watchdogInterval = null;
+				}
+				if (stopHandle) {
+					stopHandle.cancel();
+					stopHandle = null;
+				}
+				if (signal && abortListener) {
+					signal.removeEventListener("abort", abortListener);
+					abortListener = null;
+				}
+			};
+
+			const settle = (code: number) => {
+				if (isResolved) return;
+				isResolved = true;
+				cleanupProcessLifecycle();
+				resolve(code);
+			};
+
+			const requestWorkerStop = (_reason: "abort" | "max_turns" | "stalled") => {
+				if (stopRequested) return;
+				stopRequested = true;
+				stopHandle = terminateProcessWithGrace(proc, {
+					killGraceMs: FOREGROUND_WATCHDOG_THRESHOLDS.killGraceMs,
+					onForceResolve: () => {
+						settle(1);
+					},
+				});
+			};
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
@@ -684,12 +908,20 @@ export async function runSingleAgent(
 					return;
 				}
 
+				if (
+					event.type === "message_end" ||
+					event.type === "tool_call_start" ||
+					event.type === "tool_result_end"
+				) {
+					heartbeatState = recordWatchdogHeartbeat(heartbeatState, Date.now());
+				}
+
 				// Emit subagent_tool_call when tool starts
 				if (event.type === "tool_call_start") {
 					fgTurnCount++;
 					// Hard enforcement: kill after maxTurns tool calls
 					if (agent.maxTurns && fgTurnCount >= agent.maxTurns) {
-						proc.kill("SIGTERM");
+						requestWorkerStop("max_turns");
 					}
 
 					piEvents?.emit("subagent_tool_call", {
@@ -717,8 +949,12 @@ export async function runSingleAgent(
 							currentResult.usage.contextTokens = usage.totalTokens || 0;
 						}
 						if (!currentResult.model && msg.model) currentResult.model = msg.model;
-						if (msg.stopReason) currentResult.stopReason = msg.stopReason;
-						if (msg.errorMessage) currentResult.errorMessage = msg.errorMessage;
+						if (msg.stopReason && currentResult.stopReason !== "stalled") {
+							currentResult.stopReason = msg.stopReason;
+						}
+						if (msg.errorMessage && currentResult.stopReason !== "stalled") {
+							currentResult.errorMessage = msg.errorMessage;
+						}
 					}
 					emitUpdate();
 				}
@@ -746,6 +982,20 @@ export async function runSingleAgent(
 				}
 			};
 
+			watchdogInterval = setInterval(() => {
+				if (isResolved || stopRequested) return;
+				const status = evaluateWatchdogStatus(
+					heartbeatState,
+					Date.now(),
+					FOREGROUND_WATCHDOG_THRESHOLDS
+				);
+				if (status.kind !== "stalled") return;
+				applyStalledClassification(currentResult, status);
+				setForegroundSubagentStatus(taskId, "stalled", piEvents);
+				emitUpdate(true);
+				requestWorkerStop("stalled");
+			}, FOREGROUND_WATCHDOG_CHECK_INTERVAL_MS);
+
 			proc.stdout.on("data", (data) => {
 				buffer += data.toString();
 				const lines = buffer.split("\n");
@@ -757,25 +1007,30 @@ export async function runSingleAgent(
 				currentResult.stderr += data.toString();
 			});
 
-			proc.on("close", (code) => {
+			proc.on("close", (code, closeSignal) => {
 				if (buffer.trim()) processLine(buffer);
-				resolve(code ?? 0);
+				if (code !== null) {
+					settle(code);
+					return;
+				}
+				if (closeSignal) {
+					settle(1);
+					return;
+				}
+				settle(0);
 			});
 
 			proc.on("error", () => {
-				resolve(1);
+				settle(1);
 			});
 
 			if (signal) {
-				const killProc = () => {
+				abortListener = () => {
 					wasAborted = true;
-					proc.kill("SIGTERM");
-					setTimeout(() => {
-						if (!proc.killed) proc.kill("SIGKILL");
-					}, 5000);
+					requestWorkerStop("abort");
 				};
-				if (signal.aborted) killProc();
-				else signal.addEventListener("abort", killProc, { once: true });
+				if (signal.aborted) abortListener();
+				else signal.addEventListener("abort", abortListener, { once: true });
 			}
 		});
 

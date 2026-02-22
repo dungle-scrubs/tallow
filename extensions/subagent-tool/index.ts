@@ -629,15 +629,16 @@ async function executeParallel(
 
 	const emitParallelUpdate = () => {
 		if (onUpdate) {
-			const running = allResults.filter((r) => r.exitCode === -1).length;
-			const done = allResults.filter((r) => r.exitCode !== -1).length;
+			const counts = countParallelResultStates(allResults);
 			const details = makeDetails("parallel")([...allResults]);
 			details.spinnerFrame = spinnerFrame;
 			onUpdate({
 				content: [
 					{
 						type: "text",
-						text: `Parallel: ${done}/${allResults.length} done, ${running} running...`,
+						text:
+							`Parallel: ${counts.finished}/${counts.total} done, ` +
+							`${counts.running} running, ${counts.stalled} stalled...`,
 					},
 				],
 				details,
@@ -707,31 +708,83 @@ async function executeParallel(
 		ctx.ui.setWorkingMessage();
 	}
 
-	const successCount = results.filter((r) => r.exitCode === 0).length;
-	const summaries = results.map((r) => {
-		const output = getFinalOutput(r.messages);
-		const fallback = r.errorMessage || r.stderr || "(no output)";
+	const counts = countParallelResultStates(results);
+	const summaries = results.map((result) => {
+		const output = getFinalOutput(result.messages);
+		const fallback = result.errorMessage || result.stderr || "(no output)";
 		const preview = output
 			? output.slice(0, 100) + (output.length > 100 ? "..." : "")
 			: fallback.slice(0, 100) + (fallback.length > 100 ? "..." : "");
-		return `[${r.agent}] ${r.exitCode === 0 ? "completed" : "failed"}: ${preview}`;
+		const state = getParallelResultState(result);
+		const stateLabel = state === "completed" ? "completed" : state;
+		return `[${result.agent}] ${stateLabel}: ${preview}`;
 	});
+
+	const finishedNonStalled = counts.completed + counts.failed;
+	let isError = false;
+	let stalledRemediation: string | undefined;
+
+	if (counts.stalled > 0) {
+		const stalledAgents = results
+			.filter((result) => getParallelResultState(result) === "stalled")
+			.map((result) => result.agent);
+		const stalledAgentList = stalledAgents.join(", ");
+		const remediation =
+			`Stalled workers: ${stalledAgentList}. ` +
+			"Rerun stalled tasks individually, reduce task scope, " +
+			"or set an explicit model/modelScope for those workers.";
+
+		if (ctx.hasUI && finishedNonStalled > 0) {
+			const continueWithPartials = await ctx.ui.confirm(
+				"Parallel workers stalled",
+				`${counts.stalled} worker${counts.stalled === 1 ? "" : "s"} stalled while ` +
+					`${finishedNonStalled} other task${finishedNonStalled === 1 ? "" : "s"} finished.\n\n` +
+					"Continue and return partial results from finished workers?\n\n" +
+					'Select "No" to abort now and rerun the stalled workers.'
+			);
+			if (!continueWithPartials) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text:
+								"Parallel run aborted because stalled workers were detected and " +
+								"you chose not to continue with partial results.\n\n" +
+								`${remediation}`,
+						},
+					],
+					details: makeDetails("parallel")(results),
+					isError: true,
+				};
+			}
+		} else {
+			isError = true;
+			stalledRemediation = ctx.hasUI
+				? "Parallel run finished with stalled workers and no completed non-stalled results.\n" +
+					`${remediation}`
+				: "Non-interactive mode: returning partial results and marking this " +
+					"parallel call as error because some workers stalled.\n" +
+					`${remediation}`;
+		}
+	}
+
 	const batchNote =
 		taskBatches.length > 1
 			? `\nAuto-batched into ${taskBatches.length} calls ` +
 				`(${taskBatches.map((batch) => batch.tasks.length).join(" + ")}) ` +
-				`to respect max ${MAX_PARALLEL_TASKS} tasks per call.\n`
+				`to respect max ${MAX_PARALLEL_TASKS} tasks per call.`
 			: "";
+	const header =
+		`Parallel: ${counts.finished}/${counts.total} done ` +
+		`(${counts.completed} completed, ${counts.failed} failed, ${counts.stalled} stalled)`;
+	const summaryText =
+		`${header}${batchNote}\n\n${summaries.join("\n\n")}` +
+		(stalledRemediation ? `\n\n${stalledRemediation}` : "");
+
 	return {
-		content: [
-			{
-				type: "text" as const,
-				text:
-					`Parallel: ${successCount}/${results.length} succeeded${batchNote}\n` +
-					`${summaries.join("\n\n")}`,
-			},
-		],
+		content: [{ type: "text" as const, text: summaryText }],
 		details: makeDetails("parallel")(results),
+		isError,
 	};
 }
 
@@ -971,6 +1024,33 @@ function createToolCallThemeFg(theme: Theme): (color: ThemeColor, text: string) 
 }
 
 /**
+ * Return whether a subagent result ended in a stalled state.
+ *
+ * @param result - Single subagent result
+ * @returns True when the worker stalled before completing
+ */
+function isResultStalled(result: SingleResult): boolean {
+	if (result.exitCode === -1) return false;
+	if (result.stopReason?.toLowerCase() === "stalled") return true;
+	if (result.exitCode === 0) return false;
+	const failureText = `${result.errorMessage ?? ""} ${result.stderr}`.toLowerCase();
+	return /\bstall(?:ed|ing)?\b/.test(failureText);
+}
+
+/** Status classification for parallel subagent rows. */
+type ParallelResultState = "running" | "completed" | "failed" | "stalled";
+
+/** Aggregated state counters for parallel execution. */
+interface ParallelResultCounts {
+	total: number;
+	finished: number;
+	running: number;
+	completed: number;
+	failed: number;
+	stalled: number;
+}
+
+/**
  * Return whether a subagent result should be rendered as an error.
  *
  * @param result - Single subagent result
@@ -978,7 +1058,58 @@ function createToolCallThemeFg(theme: Theme): (color: ThemeColor, text: string) 
  */
 function isResultError(result: SingleResult): boolean {
 	if (result.exitCode === -1) return false;
+	if (isResultStalled(result)) return true;
 	return result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted";
+}
+
+/**
+ * Classify a parallel result into a stable status label.
+ *
+ * @param result - Single subagent result
+ * @returns Parallel status bucket
+ */
+function getParallelResultState(result: SingleResult): ParallelResultState {
+	if (result.exitCode === -1) return "running";
+	if (isResultStalled(result)) return "stalled";
+	return isResultError(result) ? "failed" : "completed";
+}
+
+/**
+ * Count status buckets for a parallel run.
+ *
+ * @param results - Parallel subagent results
+ * @returns Count breakdown used by stream/final summaries
+ */
+function countParallelResultStates(results: SingleResult[]): ParallelResultCounts {
+	const counts: ParallelResultCounts = {
+		total: results.length,
+		finished: 0,
+		running: 0,
+		completed: 0,
+		failed: 0,
+		stalled: 0,
+	};
+
+	for (const result of results) {
+		const state = getParallelResultState(result);
+		switch (state) {
+			case "running":
+				counts.running++;
+				break;
+			case "completed":
+				counts.completed++;
+				break;
+			case "failed":
+				counts.failed++;
+				break;
+			case "stalled":
+				counts.stalled++;
+				break;
+		}
+	}
+
+	counts.finished = counts.completed + counts.failed + counts.stalled;
+	return counts;
 }
 
 /**
@@ -1354,7 +1485,9 @@ function formatCollapsedResultPreview(
 	});
 	if (rendered.length > 0) return rendered[0] ?? "";
 	const fallback = result.errorMessage || result.stderr || result.task || "(no output)";
-	const role = isResultError(result) ? "status_error" : "process_output";
+	const state = getParallelResultState(result);
+	const role =
+		state === "failed" ? "status_error" : state === "stalled" ? "status_warning" : "process_output";
 	return formatPresentationText(theme, role, toCompactPreview(fallback, maxLineLength));
 }
 
@@ -1569,23 +1702,25 @@ function renderParallelResult(
 	theme: Theme,
 	mdTheme: ReturnType<typeof getMarkdownTheme>
 ) {
-	const running = details.results.filter((result) => result.exitCode === -1).length;
-	const successCount = details.results.filter((result) => result.exitCode === 0).length;
-	const failCount = details.results.filter((result) => isResultError(result)).length;
-	const isRunning = running > 0;
+	const counts = countParallelResultStates(details.results);
+	const isRunning = counts.running > 0;
 	const spinnerChar =
 		details.spinnerFrame !== undefined
 			? SPINNER_FRAMES[details.spinnerFrame % SPINNER_FRAMES.length]
 			: getSpinner()[0];
 	const icon = isRunning
 		? theme.fg("warning", spinnerChar)
-		: failCount > 0
+		: counts.failed > 0
 			? theme.fg("error", getIcon("error"))
-			: theme.fg("success", getIcon("success"));
+			: counts.stalled > 0
+				? theme.fg("warning", getIcon("blocked"))
+				: theme.fg("success", getIcon("success"));
 	const summaryLine = formatMetaLine(theme, [
-		`${successCount + failCount}/${details.results.length} done`,
-		running > 0 ? `${running} running` : undefined,
-		failCount > 0 ? `${failCount} failed` : undefined,
+		`${counts.finished}/${details.results.length} done`,
+		`${counts.completed} completed`,
+		counts.failed > 0 ? `${counts.failed} failed` : undefined,
+		`${counts.stalled} stalled`,
+		counts.running > 0 ? `${counts.running} running` : undefined,
 	]);
 
 	if (expanded && !isRunning) {
@@ -1595,19 +1730,33 @@ function renderParallelResult(
 		container.addChild(new Text(headerLines.join("\n"), 0, 0));
 
 		for (const result of details.results) {
-			const resultError = isResultError(result);
-			const resultIcon = resultError
-				? theme.fg("error", getIcon("error"))
-				: theme.fg("success", getIcon("success"));
-			const resultStatus = resultError ? "failed" : "completed";
+			const resultState = getParallelResultState(result);
+			const resultStatus = resultState === "completed" ? "completed" : resultState;
+			const resultStatusRole =
+				resultState === "failed"
+					? "status_error"
+					: resultState === "stalled" || resultState === "running"
+						? "status_warning"
+						: "status_success";
+			const resultIcon =
+				resultState === "failed"
+					? theme.fg("error", getIcon("error"))
+					: resultState === "stalled"
+						? theme.fg("warning", getIcon("blocked"))
+						: resultState === "running"
+							? theme.fg("warning", spinnerChar)
+							: theme.fg("success", getIcon("success"));
 			const resultLines: string[] = [];
 			const modelTag = formatModelTag(theme, result.model);
 
 			appendSection(resultLines, [formatSectionDivider(theme, result.agent)]);
 			appendSection(resultLines, [
-				`${resultIcon} ${formatSubagentIdentity(result.agent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, "action", resultStatus)}`,
+				`${resultIcon} ${formatSubagentIdentity(result.agent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, resultStatusRole, resultStatus)}`,
 			]);
-			const resultMeta = formatMetaLine(theme, [`source:${result.agentSource}`]);
+			const resultMeta = formatMetaLine(theme, [
+				`source:${result.agentSource}`,
+				result.stopReason ? `stop:${result.stopReason}` : undefined,
+			]);
 			if (resultMeta) appendSection(resultLines, [resultMeta]);
 
 			appendSection(
@@ -1649,13 +1798,10 @@ function renderParallelResult(
 			} else {
 				const errInfo = result.errorMessage || result.stderr;
 				if (errInfo) {
+					const errRole = resultState === "failed" ? "status_error" : "status_warning";
 					container.addChild(new Spacer(1));
 					container.addChild(
-						new Text(
-							formatPresentationText(theme, "status_error", toCompactPreview(errInfo, 200)),
-							0,
-							0
-						)
+						new Text(formatPresentationText(theme, errRole, toCompactPreview(errInfo, 200)), 0, 0)
 					);
 				}
 			}
@@ -1683,19 +1829,22 @@ function renderParallelResult(
 		const isLast = index === details.results.length - 1;
 		const branch = formatPresentationText(theme, "meta", isLast ? "└─" : "├─");
 		const stem = isLast ? "   " : `${formatPresentationText(theme, "meta", "│")}  `;
-		const resultRunning = result.exitCode === -1;
-		const resultError = isResultError(result);
-		const resultStatus = resultRunning ? "running" : resultError ? "failed" : "done";
-		const statusRole = resultRunning
-			? "status_warning"
-			: resultError
+		const resultState = getParallelResultState(result);
+		const resultStatus = resultState === "completed" ? "done" : resultState;
+		const statusRole =
+			resultState === "failed"
 				? "status_error"
-				: "status_success";
-		const resultIcon = resultRunning
-			? theme.fg("warning", spinnerChar)
-			: resultError
+				: resultState === "stalled" || resultState === "running"
+					? "status_warning"
+					: "status_success";
+		const resultIcon =
+			resultState === "failed"
 				? theme.fg("error", getIcon("error"))
-				: theme.fg("success", getIcon("success"));
+				: resultState === "stalled"
+					? theme.fg("warning", getIcon("blocked"))
+					: resultState === "running"
+						? theme.fg("warning", spinnerChar)
+						: theme.fg("success", getIcon("success"));
 		const modelTag = formatModelTag(theme, result.model);
 		lines.push(
 			`${branch} ${resultIcon} ${formatSubagentIdentity(result.agent)}${modelTag ? ` ${modelTag}` : ""} ${formatPresentationText(theme, statusRole, `(${resultStatus})`)}`

@@ -27,6 +27,23 @@ until all finish. Results appear inline.
   { src: "/screenshots/extensions/subagent/parallel-complete.png", alt: "Parallel agents complete with results summary" },
 ]} />
 
+### Stalled-worker watchdog and escape hatch
+
+Foreground workers now have a liveness watchdog so one stuck worker
+cannot pin a full parallel run indefinitely.
+
+- startup timeout and inactivity timeout detect non-responsive workers
+- stalled workers are marked `stalled` and terminated with SIGTERM,
+  then SIGKILL after a grace period when needed
+- parallel summaries show separate completed/failed/stalled counts
+
+When stalled workers happen with partial completion:
+
+- **interactive sessions** prompt you to continue with partial results
+  or abort and rerun stalled workers
+- **headless/non-interactive sessions** return partial results with
+  `isError: true` and remediation guidance
+
 ### Background
 
 Agents run independently while the conversation continues.
