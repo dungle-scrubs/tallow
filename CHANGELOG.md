@@ -82,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **plan-mode:** prompt for optional user guidance when blocked tool results occur during plan execution and inject `[PLAN GUIDANCE — Step n: ...]` steer context
+- **read-tool-enhanced:** parse `.ipynb` notebooks into structured markdown/code/output text with safe image and html placeholders
 
 ### Changed
 

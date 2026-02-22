@@ -1,6 +1,6 @@
 ---
 title: read-tool-enhanced
-description: Smart file reading with compact summaries, SKILL.md rendering, and PDF extraction.
+description: Smart file reading with compact summaries, SKILL.md rendering, and PDF/notebook extraction.
 ---
 
 File reads show the first 7 lines while loading, then collapse to
@@ -38,6 +38,24 @@ read path/to/spec.pdf pages="1,3,7-10"
 - Encrypted/password-protected PDFs return a clear error
 - Corrupt PDFs return parse errors
 - Image-only PDFs report that no extractable text was found
+
+## Jupyter notebook support (`.ipynb`)
+
+Notebook files are parsed as structured cells instead of raw JSON:
+
+- Markdown cells render as plain text
+- Code cells render in language fences with execution counts (for example `# [5]`)
+- Outputs are summarized safely:
+  - text output is included inline
+  - image outputs are represented as metadata placeholders (no base64 payload)
+  - HTML outputs are labeled as `[HTML output]`
+  - error tracebacks are shown in fenced blocks
+
+```text
+read analysis.ipynb
+```
+
+The collapsed summary includes cell/type counts and extracted size; expand to view full formatted cells.
 
 ## Interaction with @file references
 
