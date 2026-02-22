@@ -35,6 +35,18 @@ let totalToolCalls = 0;
 let totalTurns = 0;
 let sessionStartTime = 0;
 
+/** Process-memory snapshot captured at the beginning of each turn. */
+const turnMemoryAtStart = new Map<number, ProcessMemorySnapshot>();
+
+/** Process memory metrics captured for debug profiling. */
+interface ProcessMemorySnapshot {
+	readonly arrayBuffers: number;
+	readonly external: number;
+	readonly heapTotal: number;
+	readonly heapUsed: number;
+	readonly rss: number;
+}
+
 /**
  * Safely extracts text content length from a tool result's content array.
  * @param content - Array of text/image content blocks
@@ -48,6 +60,42 @@ function contentLength(content: Array<{ type: string; text?: string }>): number 
 		}
 	}
 	return len;
+}
+
+/**
+ * Capture a process memory snapshot for turn-boundary profiling.
+ *
+ * @returns Current process memory usage in bytes
+ */
+function captureProcessMemorySnapshot(): ProcessMemorySnapshot {
+	const usage = process.memoryUsage();
+	return {
+		arrayBuffers: usage.arrayBuffers,
+		external: usage.external,
+		heapTotal: usage.heapTotal,
+		heapUsed: usage.heapUsed,
+		rss: usage.rss,
+	};
+}
+
+/**
+ * Calculate process-memory deltas between two snapshots.
+ *
+ * @param start - Snapshot captured at turn start
+ * @param end - Snapshot captured at turn end
+ * @returns Delta values in bytes (end - start)
+ */
+function calculateProcessMemoryDelta(
+	start: ProcessMemorySnapshot,
+	end: ProcessMemorySnapshot
+): ProcessMemorySnapshot {
+	return {
+		arrayBuffers: end.arrayBuffers - start.arrayBuffers,
+		external: end.external - start.external,
+		heapTotal: end.heapTotal - start.heapTotal,
+		heapUsed: end.heapUsed - start.heapUsed,
+		rss: end.rss - start.rss,
+	};
 }
 
 /**
@@ -85,6 +133,7 @@ export default function (pi: ExtensionAPI) {
 		totalToolCalls = 0;
 		totalTurns = 0;
 		sessionStartTime = performance.now();
+		turnMemoryAtStart.clear();
 
 		// Resolve debug activation: CLI flag > env var > dev detection
 		const flagActive = pi.getFlag("debug") === true;
@@ -180,6 +229,7 @@ export default function (pi: ExtensionAPI) {
 		logger.close();
 		logger = null;
 		globalThis.__piDebugLogger = undefined;
+		turnMemoryAtStart.clear();
 
 		// Clean up event listeners
 		const G = globalThis as Record<string, unknown>;
@@ -220,17 +270,26 @@ export default function (pi: ExtensionAPI) {
 		if (!logger) return;
 
 		totalTurns++;
+		const memory = captureProcessMemorySnapshot();
+		turnMemoryAtStart.set(event.turnIndex, memory);
 		logger.log("turn", "start", {
 			turnIndex: event.turnIndex,
+			memory,
 		});
 	});
 
 	pi.on("turn_end", async (event) => {
 		if (!logger) return;
 
+		const memory = captureProcessMemorySnapshot();
+		const startMemory = turnMemoryAtStart.get(event.turnIndex);
+		turnMemoryAtStart.delete(event.turnIndex);
+
 		logger.log("turn", "end", {
 			turnIndex: event.turnIndex,
 			toolResultCount: event.toolResults.length,
+			memory,
+			memoryDelta: startMemory ? calculateProcessMemoryDelta(startMemory, memory) : null,
 		});
 	});
 
