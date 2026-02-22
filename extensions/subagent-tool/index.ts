@@ -47,6 +47,7 @@ import {
 	type SubagentDetails,
 } from "./formatting.js";
 import {
+	applyBackgroundResultRetention,
 	mapWithConcurrencyLimit,
 	type OnUpdateCallback,
 	runSingleAgent,
@@ -57,9 +58,11 @@ import type { SubagentCompleteDetails } from "./schema.js";
 import { SubagentParams } from "./schema.js";
 import {
 	backgroundSubagents,
+	cleanupCompletedBackgroundSubagents,
 	clearAllSubagents,
 	clearForegroundSubagents,
 	formatDuration,
+	getBackgroundSubagentOutput,
 	interopStateRequestCleanup,
 	publishSubagentSnapshot,
 	runningSubagents,
@@ -148,16 +151,21 @@ export default function (pi: ExtensionAPI) {
 		for (const [_id, bg] of backgroundSubagents) {
 			if (bg.status === "running" && bg.process && !bg.process.killed) {
 				bg.process.kill("SIGTERM");
+				bg.completedAt = Date.now();
 				bg.status = "failed";
 				bg.result.exitCode = 1;
 				bg.result.stopReason = "interrupted";
+				applyBackgroundResultRetention(bg);
 				mutated = true;
 				setTimeout(() => {
 					if (!bg.process.killed) bg.process.kill("SIGKILL");
 				}, 3000);
 			}
 		}
-		if (mutated) publishSubagentSnapshot(pi.events);
+		if (mutated) {
+			publishSubagentSnapshot(pi.events);
+			cleanupCompletedBackgroundSubagents(pi.events);
+		}
 	});
 
 	pi.registerTool({
@@ -350,6 +358,8 @@ WHEN NOT TO USE SUBAGENTS:
 			taskId: Type.Optional(Type.String({ description: "Specific task ID to check (optional)" })),
 		}),
 		async execute(_toolCallId, params) {
+			cleanupCompletedBackgroundSubagents(pi.events);
+
 			if (params.taskId) {
 				const bg = backgroundSubagents.get(params.taskId);
 				if (!bg) {
@@ -359,13 +369,19 @@ WHEN NOT TO USE SUBAGENTS:
 					};
 				}
 				const duration = formatDuration(Date.now() - bg.startTime);
-				const output = getFinalOutput(bg.result.messages) || "(no output yet)";
+				const output = getBackgroundSubagentOutput(bg) || "(no output yet)";
+				const historyLine =
+					bg.historyCompacted &&
+					bg.historyOriginalMessageCount !== undefined &&
+					bg.historyRetainedMessageCount !== undefined
+						? `\n**History:** compacted (${bg.historyRetainedMessageCount}/${bg.historyOriginalMessageCount} messages retained)`
+						: "";
 				return {
 					details: {},
 					content: [
 						{
 							type: "text",
-							text: `**Task:** ${bg.id}\n**Agent:** ${bg.agent}\n**Status:** ${bg.status}\n**Duration:** ${duration}\n**Task:** ${bg.task}\n\n**Output:**\n${output}`,
+							text: `**Task:** ${bg.id}\n**Agent:** ${bg.agent}\n**Status:** ${bg.status}\n**Duration:** ${duration}\n**Task:** ${bg.task}${historyLine}\n\n**Output:**\n${output}`,
 						},
 					],
 				};
@@ -389,7 +405,8 @@ WHEN NOT TO USE SUBAGENTS:
 							? getIcon("success")
 							: getIcon("error");
 				const preview = bg.task.length > 40 ? `${bg.task.slice(0, 37)}...` : bg.task;
-				return `${statusIcon} **${bg.id}** (${bg.agent}) - ${bg.status} (${duration})\n   ${preview}`;
+				const compactedBadge = bg.historyCompacted ? " · compacted" : "";
+				return `${statusIcon} **${bg.id}** (${bg.agent}) - ${bg.status}${compactedBadge} (${duration})\n   ${preview}`;
 			});
 
 			return {

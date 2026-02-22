@@ -95,6 +95,22 @@ claimed when the team was archived are reset to pending.
 Call `team_resume` with no arguments to list all available
 archives with task summaries.
 
+## Message retention
+
+Team chat logs use ring-buffer retention so long-running teams do not
+accumulate unbounded message history in memory.
+
+- newest messages are retained
+- oldest messages are evicted when the retention cap is exceeded
+- unread/read checks continue to work on retained messages only
+
+### Tuning knobs
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `TALLOW_TEAMS_MESSAGE_RETENTION_LIMIT` | `256` | per-team message cap before oldest entries are evicted |
+| `TALLOW_TEAMS_KEEP_FULL_HISTORY` | unset | set to `1` to disable trimming (debug mode) |
+
 ## Interrupting with Escape
 
 Pressing Escape kills all team agents (both working and idle)
