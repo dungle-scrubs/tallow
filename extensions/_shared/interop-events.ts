@@ -32,6 +32,37 @@ export const INTEROP_API_CHANNELS = {
 /** Valid interop event channel names. */
 export type InteropEventName = (typeof INTEROP_EVENT_NAMES)[keyof typeof INTEROP_EVENT_NAMES];
 
+/** Canonical hook/event-bus names for worktree lifecycle notifications. */
+export const WORKTREE_LIFECYCLE_EVENT_NAMES = {
+	create: "worktree_create",
+	remove: "worktree_remove",
+} as const;
+
+/** Claude-compatible aliases for worktree lifecycle notifications. */
+export const WORKTREE_LIFECYCLE_EVENT_ALIASES = {
+	[WORKTREE_LIFECYCLE_EVENT_NAMES.create]: "WorktreeCreate",
+	[WORKTREE_LIFECYCLE_EVENT_NAMES.remove]: "WorktreeRemove",
+} as const;
+
+/** Valid worktree lifecycle event names. */
+export type WorktreeLifecycleEventName =
+	(typeof WORKTREE_LIFECYCLE_EVENT_NAMES)[keyof typeof WORKTREE_LIFECYCLE_EVENT_NAMES];
+
+/** Valid worktree scopes in lifecycle payloads. */
+export type WorktreeLifecycleScope = "session" | "subagent";
+
+/** TypeBox schema for worktree lifecycle payloads shared across extensions. */
+export const WorktreeLifecyclePayloadSchema = Type.Object({
+	agentId: Type.Optional(Type.String()),
+	repoRoot: Type.String(),
+	scope: Type.Union([Type.Literal("session"), Type.Literal("subagent")]),
+	timestamp: Type.Number(),
+	worktreePath: Type.String(),
+});
+
+/** Typed worktree lifecycle payload. */
+export type WorktreeLifecycleEventPayload = Static<typeof WorktreeLifecyclePayloadSchema>;
+
 const SubagentStatusSchema = Type.Union([
 	Type.Literal("completed"),
 	Type.Literal("failed"),
@@ -156,6 +187,23 @@ export function emitInteropEvent<TName extends InteropEventName>(
 		...payload,
 	} as InteropEventPayloadByName[TName];
 	events.emit(eventName, nextPayload);
+}
+
+/**
+ * Emit canonical and Claude-compatible worktree lifecycle events.
+ *
+ * @param events - Shared extension event bus
+ * @param eventName - Canonical lifecycle event name
+ * @param payload - Worktree lifecycle payload
+ * @returns void
+ */
+export function emitWorktreeLifecycleEvent(
+	events: ExtensionAPI["events"],
+	eventName: WorktreeLifecycleEventName,
+	payload: WorktreeLifecycleEventPayload
+): void {
+	events.emit(eventName, payload);
+	events.emit(WORKTREE_LIFECYCLE_EVENT_ALIASES[eventName], payload);
 }
 
 /**

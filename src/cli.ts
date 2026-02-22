@@ -34,6 +34,10 @@ registerFatalErrorHandlers();
 // Session ref is populated once createTallowSession() succeeds.
 const cleanupSessionRef = registerProcessCleanup();
 
+import { execFileSync } from "node:child_process";
+import { existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
 	InteractiveMode,
 	runPrintMode,
@@ -63,6 +67,7 @@ program
 	.option("-c, --continue", "Continue most recent session")
 	.option("-m, --model <model>", "Model to use (provider/model-id)")
 	.option("--provider <provider>", "Provider to use (anthropic, openai, google, etc.)")
+	.option("-w, --worktree", "Run this session in a temporary detached git worktree")
 	// --api-key removed: leaks secrets in `ps` output. Use TALLOW_API_KEY/TALLOW_API_KEY_REF.
 	.option("--mode <mode>", "Run mode: interactive, rpc, json", "interactive")
 	.option("--thinking <level>", "Thinking level: off, minimal, low, medium, high, xhigh")
@@ -177,6 +182,7 @@ async function run(opts: {
 	sessionId?: string;
 	thinking?: string;
 	tools?: string;
+	worktree?: boolean;
 }): Promise<void> {
 	// Demo mode (set early — before --list and other output commands)
 	if (opts.demo) {
@@ -265,6 +271,25 @@ async function run(opts: {
 		provider,
 	};
 
+	let sessionWorktreePath: string | undefined;
+	let sessionWorktreeRepoRoot: string | undefined;
+	const originalCwd = process.cwd();
+
+	if (opts.worktree) {
+		try {
+			const repoRoot = resolveGitRepoRoot(originalCwd);
+			sessionWorktreeRepoRoot = repoRoot;
+			cleanupStaleSessionWorktrees(repoRoot);
+			sessionWorktreePath = createSessionWorktree(repoRoot);
+			sessionOpts.cwd = sessionWorktreePath;
+			process.env.TALLOW_WORKTREE_PATH = sessionWorktreePath;
+			process.env.TALLOW_WORKTREE_ORIGINAL_CWD = originalCwd;
+		} catch (error) {
+			console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+			process.exit(1);
+		}
+	}
+
 	// Session strategy (--no-session takes highest priority)
 	if (opts.session === false) {
 		sessionOpts.session = { type: "memory" };
@@ -333,12 +358,35 @@ async function run(opts: {
 		process.exit(1);
 	}
 
+	/**
+	 * Best-effort cleanup for session-level detached worktree mode.
+	 *
+	 * @returns void
+	 */
+	const cleanupSessionWorktree = (): void => {
+		if (!sessionWorktreePath) return;
+		removeSessionWorktree(sessionWorktreePath, sessionWorktreeRepoRoot);
+		if (sessionWorktreeRepoRoot) {
+			try {
+				// Prune stale records after teardown; best-effort only.
+				cleanupStaleSessionWorktrees(sessionWorktreeRepoRoot);
+			} catch {
+				// Ignore cleanup errors during shutdown/failure paths.
+			}
+		}
+		sessionWorktreePath = undefined;
+		sessionWorktreeRepoRoot = undefined;
+		delete process.env.TALLOW_WORKTREE_PATH;
+		delete process.env.TALLOW_WORKTREE_ORIGINAL_CWD;
+	};
+
 	// ── Create session ───────────────────────────────────────────────────────
 
 	let tallow: Awaited<ReturnType<typeof createTallowSession>>;
 	try {
 		tallow = await createTallowSession(sessionOpts);
 	} catch (error) {
+		cleanupSessionWorktree();
 		if (error instanceof Error && error.message.startsWith("Session not found:")) {
 			// Log the session ID from CLI args (untainted) rather than the error message
 			console.error(`Error: Session not found: ${opts.sessionId ?? opts.resume ?? "unknown"}`);
@@ -351,80 +399,94 @@ async function run(opts: {
 		throw error;
 	}
 
-	// ── Register session for process-level cleanup ──────────────────────────
+	try {
+		// ── Register session for process-level cleanup ──────────────────────────
 
-	cleanupSessionRef.current = tallow.session;
+		cleanupSessionRef.current = tallow.session;
 
-	// ── init-only: bind extensions (fires session_start → setup hooks), then exit ─
+		// ── init-only: bind extensions (fires session_start → setup hooks), then exit ─
 
-	if (opts.initOnly) {
-		await tallow.session.bindExtensions({});
-		return;
-	}
+		if (opts.initOnly) {
+			await tallow.session.bindExtensions({});
+			return;
+		}
 
-	// ── Run in the requested mode ────────────────────────────────────────────
+		// ── Run in the requested mode ────────────────────────────────────────────
 
-	switch (opts.mode) {
-		case "interactive": {
-			// Compose the initial message from stdin and/or -p flag
-			const initialMessage = composeMessage(stdinContent, opts.print);
+		switch (opts.mode) {
+			case "interactive": {
+				// Compose the initial message from stdin and/or -p flag
+				const initialMessage = composeMessage(stdinContent, opts.print);
 
-			if (initialMessage) {
-				// Print mode: single-shot (explicit -p, piped stdin, or both)
+				if (initialMessage) {
+					// Print mode: single-shot (explicit -p, piped stdin, or both)
+					await runPrintMode(tallow.session, {
+						mode: "text",
+						initialMessage,
+					});
+					emitSessionId(tallow.sessionId);
+				} else if (!process.stdin.isTTY) {
+					// Stdin is piped/redirected but empty — can't start a TUI without a real TTY.
+					console.error(
+						"Error: stdin is piped but empty. Provide input via pipe or use -p <prompt>.\n" +
+							"Example: echo 'hello' | tallow"
+					);
+					process.exit(1);
+				} else {
+					// Interactive TUI — stdin is a real TTY
+					if (tallow.extensionOverrides.length > 0) {
+						const names = tallow.extensionOverrides.map((o) => o.name).join(", ");
+						console.log(`\x1b[33mℹ User extensions overriding bundled: ${names}\x1b[0m`);
+						console.log(
+							"\x1b[2m  To use bundled versions, rename yours or remove from ~/.tallow/extensions/\x1b[0m"
+						);
+					}
+					// Sentinel so child processes (bash tool, subagents) know they're inside
+					// an interactive session. Print/RPC mode intentionally skips this.
+					process.env.TALLOW_INTERACTIVE = "1";
+					const mode = new InteractiveMode(tallow.session, {
+						modelFallbackMessage: tallow.modelFallbackMessage,
+					});
+					await mode.run();
+				}
+				break;
+			}
+
+			case "rpc": {
+				await runRpcMode(tallow.session);
+				break;
+			}
+
+			case "json": {
+				const jsonMessage = composeMessage(stdinContent, opts.print);
+				if (!jsonMessage) {
+					console.error("JSON mode requires -p <prompt> or piped stdin");
+					process.exit(1);
+				}
 				await runPrintMode(tallow.session, {
-					mode: "text",
-					initialMessage,
+					mode: "json",
+					initialMessage: jsonMessage,
 				});
 				emitSessionId(tallow.sessionId);
-			} else if (!process.stdin.isTTY) {
-				// Stdin is piped/redirected but empty — can't start a TUI without a real TTY.
-				console.error(
-					"Error: stdin is piped but empty. Provide input via pipe or use -p <prompt>.\n" +
-						"Example: echo 'hello' | tallow"
-				);
+				break;
+			}
+
+			default:
+				console.error(`Unknown mode: ${opts.mode}`);
 				process.exit(1);
-			} else {
-				// Interactive TUI — stdin is a real TTY
-				if (tallow.extensionOverrides.length > 0) {
-					const names = tallow.extensionOverrides.map((o) => o.name).join(", ");
-					console.log(`\x1b[33mℹ User extensions overriding bundled: ${names}\x1b[0m`);
-					console.log(
-						"\x1b[2m  To use bundled versions, rename yours or remove from ~/.tallow/extensions/\x1b[0m"
-					);
+		}
+	} finally {
+		if (opts.worktree) {
+			try {
+				const runner = tallow.session.extensionRunner;
+				if (runner?.hasHandlers("session_shutdown")) {
+					await runner.emit({ type: "session_shutdown" });
 				}
-				// Sentinel so child processes (bash tool, subagents) know they're inside
-				// an interactive session. Print/RPC mode intentionally skips this.
-				process.env.TALLOW_INTERACTIVE = "1";
-				const mode = new InteractiveMode(tallow.session, {
-					modelFallbackMessage: tallow.modelFallbackMessage,
-				});
-				await mode.run();
+			} catch {
+				// Worktree teardown remains best-effort.
 			}
-			break;
 		}
-
-		case "rpc": {
-			await runRpcMode(tallow.session);
-			break;
-		}
-
-		case "json": {
-			const jsonMessage = composeMessage(stdinContent, opts.print);
-			if (!jsonMessage) {
-				console.error("JSON mode requires -p <prompt> or piped stdin");
-				process.exit(1);
-			}
-			await runPrintMode(tallow.session, {
-				mode: "json",
-				initialMessage: jsonMessage,
-			});
-			emitSessionId(tallow.sessionId);
-			break;
-		}
-
-		default:
-			console.error(`Unknown mode: ${opts.mode}`);
-			process.exit(1);
+		cleanupSessionWorktree();
 	}
 }
 
@@ -562,6 +624,136 @@ function printExtensionDetails(entry: BundledExtensionCatalogEntry): void {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Prefix used for CLI-managed session worktree directories. */
+const TALLOW_SESSION_WORKTREE_PREFIX = "tallow-worktree-session-";
+
+/** Timeout for git subprocess calls in milliseconds. */
+const WORKTREE_GIT_TIMEOUT_MS = 15_000;
+
+/**
+ * Resolve the git repository root for a working directory.
+ *
+ * @param cwd - Candidate working directory
+ * @returns Absolute repository root
+ * @throws {Error} When cwd is not inside a git repository
+ */
+function resolveGitRepoRoot(cwd: string): string {
+	try {
+		const output = execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], {
+			cwd,
+			encoding: "utf-8",
+			stdio: ["ignore", "pipe", "pipe"],
+			timeout: WORKTREE_GIT_TIMEOUT_MS,
+		}).trim();
+		if (!output) {
+			throw new Error("git returned an empty repository root");
+		}
+		return resolve(output);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Not inside a git repository: ${cwd} (${message})`);
+	}
+}
+
+/**
+ * Create a detached temporary worktree for session isolation.
+ *
+ * @param repoRoot - Git repository root
+ * @returns Absolute worktree path
+ */
+function createSessionWorktree(repoRoot: string): string {
+	const safeRepoRoot = resolve(repoRoot);
+	const id = Math.random().toString(36).slice(2, 10);
+	const worktreePath = join(
+		tmpdir(),
+		`${TALLOW_SESSION_WORKTREE_PREFIX}${id}-${Date.now().toString(36)}`
+	);
+
+	execFileSync("git", ["-C", safeRepoRoot, "worktree", "add", "--detach", worktreePath, "HEAD"], {
+		cwd: safeRepoRoot,
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "pipe"],
+		timeout: WORKTREE_GIT_TIMEOUT_MS,
+	});
+
+	return worktreePath;
+}
+
+/**
+ * Remove a temporary session worktree with git-first fallback.
+ *
+ * @param worktreePath - Worktree path to remove
+ * @param repoRoot - Repository root for prune/remove commands
+ */
+function removeSessionWorktree(worktreePath: string, repoRoot: string | undefined): void {
+	const absolutePath = resolve(worktreePath);
+	if (!existsSync(absolutePath)) return;
+
+	if (repoRoot) {
+		try {
+			execFileSync("git", ["-C", repoRoot, "worktree", "remove", "--force", absolutePath], {
+				cwd: repoRoot,
+				encoding: "utf-8",
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: WORKTREE_GIT_TIMEOUT_MS,
+			});
+			return;
+		} catch {
+			// Fall through to filesystem fallback.
+		}
+	}
+
+	rmSync(absolutePath, { force: true, recursive: true });
+	if (repoRoot) {
+		try {
+			execFileSync("git", ["-C", repoRoot, "worktree", "prune"], {
+				cwd: repoRoot,
+				encoding: "utf-8",
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: WORKTREE_GIT_TIMEOUT_MS,
+			});
+		} catch {
+			// Best-effort cleanup path.
+		}
+	}
+}
+
+/**
+ * Prune stale CLI-managed session worktrees for a repository.
+ *
+ * @param repoRoot - Repository root
+ */
+function cleanupStaleSessionWorktrees(repoRoot: string): void {
+	const output = execFileSync("git", ["-C", repoRoot, "worktree", "list", "--porcelain"], {
+		cwd: repoRoot,
+		encoding: "utf-8",
+		stdio: ["ignore", "pipe", "pipe"],
+		timeout: WORKTREE_GIT_TIMEOUT_MS,
+	}).trim();
+
+	const active = new Set<string>();
+	for (const line of output.split("\n")) {
+		if (!line.startsWith("worktree ")) continue;
+		active.add(resolve(line.slice("worktree ".length).trim()));
+	}
+
+	for (const pathValue of active) {
+		if (!pathValue.includes(`/${TALLOW_SESSION_WORKTREE_PREFIX}`)) continue;
+		if (existsSync(pathValue)) continue;
+		try {
+			execFileSync("git", ["-C", repoRoot, "worktree", "prune"], {
+				cwd: repoRoot,
+				encoding: "utf-8",
+				stdio: ["ignore", "pipe", "pipe"],
+				timeout: WORKTREE_GIT_TIMEOUT_MS,
+			});
+			break;
+		} catch {
+			break;
+		}
+	}
+}
 
 /**
  * Compose the initial message from piped stdin content and/or a -p prompt.
