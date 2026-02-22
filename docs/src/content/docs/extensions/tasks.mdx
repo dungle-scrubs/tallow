@@ -45,17 +45,19 @@ and only explicit completion markers auto-complete tasks.
 The task widget adapts to terminal width:
 
 - **Wide terminals (120+ columns)**, side-by-side layout. Tasks
-  on the left, running agents and background tasks on the right,
-  separated by a vertical rule. The right column is bottom-aligned
-  so agents appear next to the most recent tasks.
+  on the left, background activity on the right (background
+  subagents and background tasks), separated by a vertical rule.
+  The right column is bottom-aligned so live background updates
+  stay next to the most recent tasks.
 - **Narrow terminals (under 120 columns)**, stacked layout. Tasks
-  first, then agents, then background tasks, each separated by
-  a spacer line. All content truncates to fit the available width.
+  first, then background subagents, then background tasks, each
+  separated by a spacer line. All content truncates to fit the
+  available width.
 
 Both layouts cap visible tasks at 10 with a "... and N more"
-overflow indicator. Task titles, agent task previews, and
-background command strings all truncate independently based on
-available column width.
+overflow indicator. Task titles, background subagent previews,
+and background command strings all truncate independently based
+on available column width.
 
 ### Presentation roles
 
@@ -78,14 +80,19 @@ features into one responsive view.
 
 ### [subagent](/extensions/subagent-tool/)
 
-When subagents are active (foreground or background), the tasks
-widget shows them alongside the task list. The subagent header now
-splits running vs stalled counts (for example, `Subagents (2 running · 1 stalled)`).
+Subagent activity is intentionally split by mode.
+
+Foreground subagents are **inline-only**: their progress and result
+stay in the main conversation flow while the parent is blocked.
+
+The tasks widget's subagent lane is **background-only**. It tracks
+non-blocking workers and splits running vs stalled counts (for
+example, `Background Subagents (non-blocking · 2 running · 1 stalled)`).
 Running rows use a spinner, while stalled rows are explicitly labeled
 `stalled` with a non-spinner status icon so they are not mistaken
 for active progress. Each row still shows a bounded task preview and
 live activity text when available. In-progress tasks display
-`(@agent-name)` attribution when an agent claims ownership.
+`(@agent-name)` attribution when a background agent claims ownership.
 
 In the status bar, a separate agent bar appears:
 `@main @alice @bob · 2 teammates`, with each name colored
@@ -94,9 +101,9 @@ to match the agent's identity in the task widget.
 ### [background-tasks](/extensions/background-task-tool/)
 
 Running background bash commands appear in the same widget,
-below the agent section. Each shows the truncated command string
-and elapsed duration. The widget caps at 5 visible background
-tasks with an overflow indicator.
+below the background subagent section. Each shows the truncated
+command string and elapsed duration. The widget caps at 5 visible
+background tasks with an overflow indicator.
 
 ### [custom-footer](/extensions/custom-footer/)
 
@@ -107,36 +114,33 @@ the widget for full detail.
 
 ### Combined display
 
-When all three features are active simultaneously, tasks with
-dependencies, multiple agents with live activity, and background
-commands, the widget composes them into a unified view:
+When all three features are active simultaneously, the task tree
+is paired with background-only lanes: background subagents and
+background commands. Foreground subagent progress stays inline in
+conversation output instead of the bottom widget.
 
 **Wide (120+ cols):**
 ```
-Tasks (2/5)                          │  3 agents launched
-├─ ◐ Writing unit tests (@alice)     │  ├─ ⠋ @alice (Foreground) · 12s
-├─ ◐ Refactoring auth (@bob)         │  │    Writing tests for auth module
-├─ ☐ Update documentation            │  ├─ ⠋ @bob (Background) · 8s
-│  └─ blocked by @alice, @bob        │  │    Refactoring auth middleware
-└─ ✓ Explore codebase                │  └─ ⠋ @carol (Background) · 3s
-                                     │       Running type checker
-                                     │
-                                     │  Background Tasks (1)
-                                     │  └─ ● npm run test:watch (45s)
+Tasks (2/5)                                   │  Background Subagents (non-blocking · 2 running)
+├─ ◐ Refactoring auth (@bob)                  │  ├─ ⠋ @bob (Background) · 8s
+├─ ◐ Run type checks (@carol)                 │  │    Refactoring auth middleware
+├─ ☐ Update documentation                      │  └─ ⠋ @carol (Background) · 3s
+│  └─ blocked by @bob, @carol                 │       Running type checker
+└─ ✓ Explore codebase                          │
+                                              │  Background Tasks (1)
+                                              │  └─ ● npm run test:watch (45s)
 ```
 
 **Narrow (under 120 cols):**
 ```
 Tasks (2/5)
-├─ ◐ Writing unit tests (@alice)
 ├─ ◐ Refactoring auth (@bob)
+├─ ◐ Run type checks (@carol)
 ├─ ☐ Update documentation
-│  └─ blocked by @alice, @bob
+│  └─ blocked by @bob, @carol
 └─ ✓ Explore codebase
 
-3 agents launched
-├─ ⠋ @alice (Foreground) · 12s
-│    Writing tests for auth module
+Background Subagents (non-blocking · 2 running)
 ├─ ⠋ @bob (Background) · 8s
 │    Refactoring auth middleware
 └─ ⠋ @carol (Background) · 3s
