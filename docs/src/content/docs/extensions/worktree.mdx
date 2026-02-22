@@ -1,0 +1,65 @@
+---
+title: worktree
+description: Detached git worktree isolation for sessions and subagents.
+---
+
+The `worktree` extension manages temporary detached git worktrees for
+isolated execution. It is the lifecycle owner for create/remove/prune behavior.
+
+## What it does
+
+- creates detached worktrees with `git worktree add --detach`
+- removes worktrees with a git-first strategy, then filesystem fallback
+- prunes stale managed worktrees on startup
+- emits lifecycle events for hook automation
+- injects session worktree context into the system prompt when enabled
+
+## Session isolation (`tallow -w` / `--worktree`)
+
+When you start tallow with `-w` or `--worktree`, the CLI launches the
+session inside a temporary detached worktree and sets:
+
+- `TALLOW_WORKTREE_PATH`
+- `TALLOW_WORKTREE_ORIGINAL_CWD`
+
+The extension reads those values, emits lifecycle events, and performs
+best-effort cleanup on `session_shutdown`.
+
+## Subagent isolation (`isolation: "worktree"`)
+
+The `subagent` tool can run each subagent in its own detached worktree.
+Precedence is:
+
+1. per-call `isolation`
+2. agent frontmatter `isolation`
+3. `_defaults.md` frontmatter `isolation`
+
+Supported value:
+
+- `worktree`
+
+## Hook events
+
+Canonical events:
+
+- `worktree_create`
+- `worktree_remove`
+
+Claude-compatible aliases:
+
+- `WorktreeCreate`
+- `WorktreeRemove`
+
+Payload shape:
+
+```json
+{
+  "worktreePath": "/tmp/tallow-worktree-subagent-abc123-...",
+  "repoRoot": "/repo",
+  "scope": "session",
+  "agentId": "fg_abc123",
+  "timestamp": 1739999999999
+}
+```
+
+`scope` is `session` or `subagent`. `agentId` is present for subagent-scoped events.

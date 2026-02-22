@@ -6,7 +6,7 @@ description: Why tallow exists and what it does.
 ## What is tallow?
 
 tallow is an opinionated coding agent built on pi. It bundles
-50 extensions, 8 agent profiles, 34 themes, and a skill system
+51 extensions, 8 agent profiles, 34 themes, and a skill system
 into a single install. No manual extension management —
 everything ships together, ready to use.
 
@@ -19,7 +19,7 @@ hooks, skills, and commands.
 
 ## What ships out of the box
 
-### Extensions (45)
+### Extensions (51)
 
 Every feature is an extension. They're organized by category:
 
@@ -29,7 +29,7 @@ Every feature is an extension. They're organized by category:
 | **UI & Display** (6) | Terminal rendering and status | custom footer, git status, tool display, minimal skill display, session-namer, random-spinner |
 | **Commands** (7) | Prompt/command system | command-prompt, command-expansion, context-fork, health, shell-interpolation, skill-commands |
 | **Utilities** (6) | Helper features | cheatsheet, context-usage, debug, init, show-system-prompt, read-tool-enhanced |
-| **Integrations** (2) | External system hooks | lifecycle hooks, claude-bridge |
+| **Integrations** (3) | External system hooks | lifecycle hooks, claude-bridge, worktree |
 | **Language Support** (1) | IDE-like features | LSP (TypeScript, Python, Rust, Swift, PHP) |
 | **Context** (1) | Instruction loading | context-files (CLAUDE.md + AGENTS.md) |
 | **Dev** (1) | Development tools | upstream-check |
@@ -83,7 +83,7 @@ Skills have frontmatter metadata including `name`,
 
 ## What makes it different
 
-- **Batteries included** — 50 extensions loaded automatically.
+- **Batteries included** — 51 extensions loaded automatically.
   No separate install step.
 - **Extensible from the ground up** — features are extensions,
   not hard-coded. Don't like how bash output renders? Replace
