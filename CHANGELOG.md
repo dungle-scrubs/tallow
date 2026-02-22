@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.7...tallow-v0.8.8) (2026-02-22)
+
+
+### Added
+
+* **context-usage,debug:** add tool-result memory telemetry ([2d50a19](https://github.com/dungle-scrubs/tallow/commit/2d50a193d3244654ccbea243cd46405ddb732de1))
+* **hooks:** add worktree lifecycle event support ([15de3a9](https://github.com/dungle-scrubs/tallow/commit/15de3a98ffbf97ec3264f4b9b0e59e11be092763))
+* **plugins:** load plugin commands and agents from sdk env ([846116e](https://github.com/dungle-scrubs/tallow/commit/846116eed13957d7b7129128ef6fa70c82e6a79a))
+* **read-tool-enhanced:** add structured .ipynb reading support ([2fe8998](https://github.com/dungle-scrubs/tallow/commit/2fe89984fec25a410caf1992f773af089ca3e3b0))
+* **sdk:** summarize oversized historical tool results ([79b66d7](https://github.com/dungle-scrubs/tallow/commit/79b66d7f8375507679369a4acaf46e85ad215bcf))
+* **subagent-tool:** add worktree isolation mode ([630330e](https://github.com/dungle-scrubs/tallow/commit/630330e88c707b0075945b70819619238337a374))
+* **worktree:** add session worktree lifecycle and CLI isolation ([0cc751a](https://github.com/dungle-scrubs/tallow/commit/0cc751a8c7740f7178bef511704a65acc21b27ea))
+
+
+### Fixed
+
+* **cli:** avoid logging raw session-id error text ([ea4b433](https://github.com/dungle-scrubs/tallow/commit/ea4b433a538a822fa631258ca1bfb117837ad897))
+* **core:** harden session ids and rewind repository handling ([0c78e79](https://github.com/dungle-scrubs/tallow/commit/0c78e7971e90b80340a421cf6a6bb43721593e2c))
+* **plan-mode:** add blocked-step guidance during execution ([14f119f](https://github.com/dungle-scrubs/tallow/commit/14f119fad989218718e770447e6b01f883d0142e))
+* **subagent-tool:** auto-rerun stalled workers ([15e0827](https://github.com/dungle-scrubs/tallow/commit/15e0827acb8cb54a9517e941820b7e4a668baa54))
+* **tasks:** keep foreground subagents inline-only ([ac2508d](https://github.com/dungle-scrubs/tallow/commit/ac2508d515cec9fb57ca9dcda99c011d859ee210))
+
+
+### Changed
+
+* **paths:** centralize tallow home and settings resolution ([188b47c](https://github.com/dungle-scrubs/tallow/commit/188b47c84b0b5b54ba12cb208751dff0dcdde51f))
+
+
+### Documentation
+
+* **context-usage:** document tool-result retention memory reporting ([1d10f18](https://github.com/dungle-scrubs/tallow/commit/1d10f18708c892c7ea2c1d8f3ca1263348005227))
+* **plan-mode:** document execution guidance for blocked tools ([81b86db](https://github.com/dungle-scrubs/tallow/commit/81b86db17d818bebca3fddd02d19b71503595efa))
+* **read-tool-enhanced:** document notebook support ([796ea55](https://github.com/dungle-scrubs/tallow/commit/796ea55dd9f79208d58ffbed727b4263b8b85878))
+* **subagent-tool:** describe automatic stall reruns ([38a8b03](https://github.com/dungle-scrubs/tallow/commit/38a8b033f1e11969b2743d86139f820f48b8e73c))
+* **tasks:** clarify widget shows background subagents only ([56bba02](https://github.com/dungle-scrubs/tallow/commit/56bba0232ed9fafd62f7addb55bbc58037748e80))
+* **worktree:** add extension docs and update counts ([67896bb](https://github.com/dungle-scrubs/tallow/commit/67896bbb6ff92d0347d071ac9f45674e28d5b040))
+
+
+### Maintenance
+
+* **read-tool-enhanced:** cover notebook parsing and read integration ([2c6e95d](https://github.com/dungle-scrubs/tallow/commit/2c6e95d9e4ab3f2a4adffbda4de20850227017c0))
+
 ## [0.8.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.6...tallow-v0.8.7) (2026-02-22)
 
 
