@@ -62,6 +62,17 @@ project.
 - **Current session**: Excluded from search results to avoid
   self-referencing
 
+## Memory release integration
+
+When `run_slash_command({ command: "release-memory" })` completes,
+slash-command-bridge emits `interop.v1.memory-release.completed` on
+the shared extension event bus. session-memory listens for that event
+and releases its singleton `SessionIndexer` (closing SQLite handle and
+clearing the in-memory reference).
+
+This is safe because the indexer is lazily recreated on the next
+`session_recall` call.
+
 ## Curator fallback
 
 If no curator model is available (no API key configured for

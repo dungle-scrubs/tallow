@@ -8,6 +8,9 @@ Lets the model invoke a curated set of slash commands via the
 `/show-system-prompt` or `/compact`, the model can call these
 commands itself when it determines they're needed.
 
+It also registers `/release-memory` as a user-facing slash command
+for explicit memory release.
+
 ## Available commands
 
 | Command | Description |
@@ -15,6 +18,7 @@ commands itself when it determines they're needed.
 | `show-system-prompt` | Returns the full system prompt text |
 | `context` | Returns context window token usage breakdown |
 | `compact` | Triggers session compaction to free context space |
+| `release-memory` | Compacts context, then emits a lifecycle event so extensions can release rebuildable memory caches |
 
 ## Usage
 
@@ -25,7 +29,10 @@ run_slash_command({ command: "context" })
 → "Context Usage: 45,000 / 200,000 tokens (22.5%)"
 
 run_slash_command({ command: "compact" })
-→ "Session compaction triggered."
+→ "Session compaction will begin after this response completes."
+
+run_slash_command({ command: "release-memory" })
+→ "Session memory release will begin after this response completes."
 ```
 
 ## Design
@@ -40,6 +47,20 @@ framework doesn't expose command handler access to tools. Phase 2 will
 add an `allowModelInvocation` flag to command registration and a
 framework-level bridge.
 
+## Memory release flow
+
+`release-memory` uses a deferred execution strategy (same as `compact`):
+
+1. The tool call schedules release for `agent_end`.
+2. The current response finishes normally.
+3. Session compaction runs.
+4. On success, the extension emits `interop.v1.memory-release.completed`
+   on the shared event bus so other extensions can release rebuildable
+   in-memory caches.
+
+If another deferred operation is already queued, the tool returns an
+error instead of stacking multiple compaction/release requests.
+
 ## Context injection
 
 The extension injects a hidden message before each agent turn listing
@@ -51,4 +72,4 @@ knows the capability exists without polluting visible conversation.
 | Field | Value |
 |-------|-------|
 | Category | tool |
-| Enhances | clear, context-usage, show-system-prompt |
+| Enhances | clear, context-usage, show-system-prompt, session-memory |
