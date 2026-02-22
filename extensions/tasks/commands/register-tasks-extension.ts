@@ -233,22 +233,19 @@ export function registerTasksExtension(
 	}
 
 	/**
-	 * Render subagent lines (right column in side-by-side mode, or below tasks in stacked mode).
+	 * Render background subagent lines (right column in side-by-side mode, or below tasks in
+	 * stacked mode).
 	 */
 	function renderSubagentLines(
 		ctx: ExtensionContext,
 		spinner: string,
-		foreground: SubagentView[],
 		background: SubagentView[],
 		maxLineWidth: number
 	): string[] {
-		const activeForeground = foreground.filter(
-			(subagent) => subagent.status === "running" || subagent.status === "stalled"
-		);
 		const activeBackground = background.filter(
 			(subagent) => subagent.status === "running" || subagent.status === "stalled"
 		);
-		if (activeForeground.length === 0 && activeBackground.length === 0) return [];
+		if (activeBackground.length === 0) return [];
 
 		const safeLineWidth = Math.max(1, maxLineWidth);
 
@@ -355,21 +352,14 @@ export function registerTasksExtension(
 		}
 
 		/**
-		 * Append one subagent section (foreground/background) to the output.
+		 * Append the background-subagent section to the output.
 		 * @param lines - Mutable output line sink
-		 * @param sectionTitle - Section title label
-		 * @param modeLabel - Blocking mode label
 		 * @param subagents - Section subagents
 		 */
-		function appendSection(
-			lines: string[],
-			sectionTitle: string,
-			modeLabel: string,
-			subagents: SubagentView[]
-		): void {
+		function appendSection(lines: string[], subagents: SubagentView[]): void {
 			if (subagents.length === 0) return;
 
-			const sectionSummary = `${sectionTitle} (${modeLabel} · ${getStatusSummary(subagents)})`;
+			const sectionSummary = `Background Subagents (non-blocking · ${getStatusSummary(subagents)})`;
 			lines.push(
 				clampLine(`${formatWidgetRole(ctx, "title", sectionSummary)}${getModelSummary(subagents)}`)
 			);
@@ -413,9 +403,7 @@ export function registerTasksExtension(
 		}
 
 		const lines: string[] = [];
-		appendSection(lines, "Foreground Subagents", "blocking", activeForeground);
-		if (activeForeground.length > 0 && activeBackground.length > 0) lines.push("");
-		appendSection(lines, "Background Subagents", "non-blocking", activeBackground);
+		appendSection(lines, activeBackground);
 		return lines;
 	}
 
@@ -608,18 +596,15 @@ export function registerTasksExtension(
 			return;
 		}
 
-		const fgSubagents = foregroundSubagents.filter(
-			(subagent) => subagent.status === "running" || subagent.status === "stalled"
-		);
 		const bgSubagents = backgroundSubagents.filter(
 			(subagent) => subagent.status === "running" || subagent.status === "stalled"
 		);
 		const runningBgTasks = backgroundTasks.filter((task) => task.status === "running");
 
-		const hasSubagents = fgSubagents.length > 0 || bgSubagents.length > 0;
+		const hasBackgroundSubagents = bgSubagents.length > 0;
 		const hasBgTasks = runningBgTasks.length > 0;
 		const hasTeams = activeTeams.length > 0;
-		const hasRightColumn = hasSubagents || hasBgTasks || hasTeams;
+		const hasRightColumn = hasBackgroundSubagents || hasBgTasks || hasTeams;
 		const hasTasks = state.tasks.length > 0;
 
 		if (!(state.visible && (hasTasks || hasRightColumn))) {
@@ -634,7 +619,6 @@ export function registerTasksExtension(
 
 		// Build stable key for structure changes
 		const taskStates = state.tasks.map((t) => `${t.id}:${t.status}`).join(",");
-		const fgIds = fgSubagents.map((s) => `${s.id}:${s.status}`).join(",");
 		const bgIds = bgSubagents.map((s) => `${s.id}:${s.status}`).join(",");
 		const bgTaskIds = runningBgTasks.map((t) => t.id).join(",");
 		const teamKey = activeTeams
@@ -643,7 +627,7 @@ export function registerTasksExtension(
 					`${t.name}:${t.tasks.map((tk) => tk.status).join("")}:${t.teammates.map((m) => m.status).join("")}`
 			)
 			.join("|");
-		const stableKey = `${taskStates}|${fgIds}|${bgIds}|${bgTaskIds}|${teamKey}`;
+		const stableKey = `${taskStates}|${bgIds}|${bgTaskIds}|${teamKey}`;
 
 		// Re-render when structure changes, background items running (for animation),
 		// or in_progress tasks exist (spinner needs to animate every frame).
@@ -678,16 +662,14 @@ export function registerTasksExtension(
 
 					const taskLines = renderTaskLines(ctx, maxTitleLen);
 
-					// Build right column: teams, then subagents, then bg tasks
+					// Build right column: teams, background subagents, then bg tasks
 					const rightLines: string[] = [];
 					if (hasTeams) {
 						rightLines.push(...renderTeamLines(ctx, spinner, activeTeams, maxTeamLen));
 					}
-					if (hasSubagents) {
+					if (hasBackgroundSubagents) {
 						if (rightLines.length > 0) rightLines.push(""); // Spacer
-						rightLines.push(
-							...renderSubagentLines(ctx, spinner, fgSubagents, bgSubagents, rightColumnWidth)
-						);
+						rightLines.push(...renderSubagentLines(ctx, spinner, bgSubagents, rightColumnWidth));
 					}
 					if (hasBgTasks) {
 						if (rightLines.length > 0) rightLines.push(""); // Spacer
@@ -713,9 +695,9 @@ export function registerTasksExtension(
 					lines.push(...renderTeamLines(ctx, spinner, activeTeams, maxTeamLen));
 				}
 
-				if (hasSubagents) {
+				if (hasBackgroundSubagents) {
 					if (lines.length > 0) lines.push(""); // Spacer
-					lines.push(...renderSubagentLines(ctx, spinner, fgSubagents, bgSubagents, width));
+					lines.push(...renderSubagentLines(ctx, spinner, bgSubagents, width));
 				}
 
 				if (hasBgTasks) {
