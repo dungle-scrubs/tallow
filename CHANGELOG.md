@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **extensions:** lazy-initialize command expansion, context scanning, context fork indexing, and MCP startup connections behind first-use triggers
+
+### Documentation
+
+- **agents:** add extension startup policy guidance for minimal `session_start` handlers and shared lazy initialization
+
 ## [0.8.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.5...tallow-v0.8.6) (2026-02-20)
 
 
