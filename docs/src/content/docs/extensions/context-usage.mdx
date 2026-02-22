@@ -29,3 +29,35 @@ The waffle chart gives an at-a-glance view of how much context
 budget each category consumes, helping you identify when the
 conversation is getting large or when context files are taking
 too much space.
+
+## Historical tool-result memory section
+
+`/context` also shows a **Historical tool-result payloads** block with:
+
+- total tool results in the active branch
+- how many were summarized by retention
+- retained bytes currently held in memory
+- reclaimed bytes from summarized historical results
+
+This helps verify that long-session payload retention is reducing memory pressure.
+
+## Retention settings
+
+Configure retention in `~/.tallow/settings.json` (or project `.tallow/settings.json`):
+
+```json
+{
+  "toolResultRetention": {
+    "enabled": true,
+    "keepRecentToolResults": 12,
+    "maxRetainedBytesPerResult": 49152,
+    "previewChars": 600
+  }
+}
+```
+
+Semantics:
+
+- `keepRecentToolResults`: newest N tool results kept full
+- `maxRetainedBytesPerResult`: older results above this size are summarized
+- `previewChars`: max preview size kept in summarized content
