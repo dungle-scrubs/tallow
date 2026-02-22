@@ -21,6 +21,7 @@ import { isAbsolute, join } from "node:path";
 import {
 	type ExpansionVars,
 	evaluate as evaluatePermission,
+	formatPermissionReason,
 	type LoadedPermissions,
 	loadPermissionConfig,
 	type PermissionConfig,
@@ -61,6 +62,7 @@ export interface ShellPolicyVerdict {
 	readonly requiresConfirmation: boolean;
 	readonly trustLevel: ShellTrustLevel;
 	readonly reason?: string;
+	readonly reasonCode?: string;
 	readonly normalizedCommand: string;
 }
 
@@ -571,7 +573,8 @@ export function evaluateCommand(
 				allowed: false,
 				requiresConfirmation: false,
 				trustLevel,
-				reason: verdict.reason ?? "Blocked by permission rule",
+				reason: formatPermissionReason(verdict, { includeHints: true, maxHints: 2 }),
+				reasonCode: verdict.reasonCode,
 				normalizedCommand,
 			};
 		}
@@ -581,7 +584,8 @@ export function evaluateCommand(
 				allowed: true,
 				requiresConfirmation: true,
 				trustLevel,
-				reason: verdict.reason ?? "Requires confirmation per permission rule",
+				reason: formatPermissionReason(verdict, { includeHints: true, maxHints: 2 }),
+				reasonCode: verdict.reasonCode,
 				normalizedCommand,
 			};
 		}
@@ -592,7 +596,8 @@ export function evaluateCommand(
 				allowed: true,
 				requiresConfirmation: false,
 				trustLevel,
-				reason: verdict.reason,
+				reason: formatPermissionReason(verdict, { includeHints: false }),
+				reasonCode: verdict.reasonCode,
 				normalizedCommand,
 			};
 		}
@@ -674,6 +679,7 @@ export function evaluateCommand(
 			requiresConfirmation: true,
 			trustLevel,
 			reason: "Command matches high-risk pattern",
+			reasonCode: "high_risk_command",
 			normalizedCommand,
 		};
 	}
@@ -731,6 +737,10 @@ export async function enforceExplicitPolicy(
 
 	if (!interactive) {
 		if (!isNonInteractiveBypassEnabled()) {
+			const nonInteractiveReason =
+				verdict.reasonCode === "rule_requires_confirmation"
+					? "Permission rule requires confirmation in non-interactive mode"
+					: "High-risk command requires TALLOW_ALLOW_UNSAFE_SHELL=1 in non-interactive mode";
 			recordAudit({
 				timestamp: Date.now(),
 				command: verdict.normalizedCommand,
@@ -738,12 +748,14 @@ export async function enforceExplicitPolicy(
 				trustLevel: verdict.trustLevel,
 				cwd,
 				outcome: "blocked",
-				reason: "High-risk command requires TALLOW_ALLOW_UNSAFE_SHELL=1 in non-interactive mode",
+				reason: nonInteractiveReason,
 			});
 			return {
 				block: true,
 				reason:
-					"High-risk command blocked in non-interactive mode. Set TALLOW_ALLOW_UNSAFE_SHELL=1 to allow.",
+					verdict.reasonCode === "rule_requires_confirmation"
+						? `${verdict.reason ?? "Permission confirmation required"}. Re-run interactively to confirm.`
+						: "High-risk command blocked in non-interactive mode. Set TALLOW_ALLOW_UNSAFE_SHELL=1 to allow.",
 			};
 		}
 
@@ -759,10 +771,16 @@ export async function enforceExplicitPolicy(
 		return undefined;
 	}
 
+	const promptReason = verdict.reason ? `${verdict.reason}\n\n` : "";
+	const promptTitle =
+		verdict.reasonCode === "rule_requires_confirmation"
+			? "Permission confirmation required"
+			: "High-risk shell command detected";
+
 	let confirmed: boolean | undefined;
 	try {
 		confirmed = await confirmFn(
-			`High-risk shell command detected:\n\n${verdict.normalizedCommand}\n\nRun this command?`
+			`${promptTitle}:\n\n${promptReason}${verdict.normalizedCommand}\n\nRun this command?`
 		);
 	} catch (error) {
 		const reason =
@@ -783,7 +801,11 @@ export async function enforceExplicitPolicy(
 
 	if (confirmed !== true) {
 		const reason =
-			confirmed === false ? "User denied high-risk command" : "Confirmation was canceled";
+			confirmed === false
+				? verdict.reasonCode === "rule_requires_confirmation"
+					? "User denied permission confirmation"
+					: "User denied high-risk command"
+				: "Confirmation was canceled";
 		recordAudit({
 			timestamp: Date.now(),
 			command: verdict.normalizedCommand,

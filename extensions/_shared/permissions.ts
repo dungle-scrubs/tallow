@@ -22,6 +22,17 @@ import { stripQuotedContent } from "./shell-policy.js";
 /** A raw string from config, e.g. `"Bash(npm *)"`. */
 export type PermissionRuleEntry = string;
 
+/** Permission source tiers (ordered highest → lowest precedence). */
+export type PermissionSourceTier = "cli" | "project-local" | "project-shared" | "user";
+
+/** Structured reason codes returned by permission evaluation. */
+export type PermissionReasonCode =
+	| "rule_allowed"
+	| "rule_denied"
+	| "rule_requires_confirmation"
+	| "allowlist_unmatched"
+	| "no_rules_configured";
+
 /** Parsed representation of a permission rule. */
 export interface ParsedRule {
 	/** Normalized tool name (lowercase/snake_case). */
@@ -30,6 +41,10 @@ export interface ParsedRule {
 	readonly specifier: string | null;
 	/** Original raw rule string for diagnostics. */
 	readonly raw: string;
+	/** Source settings path for this rule when known. */
+	readonly sourcePath?: string;
+	/** Source scope for this rule when known. */
+	readonly sourceScope?: PermissionSourceTier;
 }
 
 /** Merged permission config with parsed rules in each tier. */
@@ -48,10 +63,28 @@ export interface PermissionVerdict {
 	readonly allowed: boolean;
 	/** Which tier produced the verdict. */
 	readonly action: PermissionAction;
-	/** Human-readable reason for the verdict. */
+	/** Legacy user-facing reason string for backward compatibility. */
 	readonly reason?: string;
-	/** The raw rule string that matched, if any. */
+	/** Stable reason code for callers that need structured handling. */
+	readonly reasonCode?: PermissionReasonCode;
+	/** Human-readable reason without remediation hints. */
+	readonly reasonMessage?: string;
+	/** The matched rule string (redacted), if any. */
 	readonly matchedRule?: string;
+	/** Settings file path where the matching rule came from, if known. */
+	readonly sourcePath?: string;
+	/** Source scope where the matching rule came from, if known. */
+	readonly sourceScope?: PermissionSourceTier;
+	/** Optional safe hints the caller can surface to unblock retries. */
+	readonly remediationHints?: readonly string[];
+}
+
+/** Options for formatting user-facing permission reasons. */
+export interface PermissionReasonFormatOptions {
+	/** Include remediation hints in formatted output (default true). */
+	readonly includeHints?: boolean;
+	/** Maximum number of hints to append (default 1). */
+	readonly maxHints?: number;
 }
 
 /** Variables for expanding `{cwd}`, `{home}`, `{project}` in patterns. */
@@ -64,7 +97,7 @@ export interface ExpansionVars {
 /** Source metadata for a loaded permission config tier. */
 export interface PermissionSource {
 	readonly path: string;
-	readonly tier: "cli" | "project-local" | "project-shared" | "user";
+	readonly tier: PermissionSourceTier;
 	readonly config: PermissionConfig;
 }
 
@@ -106,6 +139,168 @@ const TOOL_NAME_MAP: Readonly<Record<string, string>> = {
 export function normalizeToolName(name: string): string {
 	const lower = name.toLowerCase();
 	return TOOL_NAME_MAP[lower] ?? lower;
+}
+
+/** Human-friendly labels for permission source scopes. */
+const SOURCE_SCOPE_LABEL: Readonly<Record<PermissionSourceTier, string>> = {
+	cli: "CLI flags",
+	"project-local": "project-local settings",
+	"project-shared": "project settings",
+	user: "user settings",
+};
+
+/** Keyword-style sensitive value patterns to redact from surfaced reasons. */
+const SENSITIVE_ASSIGNMENT_PATTERN =
+	/((?:token|secret|password|api[_-]?key|private[_-]?key|client[_-]?secret)\s*[=:]\s*)([^\s,)]+)/gi;
+
+/** 1Password reference pattern. */
+const OP_REFERENCE_PATTERN = /op:\/\/[^\s)]+/gi;
+
+/** Sensitive file suffixes that should not be echoed in full. */
+const SENSITIVE_FILE_PATTERN = /\/[^\s)]*\.(?:pem|key|p12|pfx|kdbx)\b/gi;
+
+/** Sensitive path segment keywords that should be redacted. */
+const SENSITIVE_PATH_PATTERN = /\/[^\s)]*(?:token|secret|password|private)[^\s)]*/gi;
+
+/** Safe tool alternatives for common bash commands. */
+const BASH_ALTERNATIVE_TOOLS: Readonly<Record<string, string>> = {
+	cat: "read",
+	curl: "web_fetch",
+	find: "find",
+	grep: "grep",
+	ls: "ls",
+	wget: "web_fetch",
+};
+
+/**
+ * Redact sensitive values from user-facing permission text.
+ *
+ * @param text - Untrusted text that may contain secrets
+ * @returns Redacted text suitable for prompts/errors
+ */
+export function redactSensitiveReasonText(text: string): string {
+	let redacted = text;
+	redacted = redacted.replace(SENSITIVE_ASSIGNMENT_PATTERN, "$1[REDACTED]");
+	redacted = redacted.replace(OP_REFERENCE_PATTERN, "op://[REDACTED]");
+	redacted = redacted.replace(SENSITIVE_FILE_PATTERN, "/[REDACTED_FILE]");
+	redacted = redacted.replace(SENSITIVE_PATH_PATTERN, "/[REDACTED_PATH]");
+	return redacted;
+}
+
+/**
+ * Build a compact source path string for user-facing messages.
+ *
+ * @param sourcePath - Original settings file path
+ * @returns Compact display path
+ */
+function compactSourcePath(sourcePath: string): string {
+	if (sourcePath === "<cli>") return SOURCE_SCOPE_LABEL.cli;
+
+	const normalized = sourcePath.replaceAll("\\", "/");
+	const home = homedir().replaceAll("\\", "/");
+	if (normalized.startsWith(`${home}/`)) {
+		return `~/${normalized.slice(home.length + 1)}`;
+	}
+
+	const rootHint = ["/.tallow/", "/.claude/"]
+		.map((marker) => normalized.lastIndexOf(marker))
+		.find((index) => index !== undefined && index >= 0);
+	if (typeof rootHint === "number" && rootHint >= 0) {
+		return normalized.slice(rootHint + 1);
+	}
+
+	const segments = normalized.split("/").filter((segment) => segment.length > 0);
+	return segments.slice(-2).join("/") || normalized;
+}
+
+/**
+ * Render source metadata into a concise sentence fragment.
+ *
+ * @param verdict - Permission verdict with source metadata
+ * @returns Source text fragment, or undefined when no source metadata is available
+ */
+function formatSourceContext(verdict: PermissionVerdict): string | undefined {
+	if (verdict.sourcePath) {
+		return `source: ${compactSourcePath(verdict.sourcePath)}`;
+	}
+	if (verdict.sourceScope) {
+		return `source: ${SOURCE_SCOPE_LABEL[verdict.sourceScope]}`;
+	}
+	return undefined;
+}
+
+/**
+ * Ensure a sentence ends with terminal punctuation.
+ *
+ * @param value - Sentence text
+ * @returns Sentence text ending in `.`, `!`, or `?`
+ */
+function withTerminalPunctuation(value: string): string {
+	const trimmed = value.trim();
+	if (trimmed.length === 0) return "";
+	if (/[.!?]$/.test(trimmed)) return trimmed;
+	return `${trimmed}.`;
+}
+
+/**
+ * Format a permission verdict into a concise user-facing reason string.
+ *
+ * @param verdict - Permission verdict to format
+ * @param options - Formatting options
+ * @returns Formatted reason message
+ */
+export function formatPermissionReason(
+	verdict: PermissionVerdict,
+	options: PermissionReasonFormatOptions = {}
+): string {
+	const includeHints = options.includeHints ?? true;
+	const maxHints = options.maxHints ?? 1;
+	const reasonMessage =
+		verdict.reasonMessage ?? verdict.reason ?? "Permission policy blocked this action";
+
+	const parts = [withTerminalPunctuation(redactSensitiveReasonText(reasonMessage))];
+	const sourceContext = formatSourceContext(verdict);
+	if (sourceContext) {
+		parts.push(withTerminalPunctuation(sourceContext));
+	}
+
+	if (includeHints) {
+		const hints = (verdict.remediationHints ?? []).slice(0, Math.max(maxHints, 0));
+		if (hints.length > 0) {
+			parts.push(`Hint: ${hints.join(" ")}`);
+		}
+	}
+
+	return parts.join(" ").trim();
+}
+
+/**
+ * Check whether a tool evaluates path-like specifiers.
+ *
+ * @param toolName - Canonical tool name
+ * @returns True when the tool uses path specifiers
+ */
+function isPathLikeTool(toolName: string): boolean {
+	return ["read", "write", "edit", "cd", "ls", "find", "grep"].includes(toolName);
+}
+
+/**
+ * Suggest a dedicated tool alternative for blocked bash commands when obvious.
+ *
+ * @param input - Tool call input
+ * @returns Alternative-tool hint, or undefined when no safe suggestion exists
+ */
+function suggestBashAlternative(input: Record<string, unknown>): string | undefined {
+	const command = typeof input.command === "string" ? input.command.trim() : "";
+	if (command.length === 0) return undefined;
+
+	const executable = command.split(/\s+/)[0]?.toLowerCase();
+	if (!executable) return undefined;
+
+	const alternative = BASH_ALTERNATIVE_TOOLS[executable];
+	if (!alternative) return undefined;
+
+	return `Use ${alternative} instead of bash for this operation when possible.`;
 }
 
 // ── Rule Parsing ─────────────────────────────────────────────────────────────
@@ -807,6 +1002,108 @@ function ruleMatches(
 }
 
 /**
+ * Build remediation hints for deny/ask verdicts.
+ *
+ * @param toolName - Canonical tool name
+ * @param input - Tool invocation input
+ * @param config - Full permission config
+ * @param matchedRule - Matching rule
+ * @returns At most two concise remediation hints
+ */
+function buildRemediationHints(
+	toolName: string,
+	input: Record<string, unknown>,
+	config: PermissionConfig,
+	matchedRule: ParsedRule
+): readonly string[] {
+	const hints: string[] = [];
+
+	if (matchedRule.sourceScope === "cli") {
+		hints.push("Adjust --allowedTools/--disallowedTools flags if this action should be allowed.");
+	} else if (matchedRule.sourcePath) {
+		hints.push(
+			`Adjust ${compactSourcePath(matchedRule.sourcePath)} if this action should be allowed.`
+		);
+	}
+
+	const allowPatterns = config.allow
+		.filter((rule) => rule.tool === toolName && typeof rule.specifier === "string")
+		.map((rule) => redactSensitiveReasonText(rule.specifier ?? ""))
+		.filter((specifier) => specifier.length > 0)
+		.slice(0, 2);
+	if (allowPatterns.length > 0) {
+		hints.push(`Allowed patterns: ${allowPatterns.join(", ")}.`);
+	}
+
+	if (isPathLikeTool(toolName) && typeof matchedRule.specifier === "string") {
+		if (matchedRule.specifier.startsWith("/")) {
+			hints.push("Path rules with '/' are relative to the settings file directory.");
+		} else if (matchedRule.specifier.startsWith("./")) {
+			hints.push("Path rules with './' are relative to the current working directory.");
+		}
+	}
+
+	if (toolName === "bash" || toolName === "bg_bash") {
+		const alternativeHint = suggestBashAlternative(input);
+		if (alternativeHint) {
+			hints.push(alternativeHint);
+		}
+	}
+
+	return [...new Set(hints)].slice(0, 2);
+}
+
+/**
+ * Build a deny/ask/allow verdict for a matched rule.
+ *
+ * @param action - Permission action
+ * @param rule - Matching permission rule
+ * @param toolName - Canonical tool name
+ * @param input - Tool invocation input
+ * @param config - Full permission config
+ * @returns Structured permission verdict
+ */
+function buildRuleVerdict(
+	action: "allow" | "deny" | "ask",
+	rule: ParsedRule,
+	toolName: string,
+	input: Record<string, unknown>,
+	config: PermissionConfig
+): PermissionVerdict {
+	const redactedRule = redactSensitiveReasonText(rule.raw);
+	const reasonMessage =
+		action === "deny"
+			? `Action denied by permission rule ${redactedRule}`
+			: action === "ask"
+				? `Confirmation required by permission rule ${redactedRule}`
+				: `Action allowed by permission rule ${redactedRule}`;
+
+	const verdictBase: PermissionVerdict = {
+		allowed: action !== "deny" && action !== "ask",
+		action,
+		reasonCode:
+			action === "deny"
+				? "rule_denied"
+				: action === "ask"
+					? "rule_requires_confirmation"
+					: "rule_allowed",
+		reasonMessage,
+		matchedRule: redactedRule,
+		remediationHints:
+			action === "deny" || action === "ask"
+				? buildRemediationHints(toolName, input, config, rule)
+				: undefined,
+		sourcePath: rule.sourcePath,
+		sourceScope: rule.sourceScope,
+	};
+
+	return {
+		...verdictBase,
+		reason: formatPermissionReason(verdictBase),
+	};
+}
+
+/**
  * Evaluate a tool invocation against a permission config.
  *
  * Resolution order: deny → ask → allow → default.
@@ -834,53 +1131,48 @@ export function evaluate(
 	// 1. Deny — any match blocks
 	for (const rule of config.deny) {
 		if (ruleMatches(rule, canonical, input, "deny", vars, settingsDir)) {
-			return {
-				allowed: false,
-				action: "deny",
-				reason: `Blocked by permission rule: ${rule.raw}`,
-				matchedRule: rule.raw,
-			};
+			return buildRuleVerdict("deny", rule, canonical, input, config);
 		}
 	}
 
 	// 2. Ask — any match prompts
 	for (const rule of config.ask) {
 		if (ruleMatches(rule, canonical, input, "ask", vars, settingsDir)) {
-			return {
-				allowed: false,
-				action: "ask",
-				reason: `Requires confirmation per permission rule: ${rule.raw}`,
-				matchedRule: rule.raw,
-			};
+			return buildRuleVerdict("ask", rule, canonical, input, config);
 		}
 	}
 
 	// 3. Allow — any match permits
 	for (const rule of config.allow) {
 		if (ruleMatches(rule, canonical, input, "allow", vars, settingsDir)) {
-			return {
-				allowed: true,
-				action: "allow",
-				reason: `Permitted by permission rule: ${rule.raw}`,
-				matchedRule: rule.raw,
-			};
+			return buildRuleVerdict("allow", rule, canonical, input, config);
 		}
 	}
 
 	// 4. Default — if allow list has entries, the tool is unlisted (prompt)
 	//    If allow list is empty, fully permissive (allow)
 	if (config.allow.length > 0) {
-		return {
+		const verdict: PermissionVerdict = {
 			allowed: true,
 			action: "default",
-			reason: "No matching permission rule; allowlist mode — unlisted tool",
+			reasonCode: "allowlist_unmatched",
+			reasonMessage: "No matching allow rule for this tool",
+		};
+		return {
+			...verdict,
+			reason: formatPermissionReason(verdict, { includeHints: false }),
 		};
 	}
 
-	return {
+	const verdict: PermissionVerdict = {
 		allowed: true,
 		action: "default",
-		reason: "No permission rules configured",
+		reasonCode: "no_rules_configured",
+		reasonMessage: "No permission rules configured",
+	};
+	return {
+		...verdict,
+		reason: formatPermissionReason(verdict, { includeHints: false }),
 	};
 }
 
@@ -967,6 +1259,32 @@ function parsePermissionsObject(
 }
 
 /**
+ * Annotate parsed rules with source metadata for richer verdict reporting.
+ *
+ * @param config - Parsed permission config
+ * @param sourcePath - Path that contributed this config
+ * @param sourceScope - Source tier that contributed this config
+ * @returns Config with source metadata attached to each rule
+ */
+function annotateConfigSource(
+	config: PermissionConfig,
+	sourcePath: string,
+	sourceScope: PermissionSourceTier
+): PermissionConfig {
+	const annotateRule = (rule: ParsedRule): ParsedRule => ({
+		...rule,
+		sourcePath,
+		sourceScope,
+	});
+
+	return {
+		allow: config.allow.map(annotateRule),
+		deny: config.deny.map(annotateRule),
+		ask: config.ask.map(annotateRule),
+	};
+}
+
+/**
  * Merge multiple PermissionConfigs by concatenating their rule lists.
  *
  * @param configs - Array of configs to merge (earlier = higher precedence)
@@ -1018,7 +1336,8 @@ export function loadPermissionConfig(
 		cliConfig &&
 		(cliConfig.allow.length > 0 || cliConfig.deny.length > 0 || cliConfig.ask.length > 0)
 	) {
-		sources.push({ path: "<cli>", tier: "cli", config: cliConfig });
+		const config = annotateConfigSource(cliConfig, "<cli>", "cli");
+		sources.push({ path: "<cli>", tier: "cli", config });
 	}
 
 	// Project local: .tallow/settings.local.json
@@ -1026,7 +1345,8 @@ export function loadPermissionConfig(
 		const projectLocalPath = join(cwd, ".tallow", "settings.local.json");
 		const projectLocalRaw = readPermissionsFromFile(projectLocalPath, warnings);
 		if (projectLocalRaw) {
-			const config = parsePermissionsObject(projectLocalRaw, warnings);
+			const parsedConfig = parsePermissionsObject(projectLocalRaw, warnings);
+			const config = annotateConfigSource(parsedConfig, projectLocalPath, "project-local");
 			sources.push({ path: projectLocalPath, tier: "project-local", config });
 		}
 	}
@@ -1035,7 +1355,8 @@ export function loadPermissionConfig(
 	const claudeLocalPath = join(cwd, ".claude", "settings.local.json");
 	const claudeLocalRaw = readPermissionsFromFile(claudeLocalPath, warnings);
 	if (claudeLocalRaw) {
-		const config = parsePermissionsObject(claudeLocalRaw, warnings);
+		const parsedConfig = parsePermissionsObject(claudeLocalRaw, warnings);
+		const config = annotateConfigSource(parsedConfig, claudeLocalPath, "project-local");
 		sources.push({ path: claudeLocalPath, tier: "project-local", config });
 	}
 
@@ -1044,7 +1365,8 @@ export function loadPermissionConfig(
 		const projectSharedPath = join(cwd, ".tallow", "settings.json");
 		const projectSharedRaw = readPermissionsFromFile(projectSharedPath, warnings);
 		if (projectSharedRaw) {
-			const config = parsePermissionsObject(projectSharedRaw, warnings);
+			const parsedConfig = parsePermissionsObject(projectSharedRaw, warnings);
+			const config = annotateConfigSource(parsedConfig, projectSharedPath, "project-shared");
 			sources.push({ path: projectSharedPath, tier: "project-shared", config });
 		}
 	}
@@ -1053,7 +1375,8 @@ export function loadPermissionConfig(
 	const claudeSharedPath = join(cwd, ".claude", "settings.json");
 	const claudeSharedRaw = readPermissionsFromFile(claudeSharedPath, warnings);
 	if (claudeSharedRaw) {
-		const config = parsePermissionsObject(claudeSharedRaw, warnings);
+		const parsedConfig = parsePermissionsObject(claudeSharedRaw, warnings);
+		const config = annotateConfigSource(parsedConfig, claudeSharedPath, "project-shared");
 		sources.push({ path: claudeSharedPath, tier: "project-shared", config });
 	}
 
@@ -1061,7 +1384,8 @@ export function loadPermissionConfig(
 	const userPath = join(tallowHome, "settings.json");
 	const userRaw = readPermissionsFromFile(userPath, warnings);
 	if (userRaw) {
-		const config = parsePermissionsObject(userRaw, warnings);
+		const parsedConfig = parsePermissionsObject(userRaw, warnings);
+		const config = annotateConfigSource(parsedConfig, userPath, "user");
 		sources.push({ path: userPath, tier: "user", config });
 	}
 
