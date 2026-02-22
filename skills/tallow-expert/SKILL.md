@@ -34,7 +34,7 @@ Relay that answer to the user.
 | Component | Location |
 |-----------|----------|
 | Core source | `src/` (agent-runner.ts, atomic-write.ts, auth-hardening.ts, cli.ts, config.ts, extensions-global.d.ts, fatal-errors.ts, index.ts, install.ts, interactive-mode-patch.ts, pid-manager.ts, plugins.ts, process-cleanup.ts, project-trust-banner.ts, project-trust.ts, runtime-path-provider.ts, sdk.ts, session-migration.ts, session-utils.ts, startup-profile.ts, startup-timing.ts) |
-| Extensions | `extensions/` — extension.json + index.ts each (50 bundled) |
+| Extensions | `extensions/` — extension.json + index.ts each (51 bundled) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
 | Themes | `themes/` — JSON files (34 dark-only themes) |

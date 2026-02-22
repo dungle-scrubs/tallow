@@ -1,0 +1,31 @@
+{
+	"name": "worktree",
+	"version": "0.1.0",
+	"description": "Managed git worktree isolation lifecycle for sessions and subagents.",
+	"whenToUse": "Use when tallow should run in temporary detached git worktrees with reliable cleanup and lifecycle hooks.",
+	"capabilities": {
+		"events": ["before_agent_start", "session_shutdown", "session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": true
+	},
+	"category": "integration",
+	"tags": ["worktree", "isolation", "git", "cleanup"],
+	"files": ["index.ts", "lifecycle.ts"],
+	"relationships": [
+		{
+			"name": "subagent-tool",
+			"kind": "enhances",
+			"reason": "Subagent worktree isolation uses the shared lifecycle primitives"
+		},
+		{
+			"name": "hooks",
+			"kind": "enhances",
+			"reason": "Emits worktree lifecycle events for hook automation"
+		}
+	],
+	"npmDependencies": {}
+}
