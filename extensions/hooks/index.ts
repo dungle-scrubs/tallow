@@ -304,6 +304,8 @@ const MATCHER_FIELDS: Record<string, string> = {
 	tool_result: "toolName",
 	teammate_idle: "teammate",
 	task_completed: "assignee",
+	worktree_create: "scope",
+	worktree_remove: "scope",
 	setup: "trigger",
 	subagent_start: "agent_type",
 	subagent_stop: "agent_type",
@@ -323,6 +325,8 @@ export const CLAUDE_EVENT_MAP: Readonly<Record<string, string>> = {
 	Notification: "notification",
 	SubagentStart: "subagent_start",
 	SubagentStop: "subagent_stop",
+	WorktreeCreate: "worktree_create",
+	WorktreeRemove: "worktree_remove",
 	Stop: "agent_end",
 	TeammateIdle: "teammate_idle",
 	TaskCompleted: "task_completed",
@@ -1129,10 +1133,24 @@ export default function (pi: ExtensionAPI) {
 		}
 	};
 
+	/**
+	 * Dispatches EventBus hook execution without blocking the publisher.
+	 *
+	 * @param eventName - Hook event name to execute
+	 * @param eventData - Event payload forwarded to hook matchers/handlers
+	 * @returns Nothing
+	 */
+	const dispatchEventBusHooks = (eventName: string, eventData: Record<string, unknown>): void => {
+		void runHooks(eventName, eventData).catch((error: unknown) => {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error(`[hooks] EventBus dispatch failed for ${eventName}: ${message}`);
+		});
+	};
+
 	/** Forward teammate_idle events to hook handlers. */
 	const onTeammateIdle = (data: unknown) => {
 		const event = data as { team: string; teammate: string; role: string };
-		runHooks("teammate_idle", event);
+		dispatchEventBusHooks("teammate_idle", event);
 	};
 
 	/** Forward task_completed events to hook handlers. */
@@ -1144,7 +1162,7 @@ export default function (pi: ExtensionAPI) {
 			assignee: string;
 			result: string;
 		};
-		runHooks("task_completed", event);
+		dispatchEventBusHooks("task_completed", event);
 	};
 
 	/** Forward subagent_start events from EventBus to hook handlers. */
@@ -1156,7 +1174,7 @@ export default function (pi: ExtensionAPI) {
 			cwd: string;
 			background: boolean;
 		};
-		runHooks("subagent_start", event);
+		dispatchEventBusHooks("subagent_start", event);
 	};
 
 	/** Forward subagent_stop events from EventBus to hook handlers. */
@@ -1169,7 +1187,7 @@ export default function (pi: ExtensionAPI) {
 			result: string;
 			background: boolean;
 		};
-		runHooks("subagent_stop", event);
+		dispatchEventBusHooks("subagent_stop", event);
 	};
 
 	/** Forward notification events from EventBus to hook handlers. */
@@ -1179,7 +1197,29 @@ export default function (pi: ExtensionAPI) {
 			type: string;
 			source?: string;
 		};
-		runHooks("notification", event);
+		dispatchEventBusHooks("notification", event);
+	};
+
+	/**
+	 * Forward worktree_create events from EventBus to hook handlers.
+	 *
+	 * @param data - Event payload from EventBus
+	 * @returns Nothing
+	 */
+	const onWorktreeCreate = (data: unknown) => {
+		const event = data as Record<string, unknown>;
+		dispatchEventBusHooks("worktree_create", event);
+	};
+
+	/**
+	 * Forward worktree_remove events from EventBus to hook handlers without blocking.
+	 *
+	 * @param data - Event payload from EventBus
+	 * @returns Nothing
+	 */
+	const onWorktreeRemove = (data: unknown) => {
+		const event = data as Record<string, unknown>;
+		dispatchEventBusHooks("worktree_remove", event);
 	};
 
 	// ── Session lifecycle ────────────────────────────────────────
@@ -1215,6 +1255,8 @@ export default function (pi: ExtensionAPI) {
 		const unsub4 = pi.events.on("subagent_start", onSubagentStart);
 		const unsub5 = pi.events.on("subagent_stop", onSubagentStop);
 		const unsub6 = pi.events.on("notification", onNotification);
+		const unsub7 = pi.events.on("worktree_create", onWorktreeCreate);
+		const unsub8 = pi.events.on("worktree_remove", onWorktreeRemove);
 		G.__hooksEventCleanup = () => {
 			unsub1();
 			unsub2();
@@ -1222,6 +1264,8 @@ export default function (pi: ExtensionAPI) {
 			unsub4();
 			unsub5();
 			unsub6();
+			unsub7();
+			unsub8();
 		};
 
 		// Run setup hooks if triggered by --init, --init-only, or --maintenance CLI flags.

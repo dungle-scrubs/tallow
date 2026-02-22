@@ -42,6 +42,35 @@ describe("translateClaudeHooks", () => {
 		expect(handler?._claudeEventName).toBe("PreToolUse");
 	});
 
+	it("translates worktree aliases and preserves scope matchers", () => {
+		const translated = translateClaudeHooks({
+			WorktreeCreate: [
+				{ matcher: "project|feature", hooks: [{ type: "command", command: "echo create" }] },
+			],
+			WorktreeRemove: [
+				{ matcher: "project", hooks: [{ type: "command", command: "echo remove" }] },
+			],
+		});
+
+		expect(translated.worktree_create).toHaveLength(1);
+		expect(translated.worktree_remove).toHaveLength(1);
+		expect(translated.worktree_create[0]?.matcher).toBe("project|feature");
+		expect(translated.worktree_remove[0]?.matcher).toBe("project");
+		expect(translated.worktree_remove[0]?.hooks[0]?._claudeEventName).toBe("WorktreeRemove");
+	});
+
+	it("translates worktree lifecycle aliases", () => {
+		const translated = translateClaudeHooks({
+			WorktreeCreate: [{ hooks: [{ type: "command", command: "echo create" }] }],
+			WorktreeRemove: [{ hooks: [{ type: "command", command: "echo remove" }] }],
+		});
+
+		expect(translated.worktree_create).toHaveLength(1);
+		expect(translated.worktree_remove).toHaveLength(1);
+		expect(translated.worktree_create[0]?.hooks[0]?._claudeEventName).toBe("WorktreeCreate");
+		expect(translated.worktree_remove[0]?.hooks[0]?._claudeEventName).toBe("WorktreeRemove");
+	});
+
 	it("skips PermissionRequest with a warning", () => {
 		const warnings: string[] = [];
 		const originalWarn = console.warn;
@@ -98,6 +127,8 @@ describe("translateClaudeHooks", () => {
 			Notification: "notification",
 			SubagentStart: "subagent_start",
 			SubagentStop: "subagent_stop",
+			WorktreeCreate: "worktree_create",
+			WorktreeRemove: "worktree_remove",
 			Stop: "agent_end",
 			TeammateIdle: "teammate_idle",
 			TaskCompleted: "task_completed",
