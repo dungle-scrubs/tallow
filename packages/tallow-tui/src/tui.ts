@@ -979,6 +979,25 @@ export class TUI extends Container {
 			return;
 		}
 
+		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
+		const hasViewportBasisDrift =
+			this.overlayStack.length === 0 &&
+			this.previousLines.length > 0 &&
+			this.maxLinesRendered > this.previousLines.length &&
+			prevViewportTop !== previousContentViewportTop;
+
+		// Keep cursor movement and line-clear math on one viewport basis per render pass.
+		// After shrink-heavy updates with clearOnShrink disabled, maxLinesRendered can stay larger
+		// than current content. Partial redraws then risk clearing the wrong on-screen rows.
+		// Force one full redraw to realign row coordinates and preserve editor borders.
+		if (hasViewportBasisDrift) {
+			logRedraw(
+				`viewport basis drift (workingTop=${prevViewportTop}, contentTop=${previousContentViewportTop})`
+			);
+			fullRender(true);
+			return;
+		}
+
 		// Find first and last changed lines
 		let firstChanged = -1;
 		let lastChanged = -1;
@@ -1050,12 +1069,9 @@ export class TUI extends Container {
 			return;
 		}
 
-		// Check if firstChanged is above what was previously visible
-		// Use previousLines.length (not maxLinesRendered) to avoid false positives after content shrinks
-		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
-		if (firstChanged < previousContentViewportTop) {
-			// First change is above previous viewport - need full re-render
-			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${previousContentViewportTop})`);
+		// If first changed line is above the current viewport basis, partial redraw is unsafe.
+		if (firstChanged < prevViewportTop) {
+			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
 			fullRender(true);
 			return;
 		}
