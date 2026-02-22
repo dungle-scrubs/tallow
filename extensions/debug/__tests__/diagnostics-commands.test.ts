@@ -20,11 +20,14 @@ interface CommandContextOptions {
 let harness: ExtensionHarness;
 let tmpHome: string;
 let savedHome: string | undefined;
+let savedTallowHome: string | undefined;
 
 beforeEach(async () => {
 	tmpHome = mkdtempSync(join(tmpdir(), "tallow-debug-diag-cmd-test-"));
 	savedHome = process.env.HOME;
+	savedTallowHome = process.env.TALLOW_CODING_AGENT_DIR;
 	process.env.HOME = tmpHome;
+	process.env.TALLOW_CODING_AGENT_DIR = join(tmpHome, ".tallow");
 	(globalThis as Record<string, unknown>).__piDebugLogger = undefined;
 
 	harness = ExtensionHarness.create();
@@ -36,6 +39,11 @@ afterEach(() => {
 		process.env.HOME = savedHome;
 	} else {
 		delete process.env.HOME;
+	}
+	if (savedTallowHome !== undefined) {
+		process.env.TALLOW_CODING_AGENT_DIR = savedTallowHome;
+	} else {
+		delete process.env.TALLOW_CODING_AGENT_DIR;
 	}
 	(globalThis as Record<string, unknown>).__piDebugLogger = undefined;
 	rmSync(tmpHome, { recursive: true, force: true });
@@ -59,8 +67,9 @@ function getCommand(name: string): Omit<RegisteredCommand, "name"> {
  * @returns Absolute path to the seeded debug log
  */
 function seedDebugLog(): string {
-	const logPath = join(tmpHome, ".tallow", "debug.log");
-	mkdirSync(join(tmpHome, ".tallow"), { recursive: true });
+	const tallowHome = process.env.TALLOW_CODING_AGENT_DIR ?? join(tmpHome, ".tallow");
+	const logPath = join(tallowHome, "debug.log");
+	mkdirSync(tallowHome, { recursive: true });
 	writeFileSync(
 		logPath,
 		[

@@ -5,8 +5,7 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { getTallowSettingsPath } from "./tallow-paths.js";
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
@@ -47,8 +46,7 @@ export function extractPreview(output: string, maxLines = 3, maxLineWidth = 80):
  */
 export function isInlineResultsEnabled(): boolean {
 	try {
-		const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
-		const raw = fs.readFileSync(settingsPath, "utf-8");
+		const raw = fs.readFileSync(getTallowSettingsPath(), "utf-8");
 		const settings = JSON.parse(raw) as { inlineAgentResults?: boolean };
 		return settings.inlineAgentResults !== false;
 	} catch {

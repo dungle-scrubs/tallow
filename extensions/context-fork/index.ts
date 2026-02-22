@@ -25,6 +25,7 @@ import { stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
 import { isShellInterpolationEnabled } from "../_shared/shell-policy.js";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 import { expandShellCommands } from "../shell-interpolation/index.js";
 import type { FrontmatterIndex } from "./frontmatter-index.js";
 import { buildFrontmatterIndex } from "./frontmatter-index.js";
@@ -197,7 +198,7 @@ function getPackageAgentDirs(settingsPath: string): string[] {
  * @returns Map of agent name → config
  */
 function loadAllAgents(): Map<string, AgentConfig> {
-	const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".tallow");
+	const agentDir = getTallowHomeDir();
 	const userDir = path.join(agentDir, "agents");
 	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
 	const projectDir = path.join(process.cwd(), ".tallow", "agents");

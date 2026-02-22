@@ -12,8 +12,6 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
 import {
@@ -22,6 +20,7 @@ import {
 	type ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import type { EditorTheme } from "@mariozechner/pi-tui";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import { AutocompleteEngine, type ConversationContext } from "./autocomplete.js";
 import { GENERAL_TEMPLATES, type PromptTemplate } from "./templates.js";
 
@@ -30,7 +29,7 @@ import { GENERAL_TEMPLATES, type PromptTemplate } from "./templates.js";
 /** Read a setting from ~/.tallow/settings.json with a typed fallback. */
 function readSetting<T>(key: string, fallback: T): T {
 	try {
-		const raw = readFileSync(join(homedir(), ".tallow", "settings.json"), "utf-8");
+		const raw = readFileSync(getTallowSettingsPath(), "utf-8");
 		const settings = JSON.parse(raw);
 		return key in settings ? (settings[key] as T) : fallback;
 	} catch {

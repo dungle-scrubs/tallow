@@ -13,7 +13,6 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
-import { homedir } from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
@@ -41,6 +40,7 @@ import {
 	WorkspaceSymbolRequest,
 } from "vscode-languageserver-protocol";
 import { getIcon } from "../_icons/index.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 /** Language server binary configuration and project detection markers. */
 interface ServerConfig {
@@ -280,12 +280,7 @@ function readStartupTimeoutFromSettings(settings: Record<string, unknown>): numb
  * @returns Absolute path to the user-level settings file
  */
 function getGlobalSettingsPath(): string {
-	const configuredAgentDir = process.env.TALLOW_CODING_AGENT_DIR ?? process.env.PI_CODING_AGENT_DIR;
-	if (typeof configuredAgentDir === "string" && configuredAgentDir.trim().length > 0) {
-		return path.join(configuredAgentDir, "settings.json");
-	}
-
-	return path.join(homedir(), ".tallow", "settings.json");
+	return getTallowSettingsPath();
 }
 
 /**

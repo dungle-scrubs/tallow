@@ -12,10 +12,9 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Loader } from "@mariozechner/pi-tui";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -599,7 +598,7 @@ function resolve(name: string): SpinnerPreset | undefined {
  * @returns Parsed spinner settings with defaults
  */
 function readSettings(): SpinnerSettings {
-	const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+	const settingsPath = getTallowSettingsPath();
 	try {
 		const raw = fs.readFileSync(settingsPath, "utf-8");
 		return JSON.parse(raw) as SpinnerSettings;

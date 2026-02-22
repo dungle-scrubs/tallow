@@ -18,8 +18,8 @@ import {
 	truncateSync,
 	writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 /** Log entry categories that partition diagnostic output. */
 export type LogCategory =
@@ -238,7 +238,7 @@ export class DebugLogger {
 		logDir?: string
 	) {
 		this.useStderr = process.env.TALLOW_DEBUG === "stderr";
-		const dir = logDir ?? join(homedir(), ".tallow");
+		const dir = logDir ?? getTallowHomeDir();
 		this.logPath = join(dir, "debug.log");
 
 		if (!this.useStderr) {

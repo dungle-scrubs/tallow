@@ -7,7 +7,6 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
 	ContextUsage,
@@ -16,6 +15,7 @@ import type {
 	Theme,
 } from "@mariozechner/pi-coding-agent";
 import { BorderedBox, ROUNDED, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -580,7 +580,7 @@ export default function healthExtension(pi: ExtensionAPI): void {
 	const piVersion = readPackageVersion(
 		join(packageDir, "node_modules", "@mariozechner", "pi-coding-agent", "package.json")
 	);
-	const tallowHome = process.env.TALLOW_CODING_AGENT_DIR ?? join(homedir(), ".tallow");
+	const tallowHome = getTallowHomeDir();
 
 	// ── Message renderer ─────────────────────────────────────────────────
 

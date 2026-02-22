@@ -15,11 +15,10 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { ContextUsage, ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_COMPACTION_SETTINGS } from "@mariozechner/pi-coding-agent";
 import { getIcon } from "../_icons/index.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -60,7 +59,7 @@ const EMPTY_TOOL_RESULT_MEMORY_STATS: ToolResultMemoryStats = {
  * Falls back to DEFAULT_COMPACTION_SETTINGS if unreadable.
  */
 function readCompactionConfig(): CompactionConfig {
-	const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+	const settingsPath = getTallowSettingsPath();
 	try {
 		const raw = fs.readFileSync(settingsPath, "utf-8");
 		const settings = JSON.parse(raw) as {

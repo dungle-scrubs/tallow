@@ -18,6 +18,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 const CONTEXT_FILENAMES = ["CLAUDE.md", "AGENTS.md"] as const;
 
@@ -166,7 +167,7 @@ function findSubdirRuleFiles(baseDir: string, maxDepth: number = 5): string[] {
  */
 function collectMissingFiles(cwd: string): ContextFile[] {
 	const files: ContextFile[] = [];
-	const globalDir = path.join(os.homedir(), ".tallow");
+	const globalDir = getTallowHomeDir();
 
 	// --- Global level ---
 	// If pi loaded ~/.tallow/AGENTS.md, we pick up CLAUDE.md (and vice versa)
