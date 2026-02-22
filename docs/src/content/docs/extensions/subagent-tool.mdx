@@ -39,10 +39,10 @@ cannot pin a full parallel run indefinitely.
 
 When stalled workers happen with partial completion:
 
-- **interactive sessions** prompt you to continue with partial results
-  or abort and rerun stalled workers
-- **headless/non-interactive sessions** return partial results with
-  `isError: true` and remediation guidance
+- stalled workers are **automatically retried once** in single-worker mode
+  with scope-narrowing retry guidance and explicit model pinning when possible
+- if any workers still stall after auto-rerun, the call returns partial
+  results with `isError: true` and remediation guidance
 
 ### Background
 

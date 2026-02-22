@@ -364,6 +364,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **subagent-tool:** add foreground liveness watchdog detection for stalled workers,
   enforce SIGTERM→SIGKILL termination, and provide stalled-aware parallel
   partial-result handling with interactive and headless escape hatches
+- **subagent-tool:** automatically retry stalled parallel workers once in
+  single-worker mode with narrowed-scope guidance and explicit model pinning
+  before returning partial error results
 - **tasks/subagent:** propagate `stalled` subagent status through interop snapshots
   and widget rendering with explicit running/stalled labels
 
