@@ -19,12 +19,23 @@ import type { LogEntry } from "../logger.js";
  * @param ok - Whether the call succeeded
  * @returns A LogEntry for a tool result
  */
-function toolResult(name: string, durationMs: number, ok = true): LogEntry {
+function toolResult(
+	name: string,
+	durationMs: number,
+	ok = true,
+	extra: Record<string, unknown> = {}
+): LogEntry {
 	return {
 		ts: new Date().toISOString(),
 		cat: "tool",
 		evt: "result",
-		data: { name, durationMs, ok, toolCallId: `tc_${Math.random().toString(36).slice(2, 6)}` },
+		data: {
+			name,
+			durationMs,
+			ok,
+			toolCallId: `tc_${Math.random().toString(36).slice(2, 6)}`,
+			...extra,
+		},
 	};
 }
 
@@ -165,6 +176,17 @@ describe("formatToolTimings()", () => {
 
 		expect(output).toContain("| Tool |");
 		expect(output).toContain("| bash |");
+	});
+
+	it("includes payload and summarized columns", () => {
+		const stats = summarizeToolTimings([
+			toolResult("bash", 100, true, { payloadBytes: 2_048, summarizedByRetention: true }),
+		]);
+		const output = formatToolTimings(stats);
+
+		expect(output).toContain("Avg payload");
+		expect(output).toContain("2.0KB");
+		expect(output).toContain("| 1 |");
 	});
 });
 
@@ -349,5 +371,16 @@ describe("formatEntries()", () => {
 
 		expect(output).toContain("agent=sub_1");
 		expect(output).toContain("exit=1");
+	});
+
+	it("highlights payload bytes and retention summaries", () => {
+		const entry = toolResult("bash", 12, true, {
+			payloadBytes: 2_048,
+			summarizedByRetention: true,
+		});
+		const output = formatEntries([entry]);
+
+		expect(output).toContain("payload=2.0KB");
+		expect(output).toContain("summarized");
 	});
 });

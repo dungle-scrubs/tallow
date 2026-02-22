@@ -35,19 +35,81 @@ let totalToolCalls = 0;
 let totalTurns = 0;
 let sessionStartTime = 0;
 
+/** Marker key set by sdk retention when historical results are summarized. */
+const TOOL_RESULT_RETENTION_MARKER = "__tallow_summarized_tool_result__";
+
+/** Payload metrics captured for each tool_result event. */
+interface ToolResultPayloadMetrics {
+	readonly contentLength: number;
+	readonly contentBytes: number;
+	readonly detailsBytes: number;
+	readonly imageBlocks: number;
+	readonly payloadBytes: number;
+	readonly summarizedByRetention: boolean;
+	readonly textBlocks: number;
+}
+
 /**
- * Safely extracts text content length from a tool result's content array.
- * @param content - Array of text/image content blocks
- * @returns Total character count of text blocks
+ * Estimate UTF-8 bytes for JSON-serializable data.
+ *
+ * @param value - Arbitrary data payload
+ * @returns Byte length of serialized data, or 0 on serialization failure
  */
-function contentLength(content: Array<{ type: string; text?: string }>): number {
-	let len = 0;
+function safeJsonBytes(value: unknown): number {
+	if (value == null) return 0;
+	try {
+		return Buffer.byteLength(JSON.stringify(value), "utf-8");
+	} catch {
+		return 0;
+	}
+}
+
+/**
+ * Measure text/image/details payload characteristics for a tool result.
+ *
+ * @param content - Tool result content blocks
+ * @param details - Tool result details payload
+ * @returns Structured payload metrics for debug logging
+ */
+function measureToolResultPayload(
+	content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
+	details: unknown
+): ToolResultPayloadMetrics {
+	let contentLength = 0;
+	let contentBytes = 0;
+	let imageBlocks = 0;
+	let textBlocks = 0;
+
 	for (const block of content) {
-		if (block.type === "text" && block.text) {
-			len += block.text.length;
+		if (block.type === "text") {
+			const text = block.text ?? "";
+			contentLength += text.length;
+			contentBytes += Buffer.byteLength(text, "utf-8");
+			textBlocks += 1;
+			continue;
+		}
+		if (block.type === "image") {
+			contentBytes += Buffer.byteLength(block.data ?? "", "utf-8");
+			contentBytes += Buffer.byteLength(block.mimeType ?? "", "utf-8");
+			imageBlocks += 1;
 		}
 	}
-	return len;
+
+	const detailsBytes = safeJsonBytes(details);
+	const summarizedByRetention =
+		typeof details === "object" &&
+		details !== null &&
+		(details as Record<string, unknown>)[TOOL_RESULT_RETENTION_MARKER] === true;
+
+	return {
+		contentLength,
+		contentBytes,
+		detailsBytes,
+		imageBlocks,
+		payloadBytes: contentBytes + detailsBytes,
+		summarizedByRetention,
+		textBlocks,
+	};
 }
 
 /**
@@ -256,12 +318,23 @@ export default function (pi: ExtensionAPI) {
 		const durationMs = startTime !== undefined ? Math.round(performance.now() - startTime) : null;
 		toolTimings.delete(event.toolCallId);
 
+		const payload = measureToolResultPayload(
+			event.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
+			event.details
+		);
+
 		logger.log("tool", "result", {
 			toolCallId: event.toolCallId,
 			name: event.toolName,
 			durationMs,
 			ok: !event.isError,
-			contentLength: contentLength(event.content as Array<{ type: string; text?: string }>),
+			contentLength: payload.contentLength,
+			contentBytes: payload.contentBytes,
+			detailsBytes: payload.detailsBytes,
+			payloadBytes: payload.payloadBytes,
+			textBlocks: payload.textBlocks,
+			imageBlocks: payload.imageBlocks,
+			summarizedByRetention: payload.summarizedByRetention,
 		});
 	});
 
