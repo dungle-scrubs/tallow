@@ -9,6 +9,7 @@ interface QueuedMessagesLike {
 
 interface InteractiveModeInstanceLike {
 	defaultEditor?: { onEscape?: (() => void) | undefined };
+	flushPendingBashComponents?: (() => void) | undefined;
 	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
 	loadingAnimation?: unknown;
 	pendingWorkingMessage?: unknown;
@@ -22,6 +23,9 @@ interface InteractiveModeInstanceLike {
 interface InteractiveModePrototypeLike {
 	__tallow_stale_ui_patch_applied__?: boolean;
 	createExtensionUIContext?: ((...args: unknown[]) => Record<string, unknown>) | undefined;
+	handleBashCommand?:
+		| ((command: string, excludeFromContext?: boolean) => Promise<unknown>)
+		| undefined;
 	handleEvent?: ((event: { type?: string }) => Promise<unknown>) | undefined;
 	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
 }
@@ -62,6 +66,7 @@ function hasQueuedMessages(messages: QueuedMessagesLike | undefined): boolean {
  *
  * The patch adds:
  * - agent_end cleanup for pending working messages + pending-message refresh
+ * - post-bash flush/update so deferred bash output moves inline promptly
  * - idle Escape behavior that clears queued steering/follow-up messages
  * - setWorkingMessage guard so idle non-empty updates don't queue stale text
  *
@@ -79,9 +84,25 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			if (event?.type === "agent_end") {
 				this.pendingWorkingMessage = undefined;
 				this.statusContainer?.clear?.();
+				this.flushPendingBashComponents?.();
 				this.updatePendingMessagesDisplay?.();
 				this.ui?.requestRender?.();
 			}
+			return result;
+		};
+	}
+
+	const originalHandleBashCommand = prototype.handleBashCommand;
+	if (typeof originalHandleBashCommand === "function") {
+		prototype.handleBashCommand = async function (
+			this: InteractiveModeInstanceLike,
+			command: string,
+			excludeFromContext?: boolean
+		) {
+			const result = await originalHandleBashCommand.call(this, command, excludeFromContext);
+			this.flushPendingBashComponents?.();
+			this.updatePendingMessagesDisplay?.();
+			this.ui?.requestRender?.();
 			return result;
 		};
 	}
