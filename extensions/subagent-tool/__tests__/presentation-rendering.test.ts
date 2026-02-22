@@ -214,4 +214,57 @@ describe("subagent presentation rendering", () => {
 		expect(rendered).not.toContain("─── Activity ───");
 		expect((rendered.match(/↑/g) ?? []).length).toBe(1);
 	});
+
+	it("shows stalled workers distinctly in parallel collapsed and expanded views", () => {
+		const details: SubagentDetails = {
+			agentScope: "user",
+			mode: "parallel",
+			projectAgentsDir: null,
+			results: [
+				makeResult({
+					agent: "alpha",
+					exitCode: 0,
+					messages: [assistantTextMessage("Finished updates and tests")],
+					task: "Apply formatting updates",
+				}),
+				makeResult({
+					agent: "beta",
+					errorMessage: "Worker stalled waiting for tool output",
+					exitCode: 1,
+					stderr: "stalled after inactivity timeout",
+					stopReason: "stalled",
+					task: "Refactor parser internals",
+				}),
+				makeResult({
+					agent: "gamma",
+					errorMessage: "Unhandled exception",
+					exitCode: 1,
+					stopReason: "error",
+					task: "Backfill regression tests",
+				}),
+			],
+		};
+
+		const collapsedComponent = tool.renderResult?.(
+			{ content: [{ text: "", type: "text" }], details },
+			{ expanded: false },
+			theme
+		);
+		if (!collapsedComponent) throw new Error("subagent.renderResult returned undefined");
+		const collapsed = renderComponent(collapsedComponent);
+		expect(collapsed).toContain("1 stalled");
+		expect(collapsed).toMatch(/beta[\s\S]*\(stalled\)/);
+		expect(collapsed).toMatch(/gamma[\s\S]*\(failed\)/);
+
+		const expandedComponent = tool.renderResult?.(
+			{ content: [{ text: "", type: "text" }], details },
+			{ expanded: true },
+			theme
+		);
+		if (!expandedComponent) throw new Error("subagent.renderResult returned undefined");
+		const expanded = renderComponent(expandedComponent);
+		expect(expanded).toContain("1 stalled");
+		expect(expanded).toMatch(/beta[\s\S]*<warning>stalled<\/warning>/);
+		expect(expanded).toMatch(/gamma[\s\S]*<error>failed<\/error>/);
+	});
 });

@@ -36,6 +36,7 @@ const SubagentStatusSchema = Type.Union([
 	Type.Literal("completed"),
 	Type.Literal("failed"),
 	Type.Literal("running"),
+	Type.Literal("stalled"),
 ]);
 
 const BackgroundTaskStatusSchema = Type.Union([
@@ -121,12 +122,13 @@ export type InteropSubagentView = Static<typeof InteropSubagentViewSchema>;
 export type InteropTeamView = Static<typeof InteropTeamViewSchema>;
 
 /** Valid subagent statuses in the interop contract. */
-type InteropSubagentStatus = InteropSubagentView["status"];
+export type InteropSubagentStatus = InteropSubagentView["status"];
 
 const INTEROP_SUBAGENT_STATUSES: readonly InteropSubagentStatus[] = [
 	"completed",
 	"failed",
 	"running",
+	"stalled",
 ] as const;
 
 const INTEROP_BACKGROUND_TASK_STATUSES: readonly InteropBackgroundTaskView["status"][] = [
