@@ -270,6 +270,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to prevent PID-reuse kills of unrelated processes
 - **wezterm-notify:** stabilize tab loader visibility by using agent-level
   lifecycle signaling and redraw-driven spinner advancement to avoid short-run flicker
+- **subagent-tool:** add foreground liveness watchdog detection for stalled workers,
+  enforce SIGTERM→SIGKILL termination, and provide stalled-aware parallel
+  partial-result handling with interactive and headless escape hatches
+- **tasks/subagent:** propagate `stalled` subagent status through interop snapshots
+  and widget rendering with explicit running/stalled labels
 
 ### Documentation
 

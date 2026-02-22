@@ -78,12 +78,14 @@ features into one responsive view.
 
 ### [subagent](/extensions/subagent-tool/)
 
-When subagents are running (foreground or background), the tasks
-widget shows them alongside the task list. Each agent gets a
-colored `@name` with a spinner, its assigned task preview, and
-a live activity line showing what tool the agent is currently
-executing. In-progress tasks display `(@agent-name)` attribution
-when an agent claims ownership.
+When subagents are active (foreground or background), the tasks
+widget shows them alongside the task list. The subagent header now
+splits running vs stalled counts (for example, `Subagents (2 running · 1 stalled)`).
+Running rows use a spinner, while stalled rows are explicitly labeled
+`stalled` with a non-spinner status icon so they are not mistaken
+for active progress. Each row still shows a bounded task preview and
+live activity text when available. In-progress tasks display
+`(@agent-name)` attribution when an agent claims ownership.
 
 In the status bar, a separate agent bar appears:
 `@main @alice @bob · 2 teammates`, with each name colored
