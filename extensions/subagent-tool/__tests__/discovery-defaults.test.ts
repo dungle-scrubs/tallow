@@ -10,6 +10,7 @@
  * - Agent scoring heuristics
  */
 import { describe, expect, it } from "bun:test";
+import { resolveEffectiveIsolation } from "../agents.js";
 
 // ── Helpers (mirrored from subagent-tool/index.ts) ───────────────────────────
 
@@ -317,5 +318,27 @@ describe("mergeDefaults", () => {
 		expect(result.maxTurns).toBe(10); // project wins
 		expect(result.tools).toEqual(["read", "bash"]); // user (project didn't set)
 		expect(result.missingAgentBehavior).toBe("match-or-ephemeral"); // built-in (others didn't set)
+	});
+});
+
+describe("resolveEffectiveIsolation", () => {
+	it("uses per-call isolation when provided", () => {
+		const effective = resolveEffectiveIsolation("worktree", undefined, undefined);
+		expect(effective).toBe("worktree");
+	});
+
+	it("falls back to agent frontmatter isolation", () => {
+		const effective = resolveEffectiveIsolation(undefined, "worktree", undefined);
+		expect(effective).toBe("worktree");
+	});
+
+	it("falls back to defaults isolation", () => {
+		const effective = resolveEffectiveIsolation(undefined, undefined, "worktree");
+		expect(effective).toBe("worktree");
+	});
+
+	it("returns undefined when isolation is unset everywhere", () => {
+		const effective = resolveEffectiveIsolation(undefined, undefined, undefined);
+		expect(effective).toBeUndefined();
 	});
 });

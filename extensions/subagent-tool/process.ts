@@ -14,13 +14,23 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
+import {
+	emitWorktreeLifecycleEvent,
+	type WorktreeLifecycleScope,
+} from "../_shared/interop-events.js";
 import { expandFileReferences } from "../file-reference/index.js";
+import { createWorktree, removeWorktree, validateGitRepo } from "../worktree/lifecycle.js";
 import type { AgentConfig, AgentDefaults } from "./agents.js";
-import { computeEffectiveTools, resolveAgentForExecution } from "./agents.js";
+import {
+	computeEffectiveTools,
+	resolveAgentForExecution,
+	resolveEffectiveIsolation,
+} from "./agents.js";
 import { getFinalOutput, type SingleResult, type SubagentDetails } from "./formatting.js";
 import type { RoutingHints } from "./model-router.js";
 import { routeModel } from "./model-router.js";
 import type {
+	IsolationMode,
 	SubagentCompleteDetails,
 	SubagentStartEvent,
 	SubagentStopEvent,
@@ -264,6 +274,100 @@ export function applyBackgroundResultRetention(
 	subagent.historyCompacted = compacted.retainedMessageCount < compacted.originalMessageCount;
 	subagent.historyOriginalMessageCount = compacted.originalMessageCount;
 	subagent.historyRetainedMessageCount = compacted.retainedMessageCount;
+}
+
+/** Managed isolation metadata for one subagent invocation. */
+interface SubagentIsolationContext {
+	readonly mode: IsolationMode;
+	readonly repoRoot: string;
+	readonly worktreePath: string;
+}
+
+/**
+ * Provision execution isolation for one subagent invocation.
+ *
+ * @param baseCwd - Base working directory before isolation
+ * @param requestedIsolation - Explicit per-call isolation, if any
+ * @param agent - Resolved agent config
+ * @param defaults - Defaults from _defaults.md
+ * @param lifecycleScope - Lifecycle scope for emitted events
+ * @param lifecycleId - Subagent/task identifier for lifecycle payloads
+ * @param events - Optional event bus for lifecycle hooks
+ * @returns Effective cwd and optional isolation context
+ */
+function provisionIsolation(
+	baseCwd: string,
+	requestedIsolation: IsolationMode | undefined,
+	agent: AgentConfig,
+	defaults: AgentDefaults | undefined,
+	lifecycleScope: WorktreeLifecycleScope,
+	lifecycleId: string,
+	events?: ExtensionAPI["events"]
+): {
+	readonly isolation: SubagentIsolationContext | undefined;
+	readonly workingDirectory: string;
+} {
+	const isolationMode = resolveEffectiveIsolation(
+		requestedIsolation,
+		agent.isolation,
+		defaults?.isolation
+	);
+	if (isolationMode !== "worktree") {
+		return { isolation: undefined, workingDirectory: baseCwd };
+	}
+
+	const repoRoot = validateGitRepo(baseCwd).repoRoot;
+	const created = createWorktree(repoRoot, {
+		agentId: lifecycleScope === "subagent" ? lifecycleId : undefined,
+		id: lifecycleId,
+		scope: "subagent",
+	});
+	const isolation: SubagentIsolationContext = {
+		mode: "worktree",
+		repoRoot,
+		worktreePath: created.worktreePath,
+	};
+
+	if (events) {
+		emitWorktreeLifecycleEvent(events, "worktree_create", {
+			agentId: lifecycleScope === "subagent" ? lifecycleId : undefined,
+			repoRoot,
+			scope: lifecycleScope,
+			timestamp: Date.now(),
+			worktreePath: created.worktreePath,
+		});
+	}
+
+	return {
+		isolation,
+		workingDirectory: created.worktreePath,
+	};
+}
+
+/**
+ * Cleanup worktree isolation for one subagent invocation.
+ *
+ * @param lifecycleScope - Lifecycle scope for emitted events
+ * @param lifecycleId - Subagent/task identifier
+ * @param isolation - Isolation context to cleanup
+ * @param events - Optional event bus for lifecycle hooks
+ */
+function cleanupIsolation(
+	lifecycleScope: WorktreeLifecycleScope,
+	lifecycleId: string,
+	isolation: SubagentIsolationContext | undefined,
+	events?: ExtensionAPI["events"]
+): void {
+	if (!isolation) return;
+	removeWorktree(isolation.worktreePath);
+	if (!events) return;
+	emitWorktreeLifecycleEvent(events, "worktree_remove", {
+		agentId: lifecycleScope === "subagent" ? lifecycleId : undefined,
+		repoRoot: isolation.repoRoot,
+		scope: lifecycleScope,
+		timestamp: Date.now(),
+		worktreePath: isolation.worktreePath,
+	});
 }
 
 /**
@@ -513,6 +617,7 @@ export type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => vo
  * @param parentModelId - Parent model ID for inheritance
  * @param defaults - Optional agent defaults
  * @param hints - Optional routing hints
+ * @param isolationOverride - Optional per-call isolation override
  * @returns Background subagent ID, error string if model unresolvable, or null if agent not found
  */
 export async function spawnBackgroundSubagent(
@@ -526,11 +631,14 @@ export async function spawnBackgroundSubagent(
 	modelOverride?: string,
 	parentModelId?: string,
 	defaults?: AgentDefaults,
-	hints?: RoutingHints
+	hints?: RoutingHints,
+	isolationOverride?: IsolationMode
 ): Promise<string | null> {
 	const resolved = resolveAgentForExecution(agentName, agents, defaults);
-	const effectiveCwd = cwd ?? defaultCwd;
-	// Route model via fuzzy resolution + auto-routing
+	const id = `bg_${generateId()}`;
+	const requestedCwd = cwd ?? defaultCwd;
+
+	// Route model via fuzzy resolution + auto-routing.
 	const routing = await routeModel(
 		task,
 		modelOverride,
@@ -538,9 +646,29 @@ export async function spawnBackgroundSubagent(
 		parentModelId,
 		resolved.agent.description,
 		hints,
-		effectiveCwd
+		requestedCwd
 	);
 	if (!routing.ok) return routing.error;
+
+	let isolationContext: SubagentIsolationContext | undefined;
+	let effectiveCwd = requestedCwd;
+	try {
+		const provisioned = provisionIsolation(
+			requestedCwd,
+			isolationOverride,
+			resolved.agent,
+			defaults,
+			"subagent",
+			id,
+			piEvents
+		);
+		isolationContext = provisioned.isolation;
+		effectiveCwd = provisioned.workingDirectory;
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		return `Failed to create worktree isolation for ${agentName}: ${reason}`;
+	}
+
 	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 
@@ -573,7 +701,14 @@ export async function spawnBackgroundSubagent(
 		args.push("--append-system-prompt", tmpPromptPath);
 	}
 
-	const expandedTask = await expandFileReferences(task, effectiveCwd);
+	let expandedTask: string;
+	try {
+		expandedTask = await expandFileReferences(task, effectiveCwd);
+	} catch (error) {
+		cleanupIsolation("subagent", id, isolationContext, piEvents);
+		const reason = error instanceof Error ? error.message : String(error);
+		return `Failed to expand task references for ${agentName}: ${reason}`;
+	}
 	args.push(`Task: ${expandedTask}`);
 
 	const childEnv: Record<string, string> = { ...process.env, PI_IS_SUBAGENT: "1" } as Record<
@@ -587,14 +722,19 @@ export async function spawnBackgroundSubagent(
 		childEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
 	}
 
-	const proc = spawn("pi", args, {
-		cwd: effectiveCwd,
-		shell: false,
-		stdio: ["ignore", "pipe", "pipe"],
-		env: childEnv,
-	});
-
-	const id = `bg_${generateId()}`;
+	let proc: ReturnType<typeof spawn>;
+	try {
+		proc = spawn("pi", args, {
+			cwd: effectiveCwd,
+			shell: false,
+			stdio: ["ignore", "pipe", "pipe"],
+			env: childEnv,
+		});
+	} catch (error) {
+		cleanupIsolation("subagent", id, isolationContext, piEvents);
+		const reason = error instanceof Error ? error.message : String(error);
+		return `Failed to spawn background subagent ${agentName}: ${reason}`;
+	}
 
 	// Emit subagent_start event
 	piEvents?.emit("subagent_start", {
@@ -627,6 +767,7 @@ export async function spawnBackgroundSubagent(
 	const bgSubagent: BackgroundSubagent = {
 		id,
 		agent: agentName,
+		isolationMode: isolationContext?.mode,
 		model: agent.model,
 		task,
 		startTime: Date.now(),
@@ -635,11 +776,24 @@ export async function spawnBackgroundSubagent(
 		status: "running",
 		tmpPromptDir,
 		tmpPromptPath,
+		worktreePath: isolationContext?.worktreePath,
 	};
 
 	backgroundSubagents.set(id, bgSubagent);
 	publishSubagentSnapshot(piEvents);
 	startBackgroundSubagentCleanupLoop(piEvents);
+
+	let isolationCleaned = false;
+	const cleanupBackgroundIsolation = () => {
+		if (isolationCleaned) return;
+		isolationCleaned = true;
+		cleanupIsolation("subagent", id, isolationContext, piEvents);
+	};
+
+	if (!proc.stdout || !proc.stderr) {
+		cleanupBackgroundIsolation();
+		return `Failed to spawn background subagent ${agentName}: missing stdio pipes`;
+	}
 
 	// Collect output
 	let buffer = "";
@@ -714,6 +868,11 @@ export async function spawnBackgroundSubagent(
 		result.stderr += data.toString();
 	});
 
+	proc.on("error", (error) => {
+		result.stderr += error.message;
+		cleanupBackgroundIsolation();
+	});
+
 	proc.on("close", (code) => {
 		if (buffer.trim()) {
 			try {
@@ -757,6 +916,7 @@ export async function spawnBackgroundSubagent(
 				/* ignore */
 			}
 
+		cleanupBackgroundIsolation();
 		updateWidget();
 
 		// Post inline result for background subagent completion
@@ -812,6 +972,7 @@ export async function spawnBackgroundSubagent(
  * @param parentModelId - Parent model ID for inheritance
  * @param defaults - Optional agent defaults
  * @param hints - Optional routing hints
+ * @param isolationOverride - Optional per-call isolation override
  * @returns Result from the subagent execution
  */
 export async function runSingleAgent(
@@ -829,10 +990,11 @@ export async function runSingleAgent(
 	modelOverride?: string,
 	parentModelId?: string,
 	defaults?: AgentDefaults,
-	hints?: RoutingHints
+	hints?: RoutingHints,
+	isolationOverride?: IsolationMode
 ): Promise<SingleResult> {
 	const resolved = resolveAgentForExecution(agentName, agents, defaults);
-	const effectiveCwd = cwd ?? defaultCwd;
+	const requestedCwd = cwd ?? defaultCwd;
 	// Route model via fuzzy resolution + auto-routing
 	const routing = await routeModel(
 		task,
@@ -841,7 +1003,7 @@ export async function runSingleAgent(
 		parentModelId,
 		resolved.agent.description,
 		hints,
-		effectiveCwd
+		requestedCwd
 	);
 	if (!routing.ok) {
 		// Return a failed SingleResult so the caller can surface the error
@@ -870,7 +1032,53 @@ export async function runSingleAgent(
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 	const taskId = `fg_${generateId()}`;
 
-	registerForegroundSubagent(taskId, agentName, task, Date.now(), piEvents, agent.model);
+	let isolationContext: SubagentIsolationContext | undefined;
+	let effectiveCwd = requestedCwd;
+	try {
+		const provisioned = provisionIsolation(
+			requestedCwd,
+			isolationOverride,
+			agent,
+			defaults,
+			"subagent",
+			taskId,
+			piEvents
+		);
+		isolationContext = provisioned.isolation;
+		effectiveCwd = provisioned.workingDirectory;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			agent: agentName,
+			agentSource,
+			task,
+			exitCode: 1,
+			messages: [],
+			stderr: message,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: 0,
+				contextTokens: 0,
+				turns: 0,
+				denials: 0,
+			},
+			errorMessage: message,
+			step,
+		};
+	}
+
+	registerForegroundSubagent(
+		taskId,
+		agentName,
+		task,
+		Date.now(),
+		piEvents,
+		agent.model,
+		isolationContext?.mode
+	);
 
 	// Emit subagent_start event
 	piEvents?.emit("subagent_start", {
@@ -993,7 +1201,7 @@ export async function runSingleAgent(
 		let fgTurnCount = 0;
 		const exitCode = await new Promise<number>((resolve) => {
 			const proc = spawn("pi", args, {
-				cwd: cwd ?? defaultCwd,
+				cwd: effectiveCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: fgChildEnv,
@@ -1210,7 +1418,7 @@ export async function runSingleAgent(
 				agents,
 				agentName,
 				task,
-				cwd,
+				effectiveCwd,
 				step,
 				signal,
 				onUpdate,
@@ -1219,8 +1427,10 @@ export async function runSingleAgent(
 				session,
 				nextModel.id,
 				parentModelId,
-				defaults
-				// Clear hints — the explicit model override will be used
+				defaults,
+				undefined,
+				undefined
+				// Clear hints and isolation override — explicit model + existing cwd are used
 			);
 		}
 
@@ -1228,5 +1438,6 @@ export async function runSingleAgent(
 	} finally {
 		completeForegroundSubagent(taskId, piEvents);
 		cleanupTempFiles();
+		cleanupIsolation("subagent", taskId, isolationContext, piEvents);
 	}
 }

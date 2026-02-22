@@ -16,6 +16,7 @@ import {
 	type InteropSubagentView,
 } from "../_shared/interop-events.js";
 import { getFinalOutput, type SingleResult } from "./formatting.js";
+import type { IsolationMode } from "./schema.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ import { getFinalOutput, type SingleResult } from "./formatting.js";
 export interface RunningSubagent {
 	id: string;
 	agent: string;
+	isolationMode?: IsolationMode;
 	model?: string;
 	task: string;
 	startTime: number;
@@ -37,6 +39,7 @@ export interface BackgroundSubagent {
 	historyOriginalMessageCount?: number;
 	historyRetainedMessageCount?: number;
 	id: string;
+	isolationMode?: IsolationMode;
 	model?: string;
 	process: ReturnType<typeof spawn>;
 	result: SingleResult;
@@ -46,6 +49,7 @@ export interface BackgroundSubagent {
 	task: string;
 	tmpPromptDir?: string;
 	tmpPromptPath?: string;
+	worktreePath?: string;
 }
 
 // ── State ────────────────────────────────────────────────────────────────────
@@ -324,9 +328,18 @@ export function registerForegroundSubagent(
 	task: string,
 	startTime: number,
 	piEvents?: ExtensionAPI["events"],
-	model?: string
+	model?: string,
+	isolationMode?: IsolationMode
 ): void {
-	runningSubagents.set(id, { id, agent, model, task, startTime, status: "running" });
+	runningSubagents.set(id, {
+		id,
+		agent,
+		isolationMode,
+		model,
+		task,
+		startTime,
+		status: "running",
+	});
 	publishSubagentSnapshot(piEvents);
 	startWidgetUpdates();
 }

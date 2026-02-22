@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import type { IsolationMode } from "./schema.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ export interface AgentConfig {
 	mcpServers?: string[];
 	maxTurns?: number;
 	model?: string;
+	isolation?: IsolationMode;
 	systemPrompt: string;
 	source: "user" | "project";
 	filePath: string;
@@ -47,6 +49,7 @@ export interface AgentDefaults {
 	disallowedTools?: string[];
 	maxTurns?: number;
 	mcpServers?: string[];
+	isolation?: IsolationMode;
 	/** How to handle missing agent names. Default: "match-or-ephemeral" */
 	missingAgentBehavior?: "match-or-ephemeral" | "error";
 	/** Agent name to use as fallback when no match found */
@@ -80,6 +83,29 @@ export const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find"
 
 /** Minimum score threshold for best-match to be accepted over ephemeral. */
 const MATCH_THRESHOLD = 40;
+
+/**
+ * Parse and validate isolation frontmatter/default values.
+ *
+ * @param value - Raw frontmatter/default value
+ * @param sourcePath - File path used in deterministic error messages
+ * @param fieldName - Field name used in deterministic error messages
+ * @returns Parsed isolation mode when present
+ * @throws {Error} When value is invalid
+ */
+function parseIsolationValue(
+	value: unknown,
+	sourcePath: string,
+	fieldName: "isolation"
+): IsolationMode | undefined {
+	if (value == null || value === "") return undefined;
+	if (typeof value !== "string") {
+		throw new Error(`Invalid ${fieldName} in ${sourcePath}: expected string "worktree".`);
+	}
+	const normalized = value.trim().toLowerCase();
+	if (normalized === "worktree") return "worktree";
+	throw new Error(`Invalid ${fieldName} in ${sourcePath}: received "${value}". Allowed: worktree.`);
+}
 
 // ── Functions ────────────────────────────────────────────────────────────────
 
@@ -136,13 +162,19 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			continue;
 		}
 
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-		if (!(frontmatter.name && frontmatter.description)) continue;
+		const { frontmatter, body } = parseFrontmatter<Record<string, unknown>>(content);
+		const name = typeof frontmatter.name === "string" ? frontmatter.name.trim() : "";
+		const description =
+			typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
+		if (!name || !description) continue;
 
-		const rawTools = frontmatter.tools
-			?.split(",")
-			.map((t: string) => t.trim())
-			.filter(Boolean);
+		const rawTools =
+			typeof frontmatter.tools === "string"
+				? frontmatter.tools
+						.split(",")
+						.map((t: string) => t.trim())
+						.filter(Boolean)
+				: undefined;
 
 		// Separate Task(agent_type) entries from regular tool names
 		const TASK_PATTERN = /^Task\((.+)\)$/;
@@ -171,13 +203,16 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			}
 		}
 
-		const disallowedTools = frontmatter.disallowedTools
-			?.split(",")
-			.map((t: string) => t.trim())
-			.filter(Boolean);
+		const disallowedTools =
+			typeof frontmatter.disallowedTools === "string"
+				? frontmatter.disallowedTools
+						.split(",")
+						.map((t: string) => t.trim())
+						.filter(Boolean)
+				: undefined;
 
 		const parsedMaxTurns = frontmatter.maxTurns
-			? Number.parseInt(frontmatter.maxTurns, 10)
+			? Number.parseInt(String(frontmatter.maxTurns), 10)
 			: undefined;
 		const maxTurns = parsedMaxTurns && parsedMaxTurns > 0 ? parsedMaxTurns : undefined;
 
@@ -189,7 +224,7 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 						if (typeof entry === "string") return true;
 						if (typeof entry === "object" && entry !== null) {
 							console.warn(
-								`MCP: Inline server definitions not supported in agent "${frontmatter.name}". ` +
+								`MCP: Inline server definitions not supported in agent "${name}". ` +
 									`Use a string reference to a configured server name.`
 							);
 							return false;
@@ -206,16 +241,19 @@ function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig
 			}
 		}
 
+		const isolation = parseIsolationValue(frontmatter.isolation, filePath, "isolation");
+
 		agents.push({
-			name: frontmatter.name,
-			description: frontmatter.description,
+			name,
+			description,
 			tools: tools.length > 0 ? tools : undefined,
 			disallowedTools: disallowedTools && disallowedTools.length > 0 ? disallowedTools : undefined,
 			skills: skills && skills.length > 0 ? skills : undefined,
 			allowedAgentTypes: allowedAgentTypes.length > 0 ? allowedAgentTypes : undefined,
 			mcpServers: mcpServers && mcpServers.length > 0 ? mcpServers : undefined,
 			maxTurns,
-			model: frontmatter.model,
+			model: typeof frontmatter.model === "string" ? frontmatter.model : undefined,
+			isolation,
 			systemPrompt: body,
 			source,
 			filePath,
@@ -307,6 +345,10 @@ function loadDefaultsFromDir(dir: string): AgentDefaults | undefined {
 			.map((s) => s.trim())
 			.filter(Boolean);
 	}
+	const isolation = parseIsolationValue(frontmatter.isolation, filePath, "isolation");
+	if (isolation) {
+		defaults.isolation = isolation;
+	}
 	if (frontmatter.missingAgentBehavior === "error") {
 		defaults.missingAgentBehavior = "error";
 	}
@@ -334,6 +376,7 @@ function mergeDefaults(...sources: (AgentDefaults | undefined)[]): AgentDefaults
 		if (src.disallowedTools) merged.disallowedTools = src.disallowedTools;
 		if (src.maxTurns != null) merged.maxTurns = src.maxTurns;
 		if (src.mcpServers) merged.mcpServers = src.mcpServers;
+		if (src.isolation) merged.isolation = src.isolation;
 		if (src.missingAgentBehavior) merged.missingAgentBehavior = src.missingAgentBehavior;
 		if (src.fallbackAgent) merged.fallbackAgent = src.fallbackAgent;
 	}
@@ -389,6 +432,22 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const defaults = mergeDefaults(userDefaults, projectDefaults);
 
 	return { agents: Array.from(agentMap.values()), projectAgentsDir, defaults };
+}
+
+/**
+ * Resolve effective isolation by precedence: call param > agent > defaults.
+ *
+ * @param callIsolation - Isolation passed in the current tool invocation
+ * @param agentIsolation - Isolation from resolved agent frontmatter
+ * @param defaultIsolation - Isolation from `_defaults.md`
+ * @returns Effective isolation mode when configured
+ */
+export function resolveEffectiveIsolation(
+	callIsolation: IsolationMode | undefined,
+	agentIsolation: IsolationMode | undefined,
+	defaultIsolation: IsolationMode | undefined
+): IsolationMode | undefined {
+	return callIsolation ?? agentIsolation ?? defaultIsolation;
 }
 
 /**
@@ -477,6 +536,7 @@ export function resolveAgentForExecution(
 		disallowedTools: defaults?.disallowedTools,
 		maxTurns: defaults?.maxTurns,
 		mcpServers: defaults?.mcpServers,
+		isolation: defaults?.isolation,
 		systemPrompt:
 			`You are ${agentName}, a specialized subagent. ` +
 			"Complete the delegated task thoroughly and return your results.",

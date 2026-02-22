@@ -54,7 +54,7 @@ import {
 	setPiRef,
 	spawnBackgroundSubagent,
 } from "./process.js";
-import type { SubagentCompleteDetails } from "./schema.js";
+import type { IsolationMode, SubagentCompleteDetails } from "./schema.js";
 import { SubagentParams } from "./schema.js";
 import {
 	backgroundSubagents,
@@ -173,6 +173,11 @@ export default function (pi: ExtensionAPI) {
 		label: "subagent",
 		description: `Delegate tasks to specialized subagents with isolated context. Modes: single (agent + task), parallel (tasks array), centipede (sequential with {previous} placeholder). Default agent scope is "user" (from ~/.tallow/agents). To include project-local agents, set agentScope: "both". Missing agent names recover gracefully via best-match or ephemeral fallback.
 
+ISOLATION:
+- isolation: "worktree" runs a subagent in a detached temporary git worktree
+- precedence: per-call param > agent frontmatter > _defaults.md frontmatter
+- in parallel/centipede mode, isolation can be set per task item
+
 MODEL SELECTION:
 - model: explicit model name (fuzzy matched, e.g. "opus", "haiku", "gemini flash")
 - No model specified: auto-routes based on task type and complexity
@@ -246,7 +251,22 @@ WHEN NOT TO USE SUBAGENTS:
 			}
 
 			const agentScope: AgentScope = params.agentScope ?? "user";
-			const discovery = discoverAgents(ctx.cwd, agentScope);
+			let discovery: ReturnType<typeof discoverAgents>;
+			try {
+				discovery = discoverAgents(ctx.cwd, agentScope);
+			} catch (error) {
+				const reason = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text", text: `Invalid agent frontmatter: ${reason}` }],
+					details: {
+						mode: "single" as const,
+						agentScope,
+						projectAgentsDir: null,
+						results: [],
+					},
+					isError: true,
+				};
+			}
 			const agents = discovery.agents;
 			const defaults = discovery.defaults;
 
@@ -376,12 +396,15 @@ WHEN NOT TO USE SUBAGENTS:
 					bg.historyRetainedMessageCount !== undefined
 						? `\n**History:** compacted (${bg.historyRetainedMessageCount}/${bg.historyOriginalMessageCount} messages retained)`
 						: "";
+				const isolationLine = bg.isolationMode
+					? `\n**Isolation:** ${bg.isolationMode}${bg.worktreePath ? ` (${bg.worktreePath})` : ""}`
+					: "";
 				return {
 					details: {},
 					content: [
 						{
 							type: "text",
-							text: `**Task:** ${bg.id}\n**Agent:** ${bg.agent}\n**Status:** ${bg.status}\n**Duration:** ${duration}\n**Task:** ${bg.task}${historyLine}\n\n**Output:**\n${output}`,
+							text: `**Task:** ${bg.id}\n**Agent:** ${bg.agent}\n**Status:** ${bg.status}\n**Duration:** ${duration}\n**Task:** ${bg.task}${isolationLine}${historyLine}\n\n**Output:**\n${output}`,
 						},
 					],
 				};
@@ -406,7 +429,8 @@ WHEN NOT TO USE SUBAGENTS:
 							: getIcon("error");
 				const preview = bg.task.length > 40 ? `${bg.task.slice(0, 37)}...` : bg.task;
 				const compactedBadge = bg.historyCompacted ? " · compacted" : "";
-				return `${statusIcon} **${bg.id}** (${bg.agent}) - ${bg.status}${compactedBadge} (${duration})\n   ${preview}`;
+				const isolationBadge = bg.isolationMode ? ` · ${bg.isolationMode}` : "";
+				return `${statusIcon} **${bg.id}** (${bg.agent}) - ${bg.status}${compactedBadge}${isolationBadge} (${duration})\n   ${preview}`;
 			});
 
 			return {
@@ -428,7 +452,13 @@ WHEN NOT TO USE SUBAGENTS:
  * Execute centipede (sequential) mode.
  */
 async function executeCentipede(
-	centipede: { agent: string; task: string; cwd?: string; model?: string }[],
+	centipede: {
+		agent: string;
+		task: string;
+		cwd?: string;
+		model?: string;
+		isolation?: IsolationMode;
+	}[],
 	ctx: ExtensionContext,
 	agents: { name: string; source: string }[],
 	defaults: Parameters<typeof runSingleAgent>[13],
@@ -511,7 +541,8 @@ async function executeCentipede(
 				step.model,
 				parentModelId,
 				defaults,
-				routingHints
+				routingHints,
+				step.isolation
 			);
 			results.push(result);
 			latestPartialResult = undefined;
@@ -558,6 +589,7 @@ type ParallelTask = {
 	task: string;
 	cwd?: string;
 	model?: string;
+	isolation?: IsolationMode;
 };
 
 /**
@@ -594,7 +626,8 @@ async function executeParallel(
 				(t as { model?: string }).model,
 				parentModelId,
 				defaults,
-				routingHints
+				routingHints,
+				t.isolation
 			);
 			if (result?.startsWith("bg_")) taskIds.push(result);
 			else if (result) errors.push(result);
@@ -718,7 +751,8 @@ async function executeParallel(
 					(t as { model?: string }).model,
 					parentModelId,
 					defaults,
-					routingHints
+					routingHints,
+					t.isolation
 				);
 				allResults[globalIndex] = result;
 				return result;
@@ -787,7 +821,8 @@ async function executeParallel(
 					explicitRetryModel,
 					parentModelId,
 					defaults,
-					retryRoutingHints
+					retryRoutingHints,
+					stalledTask.isolation
 				);
 
 				retryResult.task = stalledTask.task;
@@ -886,6 +921,7 @@ async function executeSingle(
 		session?: string;
 		model?: string;
 		background?: boolean;
+		isolation?: IsolationMode;
 	},
 	ctx: ExtensionContext,
 	agents: Parameters<typeof runSingleAgent>[1],
@@ -915,7 +951,8 @@ async function executeSingle(
 			params.model,
 			parentModelId,
 			defaults,
-			routingHints
+			routingHints,
+			params.isolation
 		);
 		if (result?.startsWith("bg_")) {
 			return {
@@ -977,7 +1014,8 @@ async function executeSingle(
 		params.model,
 		parentModelId,
 		defaults,
-		routingHints
+		routingHints,
+		params.isolation
 	);
 
 	if (singleSpinnerInterval) {
