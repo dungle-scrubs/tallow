@@ -3,6 +3,7 @@
  * - Live truncated content during execution (first N lines)
  * - Compact summary when done (✓ file.md (22 lines, 0.8KB))
  * - Special rendering for SKILL.md files
+ * - Structured parsing for PDFs and Jupyter notebooks
  * - Full content always sent to LLM via context restoration
  *
  * Uses raw render functions for renderResult so that
@@ -50,6 +51,14 @@ import {
 	renderLines,
 	truncateForDisplay,
 } from "../tool-display/index.js";
+import {
+	formatNotebookOutput,
+	isNotebook,
+	NOTEBOOK_MARKER,
+	NotebookParseError,
+	parseNotebook,
+	summarizeNotebookCounts,
+} from "./notebook.js";
 import {
 	formatPdfOutput,
 	isPdf,
@@ -363,6 +372,73 @@ async function executePdf(
 }
 
 /**
+ * Execute notebook reading: parse notebook JSON, format cell content, and summarize.
+ *
+ * @param absolutePath - Absolute path to the notebook file
+ * @param displayPath - Original user-facing path string
+ * @param onUpdate - Streaming update callback for live preview
+ * @returns Tool result with notebook content and summary metadata
+ */
+function executeNotebook(
+	absolutePath: string,
+	displayPath: string,
+	onUpdate?: (partialResult: {
+		content: Array<{ type: "text"; text: string }>;
+		details: Record<string, unknown>;
+	}) => void
+): {
+	content: Array<{ type: "text"; text: string }>;
+	details: Record<string, unknown>;
+	isError?: boolean;
+} {
+	const notebookContent = fs.readFileSync(absolutePath, "utf-8");
+
+	try {
+		const notebook = parseNotebook(notebookContent);
+		const formatted = formatNotebookOutput(notebook);
+		const counts = summarizeNotebookCounts(notebook);
+
+		// Stream a preview during execution
+		const previewLines = formatted.split("\n").slice(0, 10).join("\n");
+		onUpdate?.({
+			content: [{ type: "text" as const, text: previewLines }],
+			details: { _preview: true },
+		});
+
+		const sizeKb = (Buffer.byteLength(formatted, "utf-8") / 1024).toFixed(1);
+		const summary =
+			`${displayPath} (${notebook.cells.length} cells, ` +
+			`${counts.codeCells} code, ${counts.markdownCells} markdown, ` +
+			`${counts.outputCount} outputs, ${sizeKb}KB extracted)`;
+
+		return {
+			content: [{ type: "text" as const, text: summary }],
+			details: {
+				[NOTEBOOK_MARKER]: true,
+				_fullText: formatted,
+				_path: displayPath,
+				_filename: displayPath,
+				_cellCount: notebook.cells.length,
+				_codeCellCount: counts.codeCells,
+				_markdownCellCount: counts.markdownCells,
+				_outputCount: counts.outputCount,
+				_rawCellCount: counts.rawCells,
+				_language: notebook.language,
+			},
+		};
+	} catch (err: unknown) {
+		if (err instanceof NotebookParseError) {
+			return {
+				content: [{ type: "text" as const, text: err.message }],
+				details: {},
+				isError: true,
+			};
+		}
+		throw err;
+	}
+}
+
+/**
  * Linkify the file-path prefix in a summary string.
  *
  * Summaries follow `<path> (<meta>)`; this keeps metadata plain while turning
@@ -460,6 +536,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 			// ── PDF handling ────────────────────────────────────
 			if (await isPdf(absolutePath)) {
 				return executePdf(absolutePath, path, params.pages as string | undefined, onUpdate);
+			}
+
+			// ── Notebook handling (.ipynb) ──────────────────────
+			if (isNotebook(absolutePath)) {
+				return executeNotebook(absolutePath, path, onUpdate);
 			}
 
 			// ── Image detection from bytes ──────────────────────
@@ -591,13 +672,20 @@ export default function readSummary(pi: ExtensionAPI): void {
 						_filename?: string;
 						_fullText?: string;
 						_isSkill?: boolean;
-						_isPdf?: boolean;
-						_totalPages?: number;
+						_cellCount?: number;
+						_codeCellCount?: number;
 						_emptyText?: boolean;
 						_imageMetadata?: ImageMetadata;
-						[SUMMARY_MARKER]?: boolean;
-						[PDF_MARKER]?: boolean;
+						_isPdf?: boolean;
+						_language?: string;
+						_markdownCellCount?: number;
+						_outputCount?: number;
+						_rawCellCount?: number;
+						_totalPages?: number;
 						[IMAGE_MARKER]?: boolean;
+						[NOTEBOOK_MARKER]?: boolean;
+						[PDF_MARKER]?: boolean;
+						[SUMMARY_MARKER]?: boolean;
 				  }
 				| undefined;
 
@@ -657,6 +745,21 @@ export default function readSummary(pi: ExtensionAPI): void {
 				return renderLines([footer]);
 			}
 
+			// Notebook file: compact summary collapsed, full text expanded
+			if (details?.[NOTEBOOK_MARKER]) {
+				const summary = textContent?.text ?? "Notebook";
+				const footer = buildFooter(summary);
+
+				if (expanded && details?._fullText) {
+					const lines: string[] = [];
+					appendSection(lines, [formatSectionDivider(theme, "Output")]);
+					appendSection(lines, details._fullText.split("\n").map(styleProcessLine));
+					appendSection(lines, [footer], { blankBefore: true });
+					return renderLines(lines, { wrap: true });
+				}
+				return renderLines([footer]);
+			}
+
 			// If not summarized, show raw content
 			if (!details?.[SUMMARY_MARKER]) {
 				const raw = textContent?.text ?? "";
@@ -694,10 +797,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 			if (msg.role !== "toolResult") continue;
 
 			const details = msg.details as Record<string, unknown> | undefined;
-			// Restore full text for both summarized text files and PDF results
+			// Restore full text for summarized text files, PDFs, and notebook results.
 			const isSummarized = details?.[SUMMARY_MARKER] && details._fullText;
 			const isPdfResult = details?.[PDF_MARKER] && details._fullText;
-			if (!(isSummarized || isPdfResult)) continue;
+			const isNotebookResult = details?.[NOTEBOOK_MARKER] && details._fullText;
+			if (!(isSummarized || isPdfResult || isNotebookResult)) continue;
 
 			const textContent = msg.content.find(
 				(c): c is { type: "text"; text: string } => c.type === "text"
