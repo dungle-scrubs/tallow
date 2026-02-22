@@ -41,6 +41,7 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import {
 	appendSection,
 	dimProcessOutputLine,
@@ -90,10 +91,7 @@ function resolveHome(p: string): string {
  * @returns Array of resolved skill directory paths from packages
  */
 export function getPackageSkillPaths(): string[] {
-	const settingsPath = join(
-		process.env.TALLOW_CODING_AGENT_DIR ?? join(homedir(), ".tallow"),
-		"settings.json"
-	);
+	const settingsPath = getTallowSettingsPath();
 	if (!fs.existsSync(settingsPath)) return [];
 
 	try {

@@ -17,7 +17,6 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import {
 	type ExtensionAPI,
@@ -47,6 +46,7 @@ import {
 } from "../_shared/interop-events.js";
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import {
 	appendSection,
 	dimProcessOutputLine,
@@ -1579,7 +1579,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("toggle-inline-results", {
 		description: "Toggle inline result notifications for background tasks and subagents",
 		handler: async (_args, ctx) => {
-			const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+			const settingsPath = getTallowSettingsPath();
 			let settings: Record<string, unknown> = {};
 			try {
 				const raw = fs.readFileSync(settingsPath, "utf-8");

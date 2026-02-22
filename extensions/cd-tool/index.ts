@@ -7,10 +7,10 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 /**
  * Check if BASH_MAINTAIN_PROJECT_WORKING_DIR is enabled in settings.
@@ -19,7 +19,7 @@ import { Type } from "@sinclair/typebox";
  */
 function isMaintainProjectDirEnabled(): boolean {
 	try {
-		const raw = readFileSync(join(homedir(), ".tallow", "settings.json"), "utf-8");
+		const raw = readFileSync(getTallowSettingsPath(), "utf-8");
 		return (
 			(JSON.parse(raw) as { BASH_MAINTAIN_PROJECT_WORKING_DIR?: boolean })
 				.BASH_MAINTAIN_PROJECT_WORKING_DIR === true

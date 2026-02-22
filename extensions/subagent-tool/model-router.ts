@@ -31,6 +31,7 @@ import {
 	resolveModelFuzzy,
 	selectModels,
 } from "@dungle-scrubs/synapse";
+import { getTallowPath, getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import { classifyTask } from "./task-classifier.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -412,8 +413,7 @@ function resolveModePolicyOverridesField(
  * @returns Merged routing config
  */
 export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
-	const home = process.env.HOME || os.homedir();
-	const userSettingsPath = path.join(home, ".tallow", "settings.json");
+	const userSettingsPath = getTallowSettingsPath();
 	const projectSettingsPath = path.join(cwd, ".tallow", "settings.json");
 
 	const userRouting = readRawRoutingConfig(userSettingsPath);
@@ -698,7 +698,7 @@ export function loadRoutingSignalsSnapshot(
  */
 function getSubscriptionProviders(): string[] {
 	try {
-		const authPath = path.join(os.homedir(), ".tallow", "auth.json");
+		const authPath = getTallowPath("auth.json");
 		const raw = fs.readFileSync(authPath, "utf-8");
 		const data = JSON.parse(raw) as Record<string, { type?: string }>;
 		return Object.entries(data)

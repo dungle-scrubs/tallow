@@ -18,16 +18,16 @@ import {
 	unlinkSync,
 	watch,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
 import { atomicWriteFileSync } from "../../_shared/atomic-write.js";
+import { getTallowPath } from "../../_shared/tallow-paths.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Directory root for team-based shared task lists. */
-export const TEAMS_DIR = join(homedir(), ".tallow", "teams");
+export const TEAMS_DIR = getTallowPath("teams");
 
 /** Max age for team directories before cleanup (7 days in ms). */
 export const TEAM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;

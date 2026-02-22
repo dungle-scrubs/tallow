@@ -15,10 +15,9 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Loader } from "@mariozechner/pi-tui";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -141,7 +140,7 @@ export function getSpinner(): string[] {
  * @returns User icon overrides
  */
 function readIconSettings(): IconOverrides {
-	const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+	const settingsPath = getTallowSettingsPath();
 	try {
 		const raw = fs.readFileSync(settingsPath, "utf-8");
 		const settings = JSON.parse(raw) as { icons?: IconOverrides };

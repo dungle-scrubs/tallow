@@ -16,6 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { getTallowPath } from "../_shared/tallow-paths.js";
 import {
 	calculateTurnMetrics,
 	formatEntries,
@@ -574,7 +575,7 @@ export default function (pi: ExtensionAPI) {
 	 * @returns Absolute path to the debug log
 	 */
 	function getLogPath(): string {
-		return logger?.logPath ?? `${process.env.HOME}/.tallow/debug.log`;
+		return logger?.logPath ?? getTallowPath("debug.log");
 	}
 
 	/**

@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { atomicWriteFileSync } from "../_shared/atomic-write.js";
+import { getTallowPath } from "../_shared/tallow-paths.js";
 import {
 	buildReminderContent,
 	buildStyledPrompt,
@@ -29,10 +30,7 @@ import {
 // ── Discovery ───────────────────────────────────────
 
 /** Standard locations for output style files */
-const USER_STYLES_DIR = path.join(
-	process.env.PI_CODING_AGENT_DIR || path.join(process.env.HOME || "", ".tallow"),
-	"output-styles"
-);
+const USER_STYLES_DIR = getTallowPath("output-styles");
 const PROJECT_STYLES_DIR = path.join(process.cwd(), ".tallow", "output-styles");
 
 /**

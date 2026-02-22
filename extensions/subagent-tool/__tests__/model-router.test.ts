@@ -15,6 +15,7 @@ const { loadRoutingConfig } = await import("../model-router.js");
 let testCwd = "";
 let testHome = "";
 let originalHome: string | undefined;
+let originalTallowHome: string | undefined;
 
 /**
  * Write a JSON file, creating parent directories as needed.
@@ -32,7 +33,9 @@ beforeEach(() => {
 	testCwd = mkdtempSync(join(tmpdir(), "tallow-routing-cwd-"));
 	testHome = mkdtempSync(join(tmpdir(), "tallow-routing-home-"));
 	originalHome = process.env.HOME;
+	originalTallowHome = process.env.TALLOW_CODING_AGENT_DIR;
 	process.env.HOME = testHome;
+	process.env.TALLOW_CODING_AGENT_DIR = join(testHome, ".tallow");
 });
 
 afterEach(() => {
@@ -40,6 +43,11 @@ afterEach(() => {
 		delete process.env.HOME;
 	} else {
 		process.env.HOME = originalHome;
+	}
+	if (originalTallowHome === undefined) {
+		delete process.env.TALLOW_CODING_AGENT_DIR;
+	} else {
+		process.env.TALLOW_CODING_AGENT_DIR = originalTallowHome;
 	}
 	rmSync(testCwd, { recursive: true, force: true });
 	rmSync(testHome, { recursive: true, force: true });

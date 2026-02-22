@@ -37,6 +37,7 @@ import {
 } from "../../src/agent-runner.js";
 import { isProjectTrusted } from "../_shared/project-trust.js";
 import { evaluateCommand } from "../_shared/shell-policy.js";
+import { getTallowHomeDir, getTallowPath } from "../_shared/tallow-paths.js";
 import { createHookStateManager, type HookStateManager } from "./state-manager.js";
 
 /** Hook execution strategy: shell command, LLM prompt, or agent subprocess. */
@@ -1228,10 +1229,10 @@ export default function (pi: ExtensionAPI) {
 		ctx = context;
 		currentCwd = context.cwd;
 		hooksConfig = loadHooksConfig(currentCwd);
-		agentsDir = path.join(process.env.HOME || "", ".tallow", "agents");
+		agentsDir = getTallowPath("agents");
 
 		// Initialize once-hook state manager
-		const tallowHome = path.join(process.env.HOME || "", ".tallow");
+		const tallowHome = getTallowHomeDir();
 		stateManager = createHookStateManager(tallowHome);
 
 		// Check for project-local agents dir

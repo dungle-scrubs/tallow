@@ -1,11 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, matchesKey, Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { atomicWriteFileSync } from "../_shared/atomic-write.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 /**
  * Theme switcher extension with live preview.
@@ -305,7 +304,7 @@ function filterByTags(themes: readonly ThemeEntry[], tags: string[]): readonly T
  * @returns `false` (disabled), `true` (pick from all), or `string[]` (filter by tags)
  */
 function readRandomThemeSetting(): false | true | string[] {
-	const settingsPath = join(homedir(), ".tallow", "settings.json");
+	const settingsPath = getTallowSettingsPath();
 	try {
 		const raw = readFileSync(settingsPath, "utf-8");
 		const settings = JSON.parse(raw) as { randomThemeOnStart?: boolean | string[] };
@@ -319,10 +318,7 @@ function readRandomThemeSetting(): false | true | string[] {
  * Persist theme selection to settings.json so it survives restarts.
  */
 function persistTheme(themeName: string): void {
-	const agentDir =
-		process.env.PI_CODING_AGENT_DIR ??
-		join(process.env.HOME ?? process.env.USERPROFILE ?? "~", ".tallow");
-	const settingsPath = join(agentDir, "settings.json");
+	const settingsPath = getTallowSettingsPath();
 	try {
 		let settings: Record<string, unknown> = {};
 		if (existsSync(settingsPath)) {

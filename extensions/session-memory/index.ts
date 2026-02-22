@@ -19,6 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { getDefaultTallowHomeDir, getTallowHomeDir } from "../_shared/tallow-paths.js";
 import { buildCuratorPrompt } from "./curator-prompt.js";
 import { SessionIndexer } from "./indexer.js";
 import type { SearchResult } from "./types.js";
@@ -45,7 +46,7 @@ let indexer: SessionIndexer | null = null;
  * @returns Path to the tallow config directory (e.g., ~/.tallow or ~/.tallow-fuse)
  */
 function getTallowHome(): string {
-	return process.env.TALLOW_CODING_AGENT_DIR ?? join(homedir(), ".tallow");
+	return getTallowHomeDir();
 }
 
 /**
@@ -66,7 +67,7 @@ function discoverAllSessionsDirs(): string[] {
 	if (existsSync(currentSessions)) dirs.add(currentSessions);
 
 	// Default tallow home (if different from current)
-	const defaultSessions = join(homedir(), ".tallow", "sessions");
+	const defaultSessions = join(getDefaultTallowHomeDir(), "sessions");
 	if (existsSync(defaultSessions)) dirs.add(defaultSessions);
 
 	// All per-project tallow homes from work-dirs config

@@ -7,8 +7,8 @@
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 // ── Schema ───────────────────────────────────────────────────────────────────
 
@@ -54,8 +54,7 @@ export interface SessionStats {
  * @returns Absolute path to stats.jsonl
  */
 export function getStatsLogPath(): string {
-	const tallowHome = process.env.TALLOW_CODING_AGENT_DIR || path.join(os.homedir(), ".tallow");
-	return path.join(tallowHome, "stats.jsonl");
+	return path.join(getTallowHomeDir(), "stats.jsonl");
 }
 
 // ── Write ────────────────────────────────────────────────────────────────────

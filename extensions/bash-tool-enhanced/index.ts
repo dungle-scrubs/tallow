@@ -18,8 +18,6 @@
  */
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import {
 	type AgentToolResult,
 	type BashToolDetails,
@@ -30,6 +28,7 @@ import { Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { INTEROP_API_CHANNELS } from "../_shared/interop-events.js";
 import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import type { PromotedTaskHandle } from "../background-task-tool/index.js";
 import {
 	appendSection,
@@ -54,7 +53,7 @@ const DEFAULT_AUTO_BG_TIMEOUT_MS = 30_000;
  */
 function readAutoBackgroundTimeout(): number {
 	try {
-		const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+		const settingsPath = getTallowSettingsPath();
 		const raw = fs.readFileSync(settingsPath, "utf-8");
 		const settings = JSON.parse(raw) as { bashAutoBackgroundTimeout?: number };
 		if (typeof settings.bashAutoBackgroundTimeout === "number") {
@@ -73,7 +72,7 @@ function readAutoBackgroundTimeout(): number {
  */
 function readMaintainProjectDir(): boolean {
 	try {
-		const settingsPath = path.join(os.homedir(), ".tallow", "settings.json");
+		const settingsPath = getTallowSettingsPath();
 		const raw = fs.readFileSync(settingsPath, "utf-8");
 		const settings = JSON.parse(raw) as { BASH_MAINTAIN_PROJECT_WORKING_DIR?: boolean };
 		return settings.BASH_MAINTAIN_PROJECT_WORKING_DIR === true;

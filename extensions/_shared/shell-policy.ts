@@ -28,6 +28,7 @@ import {
 	parseRules,
 } from "./permissions.js";
 import { isProjectTrusted } from "./project-trust.js";
+import { getTallowSettingsPath } from "./tallow-paths.js";
 
 /** Trust classification for shell/process execution sources. */
 export type ShellTrustLevel = "explicit" | "implicit" | "internal";
@@ -454,7 +455,7 @@ export function isShellInterpolationEnabled(cwd: string = process.cwd()): boolea
 	if (process.env.TALLOW_ENABLE_SHELL_INTERPOLATION === "1") return true;
 	if (process.env.TALLOW_SHELL_INTERPOLATION === "1") return true;
 
-	const globalSettingsPath = join(homedir(), ".tallow", "settings.json");
+	const globalSettingsPath = getTallowSettingsPath();
 	const settingsPaths = isProjectTrusted()
 		? [join(cwd, ".tallow", "settings.json"), globalSettingsPath]
 		: [globalSettingsPath];

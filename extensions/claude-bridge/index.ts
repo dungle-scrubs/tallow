@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 const CLAUDE_DIR = ".claude";
 /** Project-level config directories (current + legacy) */
@@ -165,7 +166,7 @@ export function getNonCollidingSkillPaths(
  */
 export default function (pi: ExtensionAPI): void {
 	pi.on("resources_discover", async (event) => {
-		const agentDir = process.env.PI_CODING_AGENT_DIR ?? path.join(os.homedir(), ".tallow");
+		const agentDir = getTallowHomeDir();
 		const cwd = (event as { cwd: string }).cwd;
 		const knownNames = collectKnownSkillNames(agentDir, cwd);
 
