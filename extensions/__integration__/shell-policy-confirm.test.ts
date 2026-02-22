@@ -9,11 +9,19 @@
  * executing it, and confirmation behavior is injected via closures.
  */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { createScriptedStreamFn } from "../../test-utils/mock-model.js";
 import { createSessionRunner, type SessionRunner } from "../../test-utils/session-runner.js";
-import { clearAuditTrail, enforceExplicitPolicy, getAuditTrail } from "../_shared/shell-policy.js";
+import {
+	clearAuditTrail,
+	enforceExplicitPolicy,
+	getAuditTrail,
+	resetPermissionCache,
+} from "../_shared/shell-policy.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -21,11 +29,13 @@ let runner: SessionRunner | undefined;
 
 beforeEach(() => {
 	clearAuditTrail();
+	resetPermissionCache();
 });
 
 afterEach(() => {
 	runner?.dispose();
 	runner = undefined;
+	resetPermissionCache();
 });
 
 /**
@@ -160,7 +170,78 @@ describe("Shell Policy Confirm — denied high-risk", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 3) Throwing confirmation is blocked
+// 3) Permission-rule deny includes clear reason metadata
+// ═══════════════════════════════════════════════════════════════
+
+describe("Shell Policy Confirm — permission-rule denial messaging", () => {
+	it("blocks execution with actionable permission reason", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "tallow-shell-perm-int-"));
+		const originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+		try {
+			mkdirSync(join(cwd, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".tallow", "settings.json"),
+				JSON.stringify({
+					permissions: {
+						allow: ["Bash(git *)"],
+						deny: ["Bash(ssh *)"],
+					},
+				})
+			);
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+			resetPermissionCache();
+
+			const toolResults: string[] = [];
+			const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
+				pi.on("tool_result", async (event) => {
+					if (event.toolName === "bash") {
+						const text = event.content.find((c) => c.type === "text");
+						if (text?.type === "text") toolResults.push(text.text);
+					}
+				});
+			};
+
+			const permissionAwarePolicy: ExtensionFactory = (pi: ExtensionAPI): void => {
+				registerSafeBashTool(pi);
+				pi.on("tool_call", async (event, ctx) => {
+					if (event.toolName !== "bash") return;
+					const command = (event.input as { command?: string }).command;
+					if (!command) return;
+					process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+					return enforceExplicitPolicy(command, "bash", ctx.cwd, true, async () => true);
+				});
+			};
+
+			runner = await createSessionRunner({
+				cwd,
+				streamFn: bashCallThenDone("ssh root@example.com"),
+				extensionFactories: [permissionAwarePolicy, resultTracker],
+			});
+
+			await runner.run("run ssh command");
+
+			const executed = toolResults.filter((t) => t.startsWith("mock-exec:"));
+			expect(executed).toHaveLength(0);
+
+			const blocked = getAuditTrail().filter((e) => e.outcome === "blocked");
+			expect(blocked.length).toBeGreaterThanOrEqual(1);
+			expect(blocked.some((e) => e.reason?.includes("Action denied by permission rule"))).toBe(
+				true
+			);
+			expect(blocked.some((e) => e.reason?.includes(".tallow/settings.json"))).toBe(true);
+		} finally {
+			if (originalTrustStatus !== undefined) {
+				process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+			} else {
+				delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+			}
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 4) Throwing confirmation is blocked
 // ═══════════════════════════════════════════════════════════════
 
 describe("Shell Policy Confirm — interrupted confirmation", () => {
@@ -196,7 +277,7 @@ describe("Shell Policy Confirm — interrupted confirmation", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 4) Denylist command blocked without confirm path
+// 5) Denylist command blocked without confirm path
 // ═══════════════════════════════════════════════════════════════
 
 describe("Shell Policy Confirm — denylist bypass", () => {
@@ -252,7 +333,7 @@ describe("Shell Policy Confirm — denylist bypass", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 5) Handler ordering — confirmed command survives extra handlers
+// 6) Handler ordering — confirmed command survives extra handlers
 // ═══════════════════════════════════════════════════════════════
 
 describe("Shell Policy Confirm — handler ordering", () => {

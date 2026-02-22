@@ -10,6 +10,7 @@ import {
 	expandVariables,
 	extractAllAgentNames,
 	extractToolInput,
+	formatPermissionReason,
 	globToRegExp,
 	loadPermissionConfig,
 	matchBashRule,
@@ -21,6 +22,7 @@ import {
 	type PermissionConfig,
 	parseRule,
 	parseRules,
+	redactSensitiveReasonText,
 	resolvePathSpecifier,
 } from "../permissions.js";
 
@@ -205,6 +207,17 @@ describe("tier resolution", () => {
 		expect(result.allowed).toBe(false);
 	});
 
+	test("ask verdict includes remediation hints when available", () => {
+		const config = makeConfig({
+			allow: ["Bash(npm *)"],
+			ask: ["Bash(docker *)"],
+		});
+		const result = evaluate("bash", { command: "docker compose up" }, config, defaultVars, "/");
+		expect(result.reasonCode).toBe("rule_requires_confirmation");
+		expect((result.remediationHints ?? []).length).toBeGreaterThan(0);
+		expect((result.remediationHints ?? []).join(" ")).toContain("Allowed patterns");
+	});
+
 	test("deny beats allow", () => {
 		const config = makeConfig({
 			allow: ["Bash(*)"],
@@ -237,12 +250,53 @@ describe("tier resolution", () => {
 		const config = makeConfig({ allow: ["Bash(npm *)"] });
 		const result = evaluate("bash", { command: "ssh evil" }, config, defaultVars, "/");
 		expect(result.action).toBe("default");
+		expect(result.reasonCode).toBe("allowlist_unmatched");
 	});
 
-	test("verdict includes matched rule", () => {
+	test("verdict includes structured reason metadata", () => {
 		const config = makeConfig({ deny: ["Bash(ssh *)"] });
 		const result = evaluate("bash", { command: "ssh root@host" }, config, defaultVars, "/");
 		expect(result.matchedRule).toBe("Bash(ssh *)");
+		expect(result.reasonCode).toBe("rule_denied");
+		expect(result.reasonMessage).toContain("Action denied");
+		expect(result.reason).toContain("permission rule");
+	});
+});
+
+// ── Reason Formatting and Redaction ─────────────────────────────────────────
+
+describe("reason formatting and redaction", () => {
+	test("redacts sensitive assignments in reason text", () => {
+		const redacted = redactSensitiveReasonText("Bash(export API_KEY=abc123secret)");
+		expect(redacted).toContain("API_KEY=[REDACTED]");
+		expect(redacted).not.toContain("abc123secret");
+	});
+
+	test("formats source context and hints", () => {
+		const message = formatPermissionReason({
+			action: "deny",
+			allowed: false,
+			reasonMessage: "Action denied by policy",
+			remediationHints: ["Use read instead."],
+			sourcePath: "/tmp/project/.tallow/settings.json",
+		});
+		expect(message).toContain("Action denied by policy");
+		expect(message).toContain(".tallow/settings.json");
+		expect(message).toContain("Hint: Use read instead.");
+	});
+
+	test("evaluate redacts sensitive values in matched rule", () => {
+		const config = makeConfig({ deny: ["Bash(export API_KEY=*)"] });
+		const result = evaluate(
+			"bash",
+			{ command: "export API_KEY=supersecret" },
+			config,
+			defaultVars,
+			"/"
+		);
+		expect(result.action).toBe("deny");
+		expect(result.matchedRule).toContain("API_KEY=[REDACTED]");
+		expect(result.matchedRule).not.toContain("supersecret");
 	});
 });
 
@@ -662,6 +716,8 @@ describe("loadPermissionConfig", () => {
 		const { loaded } = loadPermissionConfig(tempDir);
 		expect(loaded.merged.deny).toHaveLength(1);
 		expect(loaded.merged.deny[0].tool).toBe("bash");
+		expect(loaded.merged.deny[0].sourcePath).toContain(".tallow/settings.json");
+		expect(loaded.merged.deny[0].sourceScope).toBe("project-shared");
 		expect(loaded.merged.allow).toHaveLength(1);
 	});
 
@@ -736,6 +792,8 @@ describe("loadPermissionConfig", () => {
 		const { loaded } = loadPermissionConfig(tempDir, cliConfig);
 		expect(loaded.sources[0].tier).toBe("cli");
 		expect(loaded.merged.deny).toHaveLength(1);
+		expect(loaded.merged.deny[0].sourcePath).toBe("<cli>");
+		expect(loaded.merged.deny[0].sourceScope).toBe("cli");
 	});
 });
 
