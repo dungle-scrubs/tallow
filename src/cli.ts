@@ -397,7 +397,9 @@ async function run(opts: {
 			process.exit(1);
 		}
 		if (error instanceof Error && error.message.startsWith("Session ID ")) {
-			console.error(`Error: ${error.message}`);
+			console.error(
+				"Error: Invalid session ID. Session IDs cannot be empty or contain path separators."
+			);
 			process.exit(1);
 		}
 		throw error;
