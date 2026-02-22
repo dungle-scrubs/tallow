@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **extensions:** lazy-initialize command expansion, context scanning, context fork indexing, and MCP startup connections behind first-use triggers
 - **permissions:** add structured deny/ask reason metadata with redaction-safe messaging and shell-policy alignment
 
+### Fixed
+
+- **tui:** realign differential-render viewport coordinates after shrink churn to prevent input editor border lines from being cleared
+
 ### Documentation
 
 - **agents:** add extension startup policy guidance for minimal `session_start` handlers and shared lazy initialization
