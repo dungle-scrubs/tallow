@@ -16,7 +16,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { createLazyInitializer } from "../_shared/lazy-init.js";
 
 const CONTEXT_FILENAMES = ["CLAUDE.md", "AGENTS.md"] as const;
 
@@ -286,6 +287,16 @@ function readFileSafe(filepath: string): string | null {
 	}
 }
 
+/**
+ * Convert unknown thrown values into a display-safe message.
+ *
+ * @param error - Unknown thrown value
+ * @returns Error message string
+ */
+function getErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 // ─── @import directive support ───────────────────────────────────────────────
 
 /** File extensions that are never inlined (binary or large). */
@@ -479,6 +490,7 @@ function collectFromAdditionalDir(dir: string): ContextFile[] {
 
 export default function contextFilesExtension(pi: ExtensionAPI) {
 	let contextFiles: ContextFile[] = [];
+	let cwdContextFiles: ContextFile[] = [];
 	const additionalDirs: Set<string> = new Set();
 
 	/**
@@ -508,18 +520,67 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 		return [...cwdFiles, ...additionalFiles];
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
-		contextFiles = collectMissingFiles(ctx.cwd);
+	/**
+	 * Set the extension's active context file cache.
+	 *
+	 * @param cwdFiles - Files discovered from the primary cwd scan
+	 * @returns Nothing
+	 */
+	function setContextFiles(cwdFiles: ContextFile[]): void {
+		cwdContextFiles = [...cwdFiles];
+		contextFiles = mergeAdditionalDirFiles(cwdContextFiles);
+	}
 
-		if (contextFiles.length > 0) {
-			const label = contextFiles.length === 1 ? "context file" : "context files";
-			const paths = contextFiles.map((f) => shortenPath(f.filepath)).join(", ");
-			ctx.ui.notify(`context-files: +${contextFiles.length} ${label}: ${paths}`, "info");
-		}
+	/**
+	 * Notify the user about discovered context files.
+	 *
+	 * @param ctx - Extension context used for UI notifications
+	 * @returns Nothing
+	 */
+	function notifyDiscoveredContextFiles(ctx: ExtensionContext): void {
+		if (contextFiles.length === 0) return;
+
+		const label = contextFiles.length === 1 ? "context file" : "context files";
+		const paths = contextFiles.map((f) => shortenPath(f.filepath)).join(", ");
+		ctx.ui.notify(`context-files: +${contextFiles.length} ${label}: ${paths}`, "info");
+	}
+
+	const lazyScan = createLazyInitializer<ExtensionContext>({
+		name: "context-files",
+		initialize: async ({ context }) => {
+			const discovered = collectMissingFiles(context.cwd);
+			setContextFiles(discovered);
+			notifyDiscoveredContextFiles(context);
+		},
 	});
 
-	pi.on("before_agent_start", async (event) => {
-		if (contextFiles.length === 0) return;
+	/**
+	 * Ensure context file discovery has completed before using cached files.
+	 *
+	 * @param trigger - Trigger name passed to lazy-init instrumentation
+	 * @param ctx - Current extension context
+	 * @returns True when scanning succeeded
+	 */
+	async function ensureScanReady(trigger: string, ctx: ExtensionContext): Promise<boolean> {
+		try {
+			await lazyScan.ensureInitialized({ trigger, context: ctx });
+			return true;
+		} catch (error) {
+			const message = getErrorMessage(error);
+			ctx.ui.notify(`context-files: failed to discover context files: ${message}`, "error");
+			return false;
+		}
+	}
+
+	pi.on("session_start", async () => {
+		contextFiles = [];
+		cwdContextFiles = [];
+		lazyScan.reset();
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		const scanReady = await ensureScanReady("before_agent_start", ctx);
+		if (!scanReady || contextFiles.length === 0) return;
 
 		const sections = contextFiles.map((f) => {
 			const rel = shortenPath(f.filepath);
@@ -574,11 +635,11 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 
 			additionalDirs.add(resolved);
 
-			// Re-scan: rebuild contextFiles with the new additional dir included
-			const cwdBaseFiles = collectMissingFiles(ctx.cwd);
-			const newFiles = collectFromAdditionalDir(resolved);
-			contextFiles = mergeAdditionalDirFiles(cwdBaseFiles);
+			if (lazyScan.isInitialized()) {
+				setContextFiles(cwdContextFiles);
+			}
 
+			const newFiles = collectFromAdditionalDir(resolved);
 			if (newFiles.length > 0) {
 				const label = newFiles.length === 1 ? "file" : "files";
 				const paths = newFiles.map((f) => shortenPath(f.filepath)).join(", ");
@@ -603,8 +664,9 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 			const count = additionalDirs.size;
 			additionalDirs.clear();
 
-			// Rebuild contextFiles without additional dirs
-			contextFiles = collectMissingFiles(ctx.cwd);
+			if (lazyScan.isInitialized()) {
+				setContextFiles(cwdContextFiles);
+			}
 
 			const label = count === 1 ? "directory" : "directories";
 			ctx.ui.notify(`Cleared ${count} additional ${label}.`, "info");
