@@ -240,13 +240,55 @@ export function registerTasksExtension(
 		spinner: string,
 		foreground: SubagentView[],
 		background: SubagentView[],
-		maxTaskPreviewLen: number,
-		_standalone: boolean
+		maxLineWidth: number
 	): string[] {
-		const activeSubagents = [...foreground, ...background].filter(
+		const activeForeground = foreground.filter(
 			(subagent) => subagent.status === "running" || subagent.status === "stalled"
 		);
-		if (activeSubagents.length === 0) return [];
+		const activeBackground = background.filter(
+			(subagent) => subagent.status === "running" || subagent.status === "stalled"
+		);
+		if (activeForeground.length === 0 && activeBackground.length === 0) return [];
+
+		const safeLineWidth = Math.max(1, maxLineWidth);
+
+		/**
+		 * Clamp a styled widget line to the available visible width.
+		 * @param line - ANSI-styled line
+		 * @returns Width-bounded line
+		 */
+		function clampLine(line: string): string {
+			return visibleWidth(line) > safeLineWidth
+				? truncateToWidth(line, safeLineWidth, "...")
+				: line;
+		}
+
+		/**
+		 * Collapse whitespace/newlines into a compact single-line string.
+		 * @param value - Raw preview value
+		 * @returns Single-line compact text
+		 */
+		function compactPreview(value: string): string {
+			return value
+				.replace(/\n+/g, " ")
+				.replace(/\s{2,}/g, " ")
+				.trim();
+		}
+
+		/**
+		 * Truncate preview text to a visible-width budget.
+		 * @param value - Raw preview text
+		 * @param budget - Available content width
+		 * @returns Width-bounded preview
+		 */
+		function truncatePreview(value: string, budget: number): string {
+			const compact = compactPreview(value);
+			if (!compact) return compact;
+			const safeBudget = Math.max(1, budget);
+			return visibleWidth(compact) > safeBudget
+				? truncateToWidth(compact, safeBudget, "...")
+				: compact;
+		}
 
 		/**
 		 * Build a compact model label for widget rows.
@@ -256,94 +298,124 @@ export function registerTasksExtension(
 		function getModelLabel(model: string | undefined): string {
 			if (!model) return "";
 			const modelId = model.split("/").at(-1) ?? model;
-			const shortModel = modelId.length > 18 ? `${modelId.slice(0, 15)}...` : modelId;
+			const shortModel = visibleWidth(modelId) > 18 ? truncateToWidth(modelId, 18, "...") : modelId;
 			return ` ${formatWidgetRole(ctx, "hint", `(${shortModel})`)}`;
 		}
 
 		/**
-		 * Collapse whitespace and truncate preview content to a fixed budget.
-		 * @param value - Raw preview text
-		 * @param budget - Maximum preview length
-		 * @returns Single-line bounded preview
+		 * Build compact model summary text for a subagent section header.
+		 * @param subagents - Section subagents
+		 * @returns Styled model summary suffix
 		 */
-		function toBoundedPreview(value: string, budget: number): string {
-			const compact = value
-				.replace(/\n+/g, " ")
-				.replace(/\s{2,}/g, " ")
-				.trim();
-			const maxLen = Math.max(8, budget);
-			if (compact.length <= maxLen) return compact;
-			return `${compact.slice(0, maxLen - 3)}...`;
+		function getModelSummary(subagents: readonly SubagentView[]): string {
+			const models = [...new Set(subagents.map((subagent) => subagent.model).filter(Boolean))];
+			if (models.length === 0) return "";
+
+			return formatWidgetRole(
+				ctx,
+				"meta",
+				` · ${models
+					.map((model) => {
+						const modelId = String(model).split("/").at(-1) ?? String(model);
+						return visibleWidth(modelId) > 12 ? truncateToWidth(modelId, 12, "...") : modelId;
+					})
+					.join(", ")}`
+			);
 		}
 
-		const models = [...new Set(activeSubagents.map((subagent) => subagent.model).filter(Boolean))];
-		const modelSummary =
-			models.length > 0
-				? formatWidgetRole(
-						ctx,
-						"meta",
-						` · ${models
-							.map((model) => {
-								const modelId = String(model).split("/").at(-1) ?? String(model);
-								return modelId.length > 12 ? `${modelId.slice(0, 9)}...` : modelId;
-							})
-							.join(", ")}`
-					)
-				: "";
+		/**
+		 * Build a running/stalled status summary for section headers.
+		 * @param subagents - Section subagents
+		 * @returns Human-readable status summary
+		 */
+		function getStatusSummary(subagents: readonly SubagentView[]): string {
+			const runningCount = subagents.filter((subagent) => subagent.status === "running").length;
+			const stalledCount = subagents.filter((subagent) => subagent.status === "stalled").length;
+			if (runningCount > 0 && stalledCount > 0) {
+				return `${runningCount} running · ${stalledCount} stalled`;
+			}
+			return runningCount > 0 ? `${runningCount} running` : `${stalledCount} stalled`;
+		}
 
-		const runningCount = activeSubagents.filter((subagent) => subagent.status === "running").length;
-		const stalledCount = activeSubagents.filter((subagent) => subagent.status === "stalled").length;
-		const statusSummary =
-			runningCount > 0 && stalledCount > 0
-				? `${runningCount} running · ${stalledCount} stalled`
-				: runningCount > 0
-					? `${runningCount} running`
-					: `${stalledCount} stalled`;
+		/**
+		 * Render a content line with width-aware budget based on prefix width.
+		 * @param prefix - Already-styled prefix segment
+		 * @param role - Presentation role for the content segment
+		 * @param value - Raw content value
+		 * @returns Styled, width-bounded line
+		 */
+		function renderBoundedContentLine(
+			prefix: string,
+			role: PresentationRole,
+			value: string
+		): string {
+			const availableBudget = Math.max(1, safeLineWidth - visibleWidth(prefix));
+			const bounded = truncatePreview(value, availableBudget);
+			return clampLine(`${prefix}${formatWidgetRole(ctx, role, bounded)}`);
+		}
 
-		const lines: string[] = [];
-		lines.push(`${formatWidgetRole(ctx, "title", `Subagents (${statusSummary})`)}${modelSummary}`);
+		/**
+		 * Append one subagent section (foreground/background) to the output.
+		 * @param lines - Mutable output line sink
+		 * @param sectionTitle - Section title label
+		 * @param modeLabel - Blocking mode label
+		 * @param subagents - Section subagents
+		 */
+		function appendSection(
+			lines: string[],
+			sectionTitle: string,
+			modeLabel: string,
+			subagents: SubagentView[]
+		): void {
+			if (subagents.length === 0) return;
 
-		for (let i = 0; i < activeSubagents.length; i++) {
-			const subagent = activeSubagents[i];
-			const isLast = i === activeSubagents.length - 1;
-			const treeChar = isLast ? "└─" : "├─";
-			const contChar = isLast ? " " : "│";
-			const ms = Date.now() - subagent.startTime;
-			const secs = Math.floor(ms / 1000);
-			const duration = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
-
-			const identity = agentIdentities.get(subagent.id);
-			const displayName = identity?.displayName ?? subagent.agent;
-			const typeSuffix = identity?.typeLabel
-				? ` ${formatWidgetRole(ctx, "meta", `(${identity.typeLabel})`)}`
-				: "";
-			const isRunning = subagent.status === "running";
-			const statusIcon = isRunning
-				? formatWidgetRole(ctx, "status_warning", spinner)
-				: formatWidgetRole(ctx, "status_warning", getIcon("blocked"));
-			const statusSuffix = isRunning
-				? formatWidgetRole(ctx, "meta", `· ${duration}`)
-				: `${formatWidgetRole(ctx, "meta", "·")} ${formatWidgetRole(ctx, "status_warning", "stalled")} ${formatWidgetRole(ctx, "meta", `· ${duration}`)}`;
+			const sectionSummary = `${sectionTitle} (${modeLabel} · ${getStatusSummary(subagents)})`;
 			lines.push(
-				`${formatWidgetRole(ctx, "meta", treeChar)} ${statusIcon} ${formatWidgetIdentity(displayName)}${getModelLabel(subagent.model)}${typeSuffix} ${statusSuffix}`
+				clampLine(`${formatWidgetRole(ctx, "title", sectionSummary)}${getModelSummary(subagents)}`)
 			);
 
-			const taskPreviewBudget = isRunning ? maxTaskPreviewLen : Math.max(8, maxTaskPreviewLen - 10);
-			const taskPreview = toBoundedPreview(subagent.task, taskPreviewBudget);
-			const taskPreviewRole: PresentationRole = isRunning ? "action" : "hint";
-			lines.push(
-				`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, taskPreviewRole, taskPreview)}`
-			);
+			for (let i = 0; i < subagents.length; i++) {
+				const subagent = subagents[i];
+				const isLast = i === subagents.length - 1;
+				const treeChar = isLast ? "└─" : "├─";
+				const contChar = isLast ? " " : "│";
+				const ms = Date.now() - subagent.startTime;
+				const secs = Math.floor(ms / 1000);
+				const duration = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m${secs % 60}s`;
 
-			const activity = agentActivity.get(subagent.id);
-			if (activity) {
-				const activityText = toBoundedPreview(activity.summary, maxTaskPreviewLen);
+				const identity = agentIdentities.get(subagent.id);
+				const displayName = identity?.displayName ?? subagent.agent;
+				const typeSuffix = identity?.typeLabel
+					? ` ${formatWidgetRole(ctx, "meta", `(${identity.typeLabel})`)}`
+					: "";
+				const isRunning = subagent.status === "running";
+				const statusIcon = isRunning
+					? formatWidgetRole(ctx, "status_warning", spinner)
+					: formatWidgetRole(ctx, "status_warning", getIcon("blocked"));
+				const statusSuffix = isRunning
+					? formatWidgetRole(ctx, "meta", `· ${duration}`)
+					: `${formatWidgetRole(ctx, "meta", "·")} ${formatWidgetRole(ctx, "status_warning", "stalled")} ${formatWidgetRole(ctx, "meta", `· ${duration}`)}`;
 				lines.push(
-					`${formatWidgetRole(ctx, "meta", `${contChar}  `)} ${formatWidgetRole(ctx, "process_output", activityText)}`
+					clampLine(
+						`${formatWidgetRole(ctx, "meta", treeChar)} ${statusIcon} ${formatWidgetIdentity(displayName)}${getModelLabel(subagent.model)}${typeSuffix} ${statusSuffix}`
+					)
 				);
+
+				const previewRole: PresentationRole = isRunning ? "action" : "hint";
+				const previewPrefix = `${formatWidgetRole(ctx, "meta", `${contChar}  `)} `;
+				lines.push(renderBoundedContentLine(previewPrefix, previewRole, subagent.task));
+
+				const activity = agentActivity.get(subagent.id);
+				if (activity) {
+					lines.push(renderBoundedContentLine(previewPrefix, "process_output", activity.summary));
+				}
 			}
 		}
 
+		const lines: string[] = [];
+		appendSection(lines, "Foreground Subagents", "blocking", activeForeground);
+		if (activeForeground.length > 0 && activeBackground.length > 0) lines.push("");
+		appendSection(lines, "Background Subagents", "non-blocking", activeBackground);
 		return lines;
 	}
 
@@ -596,31 +668,25 @@ export function registerTasksExtension(
 					// Side-by-side: tasks on left, subagents + bg tasks on right (bottom-aligned)
 					const separator = "\x1b[38;2;60;60;70m  │  \x1b[0m"; // Dark gray
 					const separatorWidth = 5; // "  │  " is 5 visible chars
-					const columnWidth = Math.floor((width - separatorWidth) / 2);
+					const leftColumnWidth = Math.floor((width - separatorWidth) / 2);
+					const rightColumnWidth = width - leftColumnWidth - separatorWidth;
 
 					// Adjust max lengths for column width
-					const maxTitleLen = Math.max(20, columnWidth - 8);
-					const maxTaskPreviewLen = Math.max(15, columnWidth - 25);
-					const maxCmdLen = Math.max(15, columnWidth - 15);
+					const maxTitleLen = Math.max(20, leftColumnWidth - 8);
+					const maxTeamLen = Math.max(15, rightColumnWidth - 8);
+					const maxCmdLen = Math.max(15, rightColumnWidth - 12);
 
 					const taskLines = renderTaskLines(ctx, maxTitleLen);
 
 					// Build right column: teams, then subagents, then bg tasks
 					const rightLines: string[] = [];
 					if (hasTeams) {
-						rightLines.push(...renderTeamLines(ctx, spinner, activeTeams, maxTaskPreviewLen));
+						rightLines.push(...renderTeamLines(ctx, spinner, activeTeams, maxTeamLen));
 					}
 					if (hasSubagents) {
 						if (rightLines.length > 0) rightLines.push(""); // Spacer
 						rightLines.push(
-							...renderSubagentLines(
-								ctx,
-								spinner,
-								fgSubagents,
-								bgSubagents,
-								maxTaskPreviewLen,
-								true
-							)
+							...renderSubagentLines(ctx, spinner, fgSubagents, bgSubagents, rightColumnWidth)
 						);
 					}
 					if (hasBgTasks) {
@@ -628,14 +694,14 @@ export function registerTasksExtension(
 						rightLines.push(...renderBgBashLines(ctx, maxCmdLen, runningBgTasks));
 					}
 
-					return mergeSideBySide(taskLines, rightLines, columnWidth, separator, width);
+					return mergeSideBySide(taskLines, rightLines, leftColumnWidth, separator, width);
 				}
 
 				// Stacked layout (narrow terminal or only one section)
 				// "├─ ◐ " prefix = 5 visible chars, leave room for width
 				const maxTitleLen = Math.max(10, width - 5);
-				const maxTaskPreviewLen = Math.max(15, width - 25);
-				const maxCmdLen = Math.max(15, width - 15);
+				const maxTeamLen = Math.max(15, width - 8);
+				const maxCmdLen = Math.max(15, width - 12);
 				const lines: string[] = [];
 
 				if (hasTasks) {
@@ -644,21 +710,12 @@ export function registerTasksExtension(
 
 				if (hasTeams) {
 					if (lines.length > 0) lines.push(""); // Spacer
-					lines.push(...renderTeamLines(ctx, spinner, activeTeams, maxTaskPreviewLen));
+					lines.push(...renderTeamLines(ctx, spinner, activeTeams, maxTeamLen));
 				}
 
 				if (hasSubagents) {
 					if (lines.length > 0) lines.push(""); // Spacer
-					lines.push(
-						...renderSubagentLines(
-							ctx,
-							spinner,
-							fgSubagents,
-							bgSubagents,
-							maxTaskPreviewLen,
-							!hasTasks
-						)
-					);
+					lines.push(...renderSubagentLines(ctx, spinner, fgSubagents, bgSubagents, width));
 				}
 
 				if (hasBgTasks) {
