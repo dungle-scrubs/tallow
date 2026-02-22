@@ -44,6 +44,7 @@
 		"test": "bun test",
 		"test:e2e-profiles": "bun test tests/e2e-profiles",
 		"format:check": "biome format .",
+		"bench:startup": "bun scripts/benchmark-startup-fast-path.ts",
 		"pre-pr": "bash scripts/pre-pr.sh",
 		"prepare": "test -d .git && husky || true"
 	},
