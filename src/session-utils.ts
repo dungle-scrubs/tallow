@@ -8,7 +8,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { type SessionHeader, SessionManager } from "@mariozechner/pi-coding-agent";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { TALLOW_HOME } from "./config.js";
@@ -16,6 +16,44 @@ import { encodeSessionDirName } from "./session-migration.js";
 
 /** Current session file format version (mirrors pi's CURRENT_SESSION_VERSION) */
 const SESSION_VERSION = 3;
+
+/** Path characters that can escape the session directory when embedded in IDs. */
+const FORBIDDEN_SESSION_ID_CHARS = /[\\/\0]/;
+
+/**
+ * Validate that a session ID is safe to embed in a session filename.
+ *
+ * @param sessionId - Raw session ID from CLI/runtime input
+ * @returns Nothing
+ * @throws {Error} When the ID is empty or contains path separators
+ */
+export function assertValidSessionId(sessionId: string): void {
+	if (sessionId.trim().length === 0) {
+		throw new Error("Session ID cannot be empty");
+	}
+	if (FORBIDDEN_SESSION_ID_CHARS.test(sessionId)) {
+		throw new Error("Session ID cannot contain path separators");
+	}
+}
+
+/**
+ * Assert that a computed session file path stays within the target sessions directory.
+ *
+ * @param sessionsDir - Intended parent sessions directory
+ * @param filePath - Candidate session file path
+ * @returns Nothing
+ * @throws {Error} When the resolved path escapes the sessions directory
+ */
+function assertContainedSessionPath(sessionsDir: string, filePath: string): void {
+	const resolvedSessionsDir = resolve(sessionsDir);
+	const resolvedFilePath = resolve(filePath);
+	const prefix = resolvedSessionsDir.endsWith(sep)
+		? resolvedSessionsDir
+		: `${resolvedSessionsDir}${sep}`;
+	if (!resolvedFilePath.startsWith(prefix)) {
+		throw new Error("Session path resolved outside the sessions directory");
+	}
+}
 
 /**
  * Compute the per-cwd session directory path.
@@ -83,12 +121,15 @@ export function findSessionById(sessionId: string, cwd: string): string | null {
  * @returns SessionManager instance for the new session
  */
 export function createSessionWithId(sessionId: string, cwd: string): SessionManager {
+	assertValidSessionId(sessionId);
+
 	const sessionsDir = sessionDirForCwd(cwd);
 	mkdirSync(sessionsDir, { recursive: true });
 
 	const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const filename = `${timestamp}_${sessionId}.jsonl`;
 	const filePath = join(sessionsDir, filename);
+	assertContainedSessionPath(sessionsDir, filePath);
 
 	const header: SessionHeader = {
 		type: "session",

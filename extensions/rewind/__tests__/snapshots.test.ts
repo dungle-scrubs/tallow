@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGitCommandSync } from "../../_shared/shell-policy.js";
@@ -112,6 +112,48 @@ describe("SnapshotManager", () => {
 		const content = readFileSync(join(tmpDir, "a.txt"), "utf-8");
 		expect(content).toBe("state-at-turn-1");
 		expect(result.restored.length).toBeGreaterThan(0);
+	});
+
+	it("creates snapshots from nested subdirectories", () => {
+		const subDir = join(tmpDir, "sub");
+		mkdirSync(subDir, { recursive: true });
+
+		writeFileSync(join(tmpDir, "root.txt"), "base-root");
+		git(["add", "-A"], tmpDir);
+		git(["commit", "-m", "base"], tmpDir);
+
+		const subMgr = new SnapshotManager(subDir, "nested-session");
+		writeFileSync(join(tmpDir, "root.txt"), "changed-from-subdir");
+
+		const ref = subMgr.createSnapshot(1);
+		expect(ref).toBe("refs/tallow/rewind/nested-session/turn-1");
+	});
+
+	it("restores full repo state when manager cwd is a subdirectory", () => {
+		const subDir = join(tmpDir, "sub");
+		mkdirSync(subDir, { recursive: true });
+		writeFileSync(join(tmpDir, "root.txt"), "base-root");
+		writeFileSync(join(subDir, "a.txt"), "base-a");
+		git(["add", "-A"], tmpDir);
+		git(["commit", "-m", "base"], tmpDir);
+
+		const subMgr = new SnapshotManager(subDir, "nested-session");
+		writeFileSync(join(tmpDir, "root.txt"), "snap-root");
+		writeFileSync(join(subDir, "a.txt"), "snap-a");
+		writeFileSync(join(subDir, "new.txt"), "snap-new");
+		const ref = subMgr.createSnapshot(1);
+		expect(ref).not.toBeNull();
+
+		writeFileSync(join(tmpDir, "root.txt"), "after-root");
+		writeFileSync(join(subDir, "a.txt"), "after-a");
+		writeFileSync(join(subDir, "after-only.txt"), "after-only");
+
+		subMgr.restoreSnapshot(ref as string);
+
+		expect(readFileSync(join(tmpDir, "root.txt"), "utf-8")).toBe("snap-root");
+		expect(readFileSync(join(subDir, "a.txt"), "utf-8")).toBe("snap-a");
+		expect(readFileSync(join(subDir, "new.txt"), "utf-8")).toBe("snap-new");
+		expect(existsSync(join(subDir, "after-only.txt"))).toBe(false);
 	});
 
 	it("should remove files created after the snapshot point", () => {

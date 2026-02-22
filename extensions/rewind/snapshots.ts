@@ -15,7 +15,9 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runGitCommandSync } from "../_shared/shell-policy.js";
 
@@ -43,7 +45,7 @@ export interface SnapshotInfo {
  * Snapshots are stored as lightweight refs that can be restored independently.
  */
 export class SnapshotManager {
-	private readonly cwd: string;
+	private readonly repoRoot: string;
 	private readonly refPrefix: string;
 
 	/**
@@ -53,8 +55,18 @@ export class SnapshotManager {
 	 * @param sessionId - Session ID for namespacing refs
 	 */
 	constructor(cwd: string, sessionId: string) {
-		this.cwd = cwd;
+		this.repoRoot = this.resolveRepoRoot(cwd) ?? cwd;
 		this.refPrefix = `refs/tallow/rewind/${sessionId}`;
+	}
+
+	/**
+	 * Resolve the canonical git repository root for the manager's cwd.
+	 *
+	 * @param cwd - Working directory that may be a nested subdirectory
+	 * @returns Absolute repo root path, or null when outside a git worktree
+	 */
+	private resolveRepoRoot(cwd: string): string | null {
+		return runGitCommandSync(["rev-parse", "--show-toplevel"], cwd, 10_000);
 	}
 
 	/**
@@ -84,7 +96,7 @@ export class SnapshotManager {
 	 * @returns The ref name, or null if nothing to snapshot
 	 */
 	createSnapshot(turnIndex: number): string | null {
-		const tmpIndex = join(this.cwd, ".git", "tallow-snapshot-index");
+		const tmpIndex = join(tmpdir(), `tallow-snapshot-index-${process.pid}-${randomUUID()}`);
 
 		try {
 			// Stage everything into the temp index (captures untracked files too)
@@ -154,7 +166,7 @@ export class SnapshotManager {
 		// Use fs.unlinkSync for reliability — git rm only works for tracked files.
 		for (const file of filesToDelete) {
 			try {
-				unlinkSync(join(this.cwd, file));
+				unlinkSync(join(this.repoRoot, file));
 			} catch {
 				// File might already be gone — best effort
 			}
@@ -252,7 +264,7 @@ export class SnapshotManager {
 	 * @returns Trimmed output, or null on failure
 	 */
 	private git(args: string[]): string | null {
-		return runGitCommandSync(args, this.cwd, 10_000);
+		return runGitCommandSync(args, this.repoRoot, 10_000);
 	}
 
 	/**
@@ -267,7 +279,7 @@ export class SnapshotManager {
 	 */
 	private gitWithEnv(args: string[], env: Record<string, string>): string | null {
 		const result = spawnSync("git", args, {
-			cwd: this.cwd,
+			cwd: this.repoRoot,
 			encoding: "utf-8",
 			timeout: 10_000,
 			maxBuffer: 10 * 1024 * 1024,
