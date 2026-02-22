@@ -12,6 +12,7 @@
 			"context",
 			"session_start",
 			"tool_call",
+			"tool_result",
 			"turn_end"
 		]
 	},
