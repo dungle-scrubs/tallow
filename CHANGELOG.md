@@ -79,6 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **plan-mode:** prompt for optional user guidance when blocked tool results occur during plan execution and inject `[PLAN GUIDANCE — Step n: ...]` steer context
+
 ### Changed
 
 - **extensions:** lazy-initialize command expansion, context scanning, context fork indexing, and MCP startup connections behind first-use triggers

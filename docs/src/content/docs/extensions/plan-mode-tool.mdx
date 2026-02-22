@@ -23,6 +23,10 @@ Plan mode extracts numbered steps from `Plan:` sections in the assistant
 response. During execution (after exiting plan mode), a progress widget tracks
 completed steps via `[DONE:n]` markers.
 
+When a tool call is blocked during execution and UI is available, plan mode can
+prompt for optional user guidance and send it as a steer message prefixed with
+`[PLAN GUIDANCE — Step n: ...]` so the model can adjust the current step.
+
 Disabling plan mode restores the pre-plan tool set.
 
 ## Commands
