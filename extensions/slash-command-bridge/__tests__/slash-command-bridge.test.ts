@@ -217,6 +217,70 @@ describe("compact", () => {
 		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
 	});
 
+	test("onComplete sends continuation message when agent is idle", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => true,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		// Trigger onComplete and wait for the setTimeout(50) to fire
+		compactOptions?.onComplete?.();
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
+		expect(continuation).toBeDefined();
+		expect(continuation?.display).toBe(false);
+		expect(continuation?.options?.triggerTurn).toBe(true);
+		expect(continuation?.content).toContain("compaction is complete");
+	});
+
+	test("onComplete skips continuation when agent is not idle", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => false,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		compactOptions?.onComplete?.();
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
+		expect(continuation).toBeUndefined();
+	});
+
+	test("onError does not send continuation message", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => true,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		compactOptions?.onError?.();
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
+		expect(continuation).toBeUndefined();
+	});
+
 	test("agent_end hook is a no-op when no compact is pending", async () => {
 		let compactCalled = false;
 		const ctx = buildContext({
