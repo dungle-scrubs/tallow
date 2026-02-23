@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.8...tallow-v0.8.9) (2026-02-23)
+
+
+### Fixed
+
+* **slash-command-bridge:** auto-continue after model-triggered compaction ([9776a16](https://github.com/dungle-scrubs/tallow/commit/9776a1640f4be8d3c7140f305cba7bd9dd4198d4))
+
+
+### Documentation
+
+* **readme:** remove images for now ([f52a474](https://github.com/dungle-scrubs/tallow/commit/f52a474930cb21cb448c714ad5edad7da1164112))
+
+
+### Maintenance
+
+* add v1.md to gitignore ([d5cfaee](https://github.com/dungle-scrubs/tallow/commit/d5cfaee408561ca8dd0f45b45f6fac87cdba43eb))
+* **deps:** bump pi-* dependencies ([29516b5](https://github.com/dungle-scrubs/tallow/commit/29516b5c53e28a358fee86de0985ddb911b96776))
+
 ## [0.8.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.7...tallow-v0.8.8) (2026-02-22)
 
 
