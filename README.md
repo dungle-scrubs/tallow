@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/logo.jpg" width="200" alt="Tallow logo" />
-</p>
-
 <h1 align="center">Tallow</h1>
 
 <p align="center">
@@ -13,20 +9,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml"><img src="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://www.npmjs.com/package/tallow"><img src="https://img.shields.io/npm/v/tallow" alt="npm version" /></a>
-  <a href="https://img.shields.io/badge/Bun-%E2%89%A51.3.9-f9f1e1?logo=bun"><img src="https://img.shields.io/badge/Bun-%E2%89%A51.3.9-f9f1e1?logo=bun" alt="Bun ≥1.3.9" /></a>
-  <a href="https://tallow.dungle-scrubs.com"><img src="https://img.shields.io/badge/docs-tallow-blue" alt="Docs" /></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml">CI</a> ·
+  <a href="https://www.npmjs.com/package/tallow">npm</a> ·
+  <a href="https://tallow.dungle-scrubs.com">Docs</a> ·
+  <a href="https://opensource.org/licenses/MIT">MIT</a>
 </p>
 
 ---
-
-<p align="center">
-  <img src="assets/screenshot-annotated.png" alt="Tallow session showing status bar, auto-named session, and model selection" />
-  <br />
-  <sub>Shown with a customized <a href="https://wezfurlong.org/wezterm/">WezTerm</a> configuration.</sub>
-</p>
 
 Tallow is a terminal coding agent that starts minimal and scales up. Install only the
 extensions, themes, and agents your project needs, or enable everything. It drops into
