@@ -244,6 +244,20 @@ WHEN NOT TO USE:
 	 * Fires compact after the agent finishes its turn. This avoids the
 	 * spinner-hang caused by aborting the agent mid-tool-execution.
 	 * The tool sets `pendingCompact`, then agent_end picks it up.
+	 *
+	 * After compaction completes, checks whether the agent is idle. When the
+	 * model triggered compaction (vs. the user typing during it), the
+	 * framework's `flushCompactionQueue` finds no queued messages and the
+	 * agent sits at the input prompt — even though the model promised to
+	 * continue. We fix this by sending a hidden continuation message via
+	 * `pi.sendMessage()` with `triggerTurn: true` to re-prompt the agent.
+	 *
+	 * A short `setTimeout` allows `flushCompactionQueue`'s fire-and-forget
+	 * async path to settle first, so we don't conflict with user-queued
+	 * messages that already restarted the agent.
+	 *
+	 * @see Plan 98 — deferred compact to agent_end (introduced idle-after-compact)
+	 * @see Plan 157 — auto-continue after model-triggered compaction
 	 */
 	pi.on("agent_end", (_event, ctx) => {
 		if (!pendingCompact) return;
@@ -261,14 +275,30 @@ WHEN NOT TO USE:
 			onComplete: () => {
 				ctx.ui?.setWorkingMessage?.();
 				ctx.ui?.setStatus?.("compact", undefined);
-				// Framework's executeCompaction rebuilds the UI and
-				// shows the compaction summary. No extra action needed.
+
+				// After compaction, re-prompt the agent if no user messages
+				// triggered a turn via flushCompactionQueue. The setTimeout
+				// lets flushCompactionQueue's async work settle first.
+				setTimeout(() => {
+					if (ctx.isIdle()) {
+						pi.sendMessage(
+							{
+								customType: "compact-continue",
+								content:
+									"Session compaction is complete. Continue with the task " +
+									"you were working on before compaction was triggered.",
+								display: false,
+							},
+							{ triggerTurn: true }
+						);
+					}
+				}, 50);
 			},
 			onError: () => {
 				ctx.ui?.setWorkingMessage?.();
 				ctx.ui?.setStatus?.("compact", undefined);
 				// Framework's executeCompaction handles error/cancel
-				// display. No extra handling needed.
+				// display. No continuation on failure — user decides.
 			},
 		});
 	});
