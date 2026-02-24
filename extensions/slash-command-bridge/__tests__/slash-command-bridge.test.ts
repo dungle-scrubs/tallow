@@ -219,7 +219,7 @@ describe("compact", () => {
 		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "⏳ resuming" });
 	});
 
-	test("onComplete sends continuation message when agent is idle", async () => {
+	test("onComplete sends continuation message when agent is idle and no queued messages", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
 		const toolCtx = buildContext({ compact: () => {} });
 		const agentEndCtx = buildContext({
@@ -232,15 +232,43 @@ describe("compact", () => {
 		await executeTool({ command: "compact" }, toolCtx);
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
 
-		// Trigger onComplete and wait for the setTimeout(50) to fire
+		// Trigger onComplete and wait for the setTimeout(200) to fire
 		compactOptions?.onComplete?.();
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await new Promise((resolve) => setTimeout(resolve, 300));
 
 		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
 		expect(continuation).toBeDefined();
 		expect(continuation?.display).toBe(false);
 		expect(continuation?.options?.triggerTurn).toBe(true);
 		expect(continuation?.content).toContain("compaction is complete");
+	});
+
+	test("onComplete skips auto-continue when compaction queue has messages", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: () => {},
+				// Simulate the patched UI context exposing hasCompactionQueuedMessages
+				hasCompactionQueuedMessages: () => true,
+			} as unknown as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => true,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		compactOptions?.onComplete?.();
+		// Wait longer than the 200ms timeout to ensure no timer was started
+		await new Promise((resolve) => setTimeout(resolve, 300));
+
+		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
+		expect(continuation).toBeUndefined();
 	});
 
 	test("onComplete skips continuation and clears indicators when agent is not idle", async () => {
@@ -268,7 +296,7 @@ describe("compact", () => {
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
 
 		compactOptions?.onComplete?.();
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		await new Promise((resolve) => setTimeout(resolve, 300));
 
 		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
 		expect(continuation).toBeUndefined();
@@ -310,6 +338,45 @@ describe("compact", () => {
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, ctx);
 
 		expect(compactCalled).toBe(false);
+	});
+
+	test("turn_start cancels continuation timer before it fires", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: () => {},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => true,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		// Trigger onComplete — starts the 200ms timer
+		compactOptions?.onComplete?.();
+
+		// Fire turn_start before the timer expires (simulates flushCompactionQueue
+		// prompting the agent first)
+		const turnCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: () => {},
+			} as ExtensionContext["ui"],
+		});
+		await harness.fireEvent("turn_start", { type: "turn_start" }, turnCtx);
+
+		// Wait longer than the 200ms timeout
+		await new Promise((resolve) => setTimeout(resolve, 300));
+
+		// Timer was cancelled — no duplicate continuation message sent
+		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
+		expect(continuation).toBeUndefined();
 	});
 
 	test("turn_start clears footer status when resuming after compact", async () => {
@@ -422,6 +489,48 @@ describe("compact", () => {
 		await harness.fireEvent("turn_start", { type: "turn_start" }, turnCtx);
 
 		expect(turnStatusUpdates).toHaveLength(0);
+	});
+
+	test("session_before_switch cancels continuation timer", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: () => {},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => true,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+		// Trigger onComplete — starts the 200ms timer
+		compactOptions?.onComplete?.();
+
+		// Session switch fires before timer expires
+		const switchCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: () => {},
+			} as ExtensionContext["ui"],
+		});
+		await harness.fireEvent(
+			"session_before_switch",
+			{ type: "session_before_switch", reason: "switch" },
+			switchCtx
+		);
+
+		// Wait longer than the 200ms timeout
+		await new Promise((resolve) => setTimeout(resolve, 300));
+
+		// Timer was cancelled — no continuation message sent
+		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
+		expect(continuation).toBeUndefined();
 	});
 
 	test("session_before_switch clears pending compact", async () => {
