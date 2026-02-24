@@ -8,6 +8,7 @@ interface QueuedMessagesLike {
 }
 
 interface InteractiveModeInstanceLike {
+	compactionQueuedMessages?: Array<unknown>;
 	defaultEditor?: { onEscape?: (() => void) | undefined };
 	flushPendingBashComponents?: (() => void) | undefined;
 	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
@@ -148,9 +149,18 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			// Expose compaction queue status so extensions can check whether
 			// flushCompactionQueue will handle resumption (plan 159, bug 1).
 			// Read-only boolean — does not leak the full queue API.
+			//
+			// Only checks compactionQueuedMessages — the queue that
+			// flushCompactionQueue() actually processes. Session-level
+			// steering/followUp are consumed by the agent loop when a new
+			// turn starts, not by the compaction flush. Previously this
+			// checked getAllQueuedMessages() which included session steering,
+			// causing a false positive that orphaned steering messages
+			// typed before compact. See plan 160.
 			context.hasCompactionQueuedMessages = () => {
-				const queued = this.getAllQueuedMessages?.();
-				return hasQueuedMessages(queued);
+				return (
+					Array.isArray(this.compactionQueuedMessages) && this.compactionQueuedMessages.length > 0
+				);
 			};
 
 			const originalNotify = context.notify;

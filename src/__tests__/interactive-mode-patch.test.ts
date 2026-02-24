@@ -154,7 +154,11 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.flushCalls).toBe(1);
 		expect(mode.pendingBashComponents).toEqual([]);
 		expect(mode.pendingWorkingMessage).toBeUndefined();
-		expect(mode.statusClears).toBe(1);
+		// statusContainer is NOT cleared here — the original framework guards
+		// this behind `if (this.loadingAnimation)`. Unconditionally clearing
+		// strips the compacting loader during model-triggered compaction
+		// (plan 159, bug 2).
+		expect(mode.statusClears).toBe(0);
 		expect(mode.updateCalls).toBe(1);
 		expect(mode.renderRequests).toBe(1);
 
@@ -224,18 +228,24 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.lastRestoredAbort).toBeUndefined();
 	});
 
-	it("drops idle non-empty setWorkingMessage to avoid stale carryover", () => {
+	it("allows idle setWorkingMessage for post-compaction resuming indicators", () => {
+		// The setWorkingMessage guard that blocked all idle non-empty messages
+		// was removed (plan 159, bug 3). Stale messages are now handled by the
+		// agent_end patch clearing pendingWorkingMessage. Post-compaction messages
+		// like "Resuming task…" need to queue while idle.
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();
 		const uiContext = mode.createExtensionUIContext();
 
 		mode.pendingWorkingMessage = undefined;
-		uiContext.setWorkingMessage("late async message");
-		expect(mode.pendingWorkingMessage).toBeUndefined();
+		uiContext.setWorkingMessage("Resuming task…");
+		expect(mode.pendingWorkingMessage).toBe("Resuming task…");
 
+		// Clear still works
 		uiContext.setWorkingMessage();
 		expect(mode.pendingWorkingMessage).toBeUndefined();
 
+		// Also works during streaming
 		mode.session.isStreaming = true;
 		uiContext.setWorkingMessage("queued while streaming");
 		expect(mode.pendingWorkingMessage).toBe("queued while streaming");
@@ -251,5 +261,56 @@ describe("patchInteractiveModePrototype", () => {
 
 		expect(mode.notifyCalls[0]).toEqual({ message: "⛔ Hook blocked tool_call", type: "info" });
 		expect(mode.notifyCalls[1]).toEqual({ message: "plain failure", type: "error" });
+	});
+
+	it("hasCompactionQueuedMessages returns false when only session steering exists", () => {
+		// Session steering messages (in agent.steeringQueue) are consumed by the
+		// agent loop, not by flushCompactionQueue. The method must not report them
+		// as compaction-queued — that false positive orphaned steering messages
+		// typed before compact (plan 160).
+		class SteeringOnlyMode extends FakeInteractiveMode {
+			override getAllQueuedMessages(): { followUp: string[]; steering: string[] } {
+				return { followUp: [], steering: ["orphaned steering msg"] };
+			}
+		}
+
+		patchInteractiveModePrototype(SteeringOnlyMode.prototype as never);
+		const mode = new SteeringOnlyMode();
+		// compactionQueuedMessages is empty — only session steering exists
+		(mode as Record<string, unknown>).compactionQueuedMessages = [];
+		const uiContext = mode.createExtensionUIContext();
+
+		const hasQueued = (uiContext as Record<string, unknown>).hasCompactionQueuedMessages as
+			| (() => boolean)
+			| undefined;
+		expect(typeof hasQueued).toBe("function");
+		expect(hasQueued?.()).toBe(false);
+	});
+
+	it("hasCompactionQueuedMessages returns true when compactionQueuedMessages has entries", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		// Simulate messages queued during compaction
+		(mode as Record<string, unknown>).compactionQueuedMessages = [
+			{ text: "user typed during compact", mode: "steer" },
+		];
+		const uiContext = mode.createExtensionUIContext();
+
+		const hasQueued = (uiContext as Record<string, unknown>).hasCompactionQueuedMessages as
+			| (() => boolean)
+			| undefined;
+		expect(hasQueued?.()).toBe(true);
+	});
+
+	it("hasCompactionQueuedMessages returns false when compactionQueuedMessages is undefined", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		// compactionQueuedMessages not set at all (property doesn't exist)
+		const uiContext = mode.createExtensionUIContext();
+
+		const hasQueued = (uiContext as Record<string, unknown>).hasCompactionQueuedMessages as
+			| (() => boolean)
+			| undefined;
+		expect(hasQueued?.()).toBe(false);
 	});
 });
