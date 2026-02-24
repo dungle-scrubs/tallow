@@ -284,7 +284,10 @@ function readMarkerFile(worktreePath: string): WorktreeMarker | undefined {
  */
 function writeMarkerFile(worktreePath: string, marker: WorktreeMarker): void {
 	const markerPath = join(worktreePath, TALLOW_WORKTREE_MARKER_FILE);
-	writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf-8");
+	writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, {
+		encoding: "utf-8",
+		mode: 0o600,
+	});
 }
 
 /**
