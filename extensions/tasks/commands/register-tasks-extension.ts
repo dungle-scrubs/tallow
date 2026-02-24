@@ -565,10 +565,11 @@ export function registerTasksExtension(
 
 		const totalCount = allAgents.length + teamMates.length;
 		const coloredNames = [...agentNames].map((name) => formatWidgetIdentity(name)).join(" ");
+		const label = teamMates.length > 0 ? "teammate" : "agent";
 
 		ctx.ui.setStatus(
 			"agents",
-			`${coloredNames} ${formatWidgetRole(ctx, "meta", "·")} ${formatWidgetRole(ctx, "hint", `${totalCount} teammate${totalCount > 1 ? "s" : ""}`)}`
+			`${coloredNames} ${formatWidgetRole(ctx, "meta", "·")} ${formatWidgetRole(ctx, "hint", `${totalCount} ${label}${totalCount > 1 ? "s" : ""}`)}`
 		);
 	}
 
