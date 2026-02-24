@@ -2,34 +2,56 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
-const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file, which will be given to future AI coding agent sessions operating in this repository.
+const INIT_PROMPT = `Please analyze this codebase and create an AGENTS.md file for AI coding agent sessions.
 
-What to add:
-1. Commands that will be commonly used, such as how to build, lint, and run tests. Include the necessary commands to develop in this codebase, such as how to run a single test.
-2. High-level code architecture and structure so that future sessions can be productive more quickly. Focus on the "big picture" architecture that requires reading multiple files to understand.
+## Core principle
 
-Usage notes:
-- If there's already an AGENTS.md (or CLAUDE.md), suggest improvements to it.
-- When you make the initial AGENTS.md, do not repeat yourself and do not include obvious instructions like "Provide helpful error messages to users", "Write unit tests for all new utilities", "Never include sensitive information (API keys, tokens) in code or commits".
-- Avoid listing every component or file structure that can be easily discovered.
-- Don't include generic development practices.
-- If there are Cursor rules (in .cursor/rules/ or .cursorrules) or Copilot rules (in .github/copilot-instructions.md), make sure to include the important parts.
-- If there is a README.md, make sure to include the important parts.
-- Do not make up information such as "Common Development Tasks", "Tips for Development", "Support and Documentation" unless this is expressly included in other files that you read.
-- Be sure to prefix the file with the following text:
+Only document what an agent can't quickly discover on its own in a fresh session. The further something is from immediate access — reading a file, running a command, following an import — the more it belongs here. If it's one command away, leave it out.
+
+## What belongs (high discovery cost)
+
+- Commands with non-obvious flags, ordering constraints, or gotchas ("must build X before Y", "use bun test not npm test", "single test requires this flag")
+- Implicit constraints not enforced by tooling or visible in code ("don't fork X", "always rebase merge", "this directory is generated — don't edit")
+- Architectural decisions that require reading many files to piece together
+- Conventions that fail silently or cause subtle bugs when violated
+- Non-standard project setup (unusual monorepo wiring, forked dependencies, vendored packages)
+
+## What does NOT belong (low discovery cost)
+
+- Tech stack — obvious from package.json, Cargo.toml, pyproject.toml, etc.
+- File and directory structure — agents can ls and find
+- Per-file descriptions — agents can read files
+- Standard framework patterns the agent knows from training data
+- Information already in README.md (the agent reads it)
+- Generic practices ("write tests", "use descriptive names", "handle errors")
+- Fabricated sections like "Tips for Development" or "Support" unless they exist in the repo
+
+## Additional sources to check
+
+- Cursor rules (.cursor/rules/ or .cursorrules), Copilot rules (.github/copilot-instructions.md) — incorporate the non-obvious parts only.
+- If there's an existing AGENTS.md or CLAUDE.md, evaluate it against this principle — trim what's discoverable, add what's hidden.
+
+## Format
+
+Prefix the file with:
 
 # AGENTS.md
 
-This file provides guidance to AI coding agents when working with code in this repository.`;
+This file provides guidance to AI coding agents when working with code in this repository.
 
-const MIGRATE_PROMPT = `There is an existing CLAUDE.md in this project that can be migrated to AGENTS.md. Please:
+Be terse. Every line should save an agent real discovery time or prevent a silent mistake. If a fact takes one command to find, it doesn't need a line.`;
+
+const MIGRATE_PROMPT = `There is an existing CLAUDE.md in this project that should be migrated to AGENTS.md.
 
 1. Read the existing CLAUDE.md file.
-2. Create a new AGENTS.md based on its content, replacing any agent-specific references with generic agent-neutral language.
-3. Update the header to use "# AGENTS.md" and the description line to: "This file provides guidance to AI coding agents when working with code in this repository."
-4. Keep the CLAUDE.md file in place for backward compatibility, but note in it that AGENTS.md is the canonical source.
+2. Create a new AGENTS.md, but don't copy it verbatim. Evaluate each item against discovery cost:
+   - Keep: implicit constraints, build ordering gotchas, architectural decisions spanning many files, conventions that fail silently if violated.
+   - Cut: tech stack identification, file/directory listings, per-file descriptions, standard patterns, anything an agent finds with one command (ls, cat package.json, reading a config file).
+3. Replace agent-specific references with generic agent-neutral language.
+4. Use header "# AGENTS.md" and description: "This file provides guidance to AI coding agents when working with code in this repository."
+5. Keep the original CLAUDE.md for backward compatibility, but note in it that AGENTS.md is the canonical source.
 
-After creating AGENTS.md, also analyze the codebase and suggest any improvements to the migrated content.`;
+The goal is a lean file. Every line should represent something that would cost an agent real time to discover or that it might get wrong without being told.`;
 
 /** Directories to skip during subdirectory walks. */
 const SKIP_DIRS = new Set([
