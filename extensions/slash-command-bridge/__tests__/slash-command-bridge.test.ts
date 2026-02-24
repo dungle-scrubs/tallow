@@ -185,7 +185,7 @@ describe("compact", () => {
 		expect(typeof compactOptions?.onError).toBe("function");
 	});
 
-	test("agent_end hook shows and clears compacting UI feedback", async () => {
+	test("agent_end hook shows compacting UI then transitions to resuming on complete", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
 		const workingMessages: Array<string | undefined> = [];
 		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
@@ -208,13 +208,15 @@ describe("compact", () => {
 		await executeTool({ command: "compact" }, toolCtx);
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
 
+		// During compaction: shows compacting indicators
 		expect(workingMessages[0]).toBe("Compacting session…");
 		expect(statusUpdates[0]).toEqual({ key: "compact", text: "🧹 compacting" });
 
 		compactOptions?.onComplete?.();
 
-		expect(workingMessages.at(-1)).toBeUndefined();
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+		// After compaction: transitions to resuming indicators (not clearing)
+		expect(workingMessages.at(-1)).toBe("Resuming task…");
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "⏳ resuming" });
 	});
 
 	test("onComplete sends continuation message when agent is idle", async () => {
@@ -241,10 +243,21 @@ describe("compact", () => {
 		expect(continuation?.content).toContain("compaction is complete");
 	});
 
-	test("onComplete skips continuation when agent is not idle", async () => {
+	test("onComplete skips continuation and clears indicators when agent is not idle", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const workingMessages: Array<string | undefined> = [];
 		const toolCtx = buildContext({ compact: () => {} });
 		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: (message?: string) => {
+					workingMessages.push(message);
+				},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
 			compact: (options) => {
 				compactOptions = options;
 			},
@@ -259,6 +272,10 @@ describe("compact", () => {
 
 		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
 		expect(continuation).toBeUndefined();
+
+		// When not idle, the !isIdle() branch clears indicators
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+		expect(workingMessages.at(-1)).toBeUndefined();
 	});
 
 	test("onError does not send continuation message", async () => {
@@ -293,6 +310,118 @@ describe("compact", () => {
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, ctx);
 
 		expect(compactCalled).toBe(false);
+	});
+
+	test("turn_start clears footer status when resuming after compact", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+		compactOptions?.onComplete?.();
+
+		// Resuming status should be set
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "⏳ resuming" });
+
+		// turn_start fires — should clear the footer status
+		const turnCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+		});
+		await harness.fireEvent("turn_start", { type: "turn_start" }, turnCtx);
+
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+	});
+
+	test("turn_start is a no-op when not resuming after compact", async () => {
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const turnCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+		});
+
+		// Fire turn_start without any preceding compaction
+		await harness.fireEvent("turn_start", { type: "turn_start" }, turnCtx);
+
+		// No status updates should have been made
+		expect(statusUpdates).toHaveLength(0);
+	});
+
+	test("session_before_switch clears resuming state and footer status", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+		compactOptions?.onComplete?.();
+
+		// Resuming status should be set
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "⏳ resuming" });
+
+		// Session switch fires — should clear resuming state
+		const switchCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+		});
+		await harness.fireEvent(
+			"session_before_switch",
+			{ type: "session_before_switch", reason: "switch" },
+			switchCtx
+		);
+
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+
+		// Subsequent turn_start should be a no-op (flag was cleared)
+		const turnStatusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const turnCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: (key: string, text?: string) => {
+					turnStatusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+		});
+		await harness.fireEvent("turn_start", { type: "turn_start" }, turnCtx);
+
+		expect(turnStatusUpdates).toHaveLength(0);
 	});
 
 	test("session_before_switch clears pending compact", async () => {
