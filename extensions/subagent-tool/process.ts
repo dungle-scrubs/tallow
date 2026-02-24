@@ -651,7 +651,7 @@ export async function spawnBackgroundSubagent(
 	if (!routing.ok) return routing.error;
 
 	let isolationContext: SubagentIsolationContext | undefined;
-	let effectiveCwd = requestedCwd;
+	let effectiveCwd: string;
 	try {
 		const provisioned = provisionIsolation(
 			requestedCwd,
@@ -1033,7 +1033,7 @@ export async function runSingleAgent(
 	const taskId = `fg_${generateId()}`;
 
 	let isolationContext: SubagentIsolationContext | undefined;
-	let effectiveCwd = requestedCwd;
+	let effectiveCwd: string;
 	try {
 		const provisioned = provisionIsolation(
 			requestedCwd,
