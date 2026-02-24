@@ -226,7 +226,7 @@ describe("lsp tool behavior with timeout guards", () => {
 		);
 
 		expect(timeoutResult.isError).toBe(true);
-		expect(firstText(timeoutResult)).toContain("Workspace symbols request timed out");
+		expect(firstText(timeoutResult)).toContain("workspace symbols request timed out");
 		expect(runtime.spawnedServers).toHaveLength(1);
 		expect(runtime.spawnedServers[0]?.killed).toBe(true);
 
