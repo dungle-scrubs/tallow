@@ -298,23 +298,20 @@ WHEN NOT TO USE:
 				ctx.ui?.setWorkingMessage?.("Resuming task…");
 				ctx.ui?.setStatus?.("compact", "⏳ resuming");
 
-				// Check if user queued messages during compaction. If yes,
-				// flushCompactionQueue handles resumption — skip auto-continue
-				// to avoid racing two concurrent agent.prompt() calls (plan 159, bug 1).
-				// eslint-disable-next-line -- runtime duck-type check for patched UI method
-				const uiAny = ctx.ui as unknown as { hasCompactionQueuedMessages?: () => boolean };
-				const hasQueued = uiAny?.hasCompactionQueuedMessages;
-				if (typeof hasQueued === "function" && hasQueued()) {
-					// Queue flush will prompt the agent. Clean up happens in
-					// turn_start handler when the agent resumes.
-					return;
-				}
-
-				// No queued messages — send continuation after delay.
-				// 200ms (up from 50ms) gives session.prompt()'s async setup
-				// (API key resolution, compaction check) time to settle.
-				// The turn_start listener cancels this timer if a turn starts
-				// before it fires (defense-in-depth).
+				// Always schedule continuation. Safety nets prevent duplicate prompts:
+				// 1. turn_start listener cancels if flushCompactionQueue already started a turn
+				// 2. isIdle() check at timer expiry skips if agent is streaming
+				// 3. sendCustomMessage queues as steering if agent started mid-delay
+				//
+				// Previously gated on hasCompactionQueuedMessages(), but that method
+				// checked both the compaction queue AND session steering — causing a
+				// false positive when steering messages were queued before compact.
+				// flushCompactionQueue only processes compactionQueuedMessages, so
+				// session steering messages were orphaned. See plan 160.
+				//
+				// 200ms gives session.prompt()'s async setup (API key resolution,
+				// compaction check) time to settle. The turn_start listener cancels
+				// this timer if a turn starts before it fires (defense-in-depth).
 				continuationTimer = setTimeout(() => {
 					continuationTimer = null;
 					if (ctx.isIdle()) {

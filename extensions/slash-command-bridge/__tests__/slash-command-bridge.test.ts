@@ -243,7 +243,13 @@ describe("compact", () => {
 		expect(continuation?.content).toContain("compaction is complete");
 	});
 
-	test("onComplete skips auto-continue when compaction queue has messages", async () => {
+	test("onComplete always schedules continuation even when compaction queue has messages", async () => {
+		// Previously, onComplete short-circuited when hasCompactionQueuedMessages()
+		// returned true. This caused orphaned session steering messages because the
+		// method's false positive (checking session steering too) prevented the
+		// continuation timer from firing. Now the timer always fires — safety nets
+		// (turn_start cancellation, isIdle() check) prevent duplicate prompts.
+		// See plan 160.
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
 		const toolCtx = buildContext({ compact: () => {} });
 		const agentEndCtx = buildContext({
@@ -251,7 +257,8 @@ describe("compact", () => {
 			ui: {
 				setWorkingMessage: () => {},
 				setStatus: () => {},
-				// Simulate the patched UI context exposing hasCompactionQueuedMessages
+				// Even with hasCompactionQueuedMessages exposed, onComplete
+				// no longer checks it.
 				hasCompactionQueuedMessages: () => true,
 			} as unknown as ExtensionContext["ui"],
 			compact: (options) => {
@@ -264,11 +271,12 @@ describe("compact", () => {
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
 
 		compactOptions?.onComplete?.();
-		// Wait longer than the 200ms timeout to ensure no timer was started
 		await new Promise((resolve) => setTimeout(resolve, 300));
 
+		// Continuation fires regardless — safety nets prevent duplicates
 		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
-		expect(continuation).toBeUndefined();
+		expect(continuation).toBeDefined();
+		expect(continuation?.content).toContain("compaction is complete");
 	});
 
 	test("onComplete skips continuation and clears indicators when agent is not idle", async () => {
