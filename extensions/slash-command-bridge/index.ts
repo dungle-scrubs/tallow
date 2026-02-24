@@ -30,6 +30,14 @@ let pendingCompact: { customInstructions?: string } | null = null;
 let resumingAfterCompact = false;
 
 /**
+ * Timer handle for the auto-continue delay after compaction.
+ * Cancelled if a `turn_start` fires before the timer expires (indicating
+ * `flushCompactionQueue` or user input already prompted the agent), or
+ * on session switch. See plan 159, bug 1.
+ */
+let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
  * Commands the model is allowed to invoke.
  * Maps command name → whether it's executable from tool context.
  *
@@ -290,10 +298,25 @@ WHEN NOT TO USE:
 				ctx.ui?.setWorkingMessage?.("Resuming task…");
 				ctx.ui?.setStatus?.("compact", "⏳ resuming");
 
-				// After compaction, re-prompt the agent if no user messages
-				// triggered a turn via flushCompactionQueue. The setTimeout
-				// lets flushCompactionQueue's async work settle first.
-				setTimeout(() => {
+				// Check if user queued messages during compaction. If yes,
+				// flushCompactionQueue handles resumption — skip auto-continue
+				// to avoid racing two concurrent agent.prompt() calls (plan 159, bug 1).
+				// eslint-disable-next-line -- runtime duck-type check for patched UI method
+				const uiAny = ctx.ui as unknown as { hasCompactionQueuedMessages?: () => boolean };
+				const hasQueued = uiAny?.hasCompactionQueuedMessages;
+				if (typeof hasQueued === "function" && hasQueued()) {
+					// Queue flush will prompt the agent. Clean up happens in
+					// turn_start handler when the agent resumes.
+					return;
+				}
+
+				// No queued messages — send continuation after delay.
+				// 200ms (up from 50ms) gives session.prompt()'s async setup
+				// (API key resolution, compaction check) time to settle.
+				// The turn_start listener cancels this timer if a turn starts
+				// before it fires (defense-in-depth).
+				continuationTimer = setTimeout(() => {
+					continuationTimer = null;
 					if (ctx.isIdle()) {
 						pi.sendMessage(
 							{
@@ -312,7 +335,7 @@ WHEN NOT TO USE:
 						ctx.ui?.setStatus?.("compact", undefined);
 						ctx.ui?.setWorkingMessage?.();
 					}
-				}, 50);
+				}, 200);
 			},
 			onError: () => {
 				ctx.ui?.setWorkingMessage?.();
@@ -324,23 +347,36 @@ WHEN NOT TO USE:
 	});
 
 	/**
-	 * Clear the footer "⏳ resuming" status once the new turn has begun.
-	 * At this point the loading spinner is active and showing the pending
-	 * working message ("Resuming task…"), so the footer is redundant.
+	 * Cancel the auto-continue timer and clear resuming status on turn start.
+	 *
+	 * If a turn starts before the 200ms timer fires, something else already
+	 * prompted the agent (flushCompactionQueue or user input). Cancel the
+	 * timer to avoid a duplicate prompt race (plan 159, bug 1 defense-in-depth).
+	 *
+	 * Also clears the footer "⏳ resuming" status — the loading spinner is
+	 * now active and showing the pending working message ("Resuming task…").
 	 */
 	pi.on("turn_start", (_event, ctx) => {
+		if (continuationTimer) {
+			clearTimeout(continuationTimer);
+			continuationTimer = null;
+		}
 		if (!resumingAfterCompact) return;
 		resumingAfterCompact = false;
 		ctx.ui?.setStatus?.("compact", undefined);
 	});
 
 	/**
-	 * Clear pending compact and resuming state if the session switches
-	 * before the turn ends.
+	 * Clear pending compact, resuming state, and continuation timer if the
+	 * session switches before the turn ends.
 	 */
 	pi.on("session_before_switch", (_event, ctx) => {
 		pendingCompact = null;
 		resumingAfterCompact = false;
+		if (continuationTimer) {
+			clearTimeout(continuationTimer);
+			continuationTimer = null;
+		}
 		ctx.ui?.setStatus?.("compact", undefined);
 	});
 }
