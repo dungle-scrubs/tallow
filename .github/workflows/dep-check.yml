@@ -6,13 +6,12 @@ on:
     - cron: "0 8 * * *"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   check-pi-deps:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -125,6 +124,8 @@ jobs:
 
   notify-failure:
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     needs: check-pi-deps
     if: failure()
     steps:
