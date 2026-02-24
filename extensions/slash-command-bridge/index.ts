@@ -22,6 +22,14 @@ import { Type } from "@sinclair/typebox";
 let pendingCompact: { customInstructions?: string } | null = null;
 
 /**
+ * Whether the extension is in the post-compaction "resuming" state.
+ * Set when compaction completes and the agent will auto-continue.
+ * Cleared on `turn_start` (loader is active), `session_before_switch`,
+ * or when `!isIdle()` (user sent a message during compaction).
+ */
+let resumingAfterCompact = false;
+
+/**
  * Commands the model is allowed to invoke.
  * Maps command name → whether it's executable from tool context.
  *
@@ -273,8 +281,14 @@ WHEN NOT TO USE:
 		ctx.compact({
 			customInstructions: options.customInstructions,
 			onComplete: () => {
-				ctx.ui?.setWorkingMessage?.();
-				ctx.ui?.setStatus?.("compact", undefined);
+				// Transition from compaction indicators to resuming indicators.
+				// setWorkingMessage queues as pendingWorkingMessage (no loader
+				// exists after executeCompaction stops it). Applied automatically
+				// when agent_start creates the loader. Footer status is visible
+				// immediately — covers the brief gap before the loader appears.
+				resumingAfterCompact = true;
+				ctx.ui?.setWorkingMessage?.("Resuming task…");
+				ctx.ui?.setStatus?.("compact", "⏳ resuming");
 
 				// After compaction, re-prompt the agent if no user messages
 				// triggered a turn via flushCompactionQueue. The setTimeout
@@ -291,6 +305,12 @@ WHEN NOT TO USE:
 							},
 							{ triggerTurn: true }
 						);
+					} else {
+						// User sent a message during compaction — their turn is
+						// handling things, clean up our indicators.
+						resumingAfterCompact = false;
+						ctx.ui?.setStatus?.("compact", undefined);
+						ctx.ui?.setWorkingMessage?.();
 					}
 				}, 50);
 			},
@@ -303,8 +323,24 @@ WHEN NOT TO USE:
 		});
 	});
 
-	/** Clear pending compact if the session switches before the turn ends. */
-	pi.on("session_before_switch", () => {
+	/**
+	 * Clear the footer "⏳ resuming" status once the new turn has begun.
+	 * At this point the loading spinner is active and showing the pending
+	 * working message ("Resuming task…"), so the footer is redundant.
+	 */
+	pi.on("turn_start", (_event, ctx) => {
+		if (!resumingAfterCompact) return;
+		resumingAfterCompact = false;
+		ctx.ui?.setStatus?.("compact", undefined);
+	});
+
+	/**
+	 * Clear pending compact and resuming state if the session switches
+	 * before the turn ends.
+	 */
+	pi.on("session_before_switch", (_event, ctx) => {
 		pendingCompact = null;
+		resumingAfterCompact = false;
+		ctx.ui?.setStatus?.("compact", undefined);
 	});
 }
