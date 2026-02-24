@@ -125,6 +125,9 @@ function getText(result: { content: Array<{ text?: string; type: string }> }): s
 	throw new Error("Expected a text block in tool result");
 }
 
+/** Tool result with optional error flag. */
+type ToolResult = { content: Array<{ text?: string; type: string }>; isError?: boolean };
+
 describe("lsp timeout guards", () => {
 	let harness: ExtensionHarness;
 	let projectDir: string;
@@ -189,27 +192,32 @@ describe("lsp timeout guards", () => {
 		}
 	});
 
-	test("uses the default startup timeout when config is missing", async () => {
+	/**
+	 * Runs lsp_symbols against a fixture file with initialize hanging forever,
+	 * captures setTimeout delays, and returns the result.
+	 *
+	 * @param fixtureName - Relative path under projectDir for the fixture file
+	 * @param fixtureContent - Content to write into the fixture
+	 * @returns Captured timeout delays, tool result, and working-message log
+	 */
+	async function runWithHangingInit(
+		fixtureName: string,
+		fixtureContent = "export const value = 1;\n"
+	): Promise<{ delays: number[]; result: ToolResult; messages: Array<string | undefined> }> {
 		const previousInitialize = runtime.behavior.initialize;
 		runtime.behavior.initialize = async () => new Promise(() => {});
 
 		try {
-			const filePath = writeFixture(
-				projectDir,
-				"src/default-timeout.ts",
-				"export const value = 1;\n"
-			);
+			const filePath = writeFixture(projectDir, fixtureName, fixtureContent);
 			const lspSymbols = getTool(harness, "lsp_symbols");
 			const messages: Array<string | undefined> = [];
 			const ctx = createToolContext(projectDir, messages);
 			const signal = new AbortController().signal;
-			let result:
-				| { content: Array<{ text?: string; type: string }>; isError?: boolean }
-				| undefined;
+			let result: ToolResult = { content: [] };
 
 			const delays = await captureTimeoutDelays(async () => {
 				result = await lspSymbols.execute(
-					"default-timeout",
+					fixtureName.replace(/\//g, "-"),
 					{ file: filePath },
 					signal,
 					() => {},
@@ -217,147 +225,61 @@ describe("lsp timeout guards", () => {
 				);
 			});
 
-			expect(result?.isError).toBe(true);
-			expect(getText(result as { content: Array<{ text?: string; type: string }> })).toContain(
-				"Language server startup timed out"
-			);
-			expect(delays).toContain(10_000);
-			expect(runtime.spawnedServers).toHaveLength(1);
-			expect(runtime.spawnedServers[0]?.killed).toBe(true);
-			expect(messages.at(-1)).toBeUndefined();
+			return { delays, result, messages };
 		} finally {
 			runtime.behavior.initialize = previousInitialize;
 		}
+	}
+
+	test("uses the default startup timeout when config is missing", async () => {
+		const { delays, result, messages } = await runWithHangingInit("src/default-timeout.ts");
+
+		expect(result.isError).toBe(true);
+		expect(getText(result)).toContain("Language server startup timed out");
+		expect(delays).toContain(10_000);
+		expect(runtime.spawnedServers).toHaveLength(1);
+		expect(runtime.spawnedServers[0]?.killed).toBe(true);
+		expect(messages.at(-1)).toBeUndefined();
 	});
 
 	test("project startup-timeout overrides user settings", async () => {
-		const previousInitialize = runtime.behavior.initialize;
-		runtime.behavior.initialize = async () => new Promise(() => {});
-
 		writeJson(join(agentDir, "settings.json"), { lsp: { startupTimeoutMs: 150 } });
 		writeJson(join(projectDir, ".tallow", "settings.json"), {
 			lsp: { startupTimeoutMs: 25 },
 		});
 
-		try {
-			const filePath = writeFixture(
-				projectDir,
-				"src/project-timeout.ts",
-				"export const value = 2;\n"
-			);
-			const lspSymbols = getTool(harness, "lsp_symbols");
-			const messages: Array<string | undefined> = [];
-			const ctx = createToolContext(projectDir, messages);
-			const signal = new AbortController().signal;
-			let result:
-				| { content: Array<{ text?: string; type: string }>; isError?: boolean }
-				| undefined;
+		const { delays, result } = await runWithHangingInit("src/project-timeout.ts");
 
-			const delays = await captureTimeoutDelays(async () => {
-				result = await lspSymbols.execute(
-					"project-timeout",
-					{ file: filePath },
-					signal,
-					() => {},
-					ctx
-				);
-			});
-
-			expect(result?.isError).toBe(true);
-			expect(getText(result as { content: Array<{ text?: string; type: string }> })).toContain(
-				"Language server startup timed out"
-			);
-			expect(delays).toContain(25);
-			expect(delays).not.toContain(150);
-		} finally {
-			runtime.behavior.initialize = previousInitialize;
-		}
+		expect(result.isError).toBe(true);
+		expect(getText(result)).toContain("Language server startup timed out");
+		expect(delays).toContain(25);
+		expect(delays).not.toContain(150);
 	});
 
 	test("uses user startup-timeout when project value is invalid", async () => {
-		const previousInitialize = runtime.behavior.initialize;
-		runtime.behavior.initialize = async () => new Promise(() => {});
-
 		writeJson(join(agentDir, "settings.json"), { lsp: { startupTimeoutMs: 80 } });
 		writeJson(join(projectDir, ".tallow", "settings.json"), {
 			lsp: { startupTimeoutMs: "fast" },
 		});
 
-		try {
-			const filePath = writeFixture(
-				projectDir,
-				"src/user-fallback-timeout.ts",
-				"export const value = 3;\n"
-			);
-			const lspSymbols = getTool(harness, "lsp_symbols");
-			const messages: Array<string | undefined> = [];
-			const ctx = createToolContext(projectDir, messages);
-			const signal = new AbortController().signal;
-			let result:
-				| { content: Array<{ text?: string; type: string }>; isError?: boolean }
-				| undefined;
+		const { delays, result } = await runWithHangingInit("src/user-fallback-timeout.ts");
 
-			const delays = await captureTimeoutDelays(async () => {
-				result = await lspSymbols.execute(
-					"user-fallback-timeout",
-					{ file: filePath },
-					signal,
-					() => {},
-					ctx
-				);
-			});
-
-			expect(result?.isError).toBe(true);
-			expect(getText(result as { content: Array<{ text?: string; type: string }> })).toContain(
-				"Language server startup timed out"
-			);
-			expect(delays).toContain(80);
-			expect(delays).not.toContain(10_000);
-		} finally {
-			runtime.behavior.initialize = previousInitialize;
-		}
+		expect(result.isError).toBe(true);
+		expect(getText(result)).toContain("Language server startup timed out");
+		expect(delays).toContain(80);
+		expect(delays).not.toContain(10_000);
 	});
 
 	test("falls back to default timeout when startup-timeout config is invalid", async () => {
-		const previousInitialize = runtime.behavior.initialize;
-		runtime.behavior.initialize = async () => new Promise(() => {});
-
 		writeJson(join(projectDir, ".tallow", "settings.json"), {
 			lsp: { startupTimeoutMs: "fast" },
 		});
 
-		try {
-			const filePath = writeFixture(
-				projectDir,
-				"src/invalid-timeout.ts",
-				"export const value = 3;\n"
-			);
-			const lspSymbols = getTool(harness, "lsp_symbols");
-			const messages: Array<string | undefined> = [];
-			const ctx = createToolContext(projectDir, messages);
-			const signal = new AbortController().signal;
-			let result:
-				| { content: Array<{ text?: string; type: string }>; isError?: boolean }
-				| undefined;
+		const { delays, result } = await runWithHangingInit("src/invalid-timeout.ts");
 
-			const delays = await captureTimeoutDelays(async () => {
-				result = await lspSymbols.execute(
-					"invalid-timeout",
-					{ file: filePath },
-					signal,
-					() => {},
-					ctx
-				);
-			});
-
-			expect(result?.isError).toBe(true);
-			expect(getText(result as { content: Array<{ text?: string; type: string }> })).toContain(
-				"Language server startup timed out"
-			);
-			expect(delays).toContain(10_000);
-		} finally {
-			runtime.behavior.initialize = previousInitialize;
-		}
+		expect(result.isError).toBe(true);
+		expect(getText(result)).toContain("Language server startup timed out");
+		expect(delays).toContain(10_000);
 	});
 
 	test("startup-timeout failure kills server process and clears active state", async () => {
@@ -456,7 +378,7 @@ describe("lsp timeout guards", () => {
 		);
 
 		expect(timeoutResult.isError).toBe(true);
-		expect(getText(timeoutResult)).toContain("Document symbols request timed out");
+		expect(getText(timeoutResult)).toContain("document symbols request timed out");
 		expect(runtime.spawnedServers).toHaveLength(1);
 		expect(runtime.spawnedServers[0]?.killed).toBe(true);
 

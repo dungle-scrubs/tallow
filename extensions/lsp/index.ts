@@ -957,6 +957,132 @@ async function sendRequestWithTimeout(
 	);
 }
 
+/** Successful file-based LSP connection setup. */
+interface FileSetup {
+	conn: LSPConnection;
+	filePath: string;
+}
+
+/**
+ * Resolves a file path, detects language, creates/retrieves an LSP connection,
+ * validates capability support, and opens the document — the common preamble
+ * shared by all file-based LSP tools.
+ *
+ * @param params - Tool parameters containing the file path
+ * @param signal - Optional cancellation signal
+ * @param ctx - Extension context with cwd and UI
+ * @param capability - Required server capability key
+ * @param capabilityLabel - Human-readable capability name for error messages
+ * @returns Either a ready FileSetup (has `conn`) or an early-exit tool result
+ */
+async function withFileConnection(
+	params: { file: string },
+	signal: AbortSignal | undefined,
+	ctx: { cwd: string; ui: { setWorkingMessage(msg?: string): void } },
+	capability: keyof LSPConnection["capabilities"],
+	capabilityLabel: string
+): Promise<
+	FileSetup | { details: object; content: { type: "text"; text: string }[]; isError?: boolean }
+> {
+	const filePath = path.isAbsolute(params.file) ? params.file : path.resolve(ctx.cwd, params.file);
+	const language = getLanguageForFile(filePath);
+
+	if (!language) {
+		return {
+			details: {},
+			content: [{ type: "text", text: `Unsupported file type: ${params.file}` }],
+		};
+	}
+
+	let conn: LSPConnection | null = null;
+	try {
+		conn = await getOrCreateConnectionForFile(language, filePath, {
+			onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
+			settingsCwd: ctx.cwd,
+			signal,
+		});
+	} catch (error) {
+		if (isAbortError(error)) throw error;
+		if (isTimeoutError(error)) {
+			return {
+				details: {},
+				content: [{ type: "text", text: `Language server startup timed out for ${language}` }],
+				isError: true,
+			};
+		}
+		return {
+			details: {},
+			content: [{ type: "text", text: `Error starting language server: ${error}` }],
+			isError: true,
+		};
+	} finally {
+		ctx.ui.setWorkingMessage();
+	}
+
+	if (!conn) {
+		return {
+			details: {},
+			content: [
+				{
+					type: "text",
+					text: `Language server not available for ${language}. Install: ${SERVER_CONFIGS[language]?.command ?? language}`,
+				},
+			],
+		};
+	}
+
+	if (!conn.capabilities[capability]) {
+		return {
+			details: {},
+			content: [{ type: "text", text: `${capabilityLabel} not supported by this language server` }],
+		};
+	}
+
+	await openDocument(conn, filePath);
+	return { conn, filePath };
+}
+
+/**
+ * Sends an LSP request with timeout/abort handling and formats the response.
+ *
+ * @param conn - Active LSP connection
+ * @param requestType - LSP request type descriptor
+ * @param params - Request parameters
+ * @param signal - Optional cancellation signal
+ * @param description - Human-readable label for error messages
+ * @param formatResult - Callback to convert the raw response into display text
+ * @returns Formatted tool result or error
+ */
+async function sendAndFormat<T>(
+	conn: LSPConnection,
+	requestType: { method: string },
+	params: unknown,
+	signal: AbortSignal | undefined,
+	description: string,
+	formatResult: (result: T) => string
+): Promise<{ details: object; content: { type: "text"; text: string }[]; isError?: boolean }> {
+	try {
+		const result = (await sendRequestWithTimeout(
+			conn,
+			requestType,
+			params,
+			signal,
+			description
+		)) as T;
+		return { details: {}, content: [{ type: "text", text: formatResult(result) }] };
+	} catch (error) {
+		if (isAbortError(error)) throw error;
+		if (isTimeoutError(error)) {
+			return {
+				details: {},
+				content: [{ type: "text", text: `${description} timed out` }],
+				isError: true,
+			};
+		}
+		return { details: {}, content: [{ type: "text", text: `Error: ${error}` }], isError: true };
+	}
+}
+
 /**
  * Registers LSP tools for definition, references, hover, and symbol search.
  * @param pi - Extension API for registering tools and event handlers
@@ -980,113 +1106,27 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 			character: Type.Number({ description: "Character/column position (1-indexed)" }),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const filePath = path.isAbsolute(params.file)
-				? params.file
-				: path.resolve(ctx.cwd, params.file);
-			const language = getLanguageForFile(filePath);
+			const setup = await withFileConnection(
+				params,
+				signal,
+				ctx,
+				"definitionProvider",
+				"Definition provider"
+			);
+			if (!("conn" in setup)) return setup;
 
-			if (!language) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Unsupported file type: ${params.file}` }],
-				};
-			}
-
-			let conn: LSPConnection | null = null;
-			try {
-				conn = await getOrCreateConnectionForFile(language, filePath, {
-					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
-					settingsCwd: ctx.cwd,
-					signal,
-				});
-			} catch (error) {
-				if (isAbortError(error)) {
-					// Propagate cancellation so the tool runner can stop cleanly
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						details: {},
-						content: [
-							{
-								type: "text",
-								text: `Language server startup timed out for ${language}`,
-							},
-						],
-						isError: true,
-					};
-				}
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Error starting language server: ${error}`,
-						},
-					],
-					isError: true,
-				};
-			} finally {
-				// Always clear working message, even on error or cancellation
-				ctx.ui.setWorkingMessage();
-			}
-
-			if (!conn) {
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Language server not available for ${language}. Install: ${SERVER_CONFIGS[language].command}`,
-						},
-					],
-				};
-			}
-
-			if (!conn.capabilities.definitionProvider) {
-				return {
-					details: {},
-					content: [
-						{ type: "text", text: "Definition provider not supported by this language server" },
-					],
-				};
-			}
-
-			await openDocument(conn, filePath);
-
-			try {
-				const result = (await sendRequestWithTimeout(
-					conn,
-					protocolBindings.DefinitionRequest.type,
-					{
-						textDocument: { uri: filePathToUri(filePath) },
-						position: { line: params.line - 1, character: params.character - 1 },
-					},
-					signal,
-					"LSP definition request"
-				)) as Location | Location[] | LocationLink | LocationLink[] | null;
-
-				return {
-					details: {},
-					content: [{ type: "text", text: formatLocations(result) }],
-				};
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						content: [{ type: "text", text: "Definition request timed out" }],
-						details: {},
-						isError: true,
-					};
-				}
-				return {
-					content: [{ type: "text", text: `Error: ${error}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			return sendAndFormat(
+				setup.conn,
+				protocolBindings.DefinitionRequest.type,
+				{
+					textDocument: { uri: filePathToUri(setup.filePath) },
+					position: { line: params.line - 1, character: params.character - 1 },
+				},
+				signal,
+				"LSP definition request",
+				(result: Location | Location[] | LocationLink | LocationLink[] | null) =>
+					formatLocations(result)
+			);
 		},
 	});
 
@@ -1109,111 +1149,30 @@ WHEN TO USE:
 			),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const filePath = path.isAbsolute(params.file)
-				? params.file
-				: path.resolve(ctx.cwd, params.file);
-			const language = getLanguageForFile(filePath);
+			const setup = await withFileConnection(
+				params,
+				signal,
+				ctx,
+				"referencesProvider",
+				"References provider"
+			);
+			if (!("conn" in setup)) return setup;
 
-			if (!language) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Unsupported file type: ${params.file}` }],
-				};
-			}
-
-			let conn: LSPConnection | null = null;
-			try {
-				conn = await getOrCreateConnectionForFile(language, filePath, {
-					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
-					settingsCwd: ctx.cwd,
-					signal,
-				});
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
+			return sendAndFormat(
+				setup.conn,
+				protocolBindings.ReferencesRequest.type,
+				{
+					textDocument: { uri: filePathToUri(setup.filePath) },
+					position: { line: params.line - 1, character: params.character - 1 },
+					context: { includeDeclaration: params.includeDeclaration ?? true },
+				},
+				signal,
+				"LSP references request",
+				(result: Location[] | null) => {
+					const locations = result || [];
+					return `Found ${locations.length} reference(s):\n${formatLocations(locations)}`;
 				}
-				if (isTimeoutError(error)) {
-					return {
-						details: {},
-						content: [
-							{
-								type: "text",
-								text: `Language server startup timed out for ${language}`,
-							},
-						],
-						isError: true,
-					};
-				}
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Error starting language server: ${error}`,
-						},
-					],
-					isError: true,
-				};
-			} finally {
-				ctx.ui.setWorkingMessage();
-			}
-
-			if (!conn) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Language server not available for ${language}` }],
-				};
-			}
-
-			if (!conn.capabilities.referencesProvider) {
-				return {
-					details: {},
-					content: [{ type: "text", text: "References provider not supported" }],
-				};
-			}
-
-			await openDocument(conn, filePath);
-
-			try {
-				const result = (await sendRequestWithTimeout(
-					conn,
-					protocolBindings.ReferencesRequest.type,
-					{
-						textDocument: { uri: filePathToUri(filePath) },
-						position: { line: params.line - 1, character: params.character - 1 },
-						context: { includeDeclaration: params.includeDeclaration ?? true },
-					},
-					signal,
-					"LSP references request"
-				)) as Location[] | null;
-
-				const locations = result || [];
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Found ${locations.length} reference(s):\n${formatLocations(locations)}`,
-						},
-					],
-				};
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						content: [{ type: "text", text: "References request timed out" }],
-						details: {},
-						isError: true,
-					};
-				}
-				return {
-					content: [{ type: "text", text: `Error: ${error}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			);
 		},
 	});
 
@@ -1233,104 +1192,26 @@ WHEN TO USE:
 			character: Type.Number({ description: "Character/column position (1-indexed)" }),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const filePath = path.isAbsolute(params.file)
-				? params.file
-				: path.resolve(ctx.cwd, params.file);
-			const language = getLanguageForFile(filePath);
+			const setup = await withFileConnection(
+				params,
+				signal,
+				ctx,
+				"hoverProvider",
+				"Hover provider"
+			);
+			if (!("conn" in setup)) return setup;
 
-			if (!language) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Unsupported file type: ${params.file}` }],
-				};
-			}
-
-			let conn: LSPConnection | null = null;
-			try {
-				conn = await getOrCreateConnectionForFile(language, filePath, {
-					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
-					settingsCwd: ctx.cwd,
-					signal,
-				});
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						details: {},
-						content: [
-							{
-								type: "text",
-								text: `Language server startup timed out for ${language}`,
-							},
-						],
-						isError: true,
-					};
-				}
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Error starting language server: ${error}`,
-						},
-					],
-					isError: true,
-				};
-			} finally {
-				ctx.ui.setWorkingMessage();
-			}
-
-			if (!conn) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Language server not available for ${language}` }],
-				};
-			}
-
-			if (!conn.capabilities.hoverProvider) {
-				return {
-					details: {},
-					content: [{ type: "text", text: "Hover provider not supported" }],
-				};
-			}
-
-			await openDocument(conn, filePath);
-
-			try {
-				const result = (await sendRequestWithTimeout(
-					conn,
-					protocolBindings.HoverRequest.type,
-					{
-						textDocument: { uri: filePathToUri(filePath) },
-						position: { line: params.line - 1, character: params.character - 1 },
-					},
-					signal,
-					"LSP hover request"
-				)) as Hover | null;
-
-				return {
-					details: {},
-					content: [{ type: "text", text: formatHover(result) }],
-				};
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						content: [{ type: "text", text: "Hover request timed out" }],
-						details: {},
-						isError: true,
-					};
-				}
-				return {
-					content: [{ type: "text", text: `Error: ${error}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			return sendAndFormat(
+				setup.conn,
+				protocolBindings.HoverRequest.type,
+				{
+					textDocument: { uri: filePathToUri(setup.filePath) },
+					position: { line: params.line - 1, character: params.character - 1 },
+				},
+				signal,
+				"LSP hover request",
+				(result: Hover | null) => formatHover(result)
+			);
 		},
 	});
 
@@ -1348,103 +1229,23 @@ WHEN TO USE:
 			file: Type.String({ description: "Path to the file" }),
 		}),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-			const filePath = path.isAbsolute(params.file)
-				? params.file
-				: path.resolve(ctx.cwd, params.file);
-			const language = getLanguageForFile(filePath);
+			const setup = await withFileConnection(
+				params,
+				signal,
+				ctx,
+				"documentSymbolProvider",
+				"Document symbol provider"
+			);
+			if (!("conn" in setup)) return setup;
 
-			if (!language) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Unsupported file type: ${params.file}` }],
-				};
-			}
-
-			let conn: LSPConnection | null = null;
-			try {
-				conn = await getOrCreateConnectionForFile(language, filePath, {
-					onStarting: (lang) => ctx.ui.setWorkingMessage(`Starting ${lang} language server`),
-					settingsCwd: ctx.cwd,
-					signal,
-				});
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						details: {},
-						content: [
-							{
-								type: "text",
-								text: `Language server startup timed out for ${language}`,
-							},
-						],
-						isError: true,
-					};
-				}
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Error starting language server: ${error}`,
-						},
-					],
-					isError: true,
-				};
-			} finally {
-				ctx.ui.setWorkingMessage();
-			}
-
-			if (!conn) {
-				return {
-					details: {},
-					content: [{ type: "text", text: `Language server not available for ${language}` }],
-				};
-			}
-
-			if (!conn.capabilities.documentSymbolProvider) {
-				return {
-					details: {},
-					content: [{ type: "text", text: "Document symbol provider not supported" }],
-				};
-			}
-
-			await openDocument(conn, filePath);
-
-			try {
-				const result = (await sendRequestWithTimeout(
-					conn,
-					protocolBindings.DocumentSymbolRequest.type,
-					{
-						textDocument: { uri: filePathToUri(filePath) },
-					},
-					signal,
-					"LSP document symbols request"
-				)) as (SymbolInformation | DocumentSymbol)[] | null;
-
-				return {
-					details: {},
-					content: [{ type: "text", text: formatSymbols(result) }],
-				};
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
-				}
-				if (isTimeoutError(error)) {
-					return {
-						content: [{ type: "text", text: "Document symbols request timed out" }],
-						details: {},
-						isError: true,
-					};
-				}
-				return {
-					content: [{ type: "text", text: `Error: ${error}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			return sendAndFormat(
+				setup.conn,
+				protocolBindings.DocumentSymbolRequest.type,
+				{ textDocument: { uri: filePathToUri(setup.filePath) } },
+				signal,
+				"LSP document symbols request",
+				(result: (SymbolInformation | DocumentSymbol)[] | null) => formatSymbols(result)
+			);
 		},
 	});
 
@@ -1504,44 +1305,18 @@ WHEN TO USE:
 				};
 			}
 
-			try {
-				const result = (await sendRequestWithTimeout(
-					conn,
-					protocolBindings.WorkspaceSymbolRequest.type,
-					{
-						query: params.query,
-					},
-					signal,
-					"LSP workspace symbols request"
-				)) as (SymbolInformation | WorkspaceSymbol)[] | null;
-
-				const symbols = result || [];
-				return {
-					details: {},
-					content: [
-						{
-							type: "text",
-							text: `Found ${symbols.length} symbol(s) in ${conn.rootPath}:\n${formatSymbols(symbols)}`,
-						},
-					],
-				};
-			} catch (error) {
-				if (isAbortError(error)) {
-					throw error;
+			const rootPath = conn.rootPath;
+			return sendAndFormat(
+				conn,
+				protocolBindings.WorkspaceSymbolRequest.type,
+				{ query: params.query },
+				signal,
+				"LSP workspace symbols request",
+				(result: (SymbolInformation | WorkspaceSymbol)[] | null) => {
+					const symbols = result || [];
+					return `Found ${symbols.length} symbol(s) in ${rootPath}:\n${formatSymbols(symbols)}`;
 				}
-				if (isTimeoutError(error)) {
-					return {
-						content: [{ type: "text", text: "Workspace symbols request timed out" }],
-						details: {},
-						isError: true,
-					};
-				}
-				return {
-					content: [{ type: "text", text: `Error: ${error}` }],
-					details: {},
-					isError: true,
-				};
-			}
+			);
 		},
 	});
 

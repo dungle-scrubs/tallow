@@ -69,6 +69,23 @@ function buildCommandCtx() {
 }
 
 /**
+ * Fires session_start + before_agent_start and returns the injected systemPrompt
+ * (or undefined when no extension contributed one).
+ *
+ * @returns The systemPrompt string if an extension contributed one, else undefined
+ */
+async function initAndGetPrompt(): Promise<string | undefined> {
+	const ctx = buildEventCtx();
+	await harness.fireEvent("session_start", { type: "session_start" }, ctx);
+	const [result] = await harness.fireEvent(
+		"before_agent_start",
+		{ type: "before_agent_start", systemPrompt: "SYSTEM" },
+		ctx
+	);
+	return (result as { systemPrompt: string } | undefined)?.systemPrompt;
+}
+
+/**
  * Retrieve a command handler from the harness, failing the test if not found.
  *
  * @param name - Command name
@@ -108,42 +125,26 @@ describe("nested rules discovery", () => {
 	test("discovers .tallow/rules/*.md in a subdirectory", async () => {
 		const rulesDir = join(cwdDir, "packages", "api", ".tallow", "rules");
 		mkdirSync(rulesDir, { recursive: true });
-		const rulePath = join(rulesDir, "api-rules.md");
-		writeFileSync(rulePath, "Subdir tallow rule");
+		writeFileSync(join(rulesDir, "api-rules.md"), "Subdir tallow rule");
 
-		const ctx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
-		const [result] = await harness.fireEvent(
-			"before_agent_start",
-			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			ctx
-		);
+		const prompt = await initAndGetPrompt();
 
-		expect(result).toBeDefined();
-		const { systemPrompt } = result as { systemPrompt: string };
-		expect(systemPrompt).toContain("Additional Project Context");
-		expect(systemPrompt).toContain("Subdir tallow rule");
-		expect(systemPrompt).toContain("api-rules.md");
+		expect(prompt).toBeDefined();
+		expect(prompt).toContain("Additional Project Context");
+		expect(prompt).toContain("Subdir tallow rule");
+		expect(prompt).toContain("api-rules.md");
 	});
 
 	test("discovers .claude/rules/*.md in a subdirectory", async () => {
 		const rulesDir = join(cwdDir, "apps", "web", ".claude", "rules");
 		mkdirSync(rulesDir, { recursive: true });
-		const rulePath = join(rulesDir, "web-rules.md");
-		writeFileSync(rulePath, "Subdir claude rule");
+		writeFileSync(join(rulesDir, "web-rules.md"), "Subdir claude rule");
 
-		const ctx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
-		const [result] = await harness.fireEvent(
-			"before_agent_start",
-			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			ctx
-		);
+		const prompt = await initAndGetPrompt();
 
-		expect(result).toBeDefined();
-		const { systemPrompt } = result as { systemPrompt: string };
-		expect(systemPrompt).toContain("Subdir claude rule");
-		expect(systemPrompt).toContain("web-rules.md");
+		expect(prompt).toBeDefined();
+		expect(prompt).toContain("Subdir claude rule");
+		expect(prompt).toContain("web-rules.md");
 	});
 
 	test("discovers rules at multiple nesting levels", async () => {
@@ -155,18 +156,11 @@ describe("nested rules discovery", () => {
 		writeFileSync(join(level1Rules, "level1.md"), "Level 1 rules");
 		writeFileSync(join(level2Rules, "level2.md"), "Level 2 rules");
 
-		const ctx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
-		const [result] = await harness.fireEvent(
-			"before_agent_start",
-			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			ctx
-		);
+		const prompt = await initAndGetPrompt();
 
-		expect(result).toBeDefined();
-		const { systemPrompt } = result as { systemPrompt: string };
-		expect(systemPrompt).toContain("Level 1 rules");
-		expect(systemPrompt).toContain("Level 2 rules");
+		expect(prompt).toBeDefined();
+		expect(prompt).toContain("Level 1 rules");
+		expect(prompt).toContain("Level 2 rules");
 	});
 
 	test("skips node_modules/.tallow/rules/ (SKIP_DIRS)", async () => {
@@ -174,15 +168,8 @@ describe("nested rules discovery", () => {
 		mkdirSync(rulesDir, { recursive: true });
 		writeFileSync(join(rulesDir, "lib-rules.md"), "Should be skipped");
 
-		const ctx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
-		const [result] = await harness.fireEvent(
-			"before_agent_start",
-			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			ctx
-		);
-
-		expect(result).toBeUndefined();
+		const prompt = await initAndGetPrompt();
+		expect(prompt).toBeUndefined();
 	});
 
 	test("skips .hidden-dir/.tallow/rules/ (dot-prefix filter)", async () => {
@@ -190,30 +177,16 @@ describe("nested rules discovery", () => {
 		mkdirSync(rulesDir, { recursive: true });
 		writeFileSync(join(rulesDir, "hidden-rules.md"), "Hidden rules");
 
-		const ctx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
-		const [result] = await harness.fireEvent(
-			"before_agent_start",
-			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			ctx
-		);
-
-		expect(result).toBeUndefined();
+		const prompt = await initAndGetPrompt();
+		expect(prompt).toBeUndefined();
 	});
 
 	test("empty rules dirs don't produce entries", async () => {
 		const rulesDir = join(cwdDir, "pkg", ".tallow", "rules");
 		mkdirSync(rulesDir, { recursive: true });
 
-		const ctx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
-		const [result] = await harness.fireEvent(
-			"before_agent_start",
-			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			ctx
-		);
-
-		expect(result).toBeUndefined();
+		const prompt = await initAndGetPrompt();
+		expect(prompt).toBeUndefined();
 	});
 
 	test("works with /add-dir for additional directories", async () => {
@@ -221,11 +194,10 @@ describe("nested rules discovery", () => {
 		mkdirSync(rulesDir, { recursive: true });
 		writeFileSync(join(rulesDir, "user-rules.md"), "Additional dir nested rule");
 
-		// Initialize session with cwd set to the main project directory
-		const eventCtx = buildEventCtx();
-		await harness.fireEvent("session_start", { type: "session_start" }, eventCtx);
+		// Initialize session, then add the additional directory
+		const ctx = buildEventCtx();
+		await harness.fireEvent("session_start", { type: "session_start" }, ctx);
 
-		// Add the additional directory and ensure nested rules are discovered
 		const cmdCtx = buildCommandCtx();
 		await getCmd("add-dir").handler(additionalDir, cmdCtx);
 		expect(
@@ -237,11 +209,11 @@ describe("nested rules discovery", () => {
 		const [result] = await harness.fireEvent(
 			"before_agent_start",
 			{ type: "before_agent_start", systemPrompt: "SYSTEM" },
-			eventCtx
+			ctx
 		);
-
 		expect(result).toBeDefined();
-		const { systemPrompt } = result as { systemPrompt: string };
-		expect(systemPrompt).toContain("Additional dir nested rule");
+		expect((result as { systemPrompt: string }).systemPrompt).toContain(
+			"Additional dir nested rule"
+		);
 	});
 });

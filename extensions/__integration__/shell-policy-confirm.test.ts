@@ -86,6 +86,24 @@ function createPolicyExtension(confirmBehavior: "accept" | "deny" | "throw"): Ex
 }
 
 /**
+ * Creates a result-tracking extension that records bash tool_result text.
+ *
+ * @returns Tuple of [collected results array, extension factory]
+ */
+function createResultTracker(): [string[], ExtensionFactory] {
+	const toolResults: string[] = [];
+	const factory: ExtensionFactory = (pi: ExtensionAPI): void => {
+		pi.on("tool_result", async (event) => {
+			if (event.toolName === "bash") {
+				const text = event.content.find((c) => c.type === "text");
+				if (text?.type === "text") toolResults.push(text.text);
+			}
+		});
+	};
+	return [toolResults, factory];
+}
+
+/**
  * Scripted model response that calls bash with the given command, followed
  * by a text response so the agent loop completes cleanly.
  *
@@ -105,16 +123,7 @@ function bashCallThenDone(command: string) {
 
 describe("Shell Policy Confirm — confirmed high-risk", () => {
 	it("allows execution when user confirms", async () => {
-		const toolResults: string[] = [];
-
-		const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-			pi.on("tool_result", async (event) => {
-				if (event.toolName === "bash") {
-					const text = event.content.find((c) => c.type === "text");
-					if (text?.type === "text") toolResults.push(text.text);
-				}
-			});
-		};
+		const [toolResults, resultTracker] = createResultTracker();
 
 		runner = await createSessionRunner({
 			streamFn: bashCallThenDone("sudo ls /etc"),
@@ -140,16 +149,7 @@ describe("Shell Policy Confirm — confirmed high-risk", () => {
 
 describe("Shell Policy Confirm — denied high-risk", () => {
 	it("blocks execution when user denies", async () => {
-		const toolResults: string[] = [];
-
-		const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-			pi.on("tool_result", async (event) => {
-				if (event.toolName === "bash") {
-					const text = event.content.find((c) => c.type === "text");
-					if (text?.type === "text") toolResults.push(text.text);
-				}
-			});
-		};
+		const [toolResults, resultTracker] = createResultTracker();
 
 		runner = await createSessionRunner({
 			streamFn: bashCallThenDone("sudo rm -rf /tmp/test"),
@@ -191,15 +191,7 @@ describe("Shell Policy Confirm — permission-rule denial messaging", () => {
 			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 			resetPermissionCache();
 
-			const toolResults: string[] = [];
-			const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-				pi.on("tool_result", async (event) => {
-					if (event.toolName === "bash") {
-						const text = event.content.find((c) => c.type === "text");
-						if (text?.type === "text") toolResults.push(text.text);
-					}
-				});
-			};
+			const [toolResults, resultTracker] = createResultTracker();
 
 			const permissionAwarePolicy: ExtensionFactory = (pi: ExtensionAPI): void => {
 				registerSafeBashTool(pi);
@@ -246,16 +238,7 @@ describe("Shell Policy Confirm — permission-rule denial messaging", () => {
 
 describe("Shell Policy Confirm — interrupted confirmation", () => {
 	it("blocks execution when confirmation throws", async () => {
-		const toolResults: string[] = [];
-
-		const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-			pi.on("tool_result", async (event) => {
-				if (event.toolName === "bash") {
-					const text = event.content.find((c) => c.type === "text");
-					if (text?.type === "text") toolResults.push(text.text);
-				}
-			});
-		};
+		const [toolResults, resultTracker] = createResultTracker();
 
 		runner = await createSessionRunner({
 			streamFn: bashCallThenDone("sudo apt-get install foo"),
@@ -301,15 +284,7 @@ describe("Shell Policy Confirm — denylist bypass", () => {
 			});
 		};
 
-		const toolResults: string[] = [];
-		const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-			pi.on("tool_result", async (event) => {
-				if (event.toolName === "bash") {
-					const text = event.content.find((c) => c.type === "text");
-					if (text?.type === "text") toolResults.push(text.text);
-				}
-			});
-		};
+		const [toolResults, resultTracker] = createResultTracker();
 
 		// Fork bomb — always denied, never reaches confirmation
 		const forkBomb = ":(){ :|:& };:";
@@ -373,15 +348,7 @@ describe("Shell Policy Confirm — handler ordering", () => {
 			});
 		};
 
-		const toolResults: string[] = [];
-		const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-			pi.on("tool_result", async (event) => {
-				if (event.toolName === "bash") {
-					const text = event.content.find((c) => c.type === "text");
-					if (text?.type === "text") toolResults.push(text.text);
-				}
-			});
-		};
+		const [toolResults, resultTracker] = createResultTracker();
 
 		runner = await createSessionRunner({
 			streamFn: bashCallThenDone("sudo cat /etc/shadow"),
@@ -426,15 +393,7 @@ describe("Shell Policy Confirm — handler ordering", () => {
 			});
 		};
 
-		const toolResults: string[] = [];
-		const resultTracker: ExtensionFactory = (pi: ExtensionAPI): void => {
-			pi.on("tool_result", async (event) => {
-				if (event.toolName === "bash") {
-					const text = event.content.find((c) => c.type === "text");
-					if (text?.type === "text") toolResults.push(text.text);
-				}
-			});
-		};
+		const [toolResults, resultTracker] = createResultTracker();
 
 		runner = await createSessionRunner({
 			streamFn: bashCallThenDone("sudo cat /etc/shadow"),
