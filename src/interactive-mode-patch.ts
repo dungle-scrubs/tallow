@@ -83,7 +83,10 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			const result = await originalHandleEvent.call(this, event);
 			if (event?.type === "agent_end") {
 				this.pendingWorkingMessage = undefined;
-				this.statusContainer?.clear?.();
+				// NOTE: Do NOT clear statusContainer here — the original framework
+				// guards this behind `if (this.loadingAnimation)`. Unconditionally
+				// clearing it strips the compacting loader that extensions add during
+				// model-triggered compaction (plan 159, bug 2).
 				this.flushPendingBashComponents?.();
 				this.updatePendingMessagesDisplay?.();
 				this.ui?.requestRender?.();
@@ -134,17 +137,21 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			...args: unknown[]
 		) {
 			const context = originalCreateExtensionUIContext.call(this, ...args);
-			const originalSetWorkingMessage = context.setWorkingMessage;
-			if (typeof originalSetWorkingMessage === "function") {
-				context.setWorkingMessage = (message?: string) => {
-					const hasLoader = Boolean(this.loadingAnimation);
-					const isStreaming = Boolean(this.session?.isStreaming);
-					if (!hasLoader && !isStreaming && typeof message === "string" && message.length > 0) {
-						return;
-					}
-					(originalSetWorkingMessage as (value?: string) => unknown)(message);
-				};
-			}
+			// NOTE: The original setWorkingMessage guard (plan 157/158) blocked ALL
+			// non-empty messages when idle with no loader. This prevented stale text
+			// but also dropped intentional post-compaction messages like "Resuming
+			// task…". The guard is removed — stale messages are handled by the
+			// agent_end patch clearing pendingWorkingMessage (plan 159, bug 3).
+			// If stale messages recur, add a targeted guard using a compaction flag
+			// rather than a blanket block.
+
+			// Expose compaction queue status so extensions can check whether
+			// flushCompactionQueue will handle resumption (plan 159, bug 1).
+			// Read-only boolean — does not leak the full queue API.
+			context.hasCompactionQueuedMessages = () => {
+				const queued = this.getAllQueuedMessages?.();
+				return hasQueuedMessages(queued);
+			};
 
 			const originalNotify = context.notify;
 			if (typeof originalNotify === "function") {
