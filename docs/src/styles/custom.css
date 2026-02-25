@@ -47,15 +47,32 @@
 	--sl-sidebar-width: 16rem;
 }
 
-/* ── Light mode adjustments ── */
+/* ── Light mode ── */
 :root[data-theme="light"] {
+	/* Accent: deeper amber for readable contrast on cream */
 	--sl-color-accent-low: oklch(95% 0.04 70);
-	--sl-color-accent: oklch(55% 0.14 70);
+	--sl-color-accent: oklch(50% 0.14 70);
 	--sl-color-accent-high: oklch(25% 0.06 70);
+
+	/* Backgrounds - warm cream, not stark white */
 	--sl-color-bg: #f5f4f1;
 	--sl-color-bg-nav: #eae8e4;
 	--sl-color-bg-sidebar: #f0eeeb;
+	--sl-color-black: #faf9f7;
+	--sl-color-white: #2a2722;
+
+	/* Text - warm darks, high contrast */
 	--sl-color-text: #2a2d3a;
+	--sl-color-text-accent: oklch(50% 0.14 70);
+
+	/* Gray scale - warm-tinted, inverted from dark mode */
+	--sl-color-gray-1: #3d3a33;
+	--sl-color-gray-2: #5c574c;
+	--sl-color-gray-3: #8a8478;
+	--sl-color-gray-4: #b5b0a6;
+	--sl-color-gray-5: #d8d5ce;
+	--sl-color-gray-6: #eae8e3;
+	--sl-color-gray-7: #f5f4f1;
 }
 
 /* ────────────────────────────────────
@@ -101,12 +118,34 @@ starlight-content h3,
 	line-height: 1.65;
 }
 
+/* Flatten top corners when a header bar sits above the code */
+.expressive-code .frame .header + pre {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+/* Set EC's own radius variable so the frame + pre get consistent rounding,
+   and clip overflow so scrolled content doesn't bleed past rounded corners. */
+.expressive-code {
+	--ec-brdRad: 7px;
+}
+
+.expressive-code .frame {
+	overflow: clip;
+}
+
+:root[data-theme="light"] .sl-markdown-content pre {
+	border-color: var(--sl-color-gray-4);
+	box-shadow: 0 1px 3px oklch(0% 0 0 / 0.06);
+}
+
 .sl-markdown-content :not(pre) > code {
 	background: var(--sl-color-gray-6);
 	border: 1px solid var(--sl-color-gray-5);
 	border-radius: 4px;
 	padding: 0.15em 0.35em;
 	font-size: 0.875em;
+	color: var(--sl-color-gray-1);
 }
 
 /* Links - amber accent, no underline until hover */
@@ -211,6 +250,16 @@ nav.sidebar [aria-current="page"]:focus {
 	box-shadow: 0 4px 16px oklch(75% 0.14 70 / 0.3);
 }
 
+:root[data-theme="light"] .hero .action.primary a {
+	background: var(--sl-color-text);
+	color: var(--sl-color-bg);
+	border-radius: 4px;
+}
+
+:root[data-theme="light"] .hero .action.primary a:hover {
+	box-shadow: 0 4px 16px oklch(0% 0 0 / 0.15);
+}
+
 .hero .action.minimal a {
 	color: var(--sl-color-gray-2);
 	border: 1px solid var(--sl-color-gray-4);
@@ -220,6 +269,10 @@ nav.sidebar [aria-current="page"]:focus {
 .hero .action.minimal a:hover {
 	color: var(--sl-color-text);
 	border-color: var(--sl-color-gray-3);
+}
+
+:root[data-theme="light"] .hero .action.minimal a {
+	border-radius: 4px;
 }
 
 /* ────────────────────────────────────
@@ -275,10 +328,37 @@ nav.sidebar [aria-current="page"]:focus {
 
 /* ────────────────────────────────────
    Theme preview — interactive swatch → terminal widget
+   Always dark: terminal themes look wrong on light backgrounds.
+   Full-bleed dark band in light mode.
    ──────────────────────────────────── */
 
 .theme-preview {
 	margin-block: 1.5rem;
+}
+
+/* Full-bleed dark section in light mode */
+:root[data-theme="light"] .feature-section:has(.theme-preview) {
+	background: #13141f;
+	color: #b8c0dc;
+	margin-inline: calc(50% - 50vw);
+	width: 100vw;
+	padding-inline: max(1.5rem, calc(50vw - var(--sl-content-width) / 2));
+	padding-block: 4rem;
+	margin-block: 3rem;
+}
+
+:root[data-theme="light"] .feature-section:has(.theme-preview) h2 {
+	color: #c8cee0;
+}
+
+:root[data-theme="light"] .theme-description {
+	color: #9298ae;
+}
+
+/* Hide <hr> separators adjacent to the full-bleed theme section */
+:root[data-theme="light"] hr:has(+ .feature-section > .theme-preview),
+:root[data-theme="light"] .feature-section:has(.theme-preview) + hr {
+	display: none;
 }
 
 .theme-description {
@@ -448,6 +528,10 @@ nav.sidebar [aria-current="page"]:focus {
 	box-shadow: 0 0 0 4px oklch(75% 0.14 70 / 0.15);
 }
 
+:root[data-theme="light"] .roadmap-item[data-status="planned"]::before {
+	box-shadow: 0 0 0 4px oklch(50% 0.14 70 / 0.2);
+}
+
 .roadmap-header {
 	display: flex;
 	align-items: baseline;
@@ -489,6 +573,21 @@ nav.sidebar [aria-current="page"]:focus {
 .roadmap-badge[data-status] {
 	background: oklch(22% 0.04 260);
 	color: oklch(70% 0.08 260);
+}
+
+:root[data-theme="light"] .roadmap-badge[data-complexity="high"] {
+	background: oklch(92% 0.04 20);
+	color: oklch(45% 0.1 20);
+}
+
+:root[data-theme="light"] .roadmap-badge[data-complexity="medium"] {
+	background: oklch(92% 0.04 70);
+	color: oklch(45% 0.1 70);
+}
+
+:root[data-theme="light"] .roadmap-badge[data-status] {
+	background: oklch(92% 0.03 260);
+	color: oklch(45% 0.08 260);
 }
 
 .roadmap-description {
@@ -694,6 +793,10 @@ button.gallery-thumb {
 .gallery-thumb:hover {
 	border-color: var(--sl-color-accent);
 	box-shadow: 0 0 16px oklch(65% 0.15 250 / 0.4);
+}
+
+:root[data-theme="light"] .gallery-thumb:hover {
+	box-shadow: 0 2px 12px oklch(50% 0.08 70 / 0.2);
 }
 
 .gallery-thumb:focus-visible {
@@ -952,6 +1055,26 @@ button.gallery-thumb {
 .ext-category-badge[data-cat="commands"] {
 	background: oklch(22% 0.05 140);
 	color: oklch(70% 0.1 140);
+}
+
+:root[data-theme="light"] .ext-category-badge[data-cat="core"] {
+	background: oklch(92% 0.04 200);
+	color: oklch(42% 0.08 200);
+}
+
+:root[data-theme="light"] .ext-category-badge[data-cat="ui"] {
+	background: oklch(92% 0.04 300);
+	color: oklch(42% 0.08 300);
+}
+
+:root[data-theme="light"] .ext-category-badge[data-cat="lifecycle"] {
+	background: oklch(92% 0.04 70);
+	color: oklch(42% 0.08 70);
+}
+
+:root[data-theme="light"] .ext-category-badge[data-cat="commands"] {
+	background: oklch(92% 0.04 140);
+	color: oklch(42% 0.08 140);
 }
 
 .ext-description {
