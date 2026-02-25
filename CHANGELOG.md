@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.10](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.9...tallow-v0.8.10) (2026-02-25)
+
+
+### Added
+
+* **routing:** upgrade synapse to 0.1.6 and wire exclude patterns ([89f7669](https://github.com/dungle-scrubs/tallow/commit/89f76695775922991f5c47d88a88da86c83ba09d))
+* **slash-command-bridge:** show resuming indicator after compaction ([58afb02](https://github.com/dungle-scrubs/tallow/commit/58afb02669091a306652886a0051a7b7cedc8b40))
+
+
+### Fixed
+
+* **compact:** narrow hasCompactionQueuedMessages to compaction-only queue ([9fadfdf](https://github.com/dungle-scrubs/tallow/commit/9fadfdfc564c3108427e9fc7b2430a0849d1b4fb))
+* copy pi built-in themes during build to prevent /settings crash ([5014d18](https://github.com/dungle-scrubs/tallow/commit/5014d185a16491a083e7924df56ce712e4be5f90))
+* **docs:** comprehensive light mode for docs site ([1fb71b9](https://github.com/dungle-scrubs/tallow/commit/1fb71b9b920b1e32e1f648a9d7eaf2395113cdd9))
+* **init:** rewrite /init prompts around discovery-distance principle ([a65807f](https://github.com/dungle-scrubs/tallow/commit/a65807fabf71f746a3d3e84e4c72708b78838c00))
+* **interactive-mode-patch:** fix stale UI patch interference with compaction ([08aee4c](https://github.com/dungle-scrubs/tallow/commit/08aee4c0d885f292626b124f83ecaabfe63b4a07))
+* **slash-command-bridge:** always fire continuation timer after compact ([ec01d35](https://github.com/dungle-scrubs/tallow/commit/ec01d35de77bc871f4a120dcc2a1c30460205d1a))
+* **slash-command-bridge:** eliminate race between queue flush and auto-continue ([70efcfc](https://github.com/dungle-scrubs/tallow/commit/70efcfc74e886042479ac2739ce1d07daaf30559))
+* **tasks:** distinguish "agents" from "teammates" in footer bar ([202856b](https://github.com/dungle-scrubs/tallow/commit/202856b886f9bd91e7675a9b056bd4a76a30d0a6))
+* **worktree:** restrict marker file permissions to owner-only ([5262dd8](https://github.com/dungle-scrubs/tallow/commit/5262dd8904e9f6fc66bd485e3994814975942b9b))
+
+
+### Changed
+
+* **lsp:** extract shared helpers to reduce code duplication ([a12eada](https://github.com/dungle-scrubs/tallow/commit/a12eadaf83675f3a42c4094dbde241366e1a610f))
+* **subagent:** remove dead initial assignment ([d9b906f](https://github.com/dungle-scrubs/tallow/commit/d9b906f9e2f4aaecb74f4c8f3d33ecabb7cfdd0a))
+
+
+### Documentation
+
+* replace Aliases page with comprehensive Slash Commands reference ([56a328a](https://github.com/dungle-scrubs/tallow/commit/56a328adedf4e4b0063bf3c827c88d3fbcc5a6ad))
+* **session-memory:** update roadmap — hippo for memories, QMD evaluation ([fb7218c](https://github.com/dungle-scrubs/tallow/commit/fb7218c4b0928fa68c1fb65ee17cd8f1ec054b98))
+
+
+### Maintenance
+
+* **dep-check:** scope permissions to job level ([0fe08b7](https://github.com/dungle-scrubs/tallow/commit/0fe08b7f0ed0afd23e28ec3f5b0eef73a358cba6))
+* **slash-command-bridge:** add compaction race condition tests ([393fb2d](https://github.com/dungle-scrubs/tallow/commit/393fb2d8707e0fb20da60782d859958c30963353))
+* **slash-command-bridge:** cover post-compaction resuming behavior ([ba6d423](https://github.com/dungle-scrubs/tallow/commit/ba6d423e35a54a85de5067499e7b2a2e17d3ee86))
+
 ## [0.8.9](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.8...tallow-v0.8.9) (2026-02-23)
 
 
