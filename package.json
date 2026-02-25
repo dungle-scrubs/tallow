@@ -33,7 +33,7 @@
 	"packageManager": "bun@1.3.9",
 	"scripts": {
 		"preinstall": "node -e \"const ua = process.env.npm_config_user_agent || ''; if (!ua.includes('bun')) { console.error('Use Bun: bun install'); process.exit(1); }\"",
-		"build": "tsc -p packages/tallow-tui/tsconfig.build.json && tsc -p tsconfig.build.json && chmod +x dist/cli.js dist/install.js",
+		"build": "tsc -p packages/tallow-tui/tsconfig.build.json && tsc -p tsconfig.build.json && chmod +x dist/cli.js dist/install.js && node scripts/copy-pi-themes.mjs",
 		"dev": "tsc -p tsconfig.build.json --watch",
 		"start": "bun dist/cli.js",
 		"typecheck": "tsc --noEmit",
@@ -66,7 +66,7 @@
 	},
 	"dependencies": {
 		"@clack/prompts": "^1.0.0",
-		"@dungle-scrubs/synapse": "0.1.4",
+		"@dungle-scrubs/synapse": "0.1.6",
 		"@mariozechner/pi-coding-agent": "^0.54.2",
 		"@sinclair/typebox": "0.34.48",
 		"ai": "^6.0.86",
