@@ -1,0 +1,119 @@
+---
+title: Slash Commands
+description: Every slash command available in tallow — built-in framework commands, extension commands, and aliases.
+---
+
+Type `/` in the input to see the autocomplete list. Commands accept optional
+arguments after the name (e.g. `/theme tokyo`, `/cd ~/projects`).
+
+## Framework commands
+
+These ship with the pi framework and are always available.
+
+| Command | Description |
+|---------|-------------|
+| `/settings` | Open settings menu |
+| `/model` | Select model (opens selector UI) |
+| `/scoped-models` | Enable/disable models for Ctrl+P cycling |
+| `/export` | Export session to HTML file |
+| `/share` | Share session as a secret GitHub gist |
+| `/copy` | Copy last agent message to clipboard |
+| `/name` | Set session display name |
+| `/session` | Show session info and stats |
+| `/changelog` | Show changelog entries |
+| `/hotkeys` | Show all keyboard shortcuts |
+| `/fork` | Create a new fork from a previous message |
+| `/tree` | Navigate session tree (switch branches) |
+| `/login` | Login with OAuth provider |
+| `/logout` | Logout from OAuth provider |
+| `/new` | Start a new session |
+| `/compact` | Manually compact the session context |
+| `/resume` | Resume a different session |
+| `/reload` | Reload extensions, skills, prompts, and themes |
+| `/quit` | Quit tallow |
+
+## Extension commands
+
+Registered by bundled extensions. Disable an extension to remove its commands.
+
+### Session & context
+
+| Command | Description | Extension |
+|---------|-------------|-----------|
+| `/clear` | Start a new session (alias for `/new`) | [clear](/extensions/clear) |
+| `/context` | Show context window usage breakdown | [context-usage](/extensions/context-usage) |
+| `/show-system-prompt` | Show the current system prompt | [show-system-prompt](/extensions/show-system-prompt) |
+| `/rewind` | Undo file changes by rolling back to a previous turn | [rewind](/extensions/rewind) |
+| `/compact` | Manually compact the session context | built-in |
+
+### Navigation & environment
+
+| Command | Description | Extension |
+|---------|-------------|-----------|
+| `/cd` | Change working directory | [cd](/extensions/cd-tool) |
+| `/init` | Initialize AGENTS.md for the current project | [init](/extensions/init) |
+| `/add-dir` | Add an additional directory for context file discovery | [context-files](/extensions/context-files) |
+| `/clear-dirs` | Remove all additional context directories | [context-files](/extensions/context-files) |
+
+### Tools & agents
+
+| Command | Description | Extension |
+|---------|-------------|-----------|
+| `/bg` | List and manage background tasks (interactive viewer) | [background-task-tool](/extensions/background-task-tool) |
+| `/toggle-inline-results` | Toggle inline result notifications for bg tasks | [background-task-tool](/extensions/background-task-tool) |
+| `/tasks` | Manage tasks — list, add, complete, delete, clear | [tasks](/extensions/tasks) |
+| `/plan-mode` | Toggle plan mode (read-only exploration) | [plan-mode-tool](/extensions/plan-mode-tool) |
+| `/mcp` | List connected MCP servers and their tools | [mcp-adapter-tool](/extensions/mcp-adapter-tool) |
+| `/team-dashboard` | Toggle the Team Dashboard workspace | [teams-tool](/extensions/teams-tool) |
+
+### Appearance & output
+
+| Command | Description | Extension |
+|---------|-------------|-----------|
+| `/theme` | Switch color theme by name, tag, or random | [theme-selector](/extensions/theme-selector) |
+| `/output-style` | Switch output style (agent personality) | [output-styles-tool](/extensions/output-styles-tool) |
+| `/prompt` | Toggle expanded prompt visibility (compact/verbose) | [command-prompt](/extensions/command-prompt) |
+
+### Diagnostics
+
+| Command | Description | Extension |
+|---------|-------------|-----------|
+| `/health` | Show session diagnostics (model, context, tools, environment) | [health](/extensions/health) |
+| `/stats` | Show usage statistics (today, week, month, all, range) | [stats](/extensions/stats) |
+| `/permissions` | View, test, or reload permission rules | [permissions](/extensions/permissions) |
+| `/upstream` | Check for upstream pi-coding-agent / pi-tui updates | [upstream-check](/extensions/upstream-check) |
+| `/debug` | Interactive troubleshooting — model analyzes debug logs | [debug](/extensions/debug) |
+| `/diagnostics` | Show local diagnostics tail or open live follow in WezTerm | [debug](/extensions/debug) |
+| `/diagnostics-on` | Enable debug diagnostic logging | [debug](/extensions/debug) |
+| `/diagnostics-off` | Disable debug diagnostic logging | [debug](/extensions/debug) |
+| `/diagnostics-tail` | Show last N debug log entries (default: 20) | [debug](/extensions/debug) |
+| `/diagnostics-clear` | Truncate the debug log file | [debug](/extensions/debug) |
+
+### Help
+
+| Command | Description | Extension |
+|---------|-------------|-----------|
+| `/cheatsheet` | Show keyboard shortcuts | [cheatsheet](/extensions/cheatsheet) |
+
+## Dynamic commands
+
+These are generated at runtime from your configuration:
+
+- **`/agent:<name>`** — Spawns a subagent using a bundled or user-defined agent profile.
+  Default agents: `architect`, `debug`, `planner`, `refactor`, `reviewer`, `scout`, `worker`.
+- **`/skill:<name>`** — Runs a skill as a slash command (when `enableSkillCommands` is true in settings).
+- **User commands** — Markdown files in `~/.tallow/commands/` or `.tallow/commands/`
+  become `/command-name` automatically.
+
+## Aliases
+
+Some commands register shorter or alternative names.
+
+| Alias | Primary Command | Extension |
+|-------|----------------|-----------|
+| `/doctor` | `/health` | [health](/extensions/health) |
+| `/clear` | `/new` | [clear](/extensions/clear) |
+| `/keys` | `/cheatsheet` | [cheatsheet](/extensions/cheatsheet) |
+| `/keymap` | `/cheatsheet` | [cheatsheet](/extensions/cheatsheet) |
+| `/keybindings` | `/cheatsheet` | [cheatsheet](/extensions/cheatsheet) |
+| `/todos` | `/plan-mode` | [plan-mode-tool](/extensions/plan-mode-tool) |

@@ -111,7 +111,7 @@ export default defineConfig({
 					label: "Extensions",
 					items: [
 						{ label: "Overview", slug: "extensions/overview" },
-						{ label: "Aliases", slug: "extensions/aliases" },
+						{ label: "Slash Commands", slug: "extensions/slash-commands" },
 						...buildExtensionSidebar(),
 					],
 				},
