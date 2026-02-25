@@ -34,6 +34,11 @@
 					"description": "Enable automatic model routing when no explicit model override is provided.",
 					"default": true
 				},
+				"exclude": {
+					"type": "array",
+					"items": { "type": "string" },
+					"description": "Exclusion patterns to block models from routing selection. Each entry is prefix-matched against provider name, model ID, and combined provider/modelId. E.g. \"openai\" blocks all openai models, \"gpt-5.1\" blocks that model across providers."
+				},
 				"primaryType": {
 					"type": "string",
 					"enum": ["code", "vision", "text"],

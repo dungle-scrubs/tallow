@@ -74,6 +74,8 @@ export interface RoutingConfig {
 	costPreference: CostPreference;
 	/** Whether auto-routing is enabled. */
 	enabled: boolean;
+	/** Exclusion patterns to block models from selection results. */
+	exclude?: string[];
 	/** Optional matrix override JSON path. */
 	matrixOverridesPath?: string;
 	/** Optional mode policy override map. */
@@ -173,6 +175,7 @@ const VALID_TASK_TYPES = new Set<TaskType>(["code", "vision", "text"]);
 interface RawRoutingConfig {
 	costPreference?: unknown;
 	enabled?: unknown;
+	exclude?: unknown;
 	matrixOverridesPath?: unknown;
 	mode?: unknown;
 	modePolicyOverrides?: unknown;
@@ -262,6 +265,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function resolveOptionalStringField(projectValue: unknown, userValue: unknown): string | undefined {
 	if (typeof projectValue === "string" && projectValue.length > 0) return projectValue;
 	if (typeof userValue === "string" && userValue.length > 0) return userValue;
+	return undefined;
+}
+
+/**
+ * Resolve a string-array field with project > user precedence.
+ *
+ * Each element must be a non-empty string. Invalid entries are dropped.
+ * Returns undefined when neither level provides a valid array.
+ *
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @returns Sanitized string array, or undefined when absent
+ */
+function resolveStringArrayField(projectValue: unknown, userValue: unknown): string[] | undefined {
+	for (const value of [projectValue, userValue]) {
+		if (!Array.isArray(value)) continue;
+		const filtered = value.filter(
+			(item): item is string => typeof item === "string" && item.length > 0
+		);
+		if (filtered.length > 0) return filtered;
+	}
 	return undefined;
 }
 
@@ -431,6 +455,7 @@ export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 			userRouting?.enabled,
 			DEFAULT_CONFIG.enabled
 		),
+		exclude: resolveStringArrayField(projectRouting?.exclude, userRouting?.exclude),
 		matrixOverridesPath: resolveOptionalStringField(
 			projectRouting?.matrixOverridesPath,
 			userRouting?.matrixOverridesPath
@@ -1017,6 +1042,7 @@ export async function routeModel(
 	const routingSignals = loadRoutingSignalsSnapshot(effectiveCwd, config);
 
 	const selectionOptions: SelectionOptionsWithRouting = {
+		exclude: config.exclude,
 		matrixOverrides,
 		pool: scopePool,
 		preferredProviders: preferredProviders.length > 0 ? preferredProviders : undefined,
