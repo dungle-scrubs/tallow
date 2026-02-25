@@ -264,7 +264,9 @@ function detectRipgrep(): boolean {
 }
 
 export default function bashLive(pi: ExtensionAPI): void {
-	const baseBashTool = createBashTool(process.cwd());
+	const baseBashTool = createBashTool(process.cwd(), {
+		spawnHook: (ctx) => ({ ...ctx, cwd: process.cwd() }),
+	});
 	const displayConfig = getToolDisplayConfig("bash");
 
 	// Capture project root for BASH_MAINTAIN_PROJECT_WORKING_DIR
