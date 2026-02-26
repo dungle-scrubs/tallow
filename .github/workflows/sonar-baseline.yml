@@ -1,0 +1,73 @@
+name: Sonar Baseline
+
+on:
+  push:
+    tags:
+      - "tallow-v*"
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Optional commit SHA to baseline instead of trigger SHA"
+        required: false
+
+jobs:
+  set-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve target revision
+        id: target
+        run: |
+          rev="${{ github.event.inputs.revision }}"
+          if [ -z "$rev" ]; then
+            rev="${GITHUB_SHA}"
+          fi
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve Sonar analysis key
+        id: analysis
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT: dungle-scrubs_tallow
+          SONAR_BRANCH: main
+          TARGET_REVISION: ${{ steps.target.outputs.revision }}
+        run: |
+          set -euo pipefail
+
+          api="https://sonarcloud.io/api/project_analyses/search?project=${SONAR_PROJECT}&branch=${SONAR_BRANCH}&ps=50"
+          analysis=""
+          json=""
+          auth_header="Authorization: Basic $(printf '%s:' "$SONAR_TOKEN" | base64 | tr -d '\n')"
+
+          for _ in {1..30}; do
+            json="$(curl -sf -H "$auth_header" "$api")"
+            analysis="$(echo "$json" | jq -r --arg rev "$TARGET_REVISION" '.analyses[] | select(.revision == $rev) | .key' | head -n1)"
+            if [ -n "$analysis" ]; then
+              break
+            fi
+            sleep 10
+          done
+
+          if [ -z "$analysis" ]; then
+            analysis="$(echo "$json" | jq -r '.analyses[0].key // empty')"
+            echo "::warning::No Sonar analysis found for revision ${TARGET_REVISION}; falling back to latest analysis ${analysis}."
+          fi
+
+          if [ -z "$analysis" ]; then
+            echo "::error::Unable to resolve Sonar analysis key."
+            exit 1
+          fi
+
+          echo "analysis=$analysis" >> "$GITHUB_OUTPUT"
+
+      - name: Set manual new-code baseline
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT: dungle-scrubs_tallow
+          SONAR_BRANCH: main
+          ANALYSIS_KEY: ${{ steps.analysis.outputs.analysis }}
+        run: |
+          set -euo pipefail
+          auth_header="Authorization: Basic $(printf '%s:' "$SONAR_TOKEN" | base64 | tr -d '\n')"
+          curl -sf -H "$auth_header" -X POST \
+            "https://sonarcloud.io/api/project_analyses/set_baseline?project=${SONAR_PROJECT}&branch=${SONAR_BRANCH}&analysis=${ANALYSIS_KEY}"
+          echo "Set Sonar baseline to analysis ${ANALYSIS_KEY}."
