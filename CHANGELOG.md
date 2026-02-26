@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.12](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.11...tallow-v0.8.12) (2026-02-26)
+
+
+### Fixed
+
+* **sdk:** guard optional pi-tui image path helper ([05d5b96](https://github.com/dungle-scrubs/tallow/commit/05d5b967f727f1f7543f76c18be7df085c251110))
+
+
+### Maintenance
+
+* **core:** add unit tests for auth-hardening, config, process-cleanup, startup-timing ([ef6e91e](https://github.com/dungle-scrubs/tallow/commit/ef6e91eb916cd88b0a3494a833119ded56b6d3a6))
+* **deps:** bump pi-* dependencies ([0b6099e](https://github.com/dungle-scrubs/tallow/commit/0b6099e4c3df1bd23d36109a48157a3a9168d629))
+
 ## [0.8.11](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.10...tallow-v0.8.11) (2026-02-25)
 
 
