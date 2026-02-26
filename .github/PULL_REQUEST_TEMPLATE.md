@@ -16,6 +16,7 @@ Implementation approach (if non-obvious).
 - [ ] `bun run lint` passes
 - [ ] `bun test` passes
 - [ ] `bun run build` succeeds
+- [ ] All required GitHub checks are green (verify with `gh pr checks <pr-number>`)
 
 ### Docs impact
 
