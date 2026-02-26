@@ -26,7 +26,7 @@ import {
 	type Skill,
 	writeTool,
 } from "@mariozechner/pi-coding-agent";
-import { setNextImageFilePath } from "@mariozechner/pi-tui";
+import * as PiTui from "@mariozechner/pi-tui";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-hardening.js";
 import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
@@ -1686,7 +1686,12 @@ function injectImageFilePaths(pi: ExtensionAPI): void {
 		const hasImage = event.content?.some((c: { type: string }) => c.type === "image");
 		if (hasImage && event.input?.path) {
 			const filePath = resolve(String(event.input.path));
-			setNextImageFilePath(filePath);
+			// pi-tui >= 0.55 may not expose this helper; skip injection when unavailable.
+			const maybeSetNextImageFilePath = (PiTui as { setNextImageFilePath?: unknown })
+				.setNextImageFilePath;
+			if (typeof maybeSetNextImageFilePath === "function") {
+				maybeSetNextImageFilePath(filePath);
+			}
 		}
 	});
 }
