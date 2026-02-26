@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.14](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.13...tallow-v0.8.14) (2026-02-26)
+
+
+### Fixed
+
+* **ci:** add workflow to configure Sonar quality gate ([02e2f2a](https://github.com/dungle-scrubs/tallow/commit/02e2f2a6d3dc0599206404b94e4b0ce21d63e9d6))
+* **ci:** stabilize Sonar baseline after releases ([828934f](https://github.com/dungle-scrubs/tallow/commit/828934f8a3b7402e6414c06928585f588ebf2131))
+
+
+### Documentation
+
+* **pr-template:** require explicit gh pr checks before merge ([65379ae](https://github.com/dungle-scrubs/tallow/commit/65379ae2b7191d6aeecbde0be32baba01dab8711))
+
 ## [0.8.13](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.12...tallow-v0.8.13) (2026-02-26)
 
 
