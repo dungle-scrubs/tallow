@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.13](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.12...tallow-v0.8.13) (2026-02-26)
+
+
+### Fixed
+
+* **ci:** resolve audit critical and lint formatting failure ([c661bc6](https://github.com/dungle-scrubs/tallow/commit/c661bc6397fe9de121fc00fb79de951fa17410e8))
+
 ## [0.8.12](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.11...tallow-v0.8.12) (2026-02-26)
 
 
