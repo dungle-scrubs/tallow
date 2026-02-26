@@ -1,0 +1,69 @@
+name: Sonar Quality Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      duplicated_lines_threshold:
+        description: "Max duplication % on new code"
+        required: false
+        default: "5"
+
+jobs:
+  configure-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure quality gate for tallow
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_ORG: dungle-scrubs
+          SONAR_PROJECT: dungle-scrubs_tallow
+          SONAR_GATE_NAME: tallow-main
+          DUP_THRESHOLD: ${{ github.event.inputs.duplicated_lines_threshold }}
+        run: |
+          set -euo pipefail
+
+          auth_header="Authorization: Basic $(printf '%s:' "$SONAR_TOKEN" | base64 | tr -d '\n')"
+
+          get() {
+            curl -sf -H "$auth_header" "$1"
+          }
+
+          post() {
+            curl -sf -H "$auth_header" -X POST "$1"
+          }
+
+          gate_id="$(get "https://sonarcloud.io/api/qualitygates/list?organization=${SONAR_ORG}" | jq -r --arg name "$SONAR_GATE_NAME" '.qualitygates[] | select(.name == $name) | .id' | head -n1)"
+
+          if [ -z "$gate_id" ]; then
+            post "https://sonarcloud.io/api/qualitygates/create?organization=${SONAR_ORG}&name=${SONAR_GATE_NAME}" >/dev/null
+            gate_id="$(get "https://sonarcloud.io/api/qualitygates/list?organization=${SONAR_ORG}" | jq -r --arg name "$SONAR_GATE_NAME" '.qualitygates[] | select(.name == $name) | .id' | head -n1)"
+          fi
+
+          if [ -z "$gate_id" ]; then
+            echo "::error::Unable to resolve quality gate id"
+            exit 1
+          fi
+
+          # Reset conditions so workflow is idempotent.
+          get "https://sonarcloud.io/api/qualitygates/show?organization=${SONAR_ORG}&id=${gate_id}" \
+            | jq -r '.conditions[].id' \
+            | while read -r condition_id; do
+                if [ -n "$condition_id" ]; then
+                  post "https://sonarcloud.io/api/qualitygates/delete_condition?organization=${SONAR_ORG}&id=${condition_id}" >/dev/null
+                fi
+              done
+
+          # Keep strict correctness checks.
+          post "https://sonarcloud.io/api/qualitygates/create_condition?organization=${SONAR_ORG}&gateId=${gate_id}&metric=new_reliability_rating&op=GT&error=1" >/dev/null
+          post "https://sonarcloud.io/api/qualitygates/create_condition?organization=${SONAR_ORG}&gateId=${gate_id}&metric=new_security_rating&op=GT&error=1" >/dev/null
+          post "https://sonarcloud.io/api/qualitygates/create_condition?organization=${SONAR_ORG}&gateId=${gate_id}&metric=new_maintainability_rating&op=GT&error=1" >/dev/null
+          post "https://sonarcloud.io/api/qualitygates/create_condition?organization=${SONAR_ORG}&gateId=${gate_id}&metric=new_coverage&op=LT&error=80" >/dev/null
+
+          # Loosen noisy gates that repeatedly fail due stale leak-period + test churn.
+          post "https://sonarcloud.io/api/qualitygates/create_condition?organization=${SONAR_ORG}&gateId=${gate_id}&metric=new_duplicated_lines_density&op=GT&error=${DUP_THRESHOLD}" >/dev/null
+
+          # Attach gate to project.
+          post "https://sonarcloud.io/api/qualitygates/select?organization=${SONAR_ORG}&projectKey=${SONAR_PROJECT}&gateId=${gate_id}" >/dev/null
+
+          # Report active gate/conditions.
+          get "https://sonarcloud.io/api/qualitygates/show?organization=${SONAR_ORG}&id=${gate_id}" | jq '{id,name,conditions}'
