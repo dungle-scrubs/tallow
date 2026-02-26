@@ -16,7 +16,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const THEME_FILES = ["dark.json", "light.json", "theme-schema.json"];
-const PI_THEMES = join("node_modules", "@mariozechner", "pi-coding-agent", "dist", "modes", "interactive", "theme");
+const PI_THEMES = join(
+	"node_modules",
+	"@mariozechner",
+	"pi-coding-agent",
+	"dist",
+	"modes",
+	"interactive",
+	"theme"
+);
 const RELATIVE_PATH = join("modes", "interactive", "theme");
 
 /**
