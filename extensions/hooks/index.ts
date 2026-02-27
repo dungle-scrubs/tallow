@@ -88,6 +88,14 @@ const BLOCKABLE_EVENTS = new Set([
 	"session_before_tree", // Can cancel tree navigation
 ]);
 
+/** Events where a generic "Running X hook…" spinner should appear even without explicit statusMessage. */
+const SHOW_GENERIC_STATUS_EVENTS = new Set([
+	"agent_end",
+	"task_completed",
+	"session_shutdown",
+	"setup",
+]);
+
 /** Track prompt-type hooks that have already been warned about (once per command) */
 const warnedPromptHooks = new Set<string>();
 
@@ -861,6 +869,11 @@ export async function runCommandHook(
 			appendToHookBuffer(stderr, chunk, maxBufferBytes);
 		});
 
+		// Swallow async EPIPE errors on stdin (hook process may exit before
+		// reading all input). Without this handler, the 'error' event is
+		// emitted as an uncaught exception and crashes the process.
+		proc.stdin.on("error", () => {});
+
 		try {
 			proc.stdin.write(hookEventJson);
 			proc.stdin.end();
@@ -1142,10 +1155,16 @@ export default function (pi: ExtensionAPI) {
 	 * @returns Nothing
 	 */
 	const dispatchEventBusHooks = (eventName: string, eventData: Record<string, unknown>): void => {
-		void runHooks(eventName, eventData).catch((error: unknown) => {
-			const message = error instanceof Error ? error.message : String(error);
-			console.error(`[hooks] EventBus dispatch failed for ${eventName}: ${message}`);
-		});
+		void runHooks(eventName, eventData)
+			.then((result) => {
+				if (result.additionalContext || result.reason) {
+					deliverHookContext(eventName, result);
+				}
+			})
+			.catch((error: unknown) => {
+				const message = error instanceof Error ? error.message : String(error);
+				console.error(`[hooks] EventBus dispatch failed for ${eventName}: ${message}`);
+			});
 	};
 
 	/** Forward teammate_idle events to hook handlers. */
@@ -1283,8 +1302,9 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Deliver pending async results at turn start
+	// Deliver pending async results at turn start, and run turn_start hooks
 	pi.on("turn_start", async () => {
+		// Deliver pending async hook results
 		if (pendingAsyncResults.length > 0 && ctx) {
 			const results = pendingAsyncResults.splice(0);
 			for (const { event, result } of results) {
@@ -1301,6 +1321,12 @@ export default function (pi: ExtensionAPI) {
 				}
 			}
 		}
+
+		// Run turn_start hooks
+		const result = await runHooks("turn_start", {});
+		if (result.additionalContext) {
+			deliverHookContext("turn_start", result);
+		}
 	});
 
 	// Helper to run hooks for an event
@@ -1308,115 +1334,167 @@ export default function (pi: ExtensionAPI) {
 		eventName: string,
 		eventData: Record<string, unknown>,
 		signal?: AbortSignal
-	): Promise<{ block: boolean; reason?: string; additionalContext?: string }> {
+	): Promise<{ ok: boolean; block: boolean; reason?: string; additionalContext?: string }> {
 		const matchers = hooksConfig[eventName];
 		if (!matchers || matchers.length === 0) {
-			return { block: false };
+			return { ok: true, block: false };
 		}
 
 		const matcherField = MATCHER_FIELDS[eventName];
 		const matchValue = matcherField ? (eventData[matcherField] as string) : undefined;
 
 		const canBlock = BLOCKABLE_EVENTS.has(eventName);
+		const useGenericFallback = SHOW_GENERIC_STATUS_EVENTS.has(eventName);
 		let shouldBlock = false;
 		let blockReason: string | undefined;
 		let additionalContext: string | undefined;
+		let activeStatusMessage = false;
+		let handlersRun = 0;
+		const hookStartTime = performance.now();
 
-		for (const matcher of matchers) {
-			if (!matchesPattern(matchValue, matcher.matcher)) {
-				continue;
-			}
-
-			for (const handler of matcher.hooks) {
-				// Skip already-executed once-hooks
-				if (handler.once && stateManager) {
-					const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
-					if (stateManager.hasRun(hookId)) {
-						continue;
-					}
-				}
-
-				if (shouldSkipClaudeToolResultHandler(eventName, eventData, handler)) {
+		try {
+			for (const matcher of matchers) {
+				if (!matchesPattern(matchValue, matcher.matcher)) {
 					continue;
 				}
 
-				const hookEventData = adaptEventDataForHook(eventName, eventData, handler, currentCwd);
-
-				// Async hooks run in background, cannot block
-				if (handler.async) {
-					// For async once-hooks, mark immediately to prevent race conditions.
-					// Multiple events could fire before the first async hook completes,
-					// so we claim the slot eagerly rather than waiting for completion.
+				for (const handler of matcher.hooks) {
+					// Skip already-executed once-hooks
 					if (handler.once && stateManager) {
+						const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
+						if (stateManager.hasRun(hookId)) {
+							continue;
+						}
+					}
+
+					if (shouldSkipClaudeToolResultHandler(eventName, eventData, handler)) {
+						continue;
+					}
+
+					const hookEventData = adaptEventDataForHook(eventName, eventData, handler, currentCwd);
+
+					// Async hooks run in background, cannot block
+					if (handler.async) {
+						// For async once-hooks, mark immediately to prevent race conditions.
+						// Multiple events could fire before the first async hook completes,
+						// so we claim the slot eagerly rather than waiting for completion.
+						if (handler.once && stateManager) {
+							const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
+							stateManager.markAsRun(hookId);
+						}
+
+						handlersRun++;
+						// Fire and forget
+						(async () => {
+							let result: HookResult;
+							if (handler.type === "command") {
+								result = await runCommandHook(handler, hookEventData, currentCwd);
+							} else if (handler.type === "agent") {
+								result = await runAgentHook(handler, hookEventData, currentCwd, agentsDir);
+							} else {
+								return; // prompt type not yet supported async
+							}
+
+							// Queue result for next turn
+							if (result.additionalContext || result.reason) {
+								pendingAsyncResults.push({ event: eventName, result });
+							}
+						})();
+						continue;
+					}
+
+					// Show status message for sync hooks
+					const statusMsg =
+						handler.statusMessage ??
+						(useGenericFallback ? `Running ${eventName} hook\u2026` : undefined);
+					if (statusMsg && ctx) {
+						ctx.ui.setWorkingMessage(statusMsg);
+						activeStatusMessage = true;
+					}
+
+					handlersRun++;
+					// Sync hooks - run and potentially block
+					let result: HookResult;
+
+					if (handler.type === "command") {
+						result = await runCommandHook(handler, hookEventData, currentCwd, signal);
+					} else if (handler.type === "agent") {
+						result = await runAgentHook(handler, hookEventData, currentCwd, agentsDir, signal);
+					} else if (handler.type === "prompt") {
+						// TODO: implement single LLM call for prompt-type hooks
+						if (!warnedPromptHooks.has(handler.command ?? "")) {
+							warnedPromptHooks.add(handler.command ?? "");
+							console.error(
+								`Hook "${handler.command ?? "unknown"}" uses type "prompt" which is not yet implemented. Use type "command" or "agent" instead.`
+							);
+						}
+						continue;
+					} else {
+						continue;
+					}
+
+					// Mark sync once-hooks as run after successful execution
+					if (handler.once && result.ok && stateManager) {
 						const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
 						stateManager.markAsRun(hookId);
 					}
 
-					// Fire and forget
-					(async () => {
-						let result: HookResult;
-						if (handler.type === "command") {
-							result = await runCommandHook(handler, hookEventData, currentCwd);
-						} else if (handler.type === "agent") {
-							result = await runAgentHook(handler, hookEventData, currentCwd, agentsDir);
-						} else {
-							return; // prompt type not yet supported async
-						}
-
-						// Queue result for next turn
-						if (result.additionalContext || result.reason) {
-							pendingAsyncResults.push({ event: eventName, result });
-						}
-					})();
-					continue;
-				}
-
-				// Sync hooks - run and potentially block
-				let result: HookResult;
-
-				if (handler.type === "command") {
-					result = await runCommandHook(handler, hookEventData, currentCwd, signal);
-				} else if (handler.type === "agent") {
-					result = await runAgentHook(handler, hookEventData, currentCwd, agentsDir, signal);
-				} else if (handler.type === "prompt") {
-					// TODO: implement single LLM call for prompt-type hooks
-					if (!warnedPromptHooks.has(handler.command ?? "")) {
-						warnedPromptHooks.add(handler.command ?? "");
-						console.error(
-							`Hook "${handler.command ?? "unknown"}" uses type "prompt" which is not yet implemented. Use type "command" or "agent" instead.`
-						);
+					if (result.additionalContext) {
+						additionalContext = `${(additionalContext || "") + result.additionalContext}\n`;
 					}
-					continue;
-				} else {
-					continue;
+
+					if (!result.ok && canBlock) {
+						shouldBlock = true;
+						blockReason = result.reason;
+						break; // First blocking hook wins
+					}
 				}
 
-				// Mark sync once-hooks as run after successful execution
-				if (handler.once && result.ok && stateManager) {
-					const hookId = stateManager.computeHookId(eventName, matcher.matcher, handler);
-					stateManager.markAsRun(hookId);
-				}
-
-				if (result.additionalContext) {
-					additionalContext = `${(additionalContext || "") + result.additionalContext}\n`;
-				}
-
-				if (!result.ok && canBlock) {
-					shouldBlock = true;
-					blockReason = result.reason;
-					break; // First blocking hook wins
-				}
+				if (shouldBlock) break;
 			}
-
-			if (shouldBlock) break;
+		} finally {
+			// Clear any active status message when all hooks complete (or on error)
+			if (activeStatusMessage && ctx) {
+				ctx.ui.setWorkingMessage();
+			}
 		}
 
-		return {
+		const hookResult = {
+			ok: !shouldBlock,
 			block: shouldBlock,
 			reason: blockReason,
 			additionalContext: additionalContext?.trim(),
 		};
+
+		// Emit audit event for the pharma-grade audit trail
+		pi.events.emit("audit:hook_execution", {
+			event: eventName,
+			handlersRun: handlersRun ?? 0,
+			blocked: shouldBlock,
+			blockReason,
+			durationMs: Math.round(performance.now() - hookStartTime),
+		});
+
+		return hookResult;
 	}
+
+	/**
+	 * Deliver hook context to the agent via sendMessage.
+	 * Used for both sync and async hooks to provide additionalContext.
+	 */
+	const deliverHookContext = (eventName: string, result: HookResult, immediate = false) => {
+		if (result.additionalContext || result.reason) {
+			pi.sendMessage(
+				{
+					customType: "hook-result",
+					content: result.additionalContext || result.reason || "",
+					display: true,
+					details: { event: eventName, ok: result.ok },
+				},
+				{ deliverAs: immediate ? "steer" : "nextTurn" }
+			);
+		}
+	};
 
 	// Hook into tool_call events
 	pi.on("tool_call", async (event, ctx) => {
@@ -1425,6 +1503,11 @@ export default function (pi: ExtensionAPI) {
 			toolCallId: event.toolCallId,
 			input: event.input,
 		});
+
+		// Deliver additionalContext to agent even when blocking
+		if (result.additionalContext) {
+			deliverHookContext("tool_call", result, true);
+		}
 
 		if (result.block) {
 			const reason = result.reason || "Blocked by hook";
@@ -1435,21 +1518,27 @@ export default function (pi: ExtensionAPI) {
 
 	// Hook into tool_result events
 	pi.on("tool_result", async (event) => {
-		await runHooks("tool_result", {
+		const result = await runHooks("tool_result", {
 			toolName: event.toolName,
 			toolCallId: event.toolCallId,
 			input: event.input,
 			content: event.content,
 			isError: event.isError,
 		});
-		// tool_result cannot block (tool already ran)
+		// tool_result cannot block (tool already ran), but deliver context
+		if (result.additionalContext) {
+			deliverHookContext("tool_result", result);
+		}
 	});
 
 	// Hook into agent_end events
 	pi.on("agent_end", async (event) => {
-		await runHooks("agent_end", {
+		const result = await runHooks("agent_end", {
 			messages: event.messages,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("agent_end", result);
+		}
 	});
 
 	// Hook into input events
@@ -1458,6 +1547,11 @@ export default function (pi: ExtensionAPI) {
 			text: event.text,
 			source: event.source,
 		});
+
+		// Deliver additionalContext to agent even when blocking
+		if (result.additionalContext) {
+			deliverHookContext("input", result, true);
+		}
 
 		if (result.block) {
 			const reason = result.reason || "Blocked by hook";
@@ -1470,30 +1564,42 @@ export default function (pi: ExtensionAPI) {
 
 	// Hook into before_agent_start — fires after user submits but before agent loop
 	pi.on("before_agent_start", async (event) => {
-		await runHooks("before_agent_start", {
+		const result = await runHooks("before_agent_start", {
 			prompt: event.prompt,
 			systemPrompt: event.systemPrompt,
 			hasImages: (event.images?.length ?? 0) > 0,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("before_agent_start", result);
+		}
 	});
 
 	// Hook into agent_start events
 	pi.on("agent_start", async () => {
-		await runHooks("agent_start", {});
+		const result = await runHooks("agent_start", {});
+		if (result.additionalContext) {
+			deliverHookContext("agent_start", result);
+		}
 	});
 
 	// Hook into turn_end events
 	pi.on("turn_end", async (event) => {
-		await runHooks("turn_end", {
+		const result = await runHooks("turn_end", {
 			turnIndex: event.turnIndex,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("turn_end", result);
+		}
 	});
 
 	// ── Session lifecycle events ─────────────────────────────────
 
 	// Hook into session_shutdown — fires on process exit
 	pi.on("session_shutdown", async () => {
-		await runHooks("session_shutdown", {});
+		const result = await runHooks("session_shutdown", {});
+		if (result.additionalContext) {
+			deliverHookContext("session_shutdown", result);
+		}
 	});
 
 	// Hook into session_before_compact — fires before context compaction (can cancel)
@@ -1507,6 +1613,11 @@ export default function (pi: ExtensionAPI) {
 			event.signal
 		);
 
+		// Deliver additionalContext to agent even when blocking
+		if (result.additionalContext) {
+			deliverHookContext("session_before_compact", result, true);
+		}
+
 		if (result.block) {
 			const reason = result.reason || "Blocked by hook";
 			ctx.ui?.notify(`⛔ Hook blocked compaction: ${reason}`, "error");
@@ -1516,9 +1627,12 @@ export default function (pi: ExtensionAPI) {
 
 	// Hook into session_compact — fires after compaction completes
 	pi.on("session_compact", async (event) => {
-		await runHooks("session_compact", {
+		const result = await runHooks("session_compact", {
 			fromExtension: event.fromExtension,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("session_compact", result);
+		}
 	});
 
 	// Hook into session_before_switch — fires before switching sessions (can cancel)
@@ -1527,6 +1641,11 @@ export default function (pi: ExtensionAPI) {
 			reason: event.reason,
 			targetSessionFile: event.targetSessionFile,
 		});
+
+		// Deliver additionalContext to agent even when blocking
+		if (result.additionalContext) {
+			deliverHookContext("session_before_switch", result, true);
+		}
 
 		if (result.block) {
 			const reason = result.reason || "Blocked by hook";
@@ -1537,10 +1656,13 @@ export default function (pi: ExtensionAPI) {
 
 	// Hook into session_switch — fires after switching sessions
 	pi.on("session_switch", async (event) => {
-		await runHooks("session_switch", {
+		const result = await runHooks("session_switch", {
 			reason: event.reason,
 			previousSessionFile: event.previousSessionFile,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("session_switch", result);
+		}
 	});
 
 	// Hook into session_before_fork — fires before forking (can cancel)
@@ -1548,6 +1670,11 @@ export default function (pi: ExtensionAPI) {
 		const result = await runHooks("session_before_fork", {
 			entryId: event.entryId,
 		});
+
+		// Deliver additionalContext to agent even when blocking
+		if (result.additionalContext) {
+			deliverHookContext("session_before_fork", result, true);
+		}
 
 		if (result.block) {
 			const reason = result.reason || "Blocked by hook";
@@ -1558,9 +1685,12 @@ export default function (pi: ExtensionAPI) {
 
 	// Hook into session_fork — fires after forking
 	pi.on("session_fork", async (event) => {
-		await runHooks("session_fork", {
+		const result = await runHooks("session_fork", {
 			previousSessionFile: event.previousSessionFile,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("session_fork", result);
+		}
 	});
 
 	// Hook into session_before_tree — fires before tree navigation (can cancel)
@@ -1574,6 +1704,11 @@ export default function (pi: ExtensionAPI) {
 			event.signal
 		);
 
+		// Deliver additionalContext to agent even when blocking
+		if (result.additionalContext) {
+			deliverHookContext("session_before_tree", result, true);
+		}
+
 		if (result.block) {
 			const reason = result.reason || "Blocked by hook";
 			ctx.ui?.notify(`⛔ Hook blocked tree navigation: ${reason}`, "error");
@@ -1583,37 +1718,49 @@ export default function (pi: ExtensionAPI) {
 
 	// Hook into session_tree — fires after tree navigation
 	pi.on("session_tree", async (event) => {
-		await runHooks("session_tree", {
+		const result = await runHooks("session_tree", {
 			newLeafId: event.newLeafId,
 			oldLeafId: event.oldLeafId,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("session_tree", result);
+		}
 	});
 
 	// ── Other events ─────────────────────────────────────────────
 
 	// Hook into context — fires before each LLM call with messages
 	pi.on("context", async (event) => {
-		await runHooks("context", {
+		const result = await runHooks("context", {
 			messageCount: event.messages.length,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("context", result);
+		}
 	});
 
 	// Hook into model_select — fires when model changes
 	pi.on("model_select", async (event) => {
-		await runHooks("model_select", {
+		const result = await runHooks("model_select", {
 			modelId: event.model.id,
 			modelName: event.model.name,
 			previousModelId: event.previousModel?.id,
 			source: event.source,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("model_select", result);
+		}
 	});
 
 	// Hook into user_bash — fires when user runs ! or !! commands
 	pi.on("user_bash", async (event) => {
-		await runHooks("user_bash", {
+		const result = await runHooks("user_bash", {
 			command: event.command,
 			excludeFromContext: event.excludeFromContext,
 			cwd: event.cwd,
 		});
+		if (result.additionalContext) {
+			deliverHookContext("user_bash", result);
+		}
 	});
 }

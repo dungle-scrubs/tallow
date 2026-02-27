@@ -172,6 +172,19 @@ const auditTrail: ShellAuditEntry[] =
 	((globalThis as Record<string, unknown>).__piShellAuditTrail as ShellAuditEntry[]) ?? [];
 (globalThis as Record<string, unknown>).__piShellAuditTrail = auditTrail;
 
+/** Callback for the pharma-grade audit trail extension. */
+type AuditTrailCallback = (entry: ShellAuditEntry) => void;
+let auditTrailCallback: AuditTrailCallback | null = null;
+
+/**
+ * Set the audit trail callback for cross-extension shell audit forwarding.
+ *
+ * @param cb - Callback to invoke on each shell audit entry, or null to disconnect
+ */
+export function setShellAuditCallback(cb: AuditTrailCallback | null): void {
+	auditTrailCallback = cb;
+}
+
 // ── Permission Cache ─────────────────────────────────────────────────────────
 
 /** Cached permission state, lazily loaded on first evaluateCommand() call. */
@@ -337,6 +350,7 @@ export function recordAudit(entry: ShellAuditEntry): void {
 	if (auditTrail.length > MAX_AUDIT_ENTRIES) {
 		auditTrail.splice(0, auditTrail.length - MAX_AUDIT_ENTRIES);
 	}
+	auditTrailCallback?.(entry);
 }
 
 /**

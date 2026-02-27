@@ -109,6 +109,23 @@ export interface LoadedPermissions {
 	readonly sources: readonly PermissionSource[];
 }
 
+/** Callback for the pharma-grade audit trail extension. */
+type PermissionAuditCallback = (
+	tool: string,
+	input: Record<string, unknown>,
+	verdict: PermissionVerdict
+) => void;
+let permissionAuditCallback: PermissionAuditCallback | null = null;
+
+/**
+ * Set the permission audit callback for cross-extension permission audit forwarding.
+ *
+ * @param cb - Callback to invoke on each permission evaluation, or null to disconnect
+ */
+export function setPermissionAuditCallback(cb: PermissionAuditCallback | null): void {
+	permissionAuditCallback = cb;
+}
+
 // ── Tool Name Mapping ────────────────────────────────────────────────────────
 
 /**
@@ -1131,21 +1148,27 @@ export function evaluate(
 	// 1. Deny — any match blocks
 	for (const rule of config.deny) {
 		if (ruleMatches(rule, canonical, input, "deny", vars, settingsDir)) {
-			return buildRuleVerdict("deny", rule, canonical, input, config);
+			const verdict = buildRuleVerdict("deny", rule, canonical, input, config);
+			permissionAuditCallback?.(toolName, input, verdict);
+			return verdict;
 		}
 	}
 
 	// 2. Ask — any match prompts
 	for (const rule of config.ask) {
 		if (ruleMatches(rule, canonical, input, "ask", vars, settingsDir)) {
-			return buildRuleVerdict("ask", rule, canonical, input, config);
+			const verdict = buildRuleVerdict("ask", rule, canonical, input, config);
+			permissionAuditCallback?.(toolName, input, verdict);
+			return verdict;
 		}
 	}
 
 	// 3. Allow — any match permits
 	for (const rule of config.allow) {
 		if (ruleMatches(rule, canonical, input, "allow", vars, settingsDir)) {
-			return buildRuleVerdict("allow", rule, canonical, input, config);
+			const verdict = buildRuleVerdict("allow", rule, canonical, input, config);
+			permissionAuditCallback?.(toolName, input, verdict);
+			return verdict;
 		}
 	}
 
@@ -1158,10 +1181,12 @@ export function evaluate(
 			reasonCode: "allowlist_unmatched",
 			reasonMessage: "No matching allow rule for this tool",
 		};
-		return {
+		const result = {
 			...verdict,
 			reason: formatPermissionReason(verdict, { includeHints: false }),
 		};
+		permissionAuditCallback?.(toolName, input, result);
+		return result;
 	}
 
 	const verdict: PermissionVerdict = {
@@ -1170,10 +1195,12 @@ export function evaluate(
 		reasonCode: "no_rules_configured",
 		reasonMessage: "No permission rules configured",
 	};
-	return {
+	const result = {
 		...verdict,
 		reason: formatPermissionReason(verdict, { includeHints: false }),
 	};
+	permissionAuditCallback?.(toolName, input, result);
+	return result;
 }
 
 // ── Config Loading ───────────────────────────────────────────────────────────

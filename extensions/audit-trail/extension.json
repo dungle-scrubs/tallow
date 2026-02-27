@@ -1,0 +1,53 @@
+{
+	"name": "audit-trail",
+	"version": "0.1.0",
+	"description": "Pharma-grade audit trail — immutable, hash-chained JSONL logs with tamper evidence for every session event.",
+	"whenToUse": "Always active. Records all session events to append-only audit files for compliance and forensics.",
+	"capabilities": {
+		"events": [
+			"agent_end",
+			"agent_start",
+			"audit:hook_execution",
+			"before_agent_start",
+			"context",
+			"input",
+			"model_select",
+			"notification",
+			"session_before_compact",
+			"session_before_fork",
+			"session_before_switch",
+			"session_before_tree",
+			"session_compact",
+			"session_fork",
+			"session_shutdown",
+			"session_start",
+			"session_switch",
+			"session_tree",
+			"subagent_start",
+			"subagent_stop",
+			"task_completed",
+			"teammate_idle",
+			"tool_call",
+			"tool_result",
+			"turn_end",
+			"turn_start",
+			"user_bash",
+			"worktree_create",
+			"worktree_remove"
+		],
+		"commands": ["audit"],
+		"tools": ["audit_inspect"]
+	},
+	"permissionSurface": {
+		"filesystem": "write",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
+	"category": "integration",
+	"tags": ["audit", "compliance", "pharma", "immutable", "hash-chain"],
+	"files": ["index.ts", "types.ts", "logger.ts", "query.ts"],
+	"relationships": [],
+	"npmDependencies": {},
+	"configFiles": []
+}

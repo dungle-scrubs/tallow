@@ -26,6 +26,29 @@ declare global {
 		  }
 		| undefined;
 
+	// audit-trail extension (pharma-grade audit logger, persists across extension reloads)
+	var __piAuditTrailLogger:
+		| {
+				readonly sessionId: string;
+				readonly filePath: string;
+				record(params: {
+					category: string;
+					event: string;
+					actor: string;
+					data?: Record<string, unknown>;
+					before?: Record<string, unknown>;
+					after?: Record<string, unknown>;
+					outcome?: string;
+					reason?: string;
+				}): unknown;
+				getSeq(): number;
+				getLastHash(): string;
+		  }
+		| undefined;
+
+	// audit-trail extension (EventBus listener cleanup across reloads)
+	var __auditTrailEventCleanup: (() => void) | undefined;
+
 	// shell-policy shared module (audit trail persists across extension reloads)
 	var __piShellAuditTrail:
 		| Array<{
