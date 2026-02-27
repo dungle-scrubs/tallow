@@ -6,14 +6,57 @@
  * commands for inspection and an audit_inspect tool for agent queries.
  */
 
-import { dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { setPermissionAuditCallback } from "../_shared/permissions.js";
 import { setShellAuditCallback } from "../_shared/shell-policy.js";
+import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import { type AuditTrailLogger, getOrCreateAuditLogger } from "./logger.js";
 import { exportAuditTrail, listAuditFiles, queryAuditTrail, verifyIntegrity } from "./query.js";
 import type { AuditCategory, AuditQueryOptions, AuditTrailConfig } from "./types.js";
+
+/**
+ * Read audit trail config from settings.json files.
+ *
+ * Supports both short and expanded forms:
+ *   { "auditTrail": false }
+ *   { "auditTrail": { "enabled": true, "redactSensitive": false, "directory": "/custom/path", "excludeCategories": ["turn"] } }
+ *
+ * Checks project `.tallow/settings.json` first (if it exists), then global `~/.tallow/settings.json`.
+ * The first file with an `auditTrail` key wins.
+ *
+ * @param cwd - Current working directory
+ * @returns Partial config from settings, or empty object if not configured
+ */
+function readAuditTrailSettings(cwd: string): Partial<AuditTrailConfig> {
+	const paths = [join(cwd, ".tallow", "settings.json"), getTallowSettingsPath()];
+
+	for (const settingsPath of paths) {
+		if (!existsSync(settingsPath)) continue;
+		try {
+			const raw = readFileSync(settingsPath, "utf-8");
+			const settings = JSON.parse(raw) as {
+				auditTrail?: boolean | Partial<AuditTrailConfig>;
+			};
+
+			if (settings.auditTrail === undefined) continue;
+
+			if (typeof settings.auditTrail === "boolean") {
+				return { enabled: settings.auditTrail };
+			}
+
+			if (typeof settings.auditTrail === "object" && settings.auditTrail !== null) {
+				return settings.auditTrail;
+			}
+		} catch {
+			// skip malformed settings files
+		}
+	}
+
+	return {};
+}
 
 export default function (pi: ExtensionAPI): void {
 	let logger: AuditTrailLogger | null = null;
@@ -23,13 +66,19 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, context) => {
 		const sessionId = context.sessionManager.getSessionId();
 
-		// Load config from settings if available (future: read from settings.json)
+		// Load config from settings.json (project-local then global)
+		const settingsConfig = readAuditTrailSettings(context.cwd);
 		const config: Partial<AuditTrailConfig> = {
-			enabled: true,
-			redactSensitive: true,
+			enabled: settingsConfig.enabled ?? true,
+			redactSensitive: settingsConfig.redactSensitive ?? true,
+			directory: settingsConfig.directory,
+			excludeCategories: settingsConfig.excludeCategories,
 		};
 
 		logger = getOrCreateAuditLogger(sessionId, config);
+
+		// If disabled via settings, skip all event wiring
+		if (!config.enabled) return;
 
 		logger.record({
 			category: "session",
