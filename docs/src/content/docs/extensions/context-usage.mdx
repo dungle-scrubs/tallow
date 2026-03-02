@@ -3,13 +3,11 @@ title: context-usage
 description: Visualize context window usage with a waffle chart breakdown.
 ---
 
-The **context-usage** extension adds a `/context` command that
-visualizes how your context window is being used with a waffle
-chart and per-category token breakdown.
+The **context-usage** extension adds a `/context` command that shows how the active context window is allocated.
 
 ## Usage
 
-```
+```text
 /context
 ```
 
@@ -23,27 +21,20 @@ chart and per-category token breakdown.
 | Skills | Available skill metadata in prompt |
 | Messages | Conversation history |
 | Free space | Remaining capacity |
-| Autocompact buffer | Reserved for compaction (when enabled) |
+| Autocompact buffer | Reserved compaction buffer |
 
-The waffle chart gives an at-a-glance view of how much context
-budget each category consumes, helping you identify when the
-conversation is getting large or when context files are taking
-too much space.
+## Historical tool-result memory
 
-## Historical tool-result memory section
-
-`/context` also shows a **Historical tool-result payloads** block with:
+`/context` includes a **Historical tool-result payloads** block:
 
 - total tool results in the active branch
-- how many were summarized by retention
-- retained bytes currently held in memory
-- reclaimed bytes from summarized historical results
+- summarized result count
+- retained bytes in memory
+- reclaimed bytes from summarization
 
-This helps verify that long-session payload retention is reducing memory pressure.
+This reflects the `toolResultRetention` policy.
 
-## Retention settings
-
-Configure retention in `~/.tallow/settings.json` (or project `.tallow/settings.json`):
+### `toolResultRetention` settings
 
 ```json
 {
@@ -58,6 +49,40 @@ Configure retention in `~/.tallow/settings.json` (or project `.tallow/settings.j
 
 Semantics:
 
-- `keepRecentToolResults`: newest N tool results kept full
-- `maxRetainedBytesPerResult`: older results above this size are summarized
-- `previewChars`: max preview size kept in summarized content
+- `keepRecentToolResults`: newest N results kept full
+- `maxRetainedBytesPerResult`: older results above this are summarized
+- `previewChars`: maximum summary preview size
+
+## Context budget guardrails
+
+Tallow also applies **pre-flight and ingestion-time** guardrails for tool output.
+
+### `contextBudget` settings
+
+```json
+{
+  "contextBudget": {
+    "softThresholdPercent": 75,
+    "hardThresholdPercent": 90,
+    "minPerToolBytes": 4096,
+    "maxPerToolBytes": 524288,
+    "perTurnReserveTokens": 8000,
+    "unknownUsageFallbackCapBytes": 32768
+  }
+}
+```
+
+These values drive:
+
+- per-turn planner envelopes for tool-call batches
+- ingestion-time tool-result truncation under pressure
+- unknown-usage fallback behavior (`tokens: null`)
+
+### Budget signal in system prompt
+
+Each turn includes a short signal line in the system prompt:
+
+- known usage: `Context budget: <percent>% used, ~<remaining>k tokens remaining`
+- unknown usage: `Context budget: unknown (waiting for fresh usage sample)`
+
+Unknown usage is treated as high risk and uses conservative caps.

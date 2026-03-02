@@ -13,6 +13,7 @@ import {
 	matchesKey,
 	Text,
 	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -47,6 +48,50 @@ const QuestionParams = Type.Object({
 	question: Type.String({ description: "The question to ask the user" }),
 	options: Type.Array(OptionSchema, { description: "Options for the user to choose from" }),
 });
+
+/**
+ * Splits text into visual lines while normalizing LF/CRLF line endings.
+ * @param text - Source text that may contain LF or CRLF newlines
+ * @returns Normalized visual lines without embedded newline characters
+ */
+function splitVisualLines(text: string): string[] {
+	return text.replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+}
+
+/**
+ * Appends wrapped, newline-safe lines with first-line and continuation prefixes.
+ * @param lines - Output line buffer
+ * @param width - Total render width
+ * @param text - Raw text that may include LF/CRLF newlines
+ * @param firstPrefix - Prefix applied to the first rendered line
+ * @param continuationPrefix - Prefix applied to wrapped/continued lines
+ * @param style - Style function applied to each visual line before wrapping
+ * @returns Nothing
+ */
+function pushWrappedPrefixedLines(
+	lines: string[],
+	width: number,
+	text: string,
+	firstPrefix: string,
+	continuationPrefix: string,
+	style: (line: string) => string
+): void {
+	const safeWidth = Math.max(1, width);
+	let currentPrefix = firstPrefix;
+
+	for (const visualLine of splitVisualLines(text)) {
+		const prefixWidth = Math.max(visibleWidth(currentPrefix), visibleWidth(continuationPrefix));
+		const contentWidth = Math.max(1, safeWidth - prefixWidth);
+		const wrapped = wrapTextWithAnsi(style(visualLine), contentWidth);
+
+		for (let i = 0; i < wrapped.length; i++) {
+			const prefix = i === 0 ? currentPrefix : continuationPrefix;
+			lines.push(truncateToWidth(prefix + wrapped[i], safeWidth));
+		}
+
+		currentPrefix = continuationPrefix;
+	}
+}
 
 /**
  * Registers the ask_user_question tool with Pi.
@@ -118,6 +163,7 @@ WHEN NOT TO USE:
 				let optionIndex = 0;
 				let editMode = false;
 				let cachedLines: string[] | undefined;
+				let cachedWidth: number | undefined;
 
 				const editorTheme: EditorTheme = {
 					borderColor: (s) => theme.fg("accent", s),
@@ -147,6 +193,7 @@ WHEN NOT TO USE:
 				 */
 				function refresh() {
 					cachedLines = undefined;
+					cachedWidth = undefined;
 					tui.requestRender();
 				}
 
@@ -200,7 +247,7 @@ WHEN NOT TO USE:
 				 * @returns Array of rendered lines
 				 */
 				function render(width: number): string[] {
-					if (cachedLines) return cachedLines;
+					if (cachedLines && cachedWidth === width) return cachedLines;
 
 					const lines: string[] = [];
 					const add = (s: string) => lines.push(truncateToWidth(s, width));
@@ -216,19 +263,31 @@ WHEN NOT TO USE:
 						const opt = allOptions[i];
 						const selected = i === optionIndex;
 						const isOther = opt.isOther === true;
-						const prefix = selected ? theme.fg("accent", "> ") : "  ";
+						const numberPrefix = `${i + 1}. `;
+						const continuationPrefix = `  ${" ".repeat(numberPrefix.length)}`;
+						const hasEditMarker = isOther && editMode;
+						const labelText = `${numberPrefix}${opt.label}${hasEditMarker ? " ✎" : ""}`;
 
-						if (isOther && editMode) {
-							add(prefix + theme.fg("accent", `${i + 1}. ${opt.label} ✎`));
-						} else if (selected) {
-							add(prefix + theme.fg("accent", `${i + 1}. ${opt.label}`));
+						if (hasEditMarker || selected) {
+							pushWrappedPrefixedLines(
+								lines,
+								width,
+								labelText,
+								selected ? theme.fg("accent", "> ") : "  ",
+								continuationPrefix,
+								(value) => theme.fg("accent", value)
+							);
 						} else {
-							add(`  ${theme.fg("text", `${i + 1}. ${opt.label}`)}`);
+							pushWrappedPrefixedLines(lines, width, labelText, "  ", continuationPrefix, (value) =>
+								theme.fg("text", value)
+							);
 						}
 
 						// Show description if present
 						if (opt.description) {
-							add(`     ${theme.fg("muted", opt.description)}`);
+							pushWrappedPrefixedLines(lines, width, opt.description, "     ", "     ", (value) =>
+								theme.fg("muted", value)
+							);
 						}
 					}
 
@@ -248,6 +307,7 @@ WHEN NOT TO USE:
 					}
 					add(theme.fg("accent", "─".repeat(width)));
 
+					cachedWidth = width;
 					cachedLines = lines;
 					return lines;
 				}
@@ -256,6 +316,7 @@ WHEN NOT TO USE:
 					render,
 					invalidate: () => {
 						cachedLines = undefined;
+						cachedWidth = undefined;
 					},
 					handleInput,
 				};

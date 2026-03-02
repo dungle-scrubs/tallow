@@ -141,6 +141,9 @@ export interface TallowSessionOptions {
 /** Marker key used on summarized historical tool results. */
 export const TOOL_RESULT_RETENTION_MARKER = "__tallow_summarized_tool_result__";
 
+/** Marker key used on ingestion-time budget-guarded tool results. */
+export const TOOL_RESULT_BUDGET_GUARD_MARKER = "__tallow_budget_guard__";
+
 /** Default retention policy for historical tool-result payloads. */
 const DEFAULT_TOOL_RESULT_RETENTION_POLICY = {
 	enabled: true,
@@ -155,6 +158,69 @@ export interface ToolResultRetentionPolicy {
 	readonly keepRecentToolResults: number;
 	readonly maxRetainedBytesPerResult: number;
 	readonly previewChars: number;
+}
+
+// ─── Context Budget Policy ───────────────────────────────────────────────────
+
+/** Default context-budget thresholds and caps. */
+const DEFAULT_CONTEXT_BUDGET_POLICY = {
+	softThresholdPercent: 75,
+	hardThresholdPercent: 90,
+	minPerToolBytes: 4 * 1024,
+	maxPerToolBytes: 512 * 1024,
+	perTurnReserveTokens: 8_000,
+	unknownUsageFallbackCapBytes: 32 * 1024,
+} as const;
+
+/** Event channels for context-budget planner ↔ tool API handshake. */
+const CONTEXT_BUDGET_API_CHANNELS = {
+	budgetApi: "interop.api.v1.context-budget.api",
+	budgetApiRequest: "interop.api.v1.context-budget.api-request",
+} as const;
+
+/** Default TTL for per-tool context-budget envelopes. */
+const CONTEXT_BUDGET_ENVELOPE_TTL_MS = 30_000;
+
+/** Resolved policy controlling context-budget guardrails. */
+export interface ContextBudgetPolicy {
+	/** Percentage of context window at which soft budget warnings begin. */
+	readonly softThresholdPercent: number;
+	/** Percentage of context window at which hard budget caps apply. */
+	readonly hardThresholdPercent: number;
+	/** Minimum bytes a single tool call is always allowed. */
+	readonly minPerToolBytes: number;
+	/** Maximum bytes a single tool call may receive. */
+	readonly maxPerToolBytes: number;
+	/** Tokens reserved each turn for the model's response. */
+	readonly perTurnReserveTokens: number;
+	/** Byte cap applied when context usage is unknown (post-compaction). */
+	readonly unknownUsageFallbackCapBytes: number;
+}
+
+/** Optional settings payload accepted from settings.json / overrides. */
+interface ContextBudgetConfigInput {
+	readonly softThresholdPercent?: unknown;
+	readonly hardThresholdPercent?: unknown;
+	readonly minPerToolBytes?: unknown;
+	readonly maxPerToolBytes?: unknown;
+	readonly perTurnReserveTokens?: unknown;
+	readonly unknownUsageFallbackCapBytes?: unknown;
+}
+
+/** Minimal context-usage snapshot used by budget helpers. */
+export interface ContextUsageSnapshot {
+	readonly tokens: number | null;
+	readonly contextWindow: number;
+	readonly percent: number | null;
+}
+
+/** Metadata attached to budget-guarded tool results under a namespaced key. */
+interface BudgetGuardMetadata {
+	readonly [key: string]: unknown;
+	readonly guardedAt: string;
+	readonly originalContentBytes: number;
+	readonly truncatedToBytes: number;
+	readonly reason: "over_budget" | "unknown_usage";
 }
 
 /** Optional settings payload accepted from settings.json / overrides. */
@@ -191,6 +257,14 @@ interface ToolResultPayloadBytes {
 	readonly contentBytes: number;
 	readonly detailsBytes: number;
 	readonly totalBytes: number;
+}
+
+/** Output from ingestion-time budget guarding for tool-result content. */
+interface GuardedToolResultContent {
+	readonly content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+	readonly originalTextBytes: number;
+	readonly truncatedToBytes: number;
+	readonly wasGuarded: boolean;
 }
 
 /** Aggregate stats from a retention pass over historical tool results. */
@@ -322,6 +396,164 @@ export function resolveToolResultRetentionPolicy(params: {
 }
 
 /**
+ * Resolve the effective context-budget policy from layered settings.
+ *
+ * Precedence: global settings < project settings < runtime overrides.
+ * Any unset field falls back to the compiled default.
+ *
+ * @param params - Layered settings inputs
+ * @returns Resolved context-budget policy with validated numeric bounds
+ */
+export function resolveContextBudgetPolicy(params: {
+	globalSettings?: Record<string, unknown>;
+	projectSettings?: Record<string, unknown>;
+	runtimeSettings?: Record<string, unknown>;
+}): ContextBudgetPolicy {
+	const globalConfig = readContextBudgetConfig(params.globalSettings);
+	const projectConfig = readContextBudgetConfig(params.projectSettings);
+	const runtimeConfig = readContextBudgetConfig(params.runtimeSettings);
+
+	const merged = {
+		...globalConfig,
+		...projectConfig,
+		...runtimeConfig,
+	};
+
+	return {
+		softThresholdPercent: toNonNegativeInt(
+			merged.softThresholdPercent,
+			DEFAULT_CONTEXT_BUDGET_POLICY.softThresholdPercent,
+			100
+		),
+		hardThresholdPercent: toNonNegativeInt(
+			merged.hardThresholdPercent,
+			DEFAULT_CONTEXT_BUDGET_POLICY.hardThresholdPercent,
+			100
+		),
+		minPerToolBytes: toNonNegativeInt(
+			merged.minPerToolBytes,
+			DEFAULT_CONTEXT_BUDGET_POLICY.minPerToolBytes,
+			10 * 1024 * 1024
+		),
+		maxPerToolBytes: toNonNegativeInt(
+			merged.maxPerToolBytes,
+			DEFAULT_CONTEXT_BUDGET_POLICY.maxPerToolBytes,
+			10 * 1024 * 1024
+		),
+		perTurnReserveTokens: toNonNegativeInt(
+			merged.perTurnReserveTokens,
+			DEFAULT_CONTEXT_BUDGET_POLICY.perTurnReserveTokens,
+			200_000
+		),
+		unknownUsageFallbackCapBytes: toNonNegativeInt(
+			merged.unknownUsageFallbackCapBytes,
+			DEFAULT_CONTEXT_BUDGET_POLICY.unknownUsageFallbackCapBytes,
+			10 * 1024 * 1024
+		),
+	};
+}
+
+/**
+ * Estimate remaining tokens available for tool output.
+ *
+ * When usage.tokens is null (e.g. right after compaction), returns 0
+ * to signal that callers should use the unknown-usage fallback path.
+ *
+ * @param usage - Context usage snapshot from the framework
+ * @param reserveTokens - Tokens to hold back for the model response
+ * @returns Non-negative remaining token count, or 0 when unknown
+ */
+export function estimateRemainingTokens(
+	usage: ContextUsageSnapshot,
+	reserveTokens: number
+): number {
+	if (usage.tokens === null) return 0;
+	return Math.max(0, usage.contextWindow - usage.tokens - reserveTokens);
+}
+
+/**
+ * Convert a token count to an approximate byte budget.
+ *
+ * Uses a conservative 4-bytes-per-token heuristic suitable for English
+ * text and JSON payloads. Non-Latin scripts use more bytes per token;
+ * callers should treat this as an upper-bound estimate.
+ *
+ * @param tokens - Token count to convert
+ * @returns Approximate byte budget
+ */
+export function tokensToBytes(tokens: number): number {
+	return Math.max(0, Math.floor(tokens * 4));
+}
+
+/**
+ * Build a compact one-line budget status string for system prompt injection.
+ *
+ * Format when known: `Context budget: 67% used, ~66k tokens remaining`
+ * Format when unknown: `Context budget: unknown (waiting for fresh usage sample)`
+ *
+ * @param usage - Context usage snapshot
+ * @param policy - Resolved context-budget policy
+ * @returns Deterministic single-line status string
+ */
+export function formatBudgetStatusLine(
+	usage: ContextUsageSnapshot,
+	policy: ContextBudgetPolicy
+): string {
+	if (usage.tokens === null || usage.contextWindow <= 0) {
+		return "Context budget: unknown (waiting for fresh usage sample)";
+	}
+
+	const pct =
+		usage.percent !== null ? usage.percent : Math.round((usage.tokens / usage.contextWindow) * 100);
+	const remaining = estimateRemainingTokens(usage, policy.perTurnReserveTokens);
+	const remainingK = Math.max(0, Math.round(remaining / 1000));
+	return `Context budget: ${pct}% used, ~${remainingK}k tokens remaining`;
+}
+
+/**
+ * Return the fallback byte cap used when context usage is unknown.
+ *
+ * This applies after compaction or before the first LLM response when
+ * the framework reports tokens as null.
+ *
+ * @param policy - Resolved context-budget policy
+ * @returns Byte cap for unknown-usage scenarios
+ */
+export function unknownUsageFallbackBudget(policy: ContextBudgetPolicy): number {
+	return policy.unknownUsageFallbackCapBytes;
+}
+
+/**
+ * Normalize framework context-usage output into a stable snapshot.
+ *
+ * Missing or partial usage values are treated as unknown, which triggers
+ * conservative fallback behavior in budget planning/guarding.
+ *
+ * @param usage - Raw usage object returned by `ctx.getContextUsage()`
+ * @returns Normalized snapshot
+ */
+function normalizeContextUsageSnapshot(usage: unknown): ContextUsageSnapshot {
+	if (!isObjectRecord(usage)) {
+		return { contextWindow: 0, percent: null, tokens: null };
+	}
+
+	const contextWindow =
+		typeof usage.contextWindow === "number" && Number.isFinite(usage.contextWindow)
+			? usage.contextWindow
+			: 0;
+	const tokens =
+		typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : null;
+	const percent =
+		typeof usage.percent === "number" && Number.isFinite(usage.percent) ? usage.percent : null;
+
+	return {
+		contextWindow,
+		percent,
+		tokens,
+	};
+}
+
+/**
  * Summarize older oversized tool results in-place while keeping the newest N full.
  *
  * This mutates the provided message objects directly. It is intended for historical
@@ -383,6 +615,20 @@ function readToolResultRetentionConfig(
 	if (!settings) return {};
 	const config = settings.toolResultRetention;
 	return isObjectRecord(config) ? (config as ToolResultRetentionConfigInput) : {};
+}
+
+/**
+ * Read context-budget config from an arbitrary settings object.
+ *
+ * @param settings - Settings record that may include `contextBudget`
+ * @returns Partial context-budget config when present
+ */
+function readContextBudgetConfig(
+	settings: Record<string, unknown> | undefined
+): ContextBudgetConfigInput {
+	if (!settings) return {};
+	const config = settings.contextBudget;
+	return isObjectRecord(config) ? (config as ContextBudgetConfigInput) : {};
 }
 
 /**
@@ -1110,6 +1356,12 @@ export async function createTallowSession(
 		runtimeSettings: options.settings,
 	});
 
+	const contextBudgetPolicy = resolveContextBudgetPolicy({
+		globalSettings: settingsManager.getGlobalSettings() as Record<string, unknown>,
+		projectSettings: settingsManager.getProjectSettings() as Record<string, unknown>,
+		runtimeSettings: options.settings,
+	});
+
 	// ── Resource Loader ──────────────────────────────────────────────────────
 
 	const additionalExtensionPaths: string[] = [];
@@ -1247,9 +1499,10 @@ export async function createTallowSession(
 		additionalPromptTemplatePaths: additionalPromptPaths,
 		additionalThemePaths,
 		extensionFactories: [
-			rebrandSystemPrompt,
+			createRebrandSystemPromptExtension(contextBudgetPolicy),
 			injectImageFilePaths,
-			createToolResultRetentionExtension(toolResultRetentionPolicy),
+			createToolResultRetentionExtension(toolResultRetentionPolicy, contextBudgetPolicy),
+			createContextBudgetPlannerExtension(contextBudgetPolicy),
 			detectOutputTruncation,
 			createProjectTrustExtension(cwd, projectTrust),
 			...(options.extensionFactories ?? []),
@@ -1633,44 +1886,56 @@ function createProjectTrustExtension(
 }
 
 /**
- * Built-in extension factory that rebrands the pi system prompt for tallow.
+ * Create a built-in extension factory that rebrands the pi system prompt for tallow
+ * and appends a compact context-budget status line each turn.
+ *
  * Registered as a factory so it cannot be overridden or removed by users.
+ *
+ * @param budgetPolicy - Resolved context-budget policy for status line generation
+ * @returns Extension factory
  */
-function rebrandSystemPrompt(pi: ExtensionAPI): void {
-	pi.on("before_agent_start", async (event, ctx) => {
-		let prompt = event.systemPrompt
-			.replace(
-				"You are an expert coding assistant operating inside pi, a coding agent harness.",
-				"You are an expert coding assistant operating inside tallow, a coding agent harness."
-			)
-			.replace(/Pi documentation/g, "Tallow documentation")
-			.replace(/When working on pi topics/g, "When working on tallow topics")
-			.replace(/read pi \.md files/g, "read tallow .md files")
-			.replace(/the user asks about pi itself/g, "the user asks about tallow itself");
+function createRebrandSystemPromptExtension(budgetPolicy: ContextBudgetPolicy): ExtensionFactory {
+	return (pi: ExtensionAPI): void => {
+		pi.on("before_agent_start", async (event, ctx) => {
+			let prompt = event.systemPrompt
+				.replace(
+					"You are an expert coding assistant operating inside pi, a coding agent harness.",
+					"You are an expert coding assistant operating inside tallow, a coding agent harness."
+				)
+				.replace(/Pi documentation/g, "Tallow documentation")
+				.replace(/When working on pi topics/g, "When working on tallow topics")
+				.replace(/read pi \.md files/g, "read tallow .md files")
+				.replace(/the user asks about pi itself/g, "the user asks about tallow itself");
 
-		// Core guidelines baked into every tallow session
-		prompt +=
-			"\n\nLLM intelligence is not always the answer. When a well-designed algorithm, heuristic, or deterministic approach can solve the problem reliably, prefer that over reaching for another LLM call. Reserve model inference for tasks that genuinely require reasoning, creativity, or natural-language understanding.";
+			// Core guidelines baked into every tallow session
+			prompt +=
+				"\n\nLLM intelligence is not always the answer. When a well-designed algorithm, heuristic, or deterministic approach can solve the problem reliably, prefer that over reaching for another LLM call. Reserve model inference for tasks that genuinely require reasoning, creativity, or natural-language understanding.";
 
-		// Communicate strategy changes proactively
-		prompt +=
-			"\n\nIf you hit an internal limit (thinking budget, output length, or planning complexity) that forces you to change approach — say so immediately. Never silently pivot from planning to execution, or drop planned items, without telling the user what happened and why.";
+			// Communicate strategy changes proactively
+			prompt +=
+				"\n\nIf you hit an internal limit (thinking budget, output length, or planning complexity) that forces you to change approach — say so immediately. Never silently pivot from planning to execution, or drop planned items, without telling the user what happened and why.";
 
-		// Detect unexpected workspace changes
-		prompt +=
-			"\n\nWhile you are working, if you notice unexpected changes in the workspace that you didn't make — STOP IMMEDIATELY and tell the user what you found. Do not attempt to revert, overwrite, or work around them. Ask the user how they would like to proceed.";
+			// Detect unexpected workspace changes
+			prompt +=
+				"\n\nWhile you are working, if you notice unexpected changes in the workspace that you didn't make — STOP IMMEDIATELY and tell the user what you found. Do not attempt to revert, overwrite, or work around them. Ask the user how they would like to proceed.";
 
-		// Review mindset
-		prompt +=
-			"\n\nWhen the user asks for a review, default to a code-review mindset. Prioritize identifying bugs, risks, behavioral regressions, and missing tests. Present findings first, ordered by severity, with file and line references where possible. State explicitly if no issues were found and call out any residual risks or test gaps.";
+			// Review mindset
+			prompt +=
+				"\n\nWhen the user asks for a review, default to a code-review mindset. Prioritize identifying bugs, risks, behavioral regressions, and missing tests. Present findings first, ordered by severity, with file and line references where possible. State explicitly if no issues were found and call out any residual risks or test gaps.";
 
-		// Inject model identity so non-Claude models don't confabulate their identity
-		if (ctx.model) {
-			prompt += `\n\nYou are running as ${ctx.model.name} (${ctx.model.provider}/${ctx.model.id}).`;
-		}
+			// Inject model identity so non-Claude models don't confabulate their identity
+			if (ctx.model) {
+				prompt += `\n\nYou are running as ${ctx.model.name} (${ctx.model.provider}/${ctx.model.id}).`;
+			}
 
-		return { systemPrompt: prompt };
-	});
+			// Append compact budget status line for context awareness
+			const usage = normalizeContextUsageSnapshot(ctx.getContextUsage?.());
+			const budgetLine = formatBudgetStatusLine(usage, budgetPolicy);
+			prompt += `\n\n[${budgetLine}]`;
+
+			return { systemPrompt: prompt };
+		});
+	};
 }
 
 /**
@@ -1705,9 +1970,78 @@ function injectImageFilePaths(pi: ExtensionAPI): void {
  * @param policy - Resolved retention policy
  * @returns Extension factory
  */
-function createToolResultRetentionExtension(policy: ToolResultRetentionPolicy): ExtensionFactory {
+function createToolResultRetentionExtension(
+	policy: ToolResultRetentionPolicy,
+	budgetPolicy: ContextBudgetPolicy
+): ExtensionFactory {
 	return (pi: ExtensionAPI): void => {
-		if (!policy.enabled) return;
+		// ── Ingestion-time guard on tool_result ──────────────────────────────
+		// Truncate oversized textual payloads before persistence when context
+		// budget is tight or usage is unknown. Compatibility invariants:
+		// - Never change toolCallId, toolName, or isError
+		// - Preserve existing details fields
+		// - Add guard metadata only under namespaced key
+		// - Leave non-text blocks structurally unchanged
+		pi.on("tool_result", async (event, ctx) => {
+			const usage = normalizeContextUsageSnapshot(ctx.getContextUsage?.());
+			const usageUnknown = usage.tokens === null || usage.contextWindow <= 0;
+			const usagePercent =
+				usage.percent !== null
+					? usage.percent
+					: usage.tokens === null || usage.contextWindow <= 0
+						? null
+						: Math.round((usage.tokens / usage.contextWindow) * 100);
+
+			const safeBudgetBytes = (() => {
+				if (usageUnknown) {
+					return unknownUsageFallbackBudget(budgetPolicy);
+				}
+
+				const remainingTokens = estimateRemainingTokens(usage, budgetPolicy.perTurnReserveTokens);
+				const baseline = Math.min(
+					budgetPolicy.maxPerToolBytes,
+					Math.max(budgetPolicy.minPerToolBytes, tokensToBytes(remainingTokens))
+				);
+
+				if (usagePercent !== null && usagePercent >= budgetPolicy.hardThresholdPercent) {
+					return budgetPolicy.minPerToolBytes;
+				}
+
+				if (usagePercent !== null && usagePercent >= budgetPolicy.softThresholdPercent) {
+					return Math.max(budgetPolicy.minPerToolBytes, Math.floor(baseline * 0.5));
+				}
+
+				return baseline;
+			})();
+
+			const guarded = guardToolResultContent(
+				event.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
+				safeBudgetBytes
+			);
+			if (!guarded.wasGuarded) {
+				return;
+			}
+
+			const guardMeta: BudgetGuardMetadata = {
+				guardedAt: new Date().toISOString(),
+				originalContentBytes: guarded.originalTextBytes,
+				truncatedToBytes: guarded.truncatedToBytes,
+				reason: usageUnknown ? "unknown_usage" : "over_budget",
+			};
+
+			const existingDetails = isObjectRecord(event.details) ? event.details : {};
+			return {
+				content: guarded.content as Array<
+					{ type: "image"; data: string; mimeType: string } | { type: "text"; text: string }
+				>,
+				details: { ...existingDetails, [TOOL_RESULT_BUDGET_GUARD_MARKER]: guardMeta },
+			};
+		});
+
+		// ── Historical turn_end retention (unchanged) ────────────────────────
+		if (!policy.enabled) {
+			return;
+		}
 
 		pi.on("turn_end", async (_event, ctx) => {
 			const messages: Array<Record<string, unknown>> = [];
@@ -1719,6 +2053,310 @@ function createToolResultRetentionExtension(policy: ToolResultRetentionPolicy): 
 			if (messages.length === 0) return;
 
 			applyToolResultRetentionToMessages(messages, policy);
+		});
+	};
+}
+
+/**
+ * Apply ingestion-time guardrails to a tool-result content array.
+ *
+ * Only textual blocks are truncated. Non-text blocks are preserved in place
+ * to avoid breaking renderer contracts.
+ *
+ * @param content - Tool-result content blocks
+ * @param maxTextBytes - Maximum allowed bytes across all text blocks
+ * @returns Guarded content payload metadata
+ */
+function guardToolResultContent(
+	content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
+	maxTextBytes: number
+): GuardedToolResultContent {
+	let originalTextBytes = 0;
+	let totalContentBytes = 0;
+	for (const block of content) {
+		if (block.type === "text") {
+			const text = block.text ?? "";
+			const textBytes = Buffer.byteLength(text, "utf-8");
+			originalTextBytes += textBytes;
+			totalContentBytes += textBytes;
+			continue;
+		}
+
+		totalContentBytes += Buffer.byteLength(JSON.stringify(block), "utf-8");
+	}
+
+	if (originalTextBytes > 0 && originalTextBytes <= maxTextBytes) {
+		return {
+			content,
+			originalTextBytes,
+			truncatedToBytes: originalTextBytes,
+			wasGuarded: false,
+		};
+	}
+
+	if (originalTextBytes === 0) {
+		if (totalContentBytes <= maxTextBytes) {
+			return {
+				content,
+				originalTextBytes,
+				truncatedToBytes: 0,
+				wasGuarded: false,
+			};
+		}
+
+		const fallbackText =
+			"[non-text tool output exceeds context budget; payload preserved without structural rewrite]";
+		return {
+			content: [{ type: "text", text: fallbackText }, ...content],
+			originalTextBytes,
+			truncatedToBytes: 0,
+			wasGuarded: true,
+		};
+	}
+
+	const nextContent: Array<{ type: string; text?: string; data?: string; mimeType?: string }> = [];
+	let bytesUsed = 0;
+	let truncated = false;
+
+	for (const block of content) {
+		if (block.type !== "text") {
+			nextContent.push(block);
+			continue;
+		}
+
+		if (truncated) {
+			continue;
+		}
+
+		const text = block.text ?? "";
+		const blockBytes = Buffer.byteLength(text, "utf-8");
+		if (bytesUsed + blockBytes <= maxTextBytes) {
+			nextContent.push({ ...block, text });
+			bytesUsed += blockBytes;
+			continue;
+		}
+
+		const remaining = Math.max(0, maxTextBytes - bytesUsed);
+		const truncatedText =
+			remaining > 0
+				? truncateTextToBytes(text, remaining)
+				: "[output truncated by context-budget guard]";
+		const marker =
+			remaining > 0
+				? `\n\n[output truncated by context-budget guard — ${formatBytesForSummary(originalTextBytes)} → ${formatBytesForSummary(maxTextBytes)}]`
+				: `\n\n[output truncated by context-budget guard — ${formatBytesForSummary(originalTextBytes)} original]`;
+		nextContent.push({ type: "text", text: `${truncatedText}${marker}` });
+		bytesUsed = maxTextBytes;
+		truncated = true;
+	}
+
+	if (!truncated) {
+		return {
+			content,
+			originalTextBytes,
+			truncatedToBytes: originalTextBytes,
+			wasGuarded: false,
+		};
+	}
+
+	return {
+		content: nextContent,
+		originalTextBytes,
+		truncatedToBytes: Math.min(originalTextBytes, maxTextBytes),
+		wasGuarded: true,
+	};
+}
+
+/**
+ * Truncate a string to fit within a byte budget (UTF-8 safe).
+ *
+ * Walks backward from an estimated character position to find a safe
+ * cut point that does not split a multi-byte character.
+ *
+ * @param text - Source text to truncate
+ * @param maxBytes - Maximum UTF-8 byte length
+ * @returns Truncated string guaranteed to be at most maxBytes
+ */
+function truncateTextToBytes(text: string, maxBytes: number): string {
+	if (Buffer.byteLength(text, "utf-8") <= maxBytes) return text;
+	// Start from an optimistic char position (ASCII-equivalent)
+	let end = Math.min(text.length, maxBytes);
+	while (end > 0 && Buffer.byteLength(text.slice(0, end), "utf-8") > maxBytes) {
+		end -= 1;
+	}
+	return text.slice(0, end);
+}
+
+/**
+ * Create a batch planner extension that computes per-tool byte envelopes
+ * from assistant tool calls and publishes them via the event bus.
+ *
+ * On `message_end` for assistant messages, inspects tool calls in the
+ * message content and allocates a budget envelope for each one, keyed
+ * by toolCallId. Envelopes are single-use (consumed via the API) and
+ * automatically cleaned up on turn_end, agent_end, session_before_switch,
+ * and session_switch events.
+ *
+ * @param budgetPolicy - Resolved context-budget policy
+ * @returns Extension factory
+ */
+function createContextBudgetPlannerExtension(budgetPolicy: ContextBudgetPolicy): ExtensionFactory {
+	return (pi: ExtensionAPI): void => {
+		const envelopeStore = new Map<
+			string,
+			{
+				envelope: { maxBytes: number; batchSize: number };
+				metadata: { createdAtMs: number; turnIndex: number; ttlMs: number };
+			}
+		>();
+		let currentTurnIndex = 0;
+
+		/** Clamp a per-tool envelope to policy min/max bounds. */
+		const clampPerToolBytes = (value: number): number =>
+			Math.min(budgetPolicy.maxPerToolBytes, Math.max(budgetPolicy.minPerToolBytes, value));
+
+		/** Drop stale envelopes so stale calls cannot reuse old budgets. */
+		const pruneStaleEnvelopes = (nowMs: number): void => {
+			for (const [toolCallId, entry] of envelopeStore) {
+				const expired = nowMs - entry.metadata.createdAtMs > entry.metadata.ttlMs;
+				const wrongTurn = entry.metadata.turnIndex !== currentTurnIndex;
+				if (expired || wrongTurn) {
+					envelopeStore.delete(toolCallId);
+				}
+			}
+		};
+
+		/** Clear all envelopes from the planner state. */
+		const clearEnvelopes = (): void => {
+			envelopeStore.clear();
+		};
+
+		/** Resolve per-tool budget for one tool-call batch. */
+		const resolvePerToolBudget = (usage: ContextUsageSnapshot, batchSize: number): number => {
+			if (usage.tokens === null || usage.contextWindow <= 0) {
+				return clampPerToolBytes(unknownUsageFallbackBudget(budgetPolicy));
+			}
+
+			const usagePercent =
+				usage.percent !== null
+					? usage.percent
+					: Math.round((usage.tokens / usage.contextWindow) * 100);
+			const remainingTokens = estimateRemainingTokens(usage, budgetPolicy.perTurnReserveTokens);
+			const totalBytes = tokensToBytes(remainingTokens);
+			const rawPerTool = Math.floor(totalBytes / Math.max(1, batchSize));
+
+			// Apply additional pressure once the turn is near the hard threshold.
+			if (usagePercent >= budgetPolicy.hardThresholdPercent) {
+				return clampPerToolBytes(Math.min(rawPerTool, budgetPolicy.minPerToolBytes));
+			}
+
+			if (usagePercent >= budgetPolicy.softThresholdPercent) {
+				const cautiousPerTool = Math.floor(rawPerTool * 0.5);
+				return clampPerToolBytes(cautiousPerTool);
+			}
+
+			return clampPerToolBytes(rawPerTool);
+		};
+
+		/** Publish the planner API for tool extensions. */
+		const publishBudgetApi = (): void => {
+			pi.events.emit(CONTEXT_BUDGET_API_CHANNELS.budgetApi, { api: budgetApi });
+		};
+
+		// Track turn index and evict stale envelopes at turn boundaries.
+		pi.on("turn_start", async (event) => {
+			currentTurnIndex = event.turnIndex;
+			pruneStaleEnvelopes(Date.now());
+		});
+
+		// Compute envelopes on assistant message_end.
+		pi.on("message_end", async (event, ctx) => {
+			if (!event.message || event.message.role !== "assistant") {
+				return;
+			}
+
+			const content = event.message.content;
+			if (!Array.isArray(content)) {
+				return;
+			}
+
+			const toolCalls = content.filter(
+				(
+					block
+				): block is {
+					arguments: Record<string, unknown>;
+					id: string;
+					name: string;
+					type: "toolCall";
+				} =>
+					isObjectRecord(block) &&
+					block.type === "toolCall" &&
+					typeof block.id === "string" &&
+					typeof block.name === "string" &&
+					isObjectRecord(block.arguments)
+			);
+			if (toolCalls.length === 0) {
+				return;
+			}
+
+			const nowMs = Date.now();
+			pruneStaleEnvelopes(nowMs);
+
+			const usage = normalizeContextUsageSnapshot(ctx.getContextUsage?.());
+			const batchSize = toolCalls.length;
+			const perToolBytes = resolvePerToolBudget(usage, batchSize);
+
+			for (const toolCall of toolCalls) {
+				envelopeStore.set(toolCall.id, {
+					envelope: { batchSize, maxBytes: perToolBytes },
+					metadata: {
+						createdAtMs: nowMs,
+						ttlMs: CONTEXT_BUDGET_ENVELOPE_TTL_MS,
+						turnIndex: currentTurnIndex,
+					},
+				});
+			}
+		});
+
+		const budgetApi = {
+			take(toolCallId: string) {
+				const nowMs = Date.now();
+				pruneStaleEnvelopes(nowMs);
+				const entry = envelopeStore.get(toolCallId);
+				if (!entry) {
+					return undefined;
+				}
+
+				const expired = nowMs - entry.metadata.createdAtMs > entry.metadata.ttlMs;
+				const wrongTurn = entry.metadata.turnIndex !== currentTurnIndex;
+				envelopeStore.delete(toolCallId);
+				if (expired || wrongTurn) {
+					return undefined;
+				}
+
+				return entry.envelope;
+			},
+		};
+
+		pi.on("session_start", async () => {
+			publishBudgetApi();
+		});
+
+		pi.events.on(CONTEXT_BUDGET_API_CHANNELS.budgetApiRequest, () => {
+			publishBudgetApi();
+		});
+
+		pi.on("turn_end", async () => {
+			clearEnvelopes();
+		});
+		pi.on("agent_end", async () => {
+			clearEnvelopes();
+		});
+		pi.on("session_before_switch", async () => {
+			clearEnvelopes();
+		});
+		pi.on("session_switch", async () => {
+			clearEnvelopes();
 		});
 	};
 }
