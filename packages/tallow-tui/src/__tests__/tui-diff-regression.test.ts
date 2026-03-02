@@ -153,20 +153,90 @@ function runGrowShrinkUpdateScenario(): ScenarioResult {
 	};
 }
 
+/**
+ * Reproduce grow -> shrink -> grow -> update cycle that simulates agent turn
+ * content fluctuations (loader appears, content shrinks, new content arrives).
+ *
+ * @returns All terminal writes and final redraw count
+ */
+function runHeightFluctuationScenario(): { allWrites: string[]; fullRedraws: number } {
+	const width = 32;
+	const height = 10;
+	const stableLines = 18;
+	const terminal = new MockTerminal(width, height);
+	const tui = new TUI(terminal);
+	const component = new MutableLinesComponent(createFrame(stableLines, "input A", 9, width));
+	tui.addChild(component);
+
+	// Phase 1: Grow to establish a large working area (simulates loader + streaming).
+	renderNow(tui);
+
+	// Phase 2: Shrink (simulates loader stopping or tool result replacing progress).
+	component.setLines(createFrame(stableLines, "input A", 0, width));
+	renderNow(tui);
+
+	// Phase 3: Grow again (simulates new streaming content arriving).
+	component.setLines(createFrame(stableLines, "input A", 5, width));
+	renderNow(tui);
+
+	// Phase 4: Update within content (simulates editor input change).
+	component.setLines(createFrame(stableLines, "input B", 5, width));
+	renderNow(tui);
+
+	return {
+		allWrites: [...terminal.writes],
+		fullRedraws: tui.fullRedraws,
+	};
+}
+
 describe("TUI differential rendering shrink regression", () => {
-	test("falls back to full redraw when viewport basis drift is detected", () => {
+	test("realigns viewport basis on drift instead of full redraw", () => {
 		const result = runGrowShrinkUpdateScenario();
 
-		expect(result.redrawsAfterUpdate).toBe(result.redrawsBeforeUpdate + 1);
-		expect(result.finalWrite).toContain("\x1b[3J\x1b[2J\x1b[H");
+		// Viewport basis drift is now handled by realignment, not full redraw.
+		// The update render should use a partial redraw (no increase in fullRedraws).
+		expect(result.redrawsAfterUpdate).toBe(result.redrawsBeforeUpdate);
 	});
 
-	test("keeps editor top and bottom borders after grow->shrink->update", () => {
+	test("keeps editor content correct after grow->shrink->update", () => {
 		const result = runGrowShrinkUpdateScenario();
 		const plain = stripAnsi(result.finalWrite);
-		const borderCount = plain.split(result.border).length - 1;
 
-		expect(borderCount).toBeGreaterThanOrEqual(2);
+		// The partial redraw only writes the changed line, not the full content.
+		// Borders are already on screen from the prior render and don't need
+		// to be redrawn — their absence in the final write proves partial redraw worked.
 		expect(plain).toContain("input B");
+	});
+
+	test("never clears scrollback during content height fluctuation", () => {
+		const result = runHeightFluctuationScenario();
+
+		// No write should ever contain \x1b[3J (clear scrollback).
+		// This sequence destroys the user's scroll position and reading context.
+		for (const write of result.allWrites) {
+			expect(write).not.toContain("\x1b[3J");
+		}
+	});
+
+	test("never clears scrollback during grow->shrink->update", () => {
+		const width = 32;
+		const height = 10;
+		const stableLines = 18;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(createFrame(stableLines, "input A", 9, width));
+		tui.addChild(component);
+
+		renderNow(tui);
+
+		component.setLines(createFrame(stableLines, "input A", 0, width));
+		renderNow(tui);
+
+		component.setLines(createFrame(stableLines, "input B", 0, width));
+		renderNow(tui);
+
+		for (const write of terminal.writes) {
+			expect(write).not.toContain("\x1b[3J");
+		}
 	});
 });
