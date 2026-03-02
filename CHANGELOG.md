@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **sdk:** context-budget guardrails with per-turn planner envelopes,
+  ingestion-time tool-result truncation, and deterministic unknown-usage fallback
+- **web-fetch-tool:** adaptive `maxBytes` resolution from planner envelopes,
+  policy bounds, and user-specified hard upper bounds
+- **integration:** context-budget guard integration coverage for batched
+  `web_fetch` calls and envelope lifecycle reset between turns
+
+### Changed
+
+- **sdk:** inject per-turn context budget status line into the system prompt
+- **sdk:** preserve historical `toolResultRetention` behavior while adding
+  same-turn ingestion safeguards
+
+### Documentation
+
+- **context-usage:** document `contextBudget` settings and budget signal semantics
+- **web-fetch-tool:** document adaptive cap rules, fallback behavior, and
+  diagnostic detail fields
+
 ## [0.8.14](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.13...tallow-v0.8.14) (2026-02-26)
 
 
