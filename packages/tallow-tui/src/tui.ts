@@ -923,7 +923,7 @@ export class TUI extends Container {
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
-			if (clear) buffer += "\x1b[3J\x1b[2J\x1b[H"; // Clear scrollback, screen, and home
+			if (clear) buffer += "\x1b[2J\x1b[H"; // Clear screen and home (preserve scrollback)
 			for (let i = 0; i < newLines.length; i++) {
 				if (i > 0) buffer += "\r\n";
 				buffer += newLines[i];
@@ -986,16 +986,15 @@ export class TUI extends Container {
 			this.maxLinesRendered > this.previousLines.length &&
 			prevViewportTop !== previousContentViewportTop;
 
-		// Keep cursor movement and line-clear math on one viewport basis per render pass.
 		// After shrink-heavy updates with clearOnShrink disabled, maxLinesRendered can stay larger
-		// than current content. Partial redraws then risk clearing the wrong on-screen rows.
-		// Force one full redraw to realign row coordinates and preserve editor borders.
+		// than current content. Instead of a destructive full redraw (which clears the screen and
+		// disrupts scrollback), realign the working-area coordinates so the partial-redraw path
+		// can operate on a consistent viewport basis.
 		if (hasViewportBasisDrift) {
-			logRedraw(
-				`viewport basis drift (workingTop=${prevViewportTop}, contentTop=${previousContentViewportTop})`
-			);
-			fullRender(true);
-			return;
+			this.maxLinesRendered = this.previousLines.length;
+			viewportTop = Math.max(0, this.maxLinesRendered - height);
+			prevViewportTop = viewportTop;
+			this.previousViewportTop = viewportTop;
 		}
 
 		// Find first and last changed lines
