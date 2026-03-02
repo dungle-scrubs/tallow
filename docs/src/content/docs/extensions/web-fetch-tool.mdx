@@ -1,125 +1,56 @@
 ---
 title: web-fetch-tool
-description: "Fetch web content with optional Firecrawl fallback for large pages"
+description: "Fetch web content with context-budget-aware output caps"
 ---
 
-Fetches web content and returns page text, truncated to 100KB
-by default. Works out of the box with no configuration for
-simple pages.
+`web_fetch` retrieves a URL over HTTP and returns text output.
 
-## How it works
-
-1. **Direct fetch** — makes a standard HTTP request with a
-   browser-like User-Agent. Works for static HTML, APIs, and
-   simple pages.
-2. **Firecrawl fallback** — if `FIRECRAWL_API_KEY` is set,
-   automatically falls back to Firecrawl in two cases:
-   - **Truncated content** — response exceeds the size limit
-   - **JS-dependent pages** — the HTML looks like an empty
-     shell that needs JavaScript to render (SPAs, React/Vue/
-     Angular/Next.js apps)
-
-The JS detection runs automatically on every HTML response
-and checks three signals:
-
-- **Empty SPA roots** — `<div id="root"></div>`,
-  `<div id="app"></div>`, `<div id="__next"></div>`,
-  `<div id="__nuxt"></div>`
-- **Low text-to-markup ratio** — pages over 1KB with less
-  than 200 characters of visible text after stripping tags
-- **Framework bundles with no content** — `_app`, `main`,
-  `bundle`, or `chunk` script references combined with
-  less than 500 characters of visible text
-
-If any of these patterns match and Firecrawl is available, it
-fetches via headless browser automatically — even if the page
-is well under the size limit. Sites like Excalidraw, Miro,
-draw.io, and Vue Playground all trigger this detection.
-
-Without Firecrawl, you get the raw HTML as-is (which for
-JS-dependent pages means an empty shell).
-
-## Why Firecrawl matters
-
-A plain `fetch` sends an HTTP request and gets back whatever
-the server returns. For many modern sites, that's an empty
-shell with a `<script>` tag — the actual content is rendered
-by JavaScript in the browser.
-
-Firecrawl runs a **headless browser** that:
-- Executes JavaScript and waits for dynamic content to load
-- Handles anti-bot protections and CAPTCHAs
-- Navigates through proxies to avoid IP blocking
-- Extracts the **main content** as clean markdown, stripping
-  nav, ads, and boilerplate
-
-This means SPAs (React, Vue, Angular), dashboards behind
-authentication walls, and JS-heavy documentation sites all
-return usable content instead of empty HTML skeletons.
-
-## Setting up Firecrawl
-
-Firecrawl is optional. Without it, `web_fetch` still works —
-you just get raw (possibly truncated) HTML.
-
-### 1. Get an API key
-
-Sign up at [firecrawl.dev](https://www.firecrawl.dev/signin)
-and create an API key. The free tier includes 500 credits
-(pages) per month — enough for typical agent usage.
-
-### 2. Set the environment variable
-
-Add `FIRECRAWL_API_KEY` to your environment so tallow can
-read it at runtime. Where you put it depends on your setup:
-
-**Option A: tallow .env** (recommended)
-
-```bash
-# ~/.tallow/.env
-FIRECRAWL_API_KEY=fc-your-key-here
-```
-
-Tallow loads `~/.tallow/.env` at startup. Values can be plain
-strings or [1Password `op://` references](https://developer.1password.com/docs/cli/secret-references/)
-if you use opchain:
-
-```bash
-# ~/.tallow/.env — 1Password reference
-FIRECRAWL_API_KEY=op://Services/firecrawl/api-key
-```
-
-**Option B: Shell profile**
-
-```bash
-# ~/.zshrc or ~/.bashrc
-export FIRECRAWL_API_KEY="fc-your-key-here"
-```
-
-**Option C: direnv** (per-project)
-
-```bash
-# .envrc in your project root
-export FIRECRAWL_API_KEY="fc-your-key-here"
-```
-
-### 3. Verify
-
-Run tallow and fetch a JavaScript-heavy page. If Firecrawl is
-active, you'll see `source: "firecrawl"` in the tool details
-and the content will be clean markdown instead of raw HTML.
+The tool now uses **context-budget-aware caps** so a large fetch does not blow up a single turn.
 
 ## Parameters
 
-| Parameter  | Type   | Default | Description                                |
-|------------|--------|---------|--------------------------------------------|
-| `url`      | string | —       | URL to fetch                               |
-| `maxBytes` | number | 100000  | Max bytes before truncation/Firecrawl      |
-| `format`   | string | "text"  | Output format hint: "text", "markdown", "html" |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `url` | string | — | URL to fetch |
+| `maxBytes` | number | adaptive | Hard upper bound for tool output; may be reduced by safety budget |
+| `format` | string | `"text"` | Output hint: `"text"`, `"markdown"`, or `"html"` |
+
+## Adaptive budget behavior
+
+At execution time, `web_fetch` resolves `effectiveMaxBytes` from four inputs:
+
+1. **Planner envelope** (if available)
+2. **Policy bounds** (min/max per tool)
+3. **User `maxBytes`** (hard upper bound)
+4. **Strict fallback** when no envelope is available
+
+Rules:
+
+- User `maxBytes` is always an upper bound.
+- Planner envelopes can reduce output further for safety.
+- Unknown usage states use conservative fallback caps.
+
+## Default policy values
+
+| Setting | Default |
+|---------|---------|
+| minimum per-tool bytes | `4096` |
+| maximum per-tool bytes | `524288` |
+| unknown-usage fallback cap | `32768` |
+
+## Tool result details
+
+`web_fetch` includes audit fields in `details`:
+
+- `effectiveMaxBytes`
+- `budgetLimited`
+- `budgetReason`
+- `batchSize`
+
+These make it clear why truncation happened and whether a planner envelope was applied.
 
 ## When to use
 
 - Reading documentation or articles
 - Checking API responses
-- Fetching page content for summarization
-- Any URL where you need the text, not the HTML
+- Inspecting page text from a known URL
