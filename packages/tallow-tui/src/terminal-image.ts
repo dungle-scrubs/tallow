@@ -198,9 +198,29 @@ export interface ImageLayout {
 }
 
 /**
+ * Pick the closest valid integer terminal cell count for a fractional target.
+ *
+ * @param target - Ideal (fractional) cell count
+ * @param min - Minimum allowed cell count (inclusive)
+ * @param max - Maximum allowed cell count (inclusive)
+ * @returns Closest in-range integer cell count
+ */
+function closestCellCount(target: number, min: number, max: number): number {
+	const lower = Math.max(min, Math.min(max, Math.floor(target)));
+	const upper = Math.max(min, Math.min(max, Math.ceil(target)));
+	if (lower === upper) {
+		return lower;
+	}
+	return Math.abs(target - upper) < Math.abs(target - lower) ? upper : lower;
+}
+
+/**
  * Calculate the cell layout for an image at a given max width.
  * Clamps to the image's natural pixel width (prevents upscaling),
  * then optionally clamps height and back-calculates width to preserve aspect ratio.
+ *
+ * Uses nearest-integer quantization instead of always rounding up to reduce
+ * narrow-width aspect distortion.
  *
  * @param imageDimensions - Native pixel dimensions of the image
  * @param maxWidthCells - Maximum column count for the image
@@ -214,28 +234,34 @@ export function calculateImageLayout(
 	cellDims: CellDimensions = { widthPx: 9, heightPx: 18 },
 	maxHeightCells?: number
 ): ImageLayout {
-	// Clamp to natural width — prevents upscaling small images
-	const naturalCols = Math.ceil(imageDimensions.widthPx / cellDims.widthPx);
-	let columns = Math.min(maxWidthCells, naturalCols);
+	const safeImageWidthPx = Math.max(1, imageDimensions.widthPx);
+	const safeImageHeightPx = Math.max(1, imageDimensions.heightPx);
+	const safeCellWidthPx = Math.max(1, cellDims.widthPx);
+	const safeCellHeightPx = Math.max(1, cellDims.heightPx);
+	const safeMaxWidthCells = Math.max(1, Math.floor(maxWidthCells));
+	const safeMaxHeightCells =
+		maxHeightCells === undefined ? undefined : Math.max(1, Math.floor(maxHeightCells));
 
-	// Calculate rows from effective column width
-	const targetWidthPx = columns * cellDims.widthPx;
-	const scale = targetWidthPx / imageDimensions.widthPx;
-	const scaledHeightPx = imageDimensions.heightPx * scale;
-	let rows = Math.ceil(scaledHeightPx / cellDims.heightPx);
-	rows = Math.max(1, rows);
+	// Clamp to natural width — prevents upscaling small images.
+	const naturalCols = Math.max(1, Math.ceil(safeImageWidthPx / safeCellWidthPx));
+	const maxColumns = Math.min(safeMaxWidthCells, naturalCols);
+	let columns = maxColumns;
+
+	const idealRows =
+		(columns * safeCellWidthPx * safeImageHeightPx) / (safeImageWidthPx * safeCellHeightPx);
+	let rows = closestCellCount(idealRows, 1, Number.MAX_SAFE_INTEGER);
 
 	// When height-clamped, reduce columns proportionally to preserve aspect ratio.
 	// Without this, the terminal receives a wide column count but the text layer
 	// only reserves maxHeightCells rows, causing the image to overflow or squish.
-	if (maxHeightCells && rows > maxHeightCells) {
-		const clampedHeightPx = maxHeightCells * cellDims.heightPx;
-		const heightScale = clampedHeightPx / imageDimensions.heightPx;
-		columns = Math.max(1, Math.floor((imageDimensions.widthPx * heightScale) / cellDims.widthPx));
-		rows = maxHeightCells;
+	if (safeMaxHeightCells !== undefined && rows > safeMaxHeightCells) {
+		rows = safeMaxHeightCells;
+		const idealColumns =
+			(rows * safeCellHeightPx * safeImageWidthPx) / (safeImageHeightPx * safeCellWidthPx);
+		columns = closestCellCount(idealColumns, 1, maxColumns);
 	}
 
-	return { rows, columns };
+	return { columns: Math.max(1, columns), rows: Math.max(1, rows) };
 }
 
 export function getPngDimensions(base64Data: string): ImageDimensions | null {
