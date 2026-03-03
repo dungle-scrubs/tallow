@@ -10,9 +10,78 @@ import {
 	formatImageDimensions,
 	type ImageDimensions,
 	imageFormatToMime,
+	renderImage,
+	resetCapabilitiesCache,
 } from "../terminal-image.js";
 
 const DEFAULT_CELL = { widthPx: 9, heightPx: 18 };
+
+const CAPABILITY_ENV_KEYS = [
+	"COLORTERM",
+	"GHOSTTY_RESOURCES_DIR",
+	"ITERM_SESSION_ID",
+	"KITTY_WINDOW_ID",
+	"TERM",
+	"TERM_PROGRAM",
+	"WEZTERM_PANE",
+] as const;
+
+/**
+ * Run a test callback with a controlled terminal capability environment.
+ *
+ * @param overrides - Environment overrides applied for the callback
+ * @param run - Test callback executed with overridden environment
+ * @returns Nothing
+ */
+function withCapabilityEnv(
+	overrides: Readonly<Record<string, string | undefined>>,
+	run: () => void
+): void {
+	const previous: Partial<Record<(typeof CAPABILITY_ENV_KEYS)[number], string | undefined>> = {};
+
+	for (const key of CAPABILITY_ENV_KEYS) {
+		previous[key] = process.env[key];
+		if (Object.hasOwn(overrides, key)) {
+			const value = overrides[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		} else {
+			delete process.env[key];
+		}
+	}
+
+	resetCapabilitiesCache();
+	try {
+		run();
+	} finally {
+		for (const key of CAPABILITY_ENV_KEYS) {
+			const value = previous[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+		resetCapabilitiesCache();
+	}
+}
+
+/**
+ * Measure relative aspect-ratio error between source image and cell layout.
+ *
+ * @param image - Source image dimensions in pixels
+ * @param columns - Rendered terminal columns
+ * @param rows - Rendered terminal rows
+ * @returns Relative error (0 = exact, 0.1 = 10% off)
+ */
+function getAspectError(image: ImageDimensions, columns: number, rows: number): number {
+	const sourceAspect = image.widthPx / image.heightPx;
+	const renderedAspect = (columns * DEFAULT_CELL.widthPx) / (rows * DEFAULT_CELL.heightPx);
+	return Math.abs(renderedAspect / sourceAspect - 1);
+}
 
 // ── calculateImageLayout ─────────────────────────────────────────────────────
 
@@ -123,6 +192,37 @@ describe("calculateImageLayout", () => {
 			// Clamped: heightScale = 450/1000 = 0.45, cols = floor(100*0.45/9) = 5
 			expect(layout.rows).toBe(25);
 			expect(layout.columns).toBe(5);
+		});
+	});
+
+	describe("narrow-width regression", () => {
+		it("keeps portrait aspect-ratio error bounded at narrow widths", () => {
+			const portrait: ImageDimensions = { widthPx: 1179, heightPx: 2556 };
+			for (const width of [8, 12, 20, 30]) {
+				const layout = calculateImageLayout(portrait, width, DEFAULT_CELL);
+				expect(layout.columns).toBeGreaterThanOrEqual(1);
+				expect(layout.rows).toBeGreaterThanOrEqual(1);
+				expect(getAspectError(portrait, layout.columns, layout.rows)).toBeLessThan(0.12);
+			}
+		});
+
+		it("clamps non-positive maxWidthCells inputs to one column", () => {
+			const portrait: ImageDimensions = { widthPx: 1179, heightPx: 2556 };
+			expect(calculateImageLayout(portrait, 0, DEFAULT_CELL).columns).toBe(1);
+			expect(calculateImageLayout(portrait, -7, DEFAULT_CELL).columns).toBe(1);
+		});
+	});
+
+	describe("maxHeight boundary transitions", () => {
+		it("switches to height-clamp behavior exactly past the row boundary", () => {
+			const portrait: ImageDimensions = { widthPx: 1000, heightPx: 2000 };
+			const atBoundary = calculateImageLayout(portrait, 25, DEFAULT_CELL, 25);
+			const aboveBoundary = calculateImageLayout(portrait, 26, DEFAULT_CELL, 25);
+
+			expect(atBoundary.rows).toBe(25);
+			expect(atBoundary.columns).toBe(25);
+			expect(aboveBoundary.rows).toBe(25);
+			expect(aboveBoundary.columns).toBe(25);
 		});
 	});
 });
@@ -265,5 +365,52 @@ describe("formatImageDimensions", () => {
 			"png"
 		);
 		expect(formatImageDimensions(meta)).toBe("3840×2160 → 800×450");
+	});
+});
+
+// ── renderImage ─────────────────────────────────────────────────────────────
+
+describe("renderImage", () => {
+	it("emits Kitty sequences with valid columns and no explicit rows", () => {
+		withCapabilityEnv({ TERM_PROGRAM: "kitty" }, () => {
+			const result = renderImage("AA==", { widthPx: 1179, heightPx: 2556 }, { maxWidthCells: 8 });
+			expect(result).not.toBeNull();
+
+			const columnsMatch = result?.sequence.match(/c=(\d+)/);
+			expect(columnsMatch).not.toBeNull();
+			expect(Number(columnsMatch?.[1])).toBe(result?.columns);
+			expect(result?.sequence).not.toContain(",r=");
+			expect(result?.columns).toBeGreaterThanOrEqual(1);
+			expect(result?.rows).toBeGreaterThanOrEqual(1);
+		});
+	});
+
+	it("keeps render metadata aligned with calculated layout at narrow widths", () => {
+		withCapabilityEnv({ TERM_PROGRAM: "kitty" }, () => {
+			const portrait: ImageDimensions = { widthPx: 1179, heightPx: 2556 };
+			for (const width of [8, 12, 20, 30]) {
+				const result = renderImage("AA==", portrait, { maxWidthCells: width });
+				expect(result).not.toBeNull();
+
+				const layout = calculateImageLayout(portrait, width, DEFAULT_CELL);
+				expect(result?.columns).toBe(layout.columns);
+				expect(result?.rows).toBe(layout.rows);
+			}
+		});
+	});
+
+	it("emits iTerm2 sequence width/height params that match computed layout", () => {
+		withCapabilityEnv({ TERM_PROGRAM: "iterm.app" }, () => {
+			const result = renderImage("AA==", { widthPx: 1920, heightPx: 1080 }, { maxWidthCells: 30 });
+			expect(result).not.toBeNull();
+			expect(result?.sequence).toContain("\x1b]1337;File=");
+			expect(result?.sequence).toContain("height=auto");
+
+			const widthMatch = result?.sequence.match(/width=(\d+)/);
+			expect(widthMatch).not.toBeNull();
+			expect(Number(widthMatch?.[1])).toBe(result?.columns);
+			expect(result?.columns).toBeGreaterThanOrEqual(1);
+			expect(result?.rows).toBeGreaterThanOrEqual(1);
+		});
 	});
 });
