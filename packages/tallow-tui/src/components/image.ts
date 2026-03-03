@@ -151,13 +151,11 @@ export class Image implements Component {
 		}
 
 		const showBorder = this.options.border === true;
-		const borderCols = showBorder ? BORDER_OVERHEAD : 0;
-		const availableWidth = width - 2 - borderCols;
 		// Ignore maxWidthCells from upstream — it's hardcoded to 60 in
 		// pi-coding-agent and squashes landscape images. Use the full
 		// available terminal width instead; height capping and natural-width
 		// clamping in calculateImageLayout prevent oversized output.
-		const maxWidth = availableWidth;
+		const maxWidth = this.getSafeMaxWidthCells(width, showBorder);
 		const maxHeight = this.options.maxHeightCells ?? getDefaultMaxHeightCells();
 
 		const caps = getCapabilities();
@@ -189,6 +187,22 @@ export class Image implements Component {
 		this.cachedWidth = width;
 
 		return lines;
+	}
+
+	/**
+	 * Resolve a safe image width budget from the current pane width.
+	 *
+	 * Keeps width math deterministic for ultra-narrow panes by enforcing a
+	 * minimum of 1 cell after reserved spacing and optional border overhead.
+	 *
+	 * @param width - Current pane width in terminal columns
+	 * @param showBorder - Whether bordered rendering is enabled
+	 * @returns Positive max width in cells for `renderImage`
+	 */
+	private getSafeMaxWidthCells(width: number, showBorder: boolean): number {
+		const borderCols = showBorder ? BORDER_OVERHEAD : 0;
+		const availableWidth = Math.floor(width) - 2 - borderCols;
+		return Math.max(1, availableWidth);
 	}
 
 	/**
