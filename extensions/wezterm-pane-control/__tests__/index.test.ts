@@ -91,12 +91,14 @@ describe("wezterm-pane-control registration", () => {
 });
 
 describe("buildWeztermPaneGuidance", () => {
-	it("includes privacy and manual-monitoring guidance", () => {
+	it("includes privacy and explicit-pane-request guidance", () => {
 		const guidance = buildWeztermPaneGuidance(116);
 		expect(guidance).toContain("Do not run or read commands likely to reveal private secrets");
+		expect(guidance).toContain("Do not split panes or spawn tabs unless the user explicitly asks");
+		expect(guidance).toContain("prefer bg_bash in the current session");
 		expect(guidance).toContain("Default behavior: if you prefill a command");
 		expect(guidance).toContain("Only leave a command unexecuted");
-		expect(guidance).toContain("user wants to monitor output themselves");
+		expect(guidance).toContain("user explicitly asks to monitor output in another pane");
 		expect(guidance).toContain("newline (\\n) via send_text");
 		expect(guidance).toContain("WezTerm pane 116");
 	});

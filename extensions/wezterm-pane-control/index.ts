@@ -405,9 +405,11 @@ export function buildWeztermPaneGuidance(currentPaneId: number): string {
 		"",
 		"Use best judgment before controlling panes:",
 		"- Do not run or read commands likely to reveal private secrets (keys, tokens, credentials) unless the user explicitly asks.",
+		"- Do not split panes or spawn tabs unless the user explicitly asks for pane/tab management.",
+		"- For long-running commands (dev servers, watchers), prefer bg_bash in the current session unless the user explicitly asks to run them in another pane/tab.",
 		"- Default behavior: if you prefill a command for the user, execute it automatically by sending Enter (newline, \\n).",
 		"- Only leave a command unexecuted when the user explicitly asks to review/edit it before running.",
-		"- If the user wants to monitor output themselves, you can still execute the command and let them watch the pane output directly.",
+		"- If the user explicitly asks to monitor output in another pane, execute the command and let them watch there.",
 		"- Enter can be pressed by sending a newline (\\n) via send_text (either appended to the command or as a second send_text call).",
 	].join("\n");
 }

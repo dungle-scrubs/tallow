@@ -51,6 +51,11 @@ text, or spawn new tabs. Use action "list" to see all panes in
 the current tab.
 ```
 
+The guidance also tells the model to avoid opening new panes/tabs
+unless the user explicitly asks for pane/tab management, and to
+prefer `bg_bash` in the current session for long-running commands
+like dev servers and watchers unless the user asks otherwise.
+
 ## Spawning new sessions
 
 Splitting with a command spawns it in the new pane:
