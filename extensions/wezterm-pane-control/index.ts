@@ -110,6 +110,50 @@ const DIRECTIONS: readonly WeztermDirection[] = [
 
 const ZOOM_STATES: readonly WeztermZoomState[] = ["zoom", "unzoom", "toggle"] as const;
 
+const PANE_CREATING_ACTIONS: readonly WeztermAction[] = [
+	"split",
+	"spawn_tab",
+	"move_to_tab",
+] as const;
+
+const EXPLICIT_PANE_REQUEST_PATTERNS: readonly RegExp[] = [
+	/\bwezterm\b/i,
+	/\bpane(?:s)?\b/i,
+	/\btab(?:s)?\b/i,
+	/\bsplit\b/i,
+	/\bspawn\b/i,
+	/\bwindow\b/i,
+	/\bleft\b/i,
+	/\bright\b/i,
+	/\btop\b/i,
+	/\bbottom\b/i,
+] as const;
+
+/**
+ * Check whether an action creates or rehomes panes/tabs.
+ *
+ * @param action - Candidate action string
+ * @returns True when action can open/split/move panes or tabs
+ */
+export function isPaneCreatingAction(action: unknown): action is WeztermAction {
+	if (typeof action !== "string") return false;
+	return PANE_CREATING_ACTIONS.includes(action as WeztermAction);
+}
+
+/**
+ * Determine whether the user explicitly requested pane/tab management.
+ *
+ * This acts as a conservative guardrail: opening/splitting panes should only
+ * happen when the current turn clearly references pane/tab/window controls.
+ *
+ * @param prompt - Current user prompt text
+ * @returns True when prompt contains explicit pane/tab intent
+ */
+export function hasExplicitPaneRequest(prompt: string): boolean {
+	if (prompt.trim().length === 0) return false;
+	return EXPLICIT_PANE_REQUEST_PATTERNS.some((pattern) => pattern.test(prompt));
+}
+
 /**
  * Parse WEZTERM_PANE to a valid pane ID.
  *
@@ -599,6 +643,23 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 	}
 
 	const runCli = createWeztermRunner(weztermExecutable);
+	let currentTurnPrompt = "";
+
+	pi.on("tool_call", async (event) => {
+		if (event.toolName !== "wezterm_pane") return;
+
+		const input = (event.input ?? {}) as Record<string, unknown>;
+		const action = input.action;
+		if (!isPaneCreatingAction(action)) return;
+		if (hasExplicitPaneRequest(currentTurnPrompt)) return;
+
+		return {
+			block: true,
+			reason:
+				"Opening/splitting WezTerm panes requires an explicit pane/tab request. " +
+				"Use bg_bash for dev servers/watchers unless the user asks for another pane.",
+		};
+	});
 
 	pi.registerTool({
 		name: "wezterm_pane",
@@ -650,6 +711,7 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (event) => {
+		currentTurnPrompt = event.prompt;
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n${buildWeztermPaneGuidance(currentPaneId)}`,
 		};
