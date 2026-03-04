@@ -27,7 +27,7 @@ import {
 import { Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { INTEROP_API_CHANNELS } from "../_shared/interop-events.js";
-import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
+import { enforceExplicitPolicy, evaluateCommand, recordAudit } from "../_shared/shell-policy.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import type { PromotedTaskHandle } from "../background-task-tool/index.js";
 import {
@@ -653,9 +653,17 @@ export default function bashLive(pi: ExtensionAPI): void {
 		const command = (event.input as { command?: string }).command;
 		if (!command) return;
 
-		return enforceExplicitPolicy(command, "bash", ctx.cwd, ctx.hasUI, (msg) =>
+		const verdict = evaluateCommand(command, "bash", ctx.cwd);
+		const blocked = await enforceExplicitPolicy(command, "bash", ctx.cwd, ctx.hasUI, (msg) =>
 			ctx.ui.confirm("Shell Policy", msg)
 		);
+		if (blocked) {
+			return blocked;
+		}
+
+		if (ctx.hasUI && verdict.allowed && verdict.requiresConfirmation) {
+			ctx.ui.notify("✅ Shell action approved — running command", "info");
+		}
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
