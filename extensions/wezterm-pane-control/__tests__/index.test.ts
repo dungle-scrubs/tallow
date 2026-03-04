@@ -5,6 +5,8 @@ import weztermPaneControl, {
 	buildWeztermPaneGuidance,
 	executeWeztermAction,
 	filterPanesToCurrentTab,
+	hasExplicitPaneRequest,
+	isPaneCreatingAction,
 	type WeztermCliResult,
 	type WeztermPaneInfo,
 } from "../index.js";
@@ -101,6 +103,23 @@ describe("buildWeztermPaneGuidance", () => {
 		expect(guidance).toContain("user explicitly asks to monitor output in another pane");
 		expect(guidance).toContain("newline (\\n) via send_text");
 		expect(guidance).toContain("WezTerm pane 116");
+	});
+});
+
+describe("explicit pane-request guards", () => {
+	it("detects explicit pane/tab intent in prompt text", () => {
+		expect(hasExplicitPaneRequest("split a pane to the right and run pnpm dev")).toBe(true);
+		expect(hasExplicitPaneRequest("open a new tab for logs")).toBe(true);
+		expect(hasExplicitPaneRequest("start dev server")).toBe(false);
+		expect(hasExplicitPaneRequest("run tests in background")).toBe(false);
+	});
+
+	it("identifies pane-creating actions", () => {
+		expect(isPaneCreatingAction("split")).toBe(true);
+		expect(isPaneCreatingAction("spawn_tab")).toBe(true);
+		expect(isPaneCreatingAction("move_to_tab")).toBe(true);
+		expect(isPaneCreatingAction("read_text")).toBe(false);
+		expect(isPaneCreatingAction(undefined)).toBe(false);
 	});
 });
 
