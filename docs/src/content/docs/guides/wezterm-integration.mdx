@@ -78,12 +78,17 @@ judgment:
 
 - **Don't auto-read** commands likely to reveal secrets unless the user
   explicitly asks
+- **Don't open panes/tabs by default** — only split/spawn when the user
+  explicitly asks for pane/tab management
+- **Prefer bg_bash for long-running commands** — dev servers and watchers
+  should run in the current session unless the user explicitly asks for
+  another pane/tab
 - **Execute by default** — when prefilling a command for the user, send
   Enter (`\n`) to run it automatically
 - **Leave unexecuted** only when the user explicitly asks to review or
   edit the command first
-- **Let the user watch** — for commands where the user wants to monitor
-  output, execute in a visible pane and let them read the terminal directly
+- **Let the user watch** — when the user explicitly asks to monitor in
+  another pane, execute there and let them read the terminal directly
 
 This is not a hard security boundary. The model uses judgment based on
 the tool description and system prompt context. Commands like `cat

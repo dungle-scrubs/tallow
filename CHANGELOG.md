@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.15](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.14...tallow-v0.8.15) (2026-03-05)
+
+
+### Added
+
+* **context-budget:** add planner envelopes and ingestion guards ([a109c49](https://github.com/dungle-scrubs/tallow/commit/a109c49366e71050ee39a41350852580f1918421))
+* **plan-mode:** auto-enable plan mode from natural language intent ([8a91fb0](https://github.com/dungle-scrubs/tallow/commit/8a91fb0bc1a0b840ad9f96b5478950575fee7eaa))
+
+
+### Fixed
+
+* **ask-user-question:** sanitize multiline option rendering ([265957a](https://github.com/dungle-scrubs/tallow/commit/265957adedbcb6ff7460651865c68f2732d53686))
+* **ci:** add actions:write permission to dep-check workflow ([0b960ee](https://github.com/dungle-scrubs/tallow/commit/0b960eee2828b9eaa0b2b2819e4a800971d66ca2)), closes [#116](https://github.com/dungle-scrubs/tallow/issues/116)
+* **interactive:** suppress overflow error payload before auto-compaction ([85da4cf](https://github.com/dungle-scrubs/tallow/commit/85da4cf19989bec18fce294e8b35a31117641fc2))
+* **shell-policy:** show approval notice after confirmation ([844bc22](https://github.com/dungle-scrubs/tallow/commit/844bc227f347926d7f2e7866275838e6dd0ce939))
+* **tui:** preserve scrollback during agent turns ([055f917](https://github.com/dungle-scrubs/tallow/commit/055f917f0bf379ffce133977cf902a3e40fed439))
+* **wezterm-pane:** avoid unsolicited pane spawning for dev servers ([4baa9e8](https://github.com/dungle-scrubs/tallow/commit/4baa9e8bd874c5b9fe1711c10e2f2bae678506a3))
+* **wezterm-pane:** block pane creation without explicit request ([57dc7f9](https://github.com/dungle-scrubs/tallow/commit/57dc7f9f6e921df671170e0b616495aa53a4cdc6))
+
+
+### Documentation
+
+* **context-budget:** document guardrails and adaptive caps ([423a46d](https://github.com/dungle-scrubs/tallow/commit/423a46d683fbe40e3e189f70c071af030604362a))
+
+
+### Maintenance
+
+* **ask-user-question:** add down-arrow render regression coverage ([6c9af0e](https://github.com/dungle-scrubs/tallow/commit/6c9af0e330b32f74e075a73650a0f9f9bb5f77f1))
+* **deps:** bump pi-* dependencies ([7fea391](https://github.com/dungle-scrubs/tallow/commit/7fea39130e3df6f692178496d298f0fd366130db))
+* **deps:** bump pi-* dependencies ([6db17c4](https://github.com/dungle-scrubs/tallow/commit/6db17c4e331e82b48379d1139a6279067a3fca4b))
+* **plan-mode:** add plan intent detection test suite ([a88bd55](https://github.com/dungle-scrubs/tallow/commit/a88bd55d8ddb9307b46927cda36d6e18e8d8ccde))
+
 ## [Unreleased]
 
 ### Added

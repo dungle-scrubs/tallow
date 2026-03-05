@@ -45,7 +45,7 @@ import {
 	onInteropEvent,
 } from "../_shared/interop-events.js";
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
-import { enforceExplicitPolicy, recordAudit } from "../_shared/shell-policy.js";
+import { enforceExplicitPolicy, evaluateCommand, recordAudit } from "../_shared/shell-policy.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import {
 	appendSection,
@@ -1666,9 +1666,17 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		const command = (event.input as Record<string, unknown>).command as string | undefined;
 		if (!command) return;
 
-		return enforceExplicitPolicy(command, "bg_bash", ctx.cwd, ctx.hasUI, (msg) =>
+		const verdict = evaluateCommand(command, "bg_bash", ctx.cwd);
+		const blocked = await enforceExplicitPolicy(command, "bg_bash", ctx.cwd, ctx.hasUI, (msg) =>
 			ctx.ui.confirm("Shell Policy", msg)
 		);
+		if (blocked) {
+			return blocked;
+		}
+
+		if (ctx.hasUI && verdict.allowed && verdict.requiresConfirmation) {
+			ctx.ui.notify("✅ Shell action approved — starting background task", "info");
+		}
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
