@@ -12,7 +12,7 @@ import {
 	imageFormatToMime,
 	renderImage,
 } from "../terminal-image.js";
-import { withCapabilityEnv } from "./capability-env.js";
+import { withCapabilityEnv } from "../test-utils/capability-env.js";
 
 const DEFAULT_CELL = { widthPx: 9, heightPx: 18 };
 

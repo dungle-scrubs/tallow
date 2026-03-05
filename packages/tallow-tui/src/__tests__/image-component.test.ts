@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { Image, type ImageTheme } from "../components/image.js";
-import { withCapabilityEnv } from "./capability-env.js";
+import { withCapabilityEnv } from "../test-utils/capability-env.js";
 
 const IDENTITY_THEME: ImageTheme = {
 	fallbackColor: (text) => text,
