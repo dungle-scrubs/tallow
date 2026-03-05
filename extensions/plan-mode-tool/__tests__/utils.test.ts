@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
 	cleanStepText,
+	detectPlanIntent,
 	extractDoneSteps,
 	extractTodoItems,
 	isPlanModeToolAllowed,
 	isSafeCommand,
 	markCompletedSteps,
 	PLAN_MODE_ALLOWED_TOOLS,
+	stripPlanIntent,
 	type TodoItem,
 } from "../utils.js";
 
@@ -254,5 +256,183 @@ describe("markCompletedSteps", () => {
 		const items: TodoItem[] = [{ step: 1, text: "First", completed: true }];
 		markCompletedSteps("No new markers", items);
 		expect(items[0].completed).toBe(true);
+	});
+});
+
+describe("detectPlanIntent", () => {
+	// ── True positives ──────────────────────────────────────────────
+	test("detects 'plan only'", () => {
+		expect(detectPlanIntent("plan only")).toBe(true);
+	});
+
+	test("detects 'plan-only' (hyphenated)", () => {
+		expect(detectPlanIntent("this is plan-only")).toBe(true);
+	});
+
+	test("detects 'just plan'", () => {
+		expect(detectPlanIntent("just plan for now")).toBe(true);
+	});
+
+	test("detects 'only plan'", () => {
+		expect(detectPlanIntent("only plan, don't execute")).toBe(true);
+	});
+
+	test("detects 'plan mode' as directive", () => {
+		expect(detectPlanIntent("plan mode please")).toBe(true);
+	});
+
+	test("detects 'planning mode'", () => {
+		expect(detectPlanIntent("planning mode please")).toBe(true);
+	});
+
+	test("detects 'don't implement'", () => {
+		expect(detectPlanIntent("don't implement yet")).toBe(true);
+	});
+
+	test("detects curly apostrophe 'don\u2019t implement'", () => {
+		expect(detectPlanIntent("don\u2019t implement yet")).toBe(true);
+	});
+
+	test("detects 'do not implement'", () => {
+		expect(detectPlanIntent("do not implement")).toBe(true);
+	});
+
+	test("detects 'don't code yet'", () => {
+		expect(detectPlanIntent("don't code yet")).toBe(true);
+	});
+
+	test("detects 'don't make changes'", () => {
+		expect(detectPlanIntent("don't make changes")).toBe(true);
+	});
+
+	test("detects 'do not make changes'", () => {
+		expect(detectPlanIntent("do not make changes")).toBe(true);
+	});
+
+	test("detects 'no implementation yet'", () => {
+		expect(detectPlanIntent("no implementation yet")).toBe(true);
+	});
+
+	test("detects 'no changes first'", () => {
+		expect(detectPlanIntent("no changes first")).toBe(true);
+	});
+
+	test("detects 'read-only mode'", () => {
+		expect(detectPlanIntent("read-only mode")).toBe(true);
+	});
+
+	test("detects 'read only mode' (no hyphen)", () => {
+		expect(detectPlanIntent("read only mode")).toBe(true);
+	});
+
+	test("detects 'this is plan'", () => {
+		expect(detectPlanIntent("this is plan")).toBe(true);
+	});
+
+	test("detects 'this is planning'", () => {
+		expect(detectPlanIntent("this is planning")).toBe(true);
+	});
+
+	test("detects 'plan first'", () => {
+		expect(detectPlanIntent("plan first")).toBe(true);
+	});
+
+	test("detects 'plan before'", () => {
+		expect(detectPlanIntent("plan before implementing")).toBe(true);
+	});
+
+	test("detects the exact user complaint: 'not yet, this is plan only'", () => {
+		expect(detectPlanIntent("not yet, this is plan only")).toBe(true);
+	});
+
+	test("is case-insensitive", () => {
+		expect(detectPlanIntent("Plan Only")).toBe(true);
+		expect(detectPlanIntent("PLAN MODE")).toBe(true);
+		expect(detectPlanIntent("DON'T IMPLEMENT")).toBe(true);
+	});
+
+	test("detects intent mixed with a request", () => {
+		expect(detectPlanIntent("don't implement, just review the auth flow")).toBe(true);
+		expect(detectPlanIntent("analyze the database schema, plan only")).toBe(true);
+	});
+
+	// ── True negatives ──────────────────────────────────────────────
+	test("does NOT match 'make a plan for the API' (noun usage)", () => {
+		expect(detectPlanIntent("make a plan for the API")).toBe(false);
+	});
+
+	test("does NOT match 'what does plan mode do?' (question about plan mode)", () => {
+		expect(detectPlanIntent("what does plan mode do?")).toBe(false);
+	});
+
+	test("does NOT match 'how does plan mode work?' (question)", () => {
+		expect(detectPlanIntent("how does plan mode work?")).toBe(false);
+	});
+
+	test("does NOT match 'execute the plan' (opposite intent)", () => {
+		expect(detectPlanIntent("execute the plan")).toBe(false);
+	});
+
+	test("does NOT match 'the implementation plan looks good' (plan as noun)", () => {
+		expect(detectPlanIntent("the implementation plan looks good")).toBe(false);
+	});
+
+	test("does NOT match 'plan' alone (too ambiguous)", () => {
+		expect(detectPlanIntent("plan")).toBe(false);
+	});
+
+	test("does NOT match empty string", () => {
+		expect(detectPlanIntent("")).toBe(false);
+	});
+
+	test("does NOT match 'the plan is to refactor auth' (noun usage)", () => {
+		expect(detectPlanIntent("the plan is to refactor auth")).toBe(false);
+	});
+
+	test("does NOT match 'I planned the migration' (past tense)", () => {
+		expect(detectPlanIntent("I planned the migration")).toBe(false);
+	});
+});
+
+describe("stripPlanIntent", () => {
+	test("strips 'don't implement' and keeps the request", () => {
+		expect(stripPlanIntent("don't implement, just review the auth flow")).toBe(
+			"just review the auth flow"
+		);
+	});
+
+	test("returns original when stripping leaves empty string", () => {
+		expect(stripPlanIntent("plan only")).toBe("plan only");
+	});
+
+	test("strips 'this is plan only' prefix from mixed input", () => {
+		expect(stripPlanIntent("this is plan only, analyze the database schema")).toBe(
+			"analyze the database schema"
+		);
+	});
+
+	test("strips 'plan mode' from mixed input", () => {
+		expect(stripPlanIntent("plan mode — review the auth module")).toBe("review the auth module");
+	});
+
+	test("strips 'do not make changes' and cleans punctuation", () => {
+		expect(stripPlanIntent("do not make changes, review the config")).toBe("review the config");
+	});
+
+	test("cleans up double spaces after stripping", () => {
+		expect(stripPlanIntent("please plan only review auth")).toBe("please review auth");
+	});
+
+	test("handles multiple intent phrases in one message", () => {
+		const result = stripPlanIntent("plan only, don't implement, analyze the code");
+		expect(result).toBe("analyze the code");
+	});
+
+	test("returns original when entire message is intent", () => {
+		expect(stripPlanIntent("just plan")).toBe("just plan");
+	});
+
+	test("returns original for empty string", () => {
+		expect(stripPlanIntent("")).toBe("");
 	});
 });
