@@ -134,6 +134,29 @@ const tasks = new Map<string, BackgroundTask>();
 let taskCounter = 0;
 let interopStateRequestCleanup: (() => void) | undefined;
 
+/** Shared mutable state for live-updating anchor components during consecutive polls. */
+export interface PollState {
+	taskId: string;
+	latestStatus: string;
+	latestDuration: string;
+	latestExitCode: number | null;
+	pollCount: number;
+	/** Only set for task_output anchors. */
+	latestOutput?: string;
+	/** Only set for task_output anchors. */
+	latestOutputLines?: number;
+	/** Only set for task_output anchors. */
+	latestOutputBytes?: number;
+	/** Only set for task_output anchors. */
+	latestCommand?: string;
+}
+
+/** Active poll states keyed by "tool_name:taskId". */
+const pollStates = new Map<string, PollState>();
+
+/** Last completed poll tool call, used to detect consecutive same-tool same-taskId calls. */
+let lastCompletedPoll: { toolName: string; taskId: string } | null = null;
+
 /**
  * Build a serializable background task snapshot for cross-extension consumers.
  *
@@ -197,6 +220,37 @@ function cleanupOldTasks(): void {
  */
 export function setBackgroundTaskSpawnForTests(implementation?: typeof spawn): void {
 	spawnProcess = implementation ?? spawn;
+}
+
+/**
+ * Reset poll tracking state for tests.
+ *
+ * @internal
+ * @returns Nothing
+ */
+export function resetPollStateForTests(): void {
+	pollStates.clear();
+	lastCompletedPoll = null;
+}
+
+/**
+ * Get the last completed poll for tests.
+ *
+ * @internal
+ * @returns The last completed poll or null
+ */
+export function getLastCompletedPollForTests(): { toolName: string; taskId: string } | null {
+	return lastCompletedPoll;
+}
+
+/**
+ * Get the current poll states map for tests.
+ *
+ * @internal
+ * @returns ReadonlyMap of poll state key to poll state
+ */
+export function getPollStatesForTests(): ReadonlyMap<string, PollState> {
+	return pollStates;
 }
 
 /** Handle for updating a task that was promoted from bash to background. */
@@ -529,6 +583,21 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	publishPromoteApi();
 	pi.events.on(INTEROP_API_CHANNELS.promoteToBackgroundApiRequest, publishPromoteApi);
 
+	// ── Consecutive poll detection ──────────────────────────────────────────────
+	// Reset the consecutive poll chain when any non-poll tool starts executing.
+	pi.on("tool_call", async (event) => {
+		if (event.toolName !== "task_status" && event.toolName !== "task_output") {
+			lastCompletedPoll = null;
+			pollStates.clear();
+		}
+	});
+
+	// Clear poll state across agent loops to prevent stale anchors.
+	pi.on("agent_end", async () => {
+		lastCompletedPoll = null;
+		pollStates.clear();
+	});
+
 	// Tool: Run bash in background
 	pi.registerTool({
 		name: "bg_bash",
@@ -684,6 +753,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				});
 				lifecycle.detach();
 				syncTaskState(ctx);
+				lastCompletedPoll = null;
 
 				return {
 					details: { taskId, command: params.command, fireAndForget: true },
@@ -715,6 +785,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 			const output = task.output.join("");
 			const duration = formatDuration((task.endTime || Date.now()) - task.startTime);
+			lastCompletedPoll = null;
 
 			return {
 				details: {
@@ -914,7 +985,28 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				output = lines.slice(-params.tail).join("\n");
 			}
 
+			const key = `task_output:${params.taskId}`;
+			const isConsecutive =
+				lastCompletedPoll?.toolName === "task_output" &&
+				lastCompletedPoll?.taskId === params.taskId;
+
 			const duration = formatDuration((task.endTime || Date.now()) - task.startTime);
+
+			if (isConsecutive) {
+				const state = pollStates.get(key);
+				if (state) {
+					state.latestStatus = task.status;
+					state.latestDuration = duration;
+					state.latestExitCode = task.exitCode ?? null;
+					state.pollCount++;
+					state.latestOutput = output;
+					state.latestOutputLines = output.split("\n").length;
+					state.latestOutputBytes = task.outputBytes;
+				}
+			}
+
+			lastCompletedPoll = { toolName: "task_output", taskId: params.taskId };
+
 			const statusLine =
 				task.status === "running"
 					? `Status: running (${duration})`
@@ -930,6 +1022,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					outputLines: output.split("\n").length,
 					outputBytes: task.outputBytes,
 					output,
+					_isConsecutive: isConsecutive,
 				},
 				content: [
 					{
@@ -940,15 +1033,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			};
 		},
 
-		renderCall(args, theme) {
-			const taskId = args.taskId as string;
-			const task = tasks.get(taskId);
-			const cmd = task ? truncateCommand(task.command, 40) : "";
-			let text =
-				formatPresentationText(theme, "title", "task_output ") +
-				formatPresentationText(theme, "identity", taskId);
-			if (cmd) text += ` ${formatPresentationText(theme, "meta", cmd)}`;
-			return new Text(text, 0, 0);
+		renderCall(_args, _theme) {
+			return { render: () => [], invalidate: () => {} };
 		},
 
 		renderResult(result, { expanded }, theme) {
@@ -966,10 +1052,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 						outputBytes?: number;
 						output?: string;
 						error?: boolean;
+						_isConsecutive?: boolean;
 				  }
 				| undefined;
 
-			// Error case — show full text
+			// Error case — always render fully
 			if (details?.error) {
 				const text = result.content[0];
 				return renderLines([
@@ -981,66 +1068,107 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				]);
 			}
 
-			const status = details?.status ?? "unknown";
-			const duration = details?.duration ?? "";
-
-			// Status icon
-			let icon: string;
-			let statusRole: "status_success" | "status_warning" | "status_error";
-			switch (status) {
-				case "running":
-					icon = getIcon("in_progress");
-					statusRole = "status_warning";
-					break;
-				case "completed":
-					icon = getIcon("success");
-					statusRole = "status_success";
-					break;
-				default:
-					icon = getIcon("error");
-					statusRole = "status_error";
+			// Consecutive — collapse to zero height
+			if (details?._isConsecutive) {
+				return { render: () => [], invalidate: () => {} };
 			}
 
-			const lines: string[] = [];
-			appendSection(lines, [
-				formatPresentationText(theme, statusRole, `${icon} ${status}`) +
-					formatPresentationText(theme, "meta", ` (${duration})`),
-			]);
-
-			// Show output tail (always — collapsed=10 lines, expanded=50)
-			if (details?.output) {
-				const allLines = details.output.split("\n").filter((l) => l.length > 0);
-				const maxLines = expanded ? EXPANDED_LINES : COLLAPSED_LINES;
-				const truncated = allLines.length > maxLines;
-				const tail = truncated ? allLines.slice(-maxLines) : allLines;
-
-				appendSection(lines, [formatSectionDivider(theme, "Output")], { blankBefore: true });
-				if (truncated) {
-					appendSection(lines, [
-						formatPresentationText(
-							theme,
-							"meta",
-							`  ... ${allLines.length - maxLines} more lines above`
-						),
-					]);
-				}
-				appendSection(
-					lines,
-					tail.map((line) => `  ${styleBackgroundOutputLine(theme, line)}`)
-				);
-
-				if (!expanded && truncated) {
-					appendSection(lines, [
-						formatPresentationText(theme, "hint", keyHint("expandTools", "to show more")),
-					]);
-				}
-			} else {
-				appendSection(lines, [formatPresentationText(theme, "meta", "(no output yet)")], {
-					blankBefore: true,
+			// Anchor — create poll state entry + return live component
+			const key = `task_output:${details?.taskId}`;
+			if (!pollStates.has(key)) {
+				pollStates.set(key, {
+					taskId: details?.taskId ?? "",
+					latestStatus: details?.status ?? "unknown",
+					latestDuration: details?.duration ?? "",
+					latestExitCode: details?.exitCode ?? null,
+					pollCount: 1,
+					latestOutput: details?.output,
+					latestOutputLines: details?.outputLines,
+					latestOutputBytes: details?.outputBytes,
+					latestCommand: details?.command,
 				});
 			}
 
-			return renderLines(lines, { wrap: expanded });
+			return {
+				render(width: number): string[] {
+					const state = pollStates.get(key);
+					if (!state) return [];
+
+					// Header with taskId and command
+					const header =
+						formatPresentationText(theme, "title", "task_output ") +
+						formatPresentationText(theme, "identity", state.taskId) +
+						(state.latestCommand
+							? ` ${formatPresentationText(theme, "meta", truncateCommand(state.latestCommand, 40))}`
+							: "");
+
+					// Status icon
+					let icon: string;
+					let statusRole: "status_success" | "status_warning" | "status_error";
+					switch (state.latestStatus) {
+						case "running":
+							icon = getIcon("in_progress");
+							statusRole = "status_warning";
+							break;
+						case "completed":
+							icon = getIcon("success");
+							statusRole = "status_success";
+							break;
+						default:
+							icon = getIcon("error");
+							statusRole = "status_error";
+					}
+
+					const pollSuffix =
+						state.pollCount > 1
+							? formatPresentationText(theme, "meta", ` · polled ${state.pollCount}×`)
+							: "";
+					const statusLine =
+						formatPresentationText(theme, statusRole, `${icon} ${state.latestStatus}`) +
+						formatPresentationText(theme, "meta", ` (${state.latestDuration})`) +
+						pollSuffix;
+
+					const lines: string[] = [
+						truncateToWidth(header, width, "…"),
+						truncateToWidth(statusLine, width, "…"),
+					];
+
+					// Output tail
+					if (state.latestOutput) {
+						const allLines = state.latestOutput.split("\n").filter((l) => l.length > 0);
+						const maxLines = expanded ? EXPANDED_LINES : COLLAPSED_LINES;
+						const truncated = allLines.length > maxLines;
+						const tail = truncated ? allLines.slice(-maxLines) : allLines;
+
+						lines.push("");
+						if (truncated) {
+							lines.push(
+								formatPresentationText(
+									theme,
+									"meta",
+									`  ... ${allLines.length - maxLines} more lines above`
+								)
+							);
+						}
+						for (const line of tail) {
+							lines.push(
+								truncateToWidth(`  ${styleBackgroundOutputLine(theme, line)}`, width, "…")
+							);
+						}
+
+						if (!expanded && truncated) {
+							lines.push(
+								formatPresentationText(theme, "hint", keyHint("expandTools", "to show more"))
+							);
+						}
+					} else {
+						lines.push(formatPresentationText(theme, "meta", "(no output yet)"));
+					}
+
+					return lines;
+				},
+				invalidate() {},
+			};
 		},
 	});
 
@@ -1067,7 +1195,24 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				};
 			}
 
+			const key = `task_status:${params.taskId}`;
+			const isConsecutive =
+				lastCompletedPoll?.toolName === "task_status" &&
+				lastCompletedPoll?.taskId === params.taskId;
+
 			const duration = formatDuration((task.endTime || Date.now()) - task.startTime);
+
+			if (isConsecutive) {
+				const state = pollStates.get(key);
+				if (state) {
+					state.latestStatus = task.status;
+					state.latestDuration = duration;
+					state.latestExitCode = task.exitCode ?? null;
+					state.pollCount++;
+				}
+			}
+
+			lastCompletedPoll = { toolName: "task_status", taskId: params.taskId };
 
 			return {
 				details: {
@@ -1075,6 +1220,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					status: task.status,
 					exitCode: task.exitCode,
 					duration,
+					_isConsecutive: isConsecutive,
 				},
 				content: [
 					{
@@ -1096,19 +1242,23 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			};
 		},
 
-		renderCall(args, theme) {
-			return new Text(
-				formatPresentationText(theme, "title", "task_status ") +
-					formatPresentationText(theme, "identity", args.taskId as string),
-				0,
-				0
-			);
+		renderCall(_args, _theme) {
+			return { render: () => [], invalidate: () => {} };
 		},
 
 		renderResult(result, _options, theme) {
 			const details = result.details as
-				| { status?: string; duration?: string; error?: boolean }
+				| {
+						taskId?: string;
+						status?: string;
+						duration?: string;
+						exitCode?: number | null;
+						error?: boolean;
+						_isConsecutive?: boolean;
+				  }
 				| undefined;
+
+			// Error results always render fully
 			if (details?.error) {
 				const text = result.content[0];
 				return renderLines([
@@ -1119,24 +1269,58 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					),
 				]);
 			}
-			const status = details?.status ?? "unknown";
-			const duration = details?.duration ?? "";
-			const icon =
-				status === "running"
-					? getIcon("in_progress")
-					: status === "completed"
-						? getIcon("success")
-						: getIcon("error");
-			const statusRole: "status_success" | "status_warning" | "status_error" =
-				status === "completed"
-					? "status_success"
-					: status === "running"
-						? "status_warning"
-						: "status_error";
-			return renderLines([
-				formatPresentationText(theme, statusRole, `${icon} ${status}`) +
-					formatPresentationText(theme, "meta", ` (${duration})`),
-			]);
+
+			// Consecutive — collapse to zero height
+			if (details?._isConsecutive) {
+				return { render: () => [], invalidate: () => {} };
+			}
+
+			// Anchor — create poll state entry + return live component
+			const key = `task_status:${details?.taskId}`;
+			if (!pollStates.has(key)) {
+				pollStates.set(key, {
+					taskId: details?.taskId ?? "",
+					latestStatus: details?.status ?? "unknown",
+					latestDuration: details?.duration ?? "",
+					latestExitCode: details?.exitCode ?? null,
+					pollCount: 1,
+				});
+			}
+
+			return {
+				render(width: number): string[] {
+					const state = pollStates.get(key);
+					if (!state) return [];
+
+					const header =
+						formatPresentationText(theme, "title", "task_status ") +
+						formatPresentationText(theme, "identity", state.taskId);
+
+					const icon =
+						state.latestStatus === "running"
+							? getIcon("in_progress")
+							: state.latestStatus === "completed"
+								? getIcon("success")
+								: getIcon("error");
+					const statusRole: "status_success" | "status_warning" | "status_error" =
+						state.latestStatus === "completed"
+							? "status_success"
+							: state.latestStatus === "running"
+								? "status_warning"
+								: "status_error";
+					const pollSuffix =
+						state.pollCount > 1
+							? formatPresentationText(theme, "meta", ` · polled ${state.pollCount}×`)
+							: "";
+					const statusLine =
+						formatPresentationText(theme, statusRole, `${icon} ${state.latestStatus}`) +
+						formatPresentationText(theme, "meta", ` (${state.latestDuration})`) +
+						pollSuffix;
+
+					return [truncateToWidth(header, width, "…"), truncateToWidth(statusLine, width, "…")];
+				},
+				invalidate() {},
+			};
 		},
 	});
 
@@ -1186,6 +1370,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			task.output.push("\n[Killed by user]\n");
 
 			syncTaskState(ctx);
+			lastCompletedPoll = null;
 
 			return {
 				details: { taskId: params.taskId, killed: true },
@@ -1615,6 +1800,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		}
 		tasks.clear();
 		promotedAbortControllers.clear();
+		pollStates.clear();
+		lastCompletedPoll = null;
 		publishBackgroundTaskSnapshot(pi.events);
 		interopStateRequestCleanup?.();
 		interopStateRequestCleanup = undefined;
