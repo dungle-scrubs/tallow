@@ -11,63 +11,10 @@ import {
 	type ImageDimensions,
 	imageFormatToMime,
 	renderImage,
-	resetCapabilitiesCache,
 } from "../terminal-image.js";
+import { withCapabilityEnv } from "./capability-env.js";
 
 const DEFAULT_CELL = { widthPx: 9, heightPx: 18 };
-
-const CAPABILITY_ENV_KEYS = [
-	"COLORTERM",
-	"GHOSTTY_RESOURCES_DIR",
-	"ITERM_SESSION_ID",
-	"KITTY_WINDOW_ID",
-	"TERM",
-	"TERM_PROGRAM",
-	"WEZTERM_PANE",
-] as const;
-
-/**
- * Run a test callback with a controlled terminal capability environment.
- *
- * @param overrides - Environment overrides applied for the callback
- * @param run - Test callback executed with overridden environment
- * @returns Nothing
- */
-function withCapabilityEnv(
-	overrides: Readonly<Record<string, string | undefined>>,
-	run: () => void
-): void {
-	const previous: Partial<Record<(typeof CAPABILITY_ENV_KEYS)[number], string | undefined>> = {};
-
-	for (const key of CAPABILITY_ENV_KEYS) {
-		previous[key] = process.env[key];
-		if (Object.hasOwn(overrides, key)) {
-			const value = overrides[key];
-			if (value === undefined) {
-				delete process.env[key];
-			} else {
-				process.env[key] = value;
-			}
-		} else {
-			delete process.env[key];
-		}
-	}
-
-	resetCapabilitiesCache();
-	try {
-		run();
-	} finally {
-		for (const key of CAPABILITY_ENV_KEYS) {
-			const value = previous[key];
-			if (value === undefined) {
-				delete process.env[key];
-			} else {
-				process.env[key] = value;
-			}
-		}
-		resetCapabilitiesCache();
-	}
-}
 
 /**
  * Measure relative aspect-ratio error between source image and cell layout.

@@ -1,63 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { Image, type ImageTheme } from "../components/image.js";
-import { resetCapabilitiesCache } from "../terminal-image.js";
-
-const CAPABILITY_ENV_KEYS = [
-	"COLORTERM",
-	"GHOSTTY_RESOURCES_DIR",
-	"ITERM_SESSION_ID",
-	"KITTY_WINDOW_ID",
-	"TERM",
-	"TERM_PROGRAM",
-	"WEZTERM_PANE",
-] as const;
+import { withCapabilityEnv } from "./capability-env.js";
 
 const IDENTITY_THEME: ImageTheme = {
 	fallbackColor: (text) => text,
 };
-
-/**
- * Run a callback with controlled capability-related env vars.
- *
- * @param overrides - Temporary environment overrides
- * @param run - Callback executed with overrides applied
- * @returns Nothing
- */
-function withCapabilityEnv(
-	overrides: Readonly<Record<string, string | undefined>>,
-	run: () => void
-): void {
-	const previous: Partial<Record<(typeof CAPABILITY_ENV_KEYS)[number], string | undefined>> = {};
-
-	for (const key of CAPABILITY_ENV_KEYS) {
-		previous[key] = process.env[key];
-		if (Object.hasOwn(overrides, key)) {
-			const value = overrides[key];
-			if (value === undefined) {
-				delete process.env[key];
-			} else {
-				process.env[key] = value;
-			}
-		} else {
-			delete process.env[key];
-		}
-	}
-
-	resetCapabilitiesCache();
-	try {
-		run();
-	} finally {
-		for (const key of CAPABILITY_ENV_KEYS) {
-			const value = previous[key];
-			if (value === undefined) {
-				delete process.env[key];
-			} else {
-				process.env[key] = value;
-			}
-		}
-		resetCapabilitiesCache();
-	}
-}
 
 /**
  * Extract Kitty `c=<columns>` param from rendered image lines.
