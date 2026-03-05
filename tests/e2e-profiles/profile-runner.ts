@@ -79,6 +79,12 @@ export async function createProfileSession(
 		const streamFn = options.streamFn ?? createEchoStreamFn();
 		tallow.session.agent.streamFn = streamFn;
 
+		// Let async session_start handlers settle before first prompt.
+		await Promise.resolve();
+		await new Promise<void>((resolve) => {
+			setTimeout(resolve, 0);
+		});
+
 		const run = async (prompt: string): Promise<AgentSessionEvent[]> => {
 			const events: AgentSessionEvent[] = [];
 			let sawAgentEnd = false;

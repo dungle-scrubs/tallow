@@ -83,6 +83,12 @@ export class SessionRunner {
 		const streamFn = options.streamFn ?? createEchoStreamFn();
 		tallowSession.session.agent.streamFn = streamFn;
 
+		// Let async session_start handlers settle before first prompt.
+		await Promise.resolve();
+		await new Promise<void>((resolve) => {
+			setTimeout(resolve, 0);
+		});
+
 		return new SessionRunner(tallowSession, tmpDir);
 	}
 
