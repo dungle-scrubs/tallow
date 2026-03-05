@@ -13,6 +13,7 @@ import type { StreamFn } from "@mariozechner/pi-agent-core";
 import type { AgentSessionEvent, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { createTallowSession, type TallowSession } from "../src/sdk.js";
 import { createEchoStreamFn, createMockModel } from "./mock-model.js";
+import { withExclusiveSessionRun } from "./session-run-lock.js";
 import { withExclusiveTallowHome } from "./tallow-home-env.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -109,42 +110,44 @@ export class SessionRunner {
 	 * @returns Collected events from the prompt execution
 	 */
 	async run(prompt: string): Promise<RunResult> {
-		const events: AgentSessionEvent[] = [];
-		let resolveAgentEnd: (() => void) | undefined;
-		let sawAgentEnd = false;
-		const agentEndPromise = new Promise<void>((resolve) => {
-			resolveAgentEnd = () => {
-				if (sawAgentEnd) return;
-				sawAgentEnd = true;
-				resolve();
-			};
-		});
-		const unsub = this._tallowSession.session.subscribe((event) => {
-			events.push(event);
-			if (event.type === "agent_end") {
-				resolveAgentEnd?.();
-			}
-		});
+		return await withExclusiveSessionRun(async () => {
+			const events: AgentSessionEvent[] = [];
+			let resolveAgentEnd: (() => void) | undefined;
+			let sawAgentEnd = false;
+			const agentEndPromise = new Promise<void>((resolve) => {
+				resolveAgentEnd = () => {
+					if (sawAgentEnd) return;
+					sawAgentEnd = true;
+					resolve();
+				};
+			});
+			const unsub = this._tallowSession.session.subscribe((event) => {
+				events.push(event);
+				if (event.type === "agent_end") {
+					resolveAgentEnd?.();
+				}
+			});
 
-		try {
-			await this._tallowSession.session.prompt(prompt);
-			// On slower CI runners, prompt() can resolve before the final lifecycle
-			// event dispatch flushes. Wait briefly for `agent_end` so tests see a
-			// complete event sequence deterministically.
-			if (!sawAgentEnd) {
-				await Promise.race([
-					agentEndPromise,
-					new Promise<void>((resolve) => {
-						setTimeout(resolve, 25);
-					}),
-				]);
-				await Promise.resolve();
+			try {
+				await this._tallowSession.session.prompt(prompt);
+				// On slower CI runners, prompt() can resolve before the final lifecycle
+				// event dispatch flushes. Wait briefly for `agent_end` so tests see a
+				// complete event sequence deterministically.
+				if (!sawAgentEnd) {
+					await Promise.race([
+						agentEndPromise,
+						new Promise<void>((resolve) => {
+							setTimeout(resolve, 25);
+						}),
+					]);
+					await Promise.resolve();
+				}
+			} finally {
+				unsub();
 			}
-		} finally {
-			unsub();
-		}
 
-		return { events };
+			return { events };
+		});
 	}
 
 	/**
