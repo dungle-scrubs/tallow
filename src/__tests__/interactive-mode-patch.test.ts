@@ -1,7 +1,19 @@
 import { describe, expect, it } from "bun:test";
 import { patchInteractiveModePrototype } from "../interactive-mode-patch.js";
 
+interface FakeMessageContent {
+	type: string;
+}
+
+interface FakeMessage {
+	content: FakeMessageContent[];
+	errorMessage?: string;
+	role: "assistant" | "user";
+	stopReason?: "aborted" | "error" | "stop";
+}
+
 interface FakeEvent {
+	message?: FakeMessage;
 	type?: string;
 }
 
@@ -11,6 +23,7 @@ class FakeInteractiveMode {
 	flushCalls = 0;
 	handleBashCommandCalls = 0;
 	handleEventCalls = 0;
+	lastHandledEvent: FakeEvent | undefined;
 	lastRestoredAbort: boolean | undefined;
 	lifecycleCalls: string[] = [];
 	loadingAnimation: unknown;
@@ -34,8 +47,9 @@ class FakeInteractiveMode {
 	 * @param _event - Event payload
 	 * @returns Promise resolved with marker text
 	 */
-	async handleEvent(_event: FakeEvent): Promise<string> {
+	async handleEvent(event: FakeEvent): Promise<string> {
 		this.handleEventCalls++;
+		this.lastHandledEvent = event;
 		return "ok";
 	}
 
@@ -167,6 +181,81 @@ describe("patchInteractiveModePrototype", () => {
 		expect(flushCallIndex).toBeGreaterThanOrEqual(0);
 		expect(updateCallIndex).toBeGreaterThanOrEqual(0);
 		expect(flushCallIndex).toBeLessThan(updateCallIndex);
+	});
+
+	it("suppresses overflow message_end error payloads before render", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+
+		const overflowPayloads = [
+			'Codex error: {"type":"error","code":"context_length_exceeded","message":"prompt is too long"}',
+			// Provider fallback path: HTTP status with no body still signals overflow.
+			"413 (no body)",
+		] as const;
+
+		for (const errorMessage of overflowPayloads) {
+			const mode = new FakeInteractiveMode();
+
+			await mode.handleEvent({
+				type: "message_end",
+				message: {
+					content: [],
+					errorMessage,
+					role: "assistant",
+					stopReason: "error",
+				},
+			});
+
+			expect(mode.lastHandledEvent?.message?.stopReason).toBe("stop");
+			expect(mode.lastHandledEvent?.message?.errorMessage).toBeUndefined();
+		}
+	});
+
+	it("keeps overflow-like message_end errors unchanged when tool calls are present", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		const originalMessage =
+			'Codex error: {"type":"error","code":"context_length_exceeded","message":"prompt is too long"}';
+
+		await mode.handleEvent({
+			type: "message_end",
+			message: {
+				// keep stopReason=error when tool calls exist so pending tool rows
+				// can resolve correctly in InteractiveMode.
+				content: [{ type: "toolCall" }],
+				errorMessage: originalMessage,
+				role: "assistant",
+				stopReason: "error",
+			},
+		});
+
+		expect(mode.lastHandledEvent?.message?.stopReason).toBe("error");
+		expect(mode.lastHandledEvent?.message?.errorMessage).toBe(originalMessage);
+	});
+
+	it("keeps non-overflow message_end errors unchanged", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+
+		const nonOverflowErrors = [
+			"401 Unauthorized: invalid API key",
+			"413 Request Entity Too Large",
+		] as const;
+
+		for (const originalMessage of nonOverflowErrors) {
+			const mode = new FakeInteractiveMode();
+
+			await mode.handleEvent({
+				type: "message_end",
+				message: {
+					content: [],
+					errorMessage: originalMessage,
+					role: "assistant",
+					stopReason: "error",
+				},
+			});
+
+			expect(mode.lastHandledEvent?.message?.stopReason).toBe("error");
+			expect(mode.lastHandledEvent?.message?.errorMessage).toBe(originalMessage);
+		}
 	});
 
 	it("flushes deferred bash output after wrapped handleBashCommand and refreshes UI", async () => {
