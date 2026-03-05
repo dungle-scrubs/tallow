@@ -10,6 +10,7 @@
 			"agent_end",
 			"before_agent_start",
 			"context",
+			"input",
 			"session_start",
 			"tool_call",
 			"tool_result",

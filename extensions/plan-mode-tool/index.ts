@@ -31,11 +31,13 @@ import {
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
 import {
+	detectPlanIntent,
 	extractTodoItems,
 	isPlanModeToolAllowed,
 	isSafeCommand,
 	markCompletedSteps,
 	PLAN_MODE_ALLOWED_TOOLS,
+	stripPlanIntent,
 	type TodoItem,
 } from "./utils.js";
 
@@ -441,6 +443,37 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 			ctx.ui?.notify(`⛔ ${reason}`, "error");
 			return { block: true, reason };
 		}
+	});
+
+	// Auto-enable plan mode when user expresses planning intent in natural language
+	pi.on("input", async (event, ctx) => {
+		// No-op if already in plan mode or execution mode
+		if (planModeEnabled || executionMode) {
+			return { action: "continue" as const };
+		}
+
+		if (!detectPlanIntent(event.text)) {
+			return { action: "continue" as const };
+		}
+
+		// Auto-enable plan mode
+		planModeEnabled = true;
+		captureNormalModeTools();
+		applyPlanModeTools();
+		updateStatus(ctx);
+		persistState();
+
+		ctx.ui?.notify(
+			"Plan mode auto-enabled (detected planning intent). Use /plan-mode or Ctrl+Alt+P to disable.",
+			"info"
+		);
+
+		// Strip the plan-intent phrase, keep the actual request
+		const stripped = stripPlanIntent(event.text);
+		if (stripped !== event.text) {
+			return { action: "transform" as const, text: stripped };
+		}
+		return { action: "continue" as const };
 	});
 
 	// Filter out stale plan mode context when not in plan mode
