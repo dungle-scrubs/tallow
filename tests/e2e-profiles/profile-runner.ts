@@ -19,6 +19,7 @@ import {
 	createMockModel,
 	createScriptedStreamFn,
 } from "../../test-utils/mock-model.js";
+import { withExclusiveTallowHome } from "../../test-utils/tallow-home-env.js";
 import { resolveExtensionPaths } from "./profiles.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -57,21 +58,21 @@ export async function createProfileSession(
 	options: ProfileSessionOptions
 ): Promise<ProfileSession> {
 	const tmpHome = mkdtempSync(join(tmpdir(), "tallow-e2e-"));
-	const originalHome = process.env.TALLOW_HOME;
-	process.env.TALLOW_HOME = tmpHome;
 
 	try {
 		const extensionPaths = resolveExtensionPaths(options.extensions);
 
-		const tallow = await createTallowSession({
-			cwd: options.cwd ?? tmpHome,
-			model: createMockModel(),
-			provider: "mock",
-			apiKey: "mock-api-key",
-			session: { type: "memory" },
-			noBundledExtensions: true,
-			noBundledSkills: true,
-			additionalExtensions: extensionPaths,
+		const tallow = await withExclusiveTallowHome(tmpHome, async () => {
+			return await createTallowSession({
+				cwd: options.cwd ?? tmpHome,
+				model: createMockModel(),
+				provider: "mock",
+				apiKey: "mock-api-key",
+				session: { type: "memory" },
+				noBundledExtensions: true,
+				noBundledSkills: true,
+				additionalExtensions: extensionPaths,
+			});
 		});
 
 		// Wire mock stream function
@@ -80,9 +81,33 @@ export async function createProfileSession(
 
 		const run = async (prompt: string): Promise<AgentSessionEvent[]> => {
 			const events: AgentSessionEvent[] = [];
-			const unsub = tallow.session.subscribe((event) => events.push(event));
+			let sawAgentEnd = false;
+			let resolveAgentEnd: (() => void) | undefined;
+			const agentEndPromise = new Promise<void>((resolve) => {
+				resolveAgentEnd = () => {
+					if (sawAgentEnd) return;
+					sawAgentEnd = true;
+					resolve();
+				};
+			});
+
+			const unsub = tallow.session.subscribe((event) => {
+				events.push(event);
+				if (event.type === "agent_end") {
+					resolveAgentEnd?.();
+				}
+			});
 			try {
 				await tallow.session.prompt(prompt);
+				if (!sawAgentEnd) {
+					await Promise.race([
+						agentEndPromise,
+						new Promise<void>((resolve) => {
+							setTimeout(resolve, 25);
+						}),
+					]);
+					await Promise.resolve();
+				}
 			} finally {
 				unsub();
 			}
@@ -106,13 +131,6 @@ export async function createProfileSession(
 			// best-effort
 		}
 		throw error;
-	} finally {
-		// Restore env immediately — session already has what it needs
-		if (originalHome !== undefined) {
-			process.env.TALLOW_HOME = originalHome;
-		} else {
-			delete process.env.TALLOW_HOME;
-		}
 	}
 }
 

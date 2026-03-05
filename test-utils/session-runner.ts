@@ -13,6 +13,7 @@ import type { StreamFn } from "@mariozechner/pi-agent-core";
 import type { AgentSessionEvent, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { createTallowSession, type TallowSession } from "../src/sdk.js";
 import { createEchoStreamFn, createMockModel } from "./mock-model.js";
+import { withExclusiveTallowHome } from "./tallow-home-env.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,13 +65,9 @@ export class SessionRunner {
 	 */
 	static async create(options: SessionRunnerOptions = {}): Promise<SessionRunner> {
 		const tmpDir = mkdtempSync(join(tmpdir(), "tallow-test-"));
-		const originalHome = process.env.TALLOW_HOME;
 
-		// Isolate test sessions from real config
-		process.env.TALLOW_HOME = tmpDir;
-
-		try {
-			const tallowSession = await createTallowSession({
+		const tallowSession = await withExclusiveTallowHome(tmpDir, async () => {
+			return await createTallowSession({
 				cwd: options.cwd ?? tmpDir,
 				model: createMockModel(),
 				provider: "mock",
@@ -80,20 +77,13 @@ export class SessionRunner {
 				noBundledSkills: true,
 				extensionFactories: options.extensionFactories,
 			});
+		});
 
-			// Replace the agent's stream function with our mock
-			const streamFn = options.streamFn ?? createEchoStreamFn();
-			tallowSession.session.agent.streamFn = streamFn;
+		// Replace the agent's stream function with our mock
+		const streamFn = options.streamFn ?? createEchoStreamFn();
+		tallowSession.session.agent.streamFn = streamFn;
 
-			return new SessionRunner(tallowSession, tmpDir);
-		} finally {
-			// Restore original TALLOW_HOME so other tests aren't affected
-			if (originalHome !== undefined) {
-				process.env.TALLOW_HOME = originalHome;
-			} else {
-				delete process.env.TALLOW_HOME;
-			}
-		}
+		return new SessionRunner(tallowSession, tmpDir);
 	}
 
 	/** The underlying AgentSession. */
