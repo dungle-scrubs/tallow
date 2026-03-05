@@ -19,6 +19,7 @@ import {
 	createMockModel,
 	createScriptedStreamFn,
 } from "../../test-utils/mock-model.js";
+import { withExclusiveSessionRun } from "../../test-utils/session-run-lock.js";
 import { withExclusiveTallowHome } from "../../test-utils/tallow-home-env.js";
 import { resolveExtensionPaths } from "./profiles.js";
 
@@ -86,38 +87,40 @@ export async function createProfileSession(
 		});
 
 		const run = async (prompt: string): Promise<AgentSessionEvent[]> => {
-			const events: AgentSessionEvent[] = [];
-			let sawAgentEnd = false;
-			let resolveAgentEnd: (() => void) | undefined;
-			const agentEndPromise = new Promise<void>((resolve) => {
-				resolveAgentEnd = () => {
-					if (sawAgentEnd) return;
-					sawAgentEnd = true;
-					resolve();
-				};
-			});
+			return await withExclusiveSessionRun(async () => {
+				const events: AgentSessionEvent[] = [];
+				let sawAgentEnd = false;
+				let resolveAgentEnd: (() => void) | undefined;
+				const agentEndPromise = new Promise<void>((resolve) => {
+					resolveAgentEnd = () => {
+						if (sawAgentEnd) return;
+						sawAgentEnd = true;
+						resolve();
+					};
+				});
 
-			const unsub = tallow.session.subscribe((event) => {
-				events.push(event);
-				if (event.type === "agent_end") {
-					resolveAgentEnd?.();
+				const unsub = tallow.session.subscribe((event) => {
+					events.push(event);
+					if (event.type === "agent_end") {
+						resolveAgentEnd?.();
+					}
+				});
+				try {
+					await tallow.session.prompt(prompt);
+					if (!sawAgentEnd) {
+						await Promise.race([
+							agentEndPromise,
+							new Promise<void>((resolve) => {
+								setTimeout(resolve, 25);
+							}),
+						]);
+						await Promise.resolve();
+					}
+				} finally {
+					unsub();
 				}
+				return events;
 			});
-			try {
-				await tallow.session.prompt(prompt);
-				if (!sawAgentEnd) {
-					await Promise.race([
-						agentEndPromise,
-						new Promise<void>((resolve) => {
-							setTimeout(resolve, 25);
-						}),
-					]);
-					await Promise.resolve();
-				}
-			} finally {
-				unsub();
-			}
-			return events;
 		};
 
 		const dispose = () => {
