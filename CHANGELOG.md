@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.16](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.15...tallow-v0.8.16) (2026-03-05)
+
+
+### Fixed
+
+* **tui:** guard image width math in narrow panes ([4b8f9a0](https://github.com/dungle-scrubs/tallow/commit/4b8f9a030aa9ab8af5aab82d0c218c162dcaf5d2))
+* **tui:** improve terminal image layout quantization ([81fbc27](https://github.com/dungle-scrubs/tallow/commit/81fbc2785fb13b69fc309301cbedf4a22920ceb0))
+
+
+### Maintenance
+
+* **context-budget:** tolerate planner-unavailable fallback batch sizes ([b2479f4](https://github.com/dungle-scrubs/tallow/commit/b2479f45392e223cf5019c28ef95b88f49ba61a7))
+* **deps:** bump pi-* dependencies ([3b19fa0](https://github.com/dungle-scrubs/tallow/commit/3b19fa088328329b28b7439e2a3c0100867f0285))
+* **runner:** serialize prompt execution across integration sessions ([08d77a8](https://github.com/dungle-scrubs/tallow/commit/08d77a8604d6c51ef7c6ca05c314712d25484c68))
+* **runner:** serialize TALLOW_HOME mutation across concurrent sessions ([7cdfb65](https://github.com/dungle-scrubs/tallow/commit/7cdfb6507b73b616384a015047aeba8fbb450385))
+* **runner:** wait for session_start handlers before first prompt ([1fe50f1](https://github.com/dungle-scrubs/tallow/commit/1fe50f16a192ab975fd8775cc47e8b7b345a3b08))
+* **tui:** deduplicate terminal capability env test helper ([ef0fc78](https://github.com/dungle-scrubs/tallow/commit/ef0fc785067bb62fd4e17da0128efee43b36e1ab))
+* **tui:** move capability env helper to test-utils ([b336116](https://github.com/dungle-scrubs/tallow/commit/b336116c6dbdf29791ed5bf4ce26c000b6b8dee2))
+* **utils:** wait for agent_end before unsubscribing runner ([350c848](https://github.com/dungle-scrubs/tallow/commit/350c8486e2973a94f6af315a8d248108116a3bcc))
+
 ## [0.8.15](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.14...tallow-v0.8.15) (2026-03-05)
 
 
