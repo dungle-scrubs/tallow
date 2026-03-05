@@ -114,12 +114,36 @@ export class SessionRunner {
 	 */
 	async run(prompt: string): Promise<RunResult> {
 		const events: AgentSessionEvent[] = [];
+		let resolveAgentEnd: (() => void) | undefined;
+		let sawAgentEnd = false;
+		const agentEndPromise = new Promise<void>((resolve) => {
+			resolveAgentEnd = () => {
+				if (sawAgentEnd) return;
+				sawAgentEnd = true;
+				resolve();
+			};
+		});
 		const unsub = this._tallowSession.session.subscribe((event) => {
 			events.push(event);
+			if (event.type === "agent_end") {
+				resolveAgentEnd?.();
+			}
 		});
 
 		try {
 			await this._tallowSession.session.prompt(prompt);
+			// On slower CI runners, prompt() can resolve before the final lifecycle
+			// event dispatch flushes. Wait briefly for `agent_end` so tests see a
+			// complete event sequence deterministically.
+			if (!sawAgentEnd) {
+				await Promise.race([
+					agentEndPromise,
+					new Promise<void>((resolve) => {
+						setTimeout(resolve, 25);
+					}),
+				]);
+				await Promise.resolve();
+			}
 		} finally {
 			unsub();
 		}
