@@ -15,7 +15,7 @@ layout. This guide is about compatibility first, migration second.
 | `.claude/commands/` | ✅ | Loaded by `command-prompt` (project root + user home). |
 | `.claude/skills/` | ✅ | Loaded via `claude-bridge` + `skill-commands`. |
 | `.claude/agents/` | ✅ | Loaded by `subagent-tool`, `agent-commands-tool`, and `context-fork`. |
-| `.claude/rules/*.md` | ✅ | Loaded by `context-files` (root and nested `.claude/rules/`). |
+| `.claude/rules/*.md` | ✅ | Loaded by `context-files` (root and nested `.claude/rules/`). Supports both `path` and `paths` frontmatter. |
 | Name collision behavior | ✅ | `.tallow/` wins over `.claude/` for commands/skills/agents with the same name. |
 
 ## AGENTS.md vs CLAUDE.md
@@ -48,6 +48,25 @@ Where behavior diverges in tallow today:
 
 If you want cross-tool files to behave the same, keep shared frontmatter
 minimal and test the behavior in both CLIs.
+
+## Rules frontmatter compatibility (`path` and `paths`)
+
+Rule files in `.claude/rules/` and `.tallow/rules/` share the same scope
+frontmatter behavior.
+
+Supported variants:
+
+- `paths:` list of one or more glob patterns
+- `path:` single glob pattern (Claude-style shorthand)
+
+Activation semantics in both directories:
+
+- no `path`/`paths` frontmatter → rule is unconditional
+- with `path` or `paths` → rule activates only when the agent reads, edits,
+  or writes a matching file path
+
+This means you can move the same rule between `.claude/rules/` and
+`.tallow/rules/` without rewriting scope metadata.
 
 ## Hooks: compatible shape, different event keys
 

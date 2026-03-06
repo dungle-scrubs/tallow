@@ -1,12 +1,15 @@
 ---
 title: context-files
-description: Load both CLAUDE.md and AGENTS.md files, including from subdirectories.
+description: Load CLAUDE.md/AGENTS.md and modular rules from .tallow/.claude, including nested directories.
 ---
 
 Supplements pi's native context file loading so that **both**
 `CLAUDE.md` and `AGENTS.md` are loaded when they coexist in
 the same directory, and context files in **subdirectories** are
 picked up too.
+
+It also loads modular rule files from `.tallow/rules/`,
+`.claude/rules/`, and `~/.tallow/rules/`.
 
 ## The problem
 
@@ -20,6 +23,8 @@ This is a problem when:
   `CLAUDE.md` for Claude-specific guidance)
 - Subdirectories have their own context files (monorepo packages,
   service directories)
+- You want reusable modular rules in `.tallow/rules/` or
+  `.claude/rules/`
 
 ## What it adds
 
@@ -28,6 +33,54 @@ This is a problem when:
 | `~/.tallow/` | `AGENTS.md` | `CLAUDE.md` (if both exist) |
 | Ancestor dirs → cwd | One file per dir | The other file that was skipped |
 | Subdirectories | Nothing | Both `CLAUDE.md` and `AGENTS.md` |
+| Rules directories | Nothing | `.md`/`.txt` rules from `~/.tallow/rules/`, `.tallow/rules/`, `.claude/rules/`, and nested subdirectory rule dirs |
+
+## Rule directory compatibility
+
+Rule files are portable across both project conventions:
+
+- `.tallow/rules/` (tallow-native)
+- `.claude/rules/` (Claude Code compatibility)
+- `~/.tallow/rules/` (user-global defaults)
+
+The same rule file frontmatter works in `.tallow/rules/` and
+`.claude/rules/`.
+
+## Path-scoped frontmatter (`paths` and `path`)
+
+Rules support two equivalent frontmatter variants:
+
+- `paths`: array of one or more glob patterns
+- `path`: single-pattern shorthand (Claude-compatible)
+
+Activation semantics:
+
+- No `path`/`paths` frontmatter → rule is unconditional and always injected
+- `path` or `paths` frontmatter → rule activates only when the agent reads,
+  edits, or writes at least one matching file path
+
+Example (`paths`):
+
+```markdown
+---
+paths:
+  - "src/api/**/*.ts"
+  - "src/middleware/**/*.ts"
+---
+# API Rules
+- Validate input with Zod
+- Use standard error envelope
+```
+
+Example (`path`):
+
+```markdown
+---
+path: "apps/web/**/*.tsx"
+---
+# Frontend Rules
+- Keep components server-first
+```
 
 ## Priority order
 
@@ -38,6 +91,7 @@ most specific:
 2. **Ancestors**, farthest directory first, walking toward cwd
 3. **Current directory**, the skipped file in cwd
 4. **Subdirectories**, sorted by depth, then alphabetically
+5. **Rules**, from rule directories and nested subdirectory rule dirs
 
 ## Skipped directories
 

@@ -205,9 +205,10 @@ extension scans three directories: `~/.tallow/rules/` (user global),
 and `.txt` files are discovered and injected into the system prompt at session
 start, alongside `AGENTS.md` / `CLAUDE.md` content.
 
-**Remaining: path-scoped rules.** Rules with `paths:` YAML frontmatter that
-only inject when the agent reads or edits matching files. This keeps context
-lean: API conventions don't pollute frontend work and vice versa.
+**Shipped: path-scoped rules.** Rules with `paths:` (multi-pattern) or
+`path:` (single-pattern shorthand, Claude-compatible) YAML frontmatter only
+inject when the agent reads, edits, or writes matching files. This keeps context lean:
+API conventions don't pollute frontend work and vice versa.
 
 ```markdown
 ---
@@ -221,15 +222,14 @@ paths:
 - Include OpenAPI JSDoc on every handler
 ```
 
-Also remaining: `/rules` command to list loaded rules with scope and path
-filters, `/rules:add` to create a new rule file, recursive subdirectory
-scanning.
+Still planned: `/rules` command to list loaded rules with scope and path
+filters, and `/rules:add` to create new rule files.
 
   </div>
   <div class="roadmap-meta">
     <span class="roadmap-meta-item"><strong>Extension:</strong> context-files</span>
     <span class="roadmap-meta-item"><strong>Scopes:</strong> ~/.tallow/rules/, .tallow/rules/, .claude/rules/</span>
-    <span class="roadmap-meta-item"><strong>Shipped:</strong> Unconditional rules scanning and injection</span>
+    <span class="roadmap-meta-item"><strong>Shipped:</strong> Unconditional + path-scoped rule loading (`paths`/`path`) across .tallow and .claude rules directories</span>
   </div>
 </div>
 
