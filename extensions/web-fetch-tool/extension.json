@@ -1,7 +1,7 @@
 {
 	"name": "web-fetch-tool",
 	"version": "0.1.0",
-	"description": "Fetch web content with optional Firecrawl fallback for large pages",
+	"description": "Fetch web content with optional dendrite-scraper fallback for bot-guarded or JS-heavy pages",
 	"whenToUse": "Use when the model needs to fetch and read a specific web page.",
 	"capabilities": {
 		"tools": ["web_fetch"]
@@ -10,10 +10,10 @@
 		"filesystem": "none",
 		"shell": false,
 		"network": true,
-		"subprocess": false
+		"subprocess": true
 	},
 	"category": "tool",
-	"tags": ["web", "fetch", "firecrawl"],
+	"tags": ["web", "fetch", "dendrite-scraper"],
 	"files": ["index.ts"],
 	"relationships": [],
 	"npmDependencies": {}
