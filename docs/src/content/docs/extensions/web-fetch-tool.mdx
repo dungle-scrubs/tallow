@@ -1,11 +1,11 @@
 ---
 title: web-fetch-tool
-description: "Fetch web content with context-budget-aware output caps"
+description: "Fetch web content with context-budget-aware output caps and optional dendrite fallback"
 ---
 
 `web_fetch` retrieves a URL over HTTP and returns text output.
 
-The tool now uses **context-budget-aware caps** so a large fetch does not blow up a single turn.
+The tool uses **context-budget-aware caps** so a large fetch does not blow up a single turn. When direct HTTP fetches hit a bot wall or JS-only shell, it can fall back to the published `dendrite-scraper` CLI.
 
 ## Parameters
 
@@ -30,6 +30,21 @@ Rules:
 - Planner envelopes can reduce output further for safety.
 - Unknown usage states use conservative fallback caps.
 
+## Dendrite fallback
+
+Fallback is only attempted for `text`/`markdown` requests when plain HTTP is likely useless:
+
+- fetch errors
+- retryable HTTP statuses like `403`, `429`, or `503`
+- HTML shells that look like Cloudflare, CAPTCHA, or JavaScript-required pages
+
+Command resolution is:
+
+1. `dendrite-scraper scrape <url>`
+2. `uvx --from dendrite-scraper dendrite-scraper scrape <url>`
+
+That means tallow can use the **published package**. You do not need a local checkout. Install it directly or let `uvx` run it on demand.
+
 ## Default policy values
 
 | Setting | Default |
@@ -46,8 +61,12 @@ Rules:
 - `budgetLimited`
 - `budgetReason`
 - `batchSize`
+- `backend`
+- `fallbackReason`
+- `fallbackCommand`
+- `source`
 
-These make it clear why truncation happened and whether a planner envelope was applied.
+These make it clear why truncation happened, whether a planner envelope was applied, and when dendrite handled the fetch instead of plain HTTP.
 
 ## When to use
 

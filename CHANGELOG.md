@@ -65,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ingestion-time tool-result truncation, and deterministic unknown-usage fallback
 - **web-fetch-tool:** adaptive `maxBytes` resolution from planner envelopes,
   policy bounds, and user-specified hard upper bounds
+- **web-fetch-tool:** optional `dendrite-scraper` CLI fallback for bot-guarded,
+  JS-heavy, or retryable-error pages via the published package or `uvx`
 - **integration:** context-budget guard integration coverage for batched
   `web_fetch` calls and envelope lifecycle reset between turns
 - **context-files:** path-scoped rules in `.tallow/rules/` and `.claude/rules/`
