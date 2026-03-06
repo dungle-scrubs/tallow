@@ -67,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   policy bounds, and user-specified hard upper bounds
 - **integration:** context-budget guard integration coverage for batched
   `web_fetch` calls and envelope lifecycle reset between turns
+- **context-files:** path-scoped rules in `.tallow/rules/` and `.claude/rules/`
+  via `paths`/`path` frontmatter, activated by read/edit/write file activity
 
 ### Changed
 
@@ -84,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **context-usage:** document `contextBudget` settings and budget signal semantics
 - **web-fetch-tool:** document adaptive cap rules, fallback behavior, and
   diagnostic detail fields
+- **context-files:** document path-scoped rules compatibility across
+  `.tallow/rules/` and `.claude/rules/`, including `paths`/`path`
+  frontmatter activation semantics
 
 ## [0.8.14](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.13...tallow-v0.8.14) (2026-02-26)
 
