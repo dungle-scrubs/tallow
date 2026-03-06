@@ -14,6 +14,9 @@ interface SessionLike {
 
 interface InteractiveModeInstanceLike {
 	compactionQueuedMessages?: Array<unknown>;
+	createExtensionUIContext?:
+		| ((...args: unknown[]) => { notify?: ((...args: unknown[]) => unknown) | undefined })
+		| undefined;
 	defaultEditor?: { onEscape?: (() => void) | undefined };
 	flushPendingBashComponents?: (() => void) | undefined;
 	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
@@ -34,8 +37,12 @@ interface AssistantMessageLike {
 }
 
 interface InteractiveModeEventLike {
+	aborted?: boolean;
+	errorMessage?: string;
 	message?: AssistantMessageLike;
+	result?: unknown;
 	type?: string;
+	willRetry?: boolean;
 }
 
 interface InteractiveModePrototypeLike {
@@ -103,6 +110,34 @@ const OVERFLOW_ERROR_PATTERNS = [
 	/token limit exceeded/i,
 ] as const;
 
+/** UI-visible overflow summary appended when suppressing noisy provider payloads. */
+const OVERFLOW_VISIBLE_INDICATOR_TEXT =
+	"⚠️ Context overflow detected. Attempting auto-compaction recovery.";
+
+/** Warning shown when auto-compaction promised retry but no continuation started. */
+const COMPACTION_RETRY_STALLED_WARNING_TEXT =
+	"Auto-compaction completed, but continuation did not start. Retry your last request, run /compact, or resend a shorter message.";
+
+/** Warning shown when auto-compaction ended without result/error/abort signal. */
+const AMBIGUOUS_COMPACTION_END_WARNING_TEXT =
+	"Auto-compaction ended without a clear result. Retry your last request, run /compact, or resend your message after reducing context.";
+
+/** Retry liveness timeout after auto_compaction_end before warning the user. */
+const COMPACTION_RETRY_WATCHDOG_TIMEOUT_MS = 2_500;
+
+const CONTINUATION_SIGNAL_EVENT_TYPES = new Set([
+	"agent_start",
+	"auto_retry_start",
+	"message_start",
+	"tool_execution_start",
+	"turn_start",
+]);
+
+const compactionRetryWatchdogTimers = new WeakMap<
+	InteractiveModeInstanceLike,
+	ReturnType<typeof setTimeout>
+>();
+
 /**
  * Returns whether assistant content includes tool calls.
  *
@@ -135,12 +170,114 @@ function isContextOverflowErrorMessage(errorMessage: string): boolean {
 }
 
 /**
+ * Returns content blocks with a concise overflow indicator appended exactly once.
+ *
+ * @param content - Assistant content blocks to clone/augment
+ * @returns Cloned content blocks including visible overflow context
+ */
+function withOverflowIndicatorContent(content: unknown[] | undefined): unknown[] {
+	const blocks = Array.isArray(content) ? [...content] : [];
+	const alreadyAnnotated = blocks.some((block) => {
+		if (!block || typeof block !== "object") return false;
+		if ((block as { type?: unknown }).type !== "text") return false;
+		const text = (block as { text?: unknown }).text;
+		return typeof text === "string" && text.includes("Context overflow detected");
+	});
+	if (alreadyAnnotated) {
+		return blocks;
+	}
+	blocks.push({
+		text: OVERFLOW_VISIBLE_INDICATOR_TEXT,
+		type: "text",
+	});
+	return blocks;
+}
+
+/**
+ * Emits a user-facing notification via the extension UI context when available.
+ *
+ * @param mode - Interactive mode instance
+ * @param message - Notification text
+ * @param type - Notification severity
+ * @returns Nothing
+ */
+function notifyFromInteractiveMode(
+	mode: InteractiveModeInstanceLike,
+	message: string,
+	type: "info" | "warning" | "error"
+): void {
+	const createContext = mode.createExtensionUIContext;
+	if (typeof createContext !== "function") return;
+	const context = createContext.call(mode);
+	const notify = context?.notify;
+	if (typeof notify !== "function") return;
+	notify(message, type);
+}
+
+/**
+ * Clears the liveness watchdog timer for an interactive mode instance.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function clearCompactionRetryWatchdog(mode: InteractiveModeInstanceLike): void {
+	const timer = compactionRetryWatchdogTimers.get(mode);
+	if (!timer) return;
+	clearTimeout(timer);
+	compactionRetryWatchdogTimers.delete(mode);
+}
+
+/**
+ * Arms a retry-liveness watchdog after auto_compaction_end with willRetry=true.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function armCompactionRetryWatchdog(mode: InteractiveModeInstanceLike): void {
+	clearCompactionRetryWatchdog(mode);
+	const timer = setTimeout(() => {
+		compactionRetryWatchdogTimers.delete(mode);
+		notifyFromInteractiveMode(mode, COMPACTION_RETRY_STALLED_WARNING_TEXT, "warning");
+	}, COMPACTION_RETRY_WATCHDOG_TIMEOUT_MS);
+	compactionRetryWatchdogTimers.set(mode, timer);
+}
+
+/**
+ * Returns whether an event indicates compaction continuation has started.
+ *
+ * @param event - Interactive mode event
+ * @returns True when the event means retry/continuation is alive
+ */
+function isCompactionContinuationSignal(event: InteractiveModeEventLike): boolean {
+	if (typeof event.type !== "string") return false;
+	return CONTINUATION_SIGNAL_EVENT_TYPES.has(event.type);
+}
+
+/**
+ * Returns whether auto_compaction_end finished without result, abort, or error.
+ *
+ * @param event - Interactive mode event
+ * @returns True when the compaction end state is ambiguous to users
+ */
+function isAmbiguousCompactionEndState(event: InteractiveModeEventLike): boolean {
+	if (event.type !== "auto_compaction_end") return false;
+	if (event.willRetry === true) return false;
+	if (event.aborted === true) return false;
+	if (event.result !== null && event.result !== undefined) return false;
+	if (typeof event.errorMessage === "string" && event.errorMessage.trim().length > 0) return false;
+	return true;
+}
+
+/**
  * Returns an event payload with overflow assistant error text suppressed for UI rendering.
  *
  * For overflow+auto-compaction, the dedicated loader line already communicates
  * state (`Context overflow detected, Auto-compacting...`). Showing an extra
  * assistant error line is redundant and noisy, especially for serialized JSON
  * payloads (for example `Codex error: {...}`).
+ *
+ * Instead of a raw provider payload, a concise overflow indicator is appended
+ * so the final assistant render is still visibly diagnosable.
  *
  * The original event/message object must stay untouched: AgentSession keeps
  * using the same references for persistence and overflow-triggered compaction
@@ -164,11 +301,13 @@ function suppressOverflowAssistantErrorLine(
 	if (hasToolCalls(message.content)) return event;
 
 	// Change stopReason for UI rendering only so assistant-message component
-	// does not inject `Error: <payload>`. Auto-compaction status remains visible.
+	// does not inject `Error: <payload>`. A concise text indicator keeps the
+	// overflow state visible even when thinking blocks are hidden.
 	return {
 		...event,
 		message: {
 			...message,
+			content: withOverflowIndicatorContent(message.content),
 			errorMessage: undefined,
 			stopReason: "stop",
 		},
@@ -180,6 +319,9 @@ function suppressOverflowAssistantErrorLine(
  *
  * The patch adds:
  * - overflow error suppression before auto-compaction loader rendering
+ * - visible overflow indicators (instead of silent hidden-thinking terminal state)
+ * - retry liveness watchdog after auto-compaction retry handoff
+ * - warning path for ambiguous auto-compaction terminal states
  * - agent_end cleanup for pending working messages + pending-message refresh
  * - post-bash flush/update so deferred bash output moves inline promptly
  * - idle Escape behavior that clears queued steering/follow-up messages
@@ -199,10 +341,27 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			this: InteractiveModeInstanceLike,
 			event: InteractiveModeEventLike
 		) {
+			if (event?.type === "auto_compaction_start" || isCompactionContinuationSignal(event)) {
+				clearCompactionRetryWatchdog(this);
+			}
+
 			// Keep AgentSession event references immutable for persistence/compaction checks.
 			const uiEvent = suppressOverflowAssistantErrorLine(event, this.session);
 			const result = await originalHandleEvent.call(this, uiEvent);
+
+			if (event?.type === "auto_compaction_end") {
+				if (event.willRetry === true) {
+					armCompactionRetryWatchdog(this);
+				} else {
+					clearCompactionRetryWatchdog(this);
+				}
+				if (isAmbiguousCompactionEndState(event)) {
+					notifyFromInteractiveMode(this, AMBIGUOUS_COMPACTION_END_WARNING_TEXT, "warning");
+				}
+			}
+
 			if (event?.type === "agent_end") {
+				clearCompactionRetryWatchdog(this);
 				this.pendingWorkingMessage = undefined;
 				// NOTE: Do NOT clear statusContainer here — the original framework
 				// guards this behind `if (this.loadingAnimation)`. Unconditionally
