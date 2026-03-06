@@ -7,6 +7,7 @@ import weztermPaneControl, {
 	filterPanesToCurrentTab,
 	hasExplicitPaneRequest,
 	isPaneCreatingAction,
+	unescapeText,
 	type WeztermCliResult,
 	type WeztermPaneInfo,
 } from "../index.js";
@@ -301,5 +302,99 @@ describe("executeWeztermAction", () => {
 
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("pane not found");
+	});
+
+	it("send_text unescapes \\n and uses --no-paste", () => {
+		let capturedArgs: readonly string[] = [];
+		const result = executeWeztermAction(
+			{ action: "send_text", text: "pnpm dev\\n" },
+			{
+				currentPaneId: 18,
+				runCli: (args) => {
+					capturedArgs = args;
+					return cli("");
+				},
+			}
+		);
+
+		expect(result.isError).toBeUndefined();
+		expect(capturedArgs).toEqual(["send-text", "--no-paste", "--pane-id", "18", "pnpm dev\n"]);
+	});
+
+	it("send_text unescapes hex escapes like \\x03 (Ctrl-C)", () => {
+		let capturedArgs: readonly string[] = [];
+		executeWeztermAction(
+			{ action: "send_text", text: "\\x03" },
+			{
+				currentPaneId: 18,
+				runCli: (args) => {
+					capturedArgs = args;
+					return cli("");
+				},
+			}
+		);
+
+		expect(capturedArgs).toEqual(["send-text", "--no-paste", "--pane-id", "18", "\x03"]);
+	});
+
+	it("send_text preserves literal backslashes via \\\\", () => {
+		let capturedArgs: readonly string[] = [];
+		executeWeztermAction(
+			{ action: "send_text", text: "echo \\\\n" },
+			{
+				currentPaneId: 18,
+				runCli: (args) => {
+					capturedArgs = args;
+					return cli("");
+				},
+			}
+		);
+
+		// \\n → literal backslash followed by 'n' (not a newline)
+		expect(capturedArgs[4]).toBe("echo \\n");
+	});
+});
+
+describe("unescapeText", () => {
+	it("converts \\n to newline", () => {
+		expect(unescapeText("hello\\n")).toBe("hello\n");
+	});
+
+	it("converts \\t to tab", () => {
+		expect(unescapeText("col1\\tcol2")).toBe("col1\tcol2");
+	});
+
+	it("converts \\r to carriage return", () => {
+		expect(unescapeText("line\\r")).toBe("line\r");
+	});
+
+	it("converts \\xNN hex escapes", () => {
+		expect(unescapeText("\\x03")).toBe("\x03");
+		expect(unescapeText("\\x1b")).toBe("\x1b");
+		expect(unescapeText("\\x41")).toBe("A");
+	});
+
+	it("converts \\\\\\\\ to literal backslash", () => {
+		expect(unescapeText("\\\\")).toBe("\\");
+	});
+
+	it("preserves \\\\ before escape chars: \\\\n → literal backslash + n", () => {
+		expect(unescapeText("\\\\n")).toBe("\\n");
+	});
+
+	it("leaves unrecognized sequences untouched", () => {
+		expect(unescapeText("hello\\z world")).toBe("hello\\z world");
+	});
+
+	it("handles multiple escapes in one string", () => {
+		expect(unescapeText("cd /tmp\\n\\nls -la\\n")).toBe("cd /tmp\n\nls -la\n");
+	});
+
+	it("returns empty string unchanged", () => {
+		expect(unescapeText("")).toBe("");
+	});
+
+	it("returns plain text unchanged", () => {
+		expect(unescapeText("no escapes here")).toBe("no escapes here");
 	});
 });

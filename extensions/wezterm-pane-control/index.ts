@@ -387,6 +387,38 @@ export function formatPaneList(
 }
 
 /**
+ * Process common escape sequences in send_text payloads.
+ *
+ * LLM tool calls pass `\n` as literal backslash-n (two chars), not as an
+ * actual newline. This converts common escape sequences to their real
+ * character equivalents so `send_text` behaves as documented.
+ *
+ * Supported: `\n`, `\t`, `\r`, `\\`, `\xNN` (hex byte).
+ *
+ * @param text - Raw text from tool parameter
+ * @returns Text with escape sequences resolved
+ */
+export function unescapeText(text: string): string {
+	return text.replace(/\\(n|t|r|\\|x[0-9a-fA-F]{2})/g, (_match, seq: string) => {
+		switch (seq) {
+			case "n":
+				return "\n";
+			case "t":
+				return "\t";
+			case "r":
+				return "\r";
+			case "\\":
+				return "\\";
+			default:
+				if (seq.startsWith("x")) {
+					return String.fromCharCode(parseInt(seq.slice(1), 16));
+				}
+				return `\\${seq}`;
+		}
+	});
+}
+
+/**
  * Build a successful tool result.
  *
  * @param text - Primary output text
@@ -573,7 +605,18 @@ export function executeWeztermAction(params: WeztermPaneParams, deps: ExecuteDep
 					return fail("send_text requires non-empty text");
 				}
 				const targetPaneId = params.paneId ?? deps.currentPaneId;
-				runOrThrow(deps.runCli, ["send-text", "--pane-id", String(targetPaneId), params.text]);
+				const processedText = unescapeText(params.text);
+
+				// Use --no-paste so newlines are sent as Enter keypresses
+				// (bracketed paste would insert them as literal newlines in the
+				// shell's edit buffer without executing).
+				runOrThrow(deps.runCli, [
+					"send-text",
+					"--no-paste",
+					"--pane-id",
+					String(targetPaneId),
+					processedText,
+				]);
 				return ok(`✓ Sent text to pane ${targetPaneId}`, { paneId: targetPaneId });
 			}
 
