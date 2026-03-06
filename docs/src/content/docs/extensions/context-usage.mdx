@@ -11,6 +11,12 @@ The **context-usage** extension adds a `/context` command that shows how the act
 /context
 ```
 
+## Fresh-session behavior
+
+When usage is unknown (for example immediately after compaction or right after
+`/new`/`/clear`), `/context` shows the standard no-data warning instead of
+rendering a misleading `0 tokens` chart.
+
 ## Categories shown
 
 | Category | What it measures |
