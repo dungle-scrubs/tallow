@@ -2,6 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { patchInteractiveModePrototype } from "../interactive-mode-patch.js";
 
 interface FakeMessageContent {
+	text?: string;
+	thinking?: string;
 	type: string;
 }
 
@@ -13,8 +15,12 @@ interface FakeMessage {
 }
 
 interface FakeEvent {
+	aborted?: boolean;
+	errorMessage?: string;
 	message?: FakeMessage;
+	result?: unknown;
 	type?: string;
+	willRetry?: boolean;
 }
 
 class FakeInteractiveMode {
@@ -154,6 +160,36 @@ class FakeInteractiveMode {
 	}
 }
 
+/**
+ * Runs an async action with setTimeout forced to near-immediate callbacks.
+ *
+ * @param action - Action to execute under patched timers
+ * @returns Nothing
+ */
+async function withImmediateTimers(action: () => Promise<void>): Promise<void> {
+	const originalSetTimeout = globalThis.setTimeout;
+	globalThis.setTimeout = ((
+		callback: Parameters<typeof setTimeout>[0],
+		delay?: Parameters<typeof setTimeout>[1],
+		...args: unknown[]
+	) => {
+		return originalSetTimeout(
+			() => {
+				if (typeof callback === "function") {
+					callback(...args);
+				}
+			},
+			Math.min(typeof delay === "number" ? delay : 0, 5)
+		);
+	}) as typeof setTimeout;
+
+	try {
+		await action();
+	} finally {
+		globalThis.setTimeout = originalSetTimeout;
+	}
+}
+
 describe("patchInteractiveModePrototype", () => {
 	it("applies agent_end cleanup with bash flush before pending-message refresh", async () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
@@ -183,7 +219,7 @@ describe("patchInteractiveModePrototype", () => {
 		expect(flushCallIndex).toBeLessThan(updateCallIndex);
 	});
 
-	it("suppresses overflow message_end error payloads before render", async () => {
+	it("suppresses overflow payloads while keeping a visible overflow indicator", async () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 
 		const overflowPayloads = [
@@ -198,7 +234,7 @@ describe("patchInteractiveModePrototype", () => {
 			await mode.handleEvent({
 				type: "message_end",
 				message: {
-					content: [],
+					content: [{ thinking: "internal trace", type: "thinking" }],
 					errorMessage,
 					role: "assistant",
 					stopReason: "error",
@@ -207,6 +243,13 @@ describe("patchInteractiveModePrototype", () => {
 
 			expect(mode.lastHandledEvent?.message?.stopReason).toBe("stop");
 			expect(mode.lastHandledEvent?.message?.errorMessage).toBeUndefined();
+			const visibleTextBlocks = (mode.lastHandledEvent?.message?.content ?? []).filter(
+				(part) =>
+					part.type === "text" &&
+					typeof part.text === "string" &&
+					part.text.includes("Context overflow detected")
+			);
+			expect(visibleTextBlocks.length).toBeGreaterThan(0);
 		}
 	});
 
@@ -256,6 +299,63 @@ describe("patchInteractiveModePrototype", () => {
 			expect(mode.lastHandledEvent?.message?.stopReason).toBe("error");
 			expect(mode.lastHandledEvent?.message?.errorMessage).toBe(originalMessage);
 		}
+	});
+
+	it("warns when retry continuation does not start after auto-compaction end", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+
+		await withImmediateTimers(async () => {
+			const mode = new FakeInteractiveMode();
+			await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			const warning = mode.notifyCalls.find(
+				(call) => call.type === "warning" && call.message.includes("continuation did not start")
+			);
+			expect(warning).toBeDefined();
+		});
+	});
+
+	it("disarms retry watchdog when continuation starts", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+
+		await withImmediateTimers(async () => {
+			const mode = new FakeInteractiveMode();
+			await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+			await mode.handleEvent({ type: "message_start" });
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			const warning = mode.notifyCalls.find((call) =>
+				call.message.includes("continuation did not start")
+			);
+			expect(warning).toBeUndefined();
+		});
+	});
+
+	it("warns on ambiguous auto-compaction terminal states", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleEvent({ type: "auto_compaction_end" });
+
+		const warning = mode.notifyCalls.find(
+			(call) => call.type === "warning" && call.message.includes("without a clear result")
+		);
+		expect(warning).toBeDefined();
+	});
+
+	it("does not warn on non-ambiguous auto-compaction terminal states", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleEvent({ result: { summary: "ok" }, type: "auto_compaction_end" });
+		await mode.handleEvent({ aborted: true, type: "auto_compaction_end" });
+		await mode.handleEvent({ errorMessage: "quota exceeded", type: "auto_compaction_end" });
+
+		const warning = mode.notifyCalls.find((call) =>
+			call.message.includes("without a clear result")
+		);
+		expect(warning).toBeUndefined();
 	});
 
 	it("flushes deferred bash output after wrapped handleBashCommand and refreshes UI", async () => {
