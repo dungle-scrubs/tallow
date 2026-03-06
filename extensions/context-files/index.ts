@@ -17,6 +17,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
@@ -46,6 +47,46 @@ interface ContextFile {
 	readonly content: string;
 	readonly source: "global" | "ancestor" | "cwd" | "subdirectory" | "additional";
 	readonly depth: number;
+}
+
+interface ScopedRuleFile extends ContextFile {
+	readonly patterns: readonly string[];
+}
+
+interface DiscoveryResult {
+	readonly contextFiles: ContextFile[];
+	readonly scopedRuleFiles: ScopedRuleFile[];
+	readonly warnings: string[];
+}
+
+interface RuleFrontmatter {
+	readonly path?: unknown;
+	readonly paths?: unknown;
+	readonly [key: string]: unknown;
+}
+
+interface ParsedRuleMetadata {
+	readonly content: string;
+	readonly patterns?: readonly string[];
+	readonly warning?: string;
+}
+
+const RULE_TRIGGER_TOOLS = new Set(["read", "edit", "write"]);
+
+/**
+ * Read and alphabetically sort a directory's entries for deterministic traversal.
+ *
+ * @param dir - Directory path to scan
+ * @returns Sorted directory entries, or an empty array when unreadable
+ */
+function getSortedDirEntries(dir: string): fs.Dirent[] {
+	try {
+		return fs
+			.readdirSync(dir, { withFileTypes: true })
+			.sort((a, b) => a.name.localeCompare(b.name));
+	} catch {
+		return [];
+	}
 }
 
 /** Check which context filenames exist in a directory */
@@ -81,14 +122,7 @@ function findSubdirContextFiles(baseDir: string, maxDepth: number = 5): string[]
 	function walk(dir: string, depth: number): void {
 		if (depth > maxDepth) return;
 
-		let entries: fs.Dirent[];
-		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
-		} catch {
-			return;
-		}
-
-		for (const entry of entries) {
+		for (const entry of getSortedDirEntries(dir)) {
 			if (entry.isDirectory()) {
 				if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
 				const subdir = path.join(dir, entry.name);
@@ -127,14 +161,7 @@ function findSubdirRuleFiles(baseDir: string, maxDepth: number = 5): string[] {
 	function walk(dir: string, depth: number): void {
 		if (depth > maxDepth) return;
 
-		let entries: fs.Dirent[];
-		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
-		} catch {
-			return;
-		}
-
-		for (const entry of entries) {
+		for (const entry of getSortedDirEntries(dir)) {
 			if (!entry.isDirectory()) continue;
 			if (SKIP_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
 
@@ -156,6 +183,142 @@ function findSubdirRuleFiles(baseDir: string, maxDepth: number = 5): string[] {
 }
 
 /**
+ * Normalize a path string to POSIX separators.
+ *
+ * @param value - Path to normalize
+ * @returns Path using `/` separators
+ */
+function toPosixPath(value: string): string {
+	return value.replace(/\\/g, "/");
+}
+
+/**
+ * Determine whether a file is a modular rule file from .tallow/.claude rules dirs.
+ *
+ * @param filepath - Absolute or relative file path
+ * @returns True when the path points into `.tallow/rules` or `.claude/rules`
+ */
+function isRuleFile(filepath: string): boolean {
+	const normalized = toPosixPath(path.resolve(filepath));
+	return normalized.includes("/.tallow/rules/") || normalized.includes("/.claude/rules/");
+}
+
+/**
+ * Normalize a single rule glob pattern.
+ *
+ * @param pattern - Raw glob pattern from frontmatter
+ * @returns Normalized pattern with POSIX separators and no `./` prefix
+ */
+function normalizeRulePattern(pattern: string): string {
+	const trimmed = pattern.trim();
+	const withoutDotPrefix = trimmed.startsWith("./") ? trimmed.slice(2) : trimmed;
+	return toPosixPath(withoutDotPrefix);
+}
+
+/**
+ * Parse and normalize `path`/`paths` frontmatter into a deterministic pattern list.
+ *
+ * @param value - Raw frontmatter value for `path` or `paths`
+ * @returns Normalized pattern array, or null when invalid
+ */
+function normalizeRulePatterns(value: unknown): readonly string[] | null {
+	const rawPatterns: unknown[] =
+		typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+	if (rawPatterns.length === 0) return null;
+
+	const patterns: string[] = [];
+	for (const rawPattern of rawPatterns) {
+		if (typeof rawPattern !== "string") {
+			return null;
+		}
+		const normalized = normalizeRulePattern(rawPattern);
+		if (normalized.length === 0) {
+			return null;
+		}
+		patterns.push(normalized);
+	}
+
+	return [...new Set(patterns)];
+}
+
+/**
+ * Parse rule frontmatter and derive optional path-scoping metadata.
+ *
+ * Invalid frontmatter does not fail discovery. Rules fall back to unconditional
+ * behavior and emit a warning for deterministic compatibility.
+ *
+ * @param content - Raw rule file content
+ * @param filepath - Rule file path for warning context
+ * @returns Parsed rule body, optional patterns, and optional warning
+ */
+function parseRuleMetadata(content: string, filepath: string): ParsedRuleMetadata {
+	try {
+		const { frontmatter, body } = parseFrontmatter<RuleFrontmatter>(content);
+		const rawPatterns = frontmatter.paths ?? frontmatter.path;
+		if (rawPatterns === undefined) {
+			return { content: body };
+		}
+
+		const patterns = normalizeRulePatterns(rawPatterns);
+		if (!patterns) {
+			return {
+				content: body,
+				warning:
+					`context-files: invalid path frontmatter in ${shortenPath(filepath)}; ` +
+					"expected `path` (string) or `paths` (string|string[]). " +
+					"Falling back to unconditional rule.",
+			};
+		}
+
+		return {
+			content: body,
+			patterns,
+		};
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return {
+			content,
+			warning:
+				`context-files: failed to parse frontmatter in ${shortenPath(filepath)}: ${message}. ` +
+				"Falling back to unconditional rule.",
+		};
+	}
+}
+
+/**
+ * Add a discovered file to unconditional context or scoped rules, depending on metadata.
+ *
+ * @param contextFiles - Mutable unconditional context file accumulator
+ * @param scopedRuleFiles - Mutable scoped rule accumulator
+ * @param warnings - Mutable warning accumulator
+ * @param file - Discovered file candidate
+ * @returns Nothing
+ */
+function addDiscoveredFile(
+	contextFiles: ContextFile[],
+	scopedRuleFiles: ScopedRuleFile[],
+	warnings: string[],
+	file: ContextFile
+): void {
+	if (!isRuleFile(file.filepath)) {
+		contextFiles.push(file);
+		return;
+	}
+
+	const parsed = parseRuleMetadata(file.content, file.filepath);
+	if (parsed.warning) {
+		warnings.push(parsed.warning);
+	}
+
+	if (parsed.patterns) {
+		scopedRuleFiles.push({ ...file, content: parsed.content, patterns: parsed.patterns });
+		return;
+	}
+
+	contextFiles.push({ ...file, content: parsed.content });
+}
+
+/**
  * Determine which files pi natively loaded.
  *
  * Pi loads AGENTS.md OR CLAUDE.md (preferring AGENTS.md) from:
@@ -164,9 +327,14 @@ function findSubdirRuleFiles(baseDir: string, maxDepth: number = 5): string[] {
  *   - cwd
  *
  * We load everything pi missed.
+ *
+ * @param cwd - Current working directory
+ * @returns Discovered unconditional context files, scoped rules, and warnings
  */
-function collectMissingFiles(cwd: string): ContextFile[] {
-	const files: ContextFile[] = [];
+function collectMissingFiles(cwd: string): DiscoveryResult {
+	const contextFiles: ContextFile[] = [];
+	const scopedRuleFiles: ScopedRuleFile[] = [];
+	const warnings: string[] = [];
 	const globalDir = getTallowHomeDir();
 
 	// --- Global level ---
@@ -184,7 +352,7 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 
 		const content = readFileSafe(filepath);
 		if (content) {
-			files.push({ filepath, content, source: "global", depth: 0 });
+			contextFiles.push({ filepath, content, source: "global", depth: 0 });
 		}
 	}
 
@@ -204,7 +372,7 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 			const content = readFileSafe(filepath);
 			if (content) {
 				const depth = filepath.split(path.sep).length;
-				files.push({ filepath, content, source: "ancestor", depth });
+				contextFiles.push({ filepath, content, source: "ancestor", depth });
 			}
 		}
 	}
@@ -220,7 +388,12 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 
 		const content = readFileSafe(filepath);
 		if (content) {
-			files.push({ filepath, content, source: "cwd", depth: filepath.split(path.sep).length });
+			contextFiles.push({
+				filepath,
+				content,
+				source: "cwd",
+				depth: filepath.split(path.sep).length,
+			});
 		}
 	}
 
@@ -230,7 +403,7 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 		const content = readFileSafe(filepath);
 		if (content) {
 			const depth = filepath.split(path.sep).length;
-			files.push({ filepath, content, source: "subdirectory", depth });
+			contextFiles.push({ filepath, content, source: "subdirectory", depth });
 		}
 	}
 
@@ -244,7 +417,12 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 		for (const filepath of findRuleFiles(rulesDir)) {
 			const content = readFileSafe(filepath);
 			if (content) {
-				files.push({ filepath, content, source: "cwd", depth: 0 });
+				addDiscoveredFile(contextFiles, scopedRuleFiles, warnings, {
+					filepath,
+					content,
+					source: "cwd",
+					depth: 0,
+				});
 			}
 		}
 	}
@@ -253,12 +431,16 @@ function collectMissingFiles(cwd: string): ContextFile[] {
 	for (const filepath of findSubdirRuleFiles(cwd)) {
 		const content = readFileSafe(filepath);
 		if (content) {
-			const depth = filepath.split(path.sep).length;
-			files.push({ filepath, content, source: "subdirectory", depth });
+			addDiscoveredFile(contextFiles, scopedRuleFiles, warnings, {
+				filepath,
+				content,
+				source: "subdirectory",
+				depth: filepath.split(path.sep).length,
+			});
 		}
 	}
 
-	return files;
+	return { contextFiles, scopedRuleFiles, warnings };
 }
 
 /**
@@ -442,16 +624,18 @@ function resolveDirPath(input: string): string {
  * subdirectory walk rules as the primary cwd scan.
  *
  * @param dir - Absolute path to the additional directory
- * @returns Context files found in the directory and its subdirectories
+ * @returns Unconditional context files, scoped rules, and warnings
  */
-function collectFromAdditionalDir(dir: string): ContextFile[] {
-	const files: ContextFile[] = [];
+function collectFromAdditionalDir(dir: string): DiscoveryResult {
+	const contextFiles: ContextFile[] = [];
+	const scopedRuleFiles: ScopedRuleFile[] = [];
+	const warnings: string[] = [];
 
 	// Direct context files in the directory root
 	for (const filepath of findContextFiles(dir)) {
 		const content = readFileSafe(filepath);
 		if (content) {
-			files.push({
+			contextFiles.push({
 				filepath,
 				content,
 				source: "additional",
@@ -464,7 +648,7 @@ function collectFromAdditionalDir(dir: string): ContextFile[] {
 	for (const filepath of findSubdirContextFiles(dir)) {
 		const content = readFileSafe(filepath);
 		if (content) {
-			files.push({
+			contextFiles.push({
 				filepath,
 				content,
 				source: "additional",
@@ -477,7 +661,7 @@ function collectFromAdditionalDir(dir: string): ContextFile[] {
 	for (const filepath of findSubdirRuleFiles(dir)) {
 		const content = readFileSafe(filepath);
 		if (content) {
-			files.push({
+			addDiscoveredFile(contextFiles, scopedRuleFiles, warnings, {
 				filepath,
 				content,
 				source: "additional",
@@ -486,72 +670,228 @@ function collectFromAdditionalDir(dir: string): ContextFile[] {
 		}
 	}
 
-	return files;
+	return { contextFiles, scopedRuleFiles, warnings };
 }
 
 export default function contextFilesExtension(pi: ExtensionAPI) {
 	let contextFiles: ContextFile[] = [];
 	let cwdContextFiles: ContextFile[] = [];
+	let scopedRuleFiles: ScopedRuleFile[] = [];
+	let cwdScopedRuleFiles: ScopedRuleFile[] = [];
+	let cwdWarnings: string[] = [];
+	let discoveryWarnings: string[] = [];
+	const activeScopedRuleFiles: Set<string> = new Set();
 	const additionalDirs: Set<string> = new Set();
 
 	/**
-	 * Re-scan all additional directories and merge results into contextFiles.
-	 * Preserves original cwd-based files and appends additional dir files
-	 * sorted alphabetically by directory path for deterministic order.
+	 * Re-scan all additional directories and merge results into discovered files.
+	 * Preserves original cwd-based ordering and appends additional-dir files in
+	 * sorted directory order for deterministic prompts.
 	 *
-	 * @param cwdFiles - Context files from the primary cwd scan
-	 * @returns Merged array with additional directory files appended
+	 * @param baseContextFiles - Context files from primary cwd scan
+	 * @param baseScopedRuleFiles - Scoped rule files from primary cwd scan
+	 * @returns Merged discovery result
 	 */
-	function mergeAdditionalDirFiles(cwdFiles: ContextFile[]): ContextFile[] {
-		if (additionalDirs.size === 0) return cwdFiles;
+	function mergeAdditionalDirFiles(
+		baseContextFiles: ContextFile[],
+		baseScopedRuleFiles: ScopedRuleFile[]
+	): DiscoveryResult {
+		if (additionalDirs.size === 0) {
+			return {
+				contextFiles: [...baseContextFiles],
+				scopedRuleFiles: [...baseScopedRuleFiles],
+				warnings: [],
+			};
+		}
 
-		const additionalFiles: ContextFile[] = [];
-		const seen = new Set(cwdFiles.map((f) => path.resolve(f.filepath)));
+		const mergedContextFiles = [...baseContextFiles];
+		const mergedScopedRuleFiles = [...baseScopedRuleFiles];
+		const warnings: string[] = [];
+		const seen = new Set([
+			...baseContextFiles.map((file) => path.resolve(file.filepath)),
+			...baseScopedRuleFiles.map((file) => path.resolve(file.filepath)),
+		]);
 
 		for (const dir of [...additionalDirs].sort()) {
-			for (const file of collectFromAdditionalDir(dir)) {
+			const discovered = collectFromAdditionalDir(dir);
+			warnings.push(...discovered.warnings);
+
+			for (const file of discovered.contextFiles) {
 				const resolved = path.resolve(file.filepath);
-				if (!seen.has(resolved)) {
-					seen.add(resolved);
-					additionalFiles.push(file);
-				}
+				if (seen.has(resolved)) continue;
+				seen.add(resolved);
+				mergedContextFiles.push(file);
+			}
+
+			for (const file of discovered.scopedRuleFiles) {
+				const resolved = path.resolve(file.filepath);
+				if (seen.has(resolved)) continue;
+				seen.add(resolved);
+				mergedScopedRuleFiles.push(file);
 			}
 		}
 
-		return [...cwdFiles, ...additionalFiles];
+		return {
+			contextFiles: mergedContextFiles,
+			scopedRuleFiles: mergedScopedRuleFiles,
+			warnings,
+		};
 	}
 
 	/**
-	 * Set the extension's active context file cache.
+	 * Set extension discovery caches for cwd + additional directories.
 	 *
-	 * @param cwdFiles - Files discovered from the primary cwd scan
+	 * @param baseContextFiles - Files discovered from primary cwd scan
+	 * @param baseScopedRuleFiles - Scoped rule files discovered from primary cwd scan
+	 * @param baseWarnings - Warnings produced by primary cwd discovery
 	 * @returns Nothing
 	 */
-	function setContextFiles(cwdFiles: ContextFile[]): void {
-		cwdContextFiles = [...cwdFiles];
-		contextFiles = mergeAdditionalDirFiles(cwdContextFiles);
+	function setDiscoveredFiles(
+		baseContextFiles: ContextFile[],
+		baseScopedRuleFiles: ScopedRuleFile[],
+		baseWarnings: string[]
+	): void {
+		cwdContextFiles = [...baseContextFiles];
+		cwdScopedRuleFiles = [...baseScopedRuleFiles];
+		cwdWarnings = [...baseWarnings];
+
+		const merged = mergeAdditionalDirFiles(cwdContextFiles, cwdScopedRuleFiles);
+		contextFiles = merged.contextFiles;
+		scopedRuleFiles = merged.scopedRuleFiles;
+		discoveryWarnings = [...cwdWarnings, ...merged.warnings];
+
+		const discoveredRuleIds = new Set(scopedRuleFiles.map((file) => path.resolve(file.filepath)));
+		for (const activeRuleId of [...activeScopedRuleFiles]) {
+			if (!discoveredRuleIds.has(activeRuleId)) {
+				activeScopedRuleFiles.delete(activeRuleId);
+			}
+		}
 	}
 
 	/**
-	 * Notify the user about discovered context files.
+	 * Show warnings emitted while parsing rule frontmatter.
+	 *
+	 * @param ctx - Extension context used for UI notifications
+	 * @param warnings - Warning messages to emit
+	 * @returns Nothing
+	 */
+	function notifyRuleWarnings(ctx: ExtensionContext, warnings: readonly string[]): void {
+		for (const warning of [...new Set(warnings)]) {
+			ctx.ui.notify(warning, "warning");
+		}
+	}
+
+	/**
+	 * Notify the user about discovered context/rule files.
 	 *
 	 * @param ctx - Extension context used for UI notifications
 	 * @returns Nothing
 	 */
 	function notifyDiscoveredContextFiles(ctx: ExtensionContext): void {
-		if (contextFiles.length === 0) return;
+		const discoveredFiles = [...contextFiles, ...scopedRuleFiles];
+		if (discoveredFiles.length === 0) return;
 
-		const label = contextFiles.length === 1 ? "context file" : "context files";
-		const paths = contextFiles.map((f) => shortenPath(f.filepath)).join(", ");
-		ctx.ui.notify(`context-files: +${contextFiles.length} ${label}: ${paths}`, "info");
+		const label = discoveredFiles.length === 1 ? "context file" : "context files";
+		const paths = discoveredFiles.map((file) => shortenPath(file.filepath)).join(", ");
+		ctx.ui.notify(`context-files: +${discoveredFiles.length} ${label}: ${paths}`, "info");
+	}
+
+	/**
+	 * Build the ordered file list to inject into the system prompt.
+	 *
+	 * Includes all unconditional context files and currently-activated scoped rules.
+	 *
+	 * @returns Files to include in prompt augmentation
+	 */
+	function getPromptFiles(): ContextFile[] {
+		if (activeScopedRuleFiles.size === 0) {
+			return contextFiles;
+		}
+
+		const activeRules = scopedRuleFiles.filter((file) =>
+			activeScopedRuleFiles.has(path.resolve(file.filepath))
+		);
+		return [...contextFiles, ...activeRules];
+	}
+
+	/**
+	 * Resolve a tool-observed file path to a cwd-relative POSIX path for matching.
+	 *
+	 * @param cwd - Current working directory
+	 * @param observedPath - Raw path from tool input
+	 * @returns Normalized relative path, or null when path is outside cwd
+	 */
+	function normalizeObservedToolPath(cwd: string, observedPath: string): string | null {
+		const resolved = path.resolve(cwd, observedPath);
+		const relative = path.relative(cwd, resolved);
+		if (relative.length === 0) {
+			return ".";
+		}
+		if (relative.startsWith("..") || path.isAbsolute(relative)) {
+			return null;
+		}
+		return toPosixPath(relative);
+	}
+
+	/**
+	 * Check whether a normalized relative path matches a rule glob pattern.
+	 *
+	 * @param relativePath - Cwd-relative POSIX path
+	 * @param pattern - Normalized rule pattern from frontmatter
+	 * @returns True when the path matches
+	 */
+	function matchesRulePattern(relativePath: string, pattern: string): boolean {
+		const candidate = pattern.startsWith("/") ? `/${relativePath}` : relativePath;
+		return path.posix.matchesGlob(candidate, pattern);
+	}
+
+	/**
+	 * Activate scoped rules that match an observed file path.
+	 *
+	 * @param relativePath - Cwd-relative POSIX file path
+	 * @returns Newly activated scoped rules in discovery order
+	 */
+	function activateScopedRules(relativePath: string): ScopedRuleFile[] {
+		const activated: ScopedRuleFile[] = [];
+
+		for (const ruleFile of scopedRuleFiles) {
+			const ruleId = path.resolve(ruleFile.filepath);
+			if (activeScopedRuleFiles.has(ruleId)) continue;
+
+			const isMatch = ruleFile.patterns.some((pattern) =>
+				matchesRulePattern(relativePath, pattern)
+			);
+			if (!isMatch) continue;
+
+			activeScopedRuleFiles.add(ruleId);
+			activated.push(ruleFile);
+		}
+
+		return activated;
+	}
+
+	/**
+	 * Extract candidate file paths from a tool input payload.
+	 *
+	 * @param input - Tool input payload
+	 * @returns Candidate file paths to evaluate
+	 */
+	function getToolInputPaths(input: Record<string, unknown>): string[] {
+		const inputPath = input.path;
+		if (typeof inputPath === "string") return [inputPath];
+		if (Array.isArray(inputPath)) {
+			return inputPath.filter((value): value is string => typeof value === "string");
+		}
+		return [];
 	}
 
 	const lazyScan = createLazyInitializer<ExtensionContext>({
 		name: "context-files",
 		initialize: async ({ context }) => {
 			const discovered = collectMissingFiles(context.cwd);
-			setContextFiles(discovered);
+			setDiscoveredFiles(discovered.contextFiles, discovered.scopedRuleFiles, discovered.warnings);
 			notifyDiscoveredContextFiles(context);
+			notifyRuleWarnings(context, discoveryWarnings);
 		},
 	});
 
@@ -573,19 +913,75 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 		}
 	}
 
-	pi.on("session_start", async () => {
+	/**
+	 * Reset all session-scoped discovery and activation state.
+	 *
+	 * @returns Nothing
+	 */
+	function resetSessionState(): void {
 		contextFiles = [];
 		cwdContextFiles = [];
+		scopedRuleFiles = [];
+		cwdScopedRuleFiles = [];
+		cwdWarnings = [];
+		discoveryWarnings = [];
+		activeScopedRuleFiles.clear();
 		lazyScan.reset();
+	}
+
+	pi.on("session_start", async () => {
+		resetSessionState();
+	});
+
+	pi.on("session_before_switch", async () => {
+		resetSessionState();
+	});
+
+	pi.on("session_switch", async () => {
+		resetSessionState();
+	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.isError) return;
+		if (!RULE_TRIGGER_TOOLS.has(event.toolName)) return;
+
+		const scanReady = await ensureScanReady("tool_result", ctx);
+		if (!scanReady || scopedRuleFiles.length === 0) return;
+		if (!event.input || typeof event.input !== "object") return;
+
+		const observedPaths = getToolInputPaths(event.input as Record<string, unknown>);
+		if (observedPaths.length === 0) return;
+
+		const activatedRulePaths: string[] = [];
+		for (const observedPath of observedPaths) {
+			const normalized = normalizeObservedToolPath(ctx.cwd, observedPath);
+			if (!normalized) continue;
+
+			for (const activatedRule of activateScopedRules(normalized)) {
+				activatedRulePaths.push(shortenPath(activatedRule.filepath));
+			}
+		}
+
+		if (activatedRulePaths.length === 0) return;
+
+		const uniquePaths = [...new Set(activatedRulePaths)];
+		const label = uniquePaths.length === 1 ? "rule" : "rules";
+		ctx.ui.notify(
+			`context-files: activated ${uniquePaths.length} scoped ${label}: ${uniquePaths.join(", ")}`,
+			"info"
+		);
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		const scanReady = await ensureScanReady("before_agent_start", ctx);
-		if (!scanReady || contextFiles.length === 0) return;
+		if (!scanReady) return;
 
-		const sections = contextFiles.map((f) => {
-			const rel = shortenPath(f.filepath);
-			const processed = resolveImports(f.content, path.dirname(f.filepath));
+		const promptFiles = getPromptFiles();
+		if (promptFiles.length === 0) return;
+
+		const sections = promptFiles.map((file) => {
+			const rel = shortenPath(file.filepath);
+			const processed = resolveImports(file.content, path.dirname(file.filepath));
 			return `## ${rel}\n\n${processed}`;
 		});
 
@@ -607,8 +1003,8 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 				}
 
 				const lines = [...additionalDirs].sort().map((dir) => {
-					const files = collectFromAdditionalDir(dir);
-					const count = files.length;
+					const discovered = collectFromAdditionalDir(dir);
+					const count = discovered.contextFiles.length + discovered.scopedRuleFiles.length;
 					const label = count === 1 ? "file" : "files";
 					return `  ${shortenPath(dir)} (${count} ${label})`;
 				});
@@ -637,13 +1033,16 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 			additionalDirs.add(resolved);
 
 			if (lazyScan.isInitialized()) {
-				setContextFiles(cwdContextFiles);
+				setDiscoveredFiles(cwdContextFiles, cwdScopedRuleFiles, cwdWarnings);
 			}
 
-			const newFiles = collectFromAdditionalDir(resolved);
+			const discovered = collectFromAdditionalDir(resolved);
+			notifyRuleWarnings(ctx, discovered.warnings);
+
+			const newFiles = [...discovered.contextFiles, ...discovered.scopedRuleFiles];
 			if (newFiles.length > 0) {
 				const label = newFiles.length === 1 ? "file" : "files";
-				const paths = newFiles.map((f) => shortenPath(f.filepath)).join(", ");
+				const paths = newFiles.map((file) => shortenPath(file.filepath)).join(", ");
 				ctx.ui.notify(
 					`context-files: +${newFiles.length} ${label} from ${shortenPath(resolved)}: ${paths}`,
 					"info"
@@ -666,7 +1065,7 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 			additionalDirs.clear();
 
 			if (lazyScan.isInitialized()) {
-				setContextFiles(cwdContextFiles);
+				setDiscoveredFiles(cwdContextFiles, cwdScopedRuleFiles, cwdWarnings);
 			}
 
 			const label = count === 1 ? "directory" : "directories";

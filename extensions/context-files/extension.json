@@ -5,7 +5,13 @@
 	"whenToUse": "Use when AGENTS.md and CLAUDE.md (plus imports) should both be added to context.",
 	"capabilities": {
 		"commands": ["add-dir", "clear-dirs"],
-		"events": ["before_agent_start", "session_start"]
+		"events": [
+			"before_agent_start",
+			"session_start",
+			"session_before_switch",
+			"session_switch",
+			"tool_result"
+		]
 	},
 	"permissionSurface": {
 		"filesystem": "read",
