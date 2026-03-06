@@ -146,3 +146,101 @@ describe("web_fetch planner handshake", () => {
 		expect(secondDetails.budgetReason).toContain("strict fallback");
 	});
 });
+
+describe("web_fetch dendrite fallback", () => {
+	test("uses dendrite-scraper binary on retryable HTTP pages", async () => {
+		const harness = ExtensionHarness.create();
+		const execCalls: string[] = [];
+		(harness.api as { exec: typeof harness.api.exec }).exec = async (command, args) => {
+			execCalls.push([command, ...args].join(" "));
+			return {
+				code: 0,
+				killed: false,
+				stderr: "",
+				stdout: JSON.stringify({
+					attempts: ["jina fallback"],
+					markdown: "# Clean page",
+					ok: true,
+					source: "jina",
+					url: "https://example.com",
+				}),
+			};
+		};
+
+		globalThis.fetch = async () =>
+			new Response("Access denied. Please enable JavaScript.", {
+				headers: { "content-type": "text/html" },
+				status: 403,
+				statusText: "Forbidden",
+			});
+
+		await harness.loadExtension(webFetchExtension);
+		const tool = harness.tools.get("web_fetch");
+		if (!tool) throw new Error("web_fetch tool missing");
+
+		const result = await tool.execute("tc-1", { url: "https://example.com" }, undefined, () => {});
+		const text = result.content[0];
+		const details = result.details as {
+			backend?: string;
+			fallbackCommand?: string;
+			fallbackUsed?: boolean;
+			source?: string;
+		};
+
+		expect(text?.type).toBe("text");
+		expect(text?.type === "text" ? text.text : "").toContain("# Clean page");
+		expect(details.backend).toBe("dendrite-scraper");
+		expect(details.fallbackCommand).toBe("dendrite-scraper");
+		expect(details.fallbackUsed).toBe(true);
+		expect(details.source).toBe("jina");
+		expect(execCalls).toEqual(["dendrite-scraper scrape --timeout 45 https://example.com"]);
+	});
+
+	test("falls back to uvx when the binary is unavailable", async () => {
+		const harness = ExtensionHarness.create();
+		const execCalls: string[] = [];
+		(harness.api as { exec: typeof harness.api.exec }).exec = async (command, args) => {
+			execCalls.push([command, ...args].join(" "));
+			if (command === "dendrite-scraper") {
+				throw new Error("spawn dendrite-scraper ENOENT");
+			}
+			return {
+				code: 0,
+				killed: false,
+				stderr: "",
+				stdout: JSON.stringify({
+					markdown: "# Clean via uvx",
+					ok: true,
+					source: "crawl4ai",
+					url: "https://example.com",
+				}),
+			};
+		};
+
+		globalThis.fetch = async () => {
+			throw new Error("getaddrinfo ENOTFOUND example.com");
+		};
+
+		await harness.loadExtension(webFetchExtension);
+		const tool = harness.tools.get("web_fetch");
+		if (!tool) throw new Error("web_fetch tool missing");
+
+		const result = await tool.execute("tc-1", { url: "https://example.com" }, undefined, () => {});
+		const text = result.content[0];
+		const details = result.details as {
+			fallbackCommand?: string;
+			fallbackUsed?: boolean;
+			source?: string;
+		};
+
+		expect(text?.type).toBe("text");
+		expect(text?.type === "text" ? text.text : "").toContain("# Clean via uvx");
+		expect(details.fallbackCommand).toBe("uvx --from dendrite-scraper dendrite-scraper");
+		expect(details.fallbackUsed).toBe(true);
+		expect(details.source).toBe("crawl4ai");
+		expect(execCalls).toEqual([
+			"dendrite-scraper scrape --timeout 45 https://example.com",
+			"uvx --from dendrite-scraper dendrite-scraper scrape --timeout 45 https://example.com",
+		]);
+	});
+});

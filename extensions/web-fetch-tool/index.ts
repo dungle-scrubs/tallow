@@ -1,9 +1,9 @@
 /**
- * WebFetch Extension for Pi
+ * WebFetch Extension for Pi.
  *
  * Fetches web content via plain HTTP. Returns page text truncated by context-budget caps.
- * For JS-rendered pages, full-page scraping, or structured extraction,
- * use a dedicated scraping tool (e.g. Firecrawl) instead.
+ * When direct fetches fail on bot walls or JS-only shells, it can fall back to the
+ * published `dendrite-scraper` CLI (direct binary first, then `uvx --from dendrite-scraper`).
  *
  * Supports adaptive context-budget caps when a planner extension publishes
  * envelopes via the shared context-budget interop.
@@ -28,6 +28,35 @@ const POLICY_MIN_BYTES = CONTEXT_BUDGET_DEFAULTS.minPerToolBytes;
 
 /** Policy ceiling — never exceed this regardless of envelope. */
 const POLICY_MAX_BYTES = CONTEXT_BUDGET_DEFAULTS.maxPerToolBytes;
+
+/** Package name used by the published dendrite fallback. */
+const DENDRITE_PACKAGE = "dendrite-scraper";
+
+/** CLI name exported by the published dendrite package. */
+const DENDRITE_COMMAND = "dendrite-scraper";
+
+/** Global scrape timeout passed to dendrite-scraper. */
+const DENDRITE_TIMEOUT_SECONDS = 45;
+
+/** Process timeout for spawned fallback commands. */
+const DENDRITE_TIMEOUT_MS = 50_000;
+
+/** Status codes worth retrying through the scraper fallback. */
+const DENDRITE_RETRYABLE_STATUSES = new Set([
+	401, 403, 408, 409, 425, 429, 451, 500, 502, 503, 504,
+]);
+
+/** HTML markers that usually mean direct fetch returned a useless shell. */
+const DENDRITE_HTML_MARKERS = [
+	/enable javascript/i,
+	/javascript required/i,
+	/checking your browser/i,
+	/verify you are human/i,
+	/captcha/i,
+	/cloudflare/i,
+	/access denied/i,
+	/please turn javascript on/i,
+] as const;
 
 // ── Adaptive cap resolution (pure, exported for tests) ──────────────
 
@@ -55,6 +84,57 @@ export interface CapResolutionResult {
 	budgetReason: string;
 	/** Batch size from the envelope (1 when no envelope). */
 	batchSize: number;
+}
+
+/** Minimal JSON contract emitted by dendrite-scraper CLI. */
+interface DendritePayload {
+	readonly attempts?: readonly string[];
+	readonly bot_detected?: boolean;
+	readonly elapsed_ms?: number;
+	readonly error?: string | null;
+	readonly llm_cleaned?: boolean;
+	readonly markdown?: string;
+	readonly ok?: boolean;
+	readonly source?: string;
+	readonly url?: string;
+}
+
+/** Resolved fallback command candidate. */
+interface DendriteCommandCandidate {
+	readonly args: readonly string[];
+	readonly command: string;
+	readonly display: string;
+}
+
+/** Successful dendrite fallback execution. */
+interface DendriteFallbackSuccess {
+	readonly command: string;
+	readonly payload: DendritePayload;
+	readonly source: "binary" | "uvx";
+}
+
+/** Final detail payload returned by the tool. */
+interface WebFetchDetails {
+	readonly attempts?: readonly string[];
+	readonly backend?: "dendrite-scraper" | "http";
+	readonly batchSize?: number;
+	readonly botDetected?: boolean;
+	readonly budgetLimited?: boolean;
+	readonly budgetReason?: string;
+	readonly contentType?: string;
+	readonly effectiveMaxBytes?: number;
+	readonly elapsedMs?: number;
+	readonly error?: string;
+	readonly fallbackCommand?: string;
+	readonly fallbackReason?: string;
+	readonly fallbackUsed?: boolean;
+	readonly isError?: boolean;
+	readonly llmCleaned?: boolean;
+	readonly source?: string;
+	readonly status?: number;
+	readonly totalBytes?: number;
+	readonly truncated?: boolean;
+	readonly url?: string;
 }
 
 /**
@@ -120,10 +200,156 @@ function truncateTextToBytes(text: string, maxBytes: number): string {
 }
 
 /**
- * Registers the web_fetch tool.
- * @param pi - Extension API for registering tools
+ * Decide whether the dendrite fallback is worth trying.
+ *
+ * @param input - HTTP outcome and fetch error context
+ * @returns Human-readable fallback reason, or undefined when plain HTTP is good enough
  */
-export default function (pi: ExtensionAPI) {
+export function shouldUseDendriteFallback(input: {
+	readonly contentType?: string;
+	readonly error?: string;
+	readonly format?: "html" | "markdown" | "text";
+	readonly responseText?: string;
+	readonly status?: number;
+}): string | undefined {
+	if (input.format === "html") return undefined;
+	if (input.error) return `fetch error (${input.error})`;
+	if (input.status !== undefined && DENDRITE_RETRYABLE_STATUSES.has(input.status)) {
+		return `HTTP ${input.status}`;
+	}
+
+	const contentType = input.contentType ?? "";
+	if (!contentType.includes("text/html")) return undefined;
+
+	const responseText = input.responseText?.trim() ?? "";
+	if (!responseText) return "empty HTML response";
+	for (const marker of DENDRITE_HTML_MARKERS) {
+		if (marker.test(responseText)) return `HTML shell matched ${marker}`;
+	}
+	return undefined;
+}
+
+/**
+ * Parse the JSON output contract emitted by dendrite-scraper.
+ *
+ * @param stdout - Raw process stdout
+ * @returns Parsed payload when stdout is valid JSON, otherwise undefined
+ */
+function parseDendritePayload(stdout: string): DendritePayload | undefined {
+	const trimmed = stdout.trim();
+	if (!trimmed) return undefined;
+
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		if (!parsed || typeof parsed !== "object") return undefined;
+		return parsed as DendritePayload;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Build the command candidates for the published dendrite fallback.
+ *
+ * @returns Direct binary first, then uvx package execution
+ */
+function getDendriteCandidates(): readonly DendriteCommandCandidate[] {
+	return [
+		{
+			args: [],
+			command: DENDRITE_COMMAND,
+			display: DENDRITE_COMMAND,
+		},
+		{
+			args: ["--from", DENDRITE_PACKAGE, DENDRITE_COMMAND],
+			command: "uvx",
+			display: `uvx --from ${DENDRITE_PACKAGE} ${DENDRITE_COMMAND}`,
+		},
+	] as const;
+}
+
+/**
+ * Execute the published dendrite fallback until one candidate succeeds.
+ *
+ * @param pi - Extension API for subprocess execution
+ * @param url - URL to scrape
+ * @param signal - Abort signal forwarded from tool execution
+ * @returns Successful fallback payload, or an error string describing why all attempts failed
+ */
+async function runDendriteFallback(
+	pi: ExtensionAPI,
+	url: string,
+	signal: AbortSignal | undefined
+): Promise<
+	| { readonly ok: true; readonly value: DendriteFallbackSuccess }
+	| { readonly error: string; readonly ok: false }
+> {
+	let lastError = "dendrite fallback unavailable";
+
+	for (const candidate of getDendriteCandidates()) {
+		try {
+			const result = await pi.exec(
+				candidate.command,
+				[...candidate.args, "scrape", "--timeout", String(DENDRITE_TIMEOUT_SECONDS), url],
+				{ signal, timeout: DENDRITE_TIMEOUT_MS }
+			);
+			const payload = parseDendritePayload(result.stdout);
+			const stderr = result.stderr.trim();
+			const payloadError = typeof payload?.error === "string" ? payload.error : "";
+			const errorText = payloadError || stderr || `exit ${result.code}`;
+
+			if (payload?.ok === true && typeof payload.markdown === "string" && payload.markdown.trim()) {
+				return {
+					ok: true,
+					value: {
+						command: candidate.display,
+						payload,
+						source: candidate.command === DENDRITE_COMMAND ? "binary" : "uvx",
+					},
+				};
+			}
+
+			lastError = `${candidate.display}: ${errorText}`;
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			lastError = `${candidate.display}: ${msg}`;
+		}
+	}
+
+	return { error: lastError, ok: false };
+}
+
+/**
+ * Apply byte truncation and append a consistent truncation note.
+ *
+ * @param text - Content to limit
+ * @param maxBytes - Byte cap to enforce
+ * @returns Final content plus truncation metadata
+ */
+function finalizeContent(
+	text: string,
+	maxBytes: number
+): {
+	readonly content: string;
+	readonly totalBytes: number;
+	readonly truncated: boolean;
+} {
+	const totalBytes = Buffer.byteLength(text, "utf-8");
+	const truncated = totalBytes > maxBytes;
+	let content = truncated ? truncateTextToBytes(text, maxBytes) : text;
+	if (truncated) {
+		content += `\n\n[Truncated: showing ${(maxBytes / 1024).toFixed(1)}KB of ${(totalBytes / 1024).toFixed(1)}KB]`;
+	}
+	return { content, totalBytes, truncated };
+}
+
+/**
+ * Registers the web_fetch tool.
+ *
+ * @param pi - Extension API for registering tools
+ * @returns void
+ */
+export default function (pi: ExtensionAPI): void {
 	const getBudgetApi = subscribeToBudgetApi(pi.events);
 
 	pi.registerTool({
@@ -164,6 +390,13 @@ WHEN TO USE:
 			});
 
 			const maxBytes = effectiveMaxBytes;
+			const baseDetails = {
+				batchSize,
+				budgetLimited,
+				budgetReason,
+				effectiveMaxBytes,
+				url: params.url,
+			} satisfies WebFetchDetails;
 
 			try {
 				const response = await fetch(params.url, {
@@ -174,44 +407,117 @@ WHEN TO USE:
 					},
 				});
 
+				const contentType = response.headers.get("content-type") || "";
+				const fullText = await response.text();
+				const fallbackReason = shouldUseDendriteFallback({
+					contentType,
+					format: params.format,
+					responseText: fullText,
+					status: response.status,
+				});
+				let fallbackFailure: string | undefined;
+
+				if (fallbackReason) {
+					const fallback = await runDendriteFallback(pi, params.url, signal);
+					if (fallback.ok) {
+						const text = fallback.value.payload.markdown ?? "";
+						const final = finalizeContent(text, maxBytes);
+						return {
+							content: [{ type: "text", text: final.content }],
+							details: {
+								...baseDetails,
+								attempts: fallback.value.payload.attempts,
+								backend: "dendrite-scraper",
+								botDetected: fallback.value.payload.bot_detected,
+								elapsedMs: fallback.value.payload.elapsed_ms,
+								fallbackCommand: fallback.value.command,
+								fallbackReason,
+								fallbackUsed: true,
+								llmCleaned: fallback.value.payload.llm_cleaned,
+								source: fallback.value.payload.source ?? fallback.value.source,
+								totalBytes: final.totalBytes,
+								truncated: final.truncated,
+								url: fallback.value.payload.url ?? params.url,
+							} satisfies WebFetchDetails,
+						};
+					}
+					fallbackFailure = fallback.error;
+				}
+
 				if (!response.ok) {
 					const error = `HTTP ${response.status}: ${response.statusText}`;
+					const fallback = fallbackFailure
+						? `\n\nDendrite fallback failed: ${fallbackFailure}`
+						: "";
 					return {
-						content: [{ type: "text", text: error }],
-						details: { status: response.status, url: params.url, error, isError: true },
+						content: [{ type: "text", text: `${error}${fallback}` }],
+						details: {
+							...baseDetails,
+							backend: "http",
+							contentType,
+							error: `${error}${fallback}`,
+							fallbackReason,
+							fallbackUsed: Boolean(fallbackReason),
+							isError: true,
+							status: response.status,
+						} satisfies WebFetchDetails,
 					};
 				}
 
-				const contentType = response.headers.get("content-type") || "";
-				const fullText = await response.text();
-				const totalBytes = Buffer.byteLength(fullText, "utf-8");
-				const truncated = totalBytes > maxBytes;
-
-				let content = truncated ? truncateTextToBytes(fullText, maxBytes) : fullText;
-
-				if (truncated) {
-					content += `\n\n[Truncated: showing ${(maxBytes / 1024).toFixed(1)}KB of ${(totalBytes / 1024).toFixed(1)}KB]`;
-				}
-
+				const final = finalizeContent(fullText, maxBytes);
 				return {
-					content: [{ type: "text", text: content }],
+					content: [{ type: "text", text: final.content }],
 					details: {
-						url: params.url,
-						status: response.status,
+						...baseDetails,
+						backend: "http",
 						contentType,
-						totalBytes,
-						truncated,
-						effectiveMaxBytes,
-						budgetLimited,
-						budgetReason,
-						batchSize,
-					},
+						status: response.status,
+						totalBytes: final.totalBytes,
+						truncated: final.truncated,
+					} satisfies WebFetchDetails,
 				};
 			} catch (error: unknown) {
 				const msg = error instanceof Error ? error.message : String(error);
+				const fallbackReason = shouldUseDendriteFallback({ error: msg, format: params.format });
+				let fallbackFailure: string | undefined;
+				if (fallbackReason) {
+					const fallback = await runDendriteFallback(pi, params.url, signal);
+					if (fallback.ok) {
+						const text = fallback.value.payload.markdown ?? "";
+						const final = finalizeContent(text, maxBytes);
+						return {
+							content: [{ type: "text", text: final.content }],
+							details: {
+								...baseDetails,
+								attempts: fallback.value.payload.attempts,
+								backend: "dendrite-scraper",
+								botDetected: fallback.value.payload.bot_detected,
+								elapsedMs: fallback.value.payload.elapsed_ms,
+								fallbackCommand: fallback.value.command,
+								fallbackReason,
+								fallbackUsed: true,
+								llmCleaned: fallback.value.payload.llm_cleaned,
+								source: fallback.value.payload.source ?? fallback.value.source,
+								totalBytes: final.totalBytes,
+								truncated: final.truncated,
+								url: fallback.value.payload.url ?? params.url,
+							} satisfies WebFetchDetails,
+						};
+					}
+					fallbackFailure = fallback.error;
+				}
+
+				const errorText = `Fetch error: ${msg}${fallbackFailure ? `\n\nDendrite fallback failed: ${fallbackFailure}` : ""}`;
 				return {
-					content: [{ type: "text", text: `Fetch error: ${msg}` }],
-					details: { url: params.url, error: msg, isError: true },
+					content: [{ type: "text", text: errorText }],
+					details: {
+						...baseDetails,
+						backend: "http",
+						error: errorText,
+						fallbackReason,
+						fallbackUsed: Boolean(fallbackReason),
+						isError: true,
+					} satisfies WebFetchDetails,
 				};
 			}
 		},
@@ -225,48 +531,40 @@ WHEN TO USE:
 		},
 
 		renderResult(result, { expanded }, theme) {
-			const details = result.details as
-				| {
-						url?: string;
-						error?: string;
-						isError?: boolean;
-						totalBytes?: number;
-						truncated?: boolean;
-						effectiveMaxBytes?: number;
-						budgetLimited?: boolean;
-						budgetReason?: string;
-						batchSize?: number;
-				  }
-				| undefined;
+			const details = result.details as WebFetchDetails | undefined;
 			if (!details) {
 				const text = result.content[0];
 				return renderLines([text?.type === "text" ? text.text : "(no output)"]);
 			}
 
-			// Build the summary footer
+			// Build the summary footer.
 			let footer: string;
 			if (details.isError) {
 				footer = theme.fg("error", `${getIcon("error")} ${details.error || "Failed"}`);
 			} else {
+				const backend =
+					details.backend === "dendrite-scraper"
+						? ` via dendrite-scraper${details.source ? `/${details.source}` : ""}`
+						: "";
 				const size = details.totalBytes ? ` (${(details.totalBytes / 1024).toFixed(1)}KB)` : "";
 				const truncNote = details.truncated ? " [truncated]" : "";
 				const budgetNote = details.budgetLimited ? " [budget-limited]" : "";
 				footer =
 					theme.fg("success", `${getIcon("success")} `) +
-					theme.fg("dim", details.url ?? "") +
+					theme.fg("dim", `${details.url ?? ""}${backend}`) +
 					theme.fg("muted", size + truncNote + budgetNote);
 			}
 
-			// Expanded: content preview first, footer last
+			// Expanded: content preview first, footer last.
 			if (expanded && !details.isError) {
 				const text = result.content[0];
 				const content = text?.type === "text" ? text.text : "";
 				const preview = content.slice(0, 500) + (content.length > 500 ? "..." : "");
-				const contentLines = preview.split("\n").map((l) => theme.fg("dim", l));
+				const contentLines = preview.split("\n").map((line) => theme.fg("dim", line));
 				return renderLines([...contentLines, footer]);
 			}
 
-			// Collapsed: footer only
+			// Collapsed: footer only.
 			return renderLines([footer]);
 		},
 	});
