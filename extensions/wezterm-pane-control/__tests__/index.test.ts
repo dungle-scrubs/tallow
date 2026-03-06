@@ -5,8 +5,6 @@ import weztermPaneControl, {
 	buildWeztermPaneGuidance,
 	executeWeztermAction,
 	filterPanesToCurrentTab,
-	hasExplicitPaneRequest,
-	isPaneCreatingAction,
 	unescapeText,
 	type WeztermCliResult,
 	type WeztermPaneInfo,
@@ -94,33 +92,15 @@ describe("wezterm-pane-control registration", () => {
 });
 
 describe("buildWeztermPaneGuidance", () => {
-	it("includes privacy and explicit-pane-request guidance", () => {
+	it("includes pane usage, sending, and privacy guidance", () => {
 		const guidance = buildWeztermPaneGuidance(116);
-		expect(guidance).toContain("Do not run or read commands likely to reveal private secrets");
-		expect(guidance).toContain("Do not split panes or spawn tabs unless the user explicitly asks");
-		expect(guidance).toContain("prefer bg_bash in the current session");
-		expect(guidance).toContain("Default behavior: if you prefill a command");
-		expect(guidance).toContain("Only leave a command unexecuted");
-		expect(guidance).toContain("user explicitly asks to monitor output in another pane");
-		expect(guidance).toContain("newline (\\n) via send_text");
 		expect(guidance).toContain("WezTerm pane 116");
-	});
-});
-
-describe("explicit pane-request guards", () => {
-	it("detects explicit pane/tab intent in prompt text", () => {
-		expect(hasExplicitPaneRequest("split a pane to the right and run pnpm dev")).toBe(true);
-		expect(hasExplicitPaneRequest("open a new tab for logs")).toBe(true);
-		expect(hasExplicitPaneRequest("start dev server")).toBe(false);
-		expect(hasExplicitPaneRequest("run tests in background")).toBe(false);
-	});
-
-	it("identifies pane-creating actions", () => {
-		expect(isPaneCreatingAction("split")).toBe(true);
-		expect(isPaneCreatingAction("spawn_tab")).toBe(true);
-		expect(isPaneCreatingAction("move_to_tab")).toBe(true);
-		expect(isPaneCreatingAction("read_text")).toBe(false);
-		expect(isPaneCreatingAction(undefined)).toBe(false);
+		expect(guidance).toContain("Interactive TTY");
+		expect(guidance).toContain("just create the pane and run it");
+		expect(guidance).toContain("ask_user_question");
+		expect(guidance).toContain("appending \\n");
+		expect(guidance).toContain("Do NOT call read_text on that pane");
+		expect(guidance).toContain("LLM must not consume secrets");
 	});
 });
 

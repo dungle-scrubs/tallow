@@ -110,50 +110,6 @@ const DIRECTIONS: readonly WeztermDirection[] = [
 
 const ZOOM_STATES: readonly WeztermZoomState[] = ["zoom", "unzoom", "toggle"] as const;
 
-const PANE_CREATING_ACTIONS: readonly WeztermAction[] = [
-	"split",
-	"spawn_tab",
-	"move_to_tab",
-] as const;
-
-const EXPLICIT_PANE_REQUEST_PATTERNS: readonly RegExp[] = [
-	/\bwezterm\b/i,
-	/\bpane(?:s)?\b/i,
-	/\btab(?:s)?\b/i,
-	/\bsplit\b/i,
-	/\bspawn\b/i,
-	/\bwindow\b/i,
-	/\bleft\b/i,
-	/\bright\b/i,
-	/\btop\b/i,
-	/\bbottom\b/i,
-] as const;
-
-/**
- * Check whether an action creates or rehomes panes/tabs.
- *
- * @param action - Candidate action string
- * @returns True when action can open/split/move panes or tabs
- */
-export function isPaneCreatingAction(action: unknown): action is WeztermAction {
-	if (typeof action !== "string") return false;
-	return PANE_CREATING_ACTIONS.includes(action as WeztermAction);
-}
-
-/**
- * Determine whether the user explicitly requested pane/tab management.
- *
- * This acts as a conservative guardrail: opening/splitting panes should only
- * happen when the current turn clearly references pane/tab/window controls.
- *
- * @param prompt - Current user prompt text
- * @returns True when prompt contains explicit pane/tab intent
- */
-export function hasExplicitPaneRequest(prompt: string): boolean {
-	if (prompt.trim().length === 0) return false;
-	return EXPLICIT_PANE_REQUEST_PATTERNS.some((pattern) => pattern.test(prompt));
-}
-
 /**
  * Parse WEZTERM_PANE to a valid pane ID.
  *
@@ -479,14 +435,30 @@ export function buildWeztermPaneGuidance(currentPaneId: number): string {
 		"Use the wezterm_pane tool to manage panes: split, close, focus, zoom, resize, send/read text, or spawn new tabs.",
 		'Use action "list" to see panes in the current tab.',
 		"",
-		"Use best judgment before controlling panes:",
-		"- Do not run or read commands likely to reveal private secrets (keys, tokens, credentials) unless the user explicitly asks.",
-		"- Do not split panes or spawn tabs unless the user explicitly asks for pane/tab management.",
-		"- For long-running commands (dev servers, watchers), prefer bg_bash in the current session unless the user explicitly asks to run them in another pane/tab.",
-		"- Default behavior: if you prefill a command for the user, execute it automatically by sending Enter (newline, \\n).",
-		"- Only leave a command unexecuted when the user explicitly asks to review/edit it before running.",
-		"- If the user explicitly asks to monitor output in another pane, execute the command and let them watch there.",
-		"- Enter can be pressed by sending a newline (\\n) via send_text (either appended to the command or as a second send_text call).",
+		"## When to use a pane",
+		"",
+		"Spawn a pane or tab when a command needs something bash/bg_bash cannot provide:",
+		"- Interactive TTY (Rich progress bars, TUI apps, curses UIs, interactive prompts)",
+		"- Long-running process the user wants to visually monitor in a separate pane",
+		"- Process that needs a proper shell environment",
+		"",
+		"When it is clear a command needs a TTY, just create the pane and run it — do not ask.",
+		"When it is ambiguous whether a pane is needed, use ask_user_question to let the user decide.",
+		"For simple commands that work fine in bash/bg_bash, prefer those — do not over-use panes.",
+		"",
+		"## Sending commands",
+		"",
+		"When you send a command to a pane, execute it by appending \\n (Enter).",
+		"Only leave a command unexecuted when the user explicitly asks to review it first.",
+		"Escape sequences (\\n, \\t, \\r, \\xNN) in send_text are processed automatically.",
+		"",
+		"## Secrets and sensitive output",
+		"",
+		"When a command generates or displays sensitive values (API keys, tokens, encryption keys, passwords):",
+		"- Spawn a pane and send the command so the USER can see the output.",
+		"- Do NOT call read_text on that pane — the LLM must not consume secrets.",
+		"- Tell the user their output is in the pane and let them handle it.",
+		"- Only read sensitive pane output if the user explicitly asks you to.",
 	].join("\n");
 }
 
@@ -686,23 +658,6 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 	}
 
 	const runCli = createWeztermRunner(weztermExecutable);
-	let currentTurnPrompt = "";
-
-	pi.on("tool_call", async (event) => {
-		if (event.toolName !== "wezterm_pane") return;
-
-		const input = (event.input ?? {}) as Record<string, unknown>;
-		const action = input.action;
-		if (!isPaneCreatingAction(action)) return;
-		if (hasExplicitPaneRequest(currentTurnPrompt)) return;
-
-		return {
-			block: true,
-			reason:
-				"Opening/splitting WezTerm panes requires an explicit pane/tab request. " +
-				"Use bg_bash for dev servers/watchers unless the user asks for another pane.",
-		};
-	});
 
 	pi.registerTool({
 		name: "wezterm_pane",
@@ -754,7 +709,6 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (event) => {
-		currentTurnPrompt = event.prompt;
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n${buildWeztermPaneGuidance(currentPaneId)}`,
 		};
