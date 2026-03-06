@@ -86,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundaries to preserve fresh-session resets
 - **context-usage,slash-command-bridge:** treat unknown usage (`tokens: null`)
   as unavailable instead of rendering misleading zero-token summaries
+- **tui:** yield render scheduling to the check phase so editor input stays
+  responsive while assistant text streams
 
 ### Documentation
 
