@@ -31,11 +31,19 @@ const CHARS_PER_TOKEN = 4;
 /** Marker key attached by sdk tool-result retention summarization. */
 const TOOL_RESULT_RETENTION_MARKER = "__tallow_summarized_tool_result__";
 
+/** Shared warning shown when usage data is unavailable for the current branch. */
+const NO_CONTEXT_USAGE_DATA_MESSAGE = "No context usage data available yet. Send a message first.";
+
 // ── Settings ─────────────────────────────────────────────────────────────────
 
 interface CompactionConfig {
 	readonly enabled: boolean;
 	readonly reserveTokens: number;
+}
+
+/** Context usage with a known finite token count. */
+interface KnownContextUsage extends ContextUsage {
+	readonly tokens: number;
 }
 
 /** Tool-result payload memory summary for the active branch. */
@@ -76,6 +84,32 @@ function readCompactionConfig(): CompactionConfig {
 			reserveTokens: DEFAULT_COMPACTION_SETTINGS.reserveTokens,
 		};
 	}
+}
+
+/**
+ * Checks whether the active branch has a known context token count.
+ *
+ * `ctx.getContextUsage()` may return `{ tokens: null }` right after compaction
+ * and before the next model response. In that state, usage should be treated
+ * as unavailable to avoid rendering stale-looking `0 tokens` summaries.
+ *
+ * @param usage - Optional usage snapshot from the session context
+ * @returns True when usage exists and the token count is finite
+ */
+function hasKnownContextTokens(usage: ContextUsage | undefined): usage is KnownContextUsage {
+	return typeof usage?.tokens === "number" && Number.isFinite(usage.tokens);
+}
+
+/**
+ * Shows the standard warning for missing/unknown context usage data.
+ *
+ * @param notify - UI notification callback
+ * @returns Nothing
+ */
+function notifyNoContextUsageData(
+	notify: (message: string, type?: "info" | "warning" | "error") => void
+): void {
+	notify(NO_CONTEXT_USAGE_DATA_MESSAGE, "warning");
 }
 
 // ── Category definitions ─────────────────────────────────────────────────────
@@ -523,8 +557,8 @@ export default function contextUsageExtension(pi: ExtensionAPI): void {
 		description: "Show context window usage breakdown",
 		handler: async (_args, ctx) => {
 			const usage = ctx.getContextUsage();
-			if (!usage) {
-				ctx.ui.notify("No context usage data available yet. Send a message first.", "warning");
+			if (!hasKnownContextTokens(usage)) {
+				notifyNoContextUsageData(ctx.ui.notify.bind(ctx.ui));
 				return;
 			}
 
@@ -558,7 +592,7 @@ export default function contextUsageExtension(pi: ExtensionAPI): void {
  * @returns Details object for the message renderer
  */
 function buildDetails(
-	usage: ContextUsage,
+	usage: KnownContextUsage,
 	systemPrompt: string,
 	tools: Array<{ name: string; description: string; parameters: unknown }>,
 	modelId: string,
@@ -582,7 +616,7 @@ function buildDetails(
 		categories[6].tokens = reserveTokens;
 	}
 
-	const usedTokens = usage.tokens ?? 0;
+	const usedTokens = usage.tokens;
 	const staticTokens =
 		categories[0].tokens + categories[1].tokens + categories[2].tokens + categories[3].tokens;
 	const messageTokens = Math.max(0, usedTokens - staticTokens);

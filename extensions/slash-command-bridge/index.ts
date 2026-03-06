@@ -121,14 +121,52 @@ const COMMAND_DESCRIPTIONS: ReadonlyMap<string, string> = new Map([
 	["compact", "Triggers session compaction to free up context window space"],
 ]);
 
+/** Context usage with a known finite token count. */
+interface KnownContextUsage extends ContextUsage {
+	readonly tokens: number;
+}
+
+/** Shared no-data message for /context parity. */
+const NO_CONTEXT_USAGE_DATA_TEXT =
+	"No context usage data available yet. A message must be processed first.";
+
+/**
+ * Returns true when context usage exists and tokens are known.
+ *
+ * @param usage - Context usage snapshot from session state
+ * @returns True when the usage token count is a finite number
+ */
+function hasKnownContextTokens(usage: ContextUsage | undefined): usage is KnownContextUsage {
+	return typeof usage?.tokens === "number" && Number.isFinite(usage.tokens);
+}
+
+/**
+ * Builds the shared no-usage result payload for `/context` parity.
+ *
+ * @param command - Bridged command name
+ * @returns Tool error payload for unavailable usage data
+ */
+function buildNoUsageDataResult(command: string) {
+	return {
+		content: [
+			{
+				type: "text" as const,
+				text: NO_CONTEXT_USAGE_DATA_TEXT,
+			},
+		],
+		details: { command, error: "no_usage_data" as const },
+		isError: true,
+	};
+}
+
 /**
  * Formats context usage into a readable summary.
  *
  * @param usage - Context usage data from the session
  * @returns Formatted string with token breakdown
  */
-function formatContextUsage(usage: ContextUsage): string {
-	const tokens = usage.tokens ?? 0;
+function formatContextUsage(usage: KnownContextUsage): string {
+	const tokens = usage.tokens;
 	const pct = usage.contextWindow > 0 ? ((tokens / usage.contextWindow) * 100).toFixed(1) : "0";
 
 	const lines = [
@@ -246,23 +284,14 @@ WHEN NOT TO USE:
 
 				case "context": {
 					const usage = ctx.getContextUsage();
-					if (!usage) {
-						return {
-							content: [
-								{
-									type: "text",
-									text: "No context usage data available yet. A message must be processed first.",
-								},
-							],
-							details: { command, error: "no_usage_data" },
-							isError: true,
-						};
+					if (!hasKnownContextTokens(usage)) {
+						return buildNoUsageDataResult(command);
 					}
 					return {
 						content: [{ type: "text", text: formatContextUsage(usage) }],
 						details: {
 							command,
-							tokens: usage.tokens ?? 0,
+							tokens: usage.tokens,
 							contextWindow: usage.contextWindow,
 						},
 					};

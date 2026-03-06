@@ -125,6 +125,22 @@ describe("context", () => {
 		}
 	});
 
+	test("returns no-usage error when token count is unknown", async () => {
+		const usage: ContextUsage = { tokens: null, contextWindow: 200000, percent: null };
+		const ctx = buildContext({ getContextUsage: () => usage });
+
+		const result = await executeTool({ command: "context" }, ctx);
+
+		expect(result.isError).toBe(true);
+		expect(result.details).toEqual({ command: "context", error: "no_usage_data" });
+		const text = result.content[0];
+		if (text?.type === "text") {
+			expect(text.text).toContain("No context usage data");
+			expect(text.text).not.toContain("0 / 200,000");
+			expect(text.text).not.toContain("0.0%");
+		}
+	});
+
 	test("handles zero context window gracefully", async () => {
 		const usage: ContextUsage = { tokens: 0, contextWindow: 0 };
 		const ctx = buildContext({ getContextUsage: () => usage });
