@@ -9,7 +9,7 @@
  * registration, with auto-generated tool schemas and full command handler access.
  */
 
-import type { ContextUsage, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
@@ -36,6 +36,70 @@ let resumingAfterCompact = false;
  * on session switch. See plan 159, bug 1.
  */
 let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Spinner frames for compact progress status updates. */
+const COMPACT_PROGRESS_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+/** Interval cadence for compact progress status updates. */
+const COMPACT_PROGRESS_INTERVAL_MS = 1000;
+
+/** Module-level heartbeat state for deferred compact UI updates. */
+const compactProgressState: {
+	interval: ReturnType<typeof setInterval> | null;
+	spinnerIndex: number;
+	startedAt: number;
+} = {
+	interval: null,
+	spinnerIndex: 0,
+	startedAt: 0,
+};
+
+/**
+ * Starts compact progress heartbeat updates in the footer status.
+ *
+ * This helper is idempotent: it always clears any previous heartbeat before
+ * starting a new one, preventing duplicate intervals after retries.
+ *
+ * @param ctx - Extension context used to update footer status
+ * @returns Nothing
+ */
+function startCompactProgress(ctx: ExtensionContext): void {
+	stopCompactProgress();
+
+	if (!ctx.ui?.setStatus) {
+		return;
+	}
+
+	compactProgressState.startedAt = Date.now();
+	compactProgressState.spinnerIndex = 0;
+
+	const renderStatus = () => {
+		const elapsedSeconds = Math.floor((Date.now() - compactProgressState.startedAt) / 1000);
+		const frame =
+			COMPACT_PROGRESS_FRAMES[compactProgressState.spinnerIndex] ?? COMPACT_PROGRESS_FRAMES[0];
+		ctx.ui?.setStatus?.("compact", `🧹 ${frame} compacting · ${elapsedSeconds}s`);
+		compactProgressState.spinnerIndex =
+			(compactProgressState.spinnerIndex + 1) % COMPACT_PROGRESS_FRAMES.length;
+	};
+
+	renderStatus();
+	compactProgressState.interval = setInterval(renderStatus, COMPACT_PROGRESS_INTERVAL_MS);
+}
+
+/**
+ * Stops compact progress heartbeat updates and resets module-level state.
+ *
+ * @returns Nothing
+ */
+function stopCompactProgress(): void {
+	if (compactProgressState.interval) {
+		clearInterval(compactProgressState.interval);
+		compactProgressState.interval = null;
+	}
+
+	compactProgressState.startedAt = 0;
+	compactProgressState.spinnerIndex = 0;
+}
 
 /**
  * Commands the model is allowed to invoke.
@@ -284,11 +348,13 @@ WHEN NOT TO USE:
 		// Show explicit UI feedback while compaction runs. Without this,
 		// users only see the deferred tool message and no live progress signal.
 		ctx.ui?.setWorkingMessage?.("Compacting session…");
-		ctx.ui?.setStatus?.("compact", "🧹 compacting");
+		startCompactProgress(ctx);
 
 		ctx.compact({
 			customInstructions: options.customInstructions,
 			onComplete: () => {
+				stopCompactProgress();
+
 				// Transition from compaction indicators to resuming indicators.
 				// setWorkingMessage queues as pendingWorkingMessage (no loader
 				// exists after executeCompaction stops it). Applied automatically
@@ -335,6 +401,7 @@ WHEN NOT TO USE:
 				}, 200);
 			},
 			onError: () => {
+				stopCompactProgress();
 				ctx.ui?.setWorkingMessage?.();
 				ctx.ui?.setStatus?.("compact", undefined);
 				// Framework's executeCompaction handles error/cancel
@@ -370,6 +437,7 @@ WHEN NOT TO USE:
 	pi.on("session_before_switch", (_event, ctx) => {
 		pendingCompact = null;
 		resumingAfterCompact = false;
+		stopCompactProgress();
 		if (continuationTimer) {
 			clearTimeout(continuationTimer);
 			continuationTimer = null;

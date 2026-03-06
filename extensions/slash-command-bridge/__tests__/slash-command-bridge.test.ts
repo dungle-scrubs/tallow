@@ -5,7 +5,7 @@
  * command dispatch, context injection, and error handling.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ContextUsage, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
 import slashCommandBridge from "../index.js";
@@ -17,6 +17,13 @@ let harness: ExtensionHarness;
 beforeEach(async () => {
 	harness = ExtensionHarness.create();
 	await harness.loadExtension(slashCommandBridge);
+});
+
+afterEach(async () => {
+	await harness.fireEvent("session_before_switch", {
+		type: "session_before_switch",
+		reason: "switch",
+	});
 });
 
 // ── Registration ─────────────────────────────────────────────────────────────
@@ -183,9 +190,12 @@ describe("compact", () => {
 		expect(compactOptions).toBeDefined();
 		expect(typeof compactOptions?.onComplete).toBe("function");
 		expect(typeof compactOptions?.onError).toBe("function");
+
+		// Clean up compact progress interval to avoid cross-test leakage.
+		compactOptions?.onError?.();
 	});
 
-	test("agent_end hook shows compacting UI then transitions to resuming on complete", async () => {
+	test("agent_end hook starts compact heartbeat updates with elapsed status", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
 		const workingMessages: Array<string | undefined> = [];
 		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
@@ -208,15 +218,52 @@ describe("compact", () => {
 		await executeTool({ command: "compact" }, toolCtx);
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
 
-		// During compaction: shows compacting indicators
 		expect(workingMessages[0]).toBe("Compacting session…");
-		expect(statusUpdates[0]).toEqual({ key: "compact", text: "🧹 compacting" });
+		expect(statusUpdates[0]?.key).toBe("compact");
+		expect(statusUpdates[0]?.text).toContain("compacting · 0s");
+
+		await sleep(1100);
+
+		const hasElapsedUpdate = statusUpdates.some((update) =>
+			update.text?.includes("compacting · 1s")
+		);
+		expect(hasElapsedUpdate).toBe(true);
+
+		compactOptions?.onError?.();
+	});
+
+	test("onComplete stops compact heartbeat and transitions to resuming", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const workingMessages: Array<string | undefined> = [];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: (message?: string) => {
+					workingMessages.push(message);
+				},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+			isIdle: () => true,
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+		await sleep(1100);
 
 		compactOptions?.onComplete?.();
-
-		// After compaction: transitions to resuming indicators (not clearing)
 		expect(workingMessages.at(-1)).toBe("Resuming task…");
 		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "⏳ resuming" });
+
+		const updatesAfterComplete = statusUpdates.length;
+		await sleep(1200);
+		expect(statusUpdates).toHaveLength(updatesAfterComplete);
 	});
 
 	test("onComplete sends continuation message when agent is idle and no queued messages", async () => {
@@ -314,10 +361,18 @@ describe("compact", () => {
 		expect(workingMessages.at(-1)).toBeUndefined();
 	});
 
-	test("onError does not send continuation message", async () => {
+	test("onError stops compact heartbeat, clears status, and sends no continuation", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
 		const toolCtx = buildContext({ compact: () => {} });
 		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
 			compact: (options) => {
 				compactOptions = options;
 			},
@@ -326,9 +381,14 @@ describe("compact", () => {
 
 		await executeTool({ command: "compact" }, toolCtx);
 		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+		await sleep(1100);
 
 		compactOptions?.onError?.();
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+
+		const updatesAfterError = statusUpdates.length;
+		await sleep(1200);
+		expect(statusUpdates).toHaveLength(updatesAfterError);
 
 		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
 		expect(continuation).toBeUndefined();
@@ -443,6 +503,51 @@ describe("compact", () => {
 		expect(statusUpdates).toHaveLength(0);
 	});
 
+	test("session_before_switch clears active compact heartbeat state", async () => {
+		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
+		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const toolCtx = buildContext({ compact: () => {} });
+		const agentEndCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setWorkingMessage: () => {},
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+			compact: (options) => {
+				compactOptions = options;
+			},
+		});
+
+		await executeTool({ command: "compact" }, toolCtx);
+		await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+		await sleep(1100);
+
+		expect(compactOptions).toBeDefined();
+		expect(statusUpdates.some((update) => update.text?.includes("compacting"))).toBe(true);
+
+		const switchCtx = buildContext({
+			hasUI: true,
+			ui: {
+				setStatus: (key: string, text?: string) => {
+					statusUpdates.push({ key, text });
+				},
+			} as ExtensionContext["ui"],
+		});
+		await harness.fireEvent(
+			"session_before_switch",
+			{ type: "session_before_switch", reason: "switch" },
+			switchCtx
+		);
+
+		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+
+		const updatesAfterSwitch = statusUpdates.length;
+		await sleep(1200);
+		expect(statusUpdates).toHaveLength(updatesAfterSwitch);
+	});
+
 	test("session_before_switch clears resuming state and footer status", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
 		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
@@ -539,6 +644,55 @@ describe("compact", () => {
 		// Timer was cancelled — no continuation message sent
 		const continuation = harness.sentMessages.find((m) => m.customType === "compact-continue");
 		expect(continuation).toBeUndefined();
+	});
+
+	test("repeated compact lifecycle does not leave duplicate heartbeat intervals", async () => {
+		const originalSetInterval = globalThis.setInterval;
+		const originalClearInterval = globalThis.clearInterval;
+		const createdHandles: unknown[] = [];
+		const clearedHandles: unknown[] = [];
+		let handleIndex = 0;
+
+		globalThis.setInterval = ((callback: Parameters<typeof setInterval>[0], _ms?: number) => {
+			void callback;
+			handleIndex += 1;
+			const handle = { id: handleIndex };
+			createdHandles.push(handle);
+			return handle as unknown as ReturnType<typeof setInterval>;
+		}) as typeof setInterval;
+		globalThis.clearInterval = ((handle?: ReturnType<typeof setInterval>) => {
+			clearedHandles.push(handle);
+		}) as typeof clearInterval;
+
+		try {
+			const toolCtx = buildContext({ compact: () => {} });
+			const agentEndCtx = buildContext({
+				hasUI: true,
+				ui: {
+					setWorkingMessage: () => {},
+					setStatus: () => {},
+				} as ExtensionContext["ui"],
+				compact: () => {},
+			});
+
+			await executeTool({ command: "compact" }, toolCtx);
+			await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+			await executeTool({ command: "compact" }, toolCtx);
+			await harness.fireEvent("agent_end", { type: "agent_end", messages: [] }, agentEndCtx);
+
+			await harness.fireEvent("session_before_switch", {
+				type: "session_before_switch",
+				reason: "switch",
+			});
+
+			expect(createdHandles).toHaveLength(2);
+			expect(clearedHandles).toContain(createdHandles[0]);
+			expect(clearedHandles).toContain(createdHandles[1]);
+		} finally {
+			globalThis.setInterval = originalSetInterval;
+			globalThis.clearInterval = originalClearInterval;
+		}
 	});
 
 	test("session_before_switch clears pending compact", async () => {
@@ -668,6 +822,16 @@ function buildContext(overrides: Partial<ExtensionContext> = {}): ExtensionConte
 		getSystemPrompt: () => "",
 		...overrides,
 	};
+}
+
+/**
+ * Waits for a given number of milliseconds.
+ *
+ * @param milliseconds - Delay duration in milliseconds
+ * @returns Promise that resolves after the delay
+ */
+function sleep(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 /**
