@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **sdk:** preserve historical `toolResultRetention` behavior while adding
   same-turn ingestion safeguards
 
+### Fixed
+
+- **slash-command-bridge:** show live elapsed heartbeat updates during
+  model-invoked `/compact`
+
 ### Documentation
 
 - **context-usage:** document `contextBudget` settings and budget signal semantics
