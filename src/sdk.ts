@@ -29,6 +29,7 @@ import {
 import * as PiTui from "@mariozechner/pi-tui";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-hardening.js";
+import { applyAgentSessionCompactionCancelPatch } from "./compaction-cancel-patch.js";
 import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
@@ -1296,6 +1297,7 @@ export async function createTallowSession(
 	if (startupProfile === "interactive") {
 		await applyInteractiveModeStaleUiPatch();
 	}
+	await applyAgentSessionCompactionCancelPatch();
 
 	// Resolve any op:// secrets not loaded from cache during bootstrap.
 	// Runs in parallel (~2.4s for all) instead of sequential (~2.4s each).
