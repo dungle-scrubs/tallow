@@ -210,6 +210,7 @@ export class TUI extends Container {
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	public onDebug?: () => void;
 	private renderRequested = false;
+	private pendingRenderHandle?: ReturnType<typeof setImmediate>;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
 	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
 	private inputBuffer = ""; // Buffer for parsing terminal responses
@@ -396,6 +397,11 @@ export class TUI extends Container {
 
 	stop(): void {
 		this.stopped = true;
+		if (this.pendingRenderHandle !== undefined) {
+			clearImmediate(this.pendingRenderHandle);
+			this.pendingRenderHandle = undefined;
+			this.renderRequested = false;
+		}
 		// Move cursor to the end of the content to prevent overwriting/artifacts on exit
 		if (this.previousLines.length > 0) {
 			const targetRow = this.previousLines.length; // Line after the last content
@@ -422,9 +428,24 @@ export class TUI extends Container {
 			this.previousViewportTop = 0;
 		}
 		if (this.renderRequested) return;
+		this.scheduleRender();
+	}
+
+	/**
+	 * Schedule a single coalesced render in the check phase.
+	 *
+	 * Using `process.nextTick()` here lets streaming updates monopolize the event loop
+	 * because each render can queue another render before stdin polling runs. `setImmediate()`
+	 * yields to I/O first, which keeps the editor responsive while chatty models stream.
+	 *
+	 * @returns {void}
+	 */
+	private scheduleRender(): void {
 		this.renderRequested = true;
-		process.nextTick(() => {
+		this.pendingRenderHandle = setImmediate(() => {
+			this.pendingRenderHandle = undefined;
 			this.renderRequested = false;
+			if (this.stopped) return;
 			this.doRender();
 		});
 	}
