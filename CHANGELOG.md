@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **slash-command-bridge:** show live elapsed heartbeat updates during
   model-invoked `/compact`
+- **sdk:** cancel in-flight compaction before `newSession`/`switchSession`
+  boundaries to preserve fresh-session resets
+- **context-usage,slash-command-bridge:** treat unknown usage (`tokens: null`)
+  as unavailable instead of rendering misleading zero-token summaries
 
 ### Documentation
 

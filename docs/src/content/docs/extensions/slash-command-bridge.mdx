@@ -13,7 +13,7 @@ commands itself when it determines they're needed.
 | Command | Description |
 |---------|-------------|
 | `show-system-prompt` | Returns the full system prompt text |
-| `context` | Returns context window token usage breakdown |
+| `context` | Returns context window token usage breakdown (or no-data when usage is unknown) |
 | `compact` | Triggers session compaction to free context space |
 
 ## Usage
@@ -27,6 +27,9 @@ run_slash_command({ command: "context" })
 run_slash_command({ command: "compact" })
 → "Session compaction triggered."
 ```
+
+If usage is unknown (`tokens: null`), `context` returns the same no-data error
+path as `/context` for parity.
 
 ## Design
 
