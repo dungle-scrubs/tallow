@@ -21,6 +21,7 @@ import {
 	enforceExplicitPolicy,
 	getAuditTrail,
 	resetPermissionCache,
+	type ShellConfirmResponse,
 } from "../_shared/shell-policy.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -75,12 +76,18 @@ function createPolicyExtension(confirmBehavior: "accept" | "deny" | "throw"): Ex
 			const command = (event.input as { command?: string }).command;
 			if (!command) return;
 
-			return enforceExplicitPolicy(command, "bash", ctx.cwd, true, async () => {
-				if (confirmBehavior === "throw") {
-					throw new Error("Confirmation interrupted");
+			return enforceExplicitPolicy(
+				command,
+				"bash",
+				ctx.cwd,
+				true,
+				async (): Promise<ShellConfirmResponse> => {
+					if (confirmBehavior === "throw") {
+						throw new Error("Confirmation interrupted");
+					}
+					return confirmBehavior === "accept" ? "yes" : "no";
 				}
-				return confirmBehavior === "accept";
-			});
+			);
 		});
 	};
 }
@@ -202,7 +209,13 @@ describe("Shell Policy Confirm — permission-rule denial messaging", () => {
 					if (!command) return;
 					process.env.TALLOW_PROJECT_TRUST_CWD = ctx.cwd;
 					process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
-					return enforceExplicitPolicy(command, "bash", ctx.cwd, true, async () => true);
+					return enforceExplicitPolicy(
+						command,
+						"bash",
+						ctx.cwd,
+						true,
+						async (): Promise<ShellConfirmResponse> => "yes"
+					);
 				});
 			};
 
@@ -284,10 +297,16 @@ describe("Shell Policy Confirm — denylist bypass", () => {
 				const command = (event.input as { command?: string }).command;
 				if (!command) return;
 
-				return enforceExplicitPolicy(command, "bash", ctx.cwd, true, async () => {
-					confirmCalled = true;
-					return true;
-				});
+				return enforceExplicitPolicy(
+					command,
+					"bash",
+					ctx.cwd,
+					true,
+					async (): Promise<ShellConfirmResponse> => {
+						confirmCalled = true;
+						return "yes";
+					}
+				);
 			});
 		};
 
@@ -336,7 +355,13 @@ describe("Shell Policy Confirm — handler ordering", () => {
 				const command = (event.input as { command?: string }).command;
 				if (!command) return;
 
-				return enforceExplicitPolicy(command, "bash", ctx.cwd, true, async () => true);
+				return enforceExplicitPolicy(
+					command,
+					"bash",
+					ctx.cwd,
+					true,
+					async (): Promise<ShellConfirmResponse> => "yes"
+				);
 			});
 		};
 
@@ -386,7 +411,13 @@ describe("Shell Policy Confirm — handler ordering", () => {
 				const command = (event.input as { command?: string }).command;
 				if (!command) return;
 
-				return enforceExplicitPolicy(command, "bash", ctx.cwd, true, async () => true);
+				return enforceExplicitPolicy(
+					command,
+					"bash",
+					ctx.cwd,
+					true,
+					async (): Promise<ShellConfirmResponse> => "yes"
+				);
 			});
 		};
 

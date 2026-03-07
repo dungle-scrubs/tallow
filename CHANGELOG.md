@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **shell-policy:** "Always Allow" option for high-risk shell command
+  confirmations — persists `Bash(pattern)` rules to
+  `~/.tallow/settings.json` so matching commands skip confirmation in
+  future sessions
+
 ## [0.8.18](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.17...tallow-v0.8.18) (2026-03-07)
 
 
