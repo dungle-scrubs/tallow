@@ -212,16 +212,16 @@ describe("buildForkArgs", () => {
 		expect(lastArg).toContain("Do the thing");
 	});
 
-	test("adds --models when model provided", async () => {
+	test("adds --model when model provided", async () => {
 		const args = await buildForkArgs({ ...baseOptions, model: "claude-sonnet-4-5-20250514" });
-		const modelsIndex = args.indexOf("--models");
-		expect(modelsIndex).toBeGreaterThan(-1);
-		expect(args[modelsIndex + 1]).toBe("claude-sonnet-4-5-20250514");
+		const modelIndex = args.indexOf("--model");
+		expect(modelIndex).toBeGreaterThan(-1);
+		expect(args[modelIndex + 1]).toBe("claude-sonnet-4-5-20250514");
 	});
 
-	test("omits --models when model is undefined", async () => {
+	test("omits --model when model is undefined", async () => {
 		const args = await buildForkArgs(baseOptions);
-		expect(args).not.toContain("--models");
+		expect(args).not.toContain("--model");
 	});
 
 	test("adds --tools when tools provided", async () => {
