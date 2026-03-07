@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionCommandContext, ExtensionUIContext } from "@mariozechner/pi-coding-agent";
@@ -21,15 +21,18 @@ let originalCwd: string;
 let currentDir: string;
 let targetDir: string;
 let notifications: NotifyCall[];
+let originalSessionWorktreePath: string | undefined;
+let originalSessionWorktreeOriginalCwd: string | undefined;
 let transitionResult: WorkspaceTransitionResult;
 let transitionRequests: WorkspaceTransitionRequest[];
 
 /**
  * Build a command context with notification capture.
  *
+ * @param cwd - Context cwd exposed to the extension runtime
  * @returns Minimal command context for invoking /cd
  */
-function createCommandContext(): ExtensionCommandContext {
+function createCommandContext(cwd: string = process.cwd()): ExtensionCommandContext {
 	const ui: Partial<ExtensionUIContext> = {
 		notify(message: string, level: string): void {
 			notifications.push({ level, message });
@@ -41,7 +44,7 @@ function createCommandContext(): ExtensionCommandContext {
 	};
 
 	return {
-		cwd: process.cwd(),
+		cwd,
 		hasUI: true,
 		ui: ui as ExtensionUIContext,
 		sessionManager: {} as never,
@@ -70,6 +73,8 @@ beforeEach(async () => {
 	currentDir = realpathSync(mkdtempSync(join(tmpdir(), "cd-tool-current-")));
 	targetDir = realpathSync(mkdtempSync(join(tmpdir(), "cd-tool-target-")));
 	notifications = [];
+	originalSessionWorktreePath = process.env.TALLOW_WORKTREE_PATH;
+	originalSessionWorktreeOriginalCwd = process.env.TALLOW_WORKTREE_ORIGINAL_CWD;
 	transitionRequests = [];
 	transitionResult = { status: "completed", trustedOnEntry: true };
 	process.chdir(currentDir);
@@ -84,6 +89,16 @@ beforeEach(async () => {
 afterEach(() => {
 	registerWorkspaceTransitionHost(null);
 	process.chdir(originalCwd);
+	if (originalSessionWorktreePath === undefined) {
+		delete process.env.TALLOW_WORKTREE_PATH;
+	} else {
+		process.env.TALLOW_WORKTREE_PATH = originalSessionWorktreePath;
+	}
+	if (originalSessionWorktreeOriginalCwd === undefined) {
+		delete process.env.TALLOW_WORKTREE_ORIGINAL_CWD;
+	} else {
+		process.env.TALLOW_WORKTREE_ORIGINAL_CWD = originalSessionWorktreeOriginalCwd;
+	}
 	rmSync(currentDir, { force: true, recursive: true });
 	rmSync(targetDir, { force: true, recursive: true });
 });
@@ -98,6 +113,20 @@ describe("cd command flow", () => {
 		expect(transitionRequests[0]?.sourceCwd).toBe(currentDir);
 		expect(transitionRequests[0]?.targetCwd).toBe(targetDir);
 		expect(notifications.some((entry) => entry.message === `Changed to: ${targetDir}`)).toBe(true);
+	});
+
+	it("resolves relative paths from ctx.cwd instead of process.cwd", async () => {
+		const nestedBaseDir = realpathSync(mkdtempSync(join(tmpdir(), "cd-tool-context-")));
+		const nestedTargetDir = join(nestedBaseDir, "nested");
+		mkdirSync(nestedTargetDir);
+
+		const command = harness.commands.get("cd");
+		await command?.handler("nested", createCommandContext(nestedBaseDir));
+
+		expect(transitionRequests).toHaveLength(1);
+		expect(transitionRequests[0]?.sourceCwd).toBe(nestedBaseDir);
+		expect(transitionRequests[0]?.targetCwd).toBe(nestedTargetDir);
+		rmSync(nestedBaseDir, { force: true, recursive: true });
 	});
 
 	it("warns when the target workspace remains untrusted", async () => {
@@ -142,6 +171,32 @@ describe("cd tool", () => {
 		if (textResult?.type === "text") {
 			expect(textResult.text).toContain("restart in the new workspace");
 		}
+	});
+
+	it("keeps original-repo absolute paths inside the active session worktree", async () => {
+		const originalRepoRoot = realpathSync(mkdtempSync(join(tmpdir(), "cd-tool-repo-")));
+		const worktreeRoot = realpathSync(mkdtempSync(join(tmpdir(), "cd-tool-worktree-")));
+		const relativePath = join("packages", "app");
+		const originalTargetDir = join(originalRepoRoot, relativePath);
+		const worktreeTargetDir = join(worktreeRoot, relativePath);
+		mkdirSync(originalTargetDir, { recursive: true });
+		mkdirSync(worktreeTargetDir, { recursive: true });
+		process.env.TALLOW_WORKTREE_ORIGINAL_CWD = originalRepoRoot;
+		process.env.TALLOW_WORKTREE_PATH = worktreeRoot;
+
+		const tool = harness.tools.get("cd");
+		await tool?.execute(
+			"tool-call-1",
+			{ path: originalTargetDir },
+			undefined,
+			undefined,
+			createCommandContext(worktreeRoot)
+		);
+
+		expect(transitionRequests).toHaveLength(1);
+		expect(transitionRequests[0]?.targetCwd).toBe(worktreeTargetDir);
+		rmSync(originalRepoRoot, { force: true, recursive: true });
+		rmSync(worktreeRoot, { force: true, recursive: true });
 	});
 
 	it("surfaces host unavailability to the model", async () => {

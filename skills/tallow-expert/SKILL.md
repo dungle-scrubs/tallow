@@ -33,7 +33,7 @@ Relay that answer to the user.
 
 | Component | Location |
 |-----------|----------|
-| Core source | `src/` (agent-runner.ts, atomic-write.ts, auth-hardening.ts, cli.ts, compaction-cancel-patch.ts, config.ts, extensions-global.d.ts, fatal-errors.ts, index.ts, install.ts, interactive-mode-patch.ts, pid-manager.ts, plugins.ts, process-cleanup.ts, project-trust-banner.ts, project-trust-interop.ts, project-trust.ts, runtime-path-provider.ts, sdk.ts, session-migration.ts, session-utils.ts, startup-profile.ts, startup-timing.ts, workspace-transition-interactive.ts, workspace-transition.ts) |
+| Core source | `src/` (agent-runner.ts, atomic-write.ts, auth-hardening.ts, cli.ts, compaction-cancel-patch.ts, config.ts, extensions-global.d.ts, fatal-errors.ts, index.ts, install.ts, interactive-mode-patch.ts, pid-manager.ts, plugins.ts, process-cleanup.ts, project-trust-banner.ts, project-trust-interop.ts, project-trust.ts, runtime-path-provider.ts, sdk.ts, session-migration.ts, session-utils.ts, startup-profile.ts, startup-timing.ts, workspace-transition-interactive.ts, workspace-transition-relay.ts, workspace-transition.ts) |
 | Extensions | `extensions/` — extension.json + index.ts each (51 bundled) |
 | Skills | `skills/` — subdirs with SKILL.md |
 | Agents | `agents/` — markdown with YAML frontmatter |
@@ -87,7 +87,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `setModel(model: Model<any>)` — Set the current model.
 - `getThinkingLevel()` — Get current thinking level.
 - `setThinkingLevel(level: ThinkingLevel)` — Set thinking level (clamped to model capabilities).
-- `unregisterProvider(name: string)` — Unregister a previously registered provider.
 - `events` — Shared event bus for extension communication.
 
 ### Events (`pi.on(event, handler)`)
