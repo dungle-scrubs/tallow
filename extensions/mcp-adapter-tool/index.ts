@@ -1130,7 +1130,7 @@ export function loadMcpConfigWithMetadata(cwd: string): McpConfigLoadResult {
 	const homeDir = process.env.HOME || "";
 	const globalSettingsPath = path.join(homeDir, ".tallow", "settings.json");
 	const projectSettingsPath = path.join(cwd, ".tallow", "settings.json");
-	const trustDecision = getProjectSettingsTrustDecision();
+	const trustDecision = getProjectSettingsTrustDecision(cwd);
 
 	const globalConfig = readMcpConfigFromSettings(globalSettingsPath);
 	const projectConfig = trustDecision.allowProjectSettings

@@ -30,7 +30,13 @@ import * as PiTui from "@mariozechner/pi-tui";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-hardening.js";
 import { applyAgentSessionCompactionCancelPatch } from "./compaction-cancel-patch.js";
-import { BUNDLED, bootstrap, resolveOpSecrets, TALLOW_HOME, TALLOW_VERSION } from "./config.js";
+import {
+	BUNDLED,
+	bootstrap,
+	getRuntimeTallowHome,
+	resolveOpSecrets,
+	TALLOW_VERSION,
+} from "./config.js";
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
 import {
@@ -49,6 +55,7 @@ import {
 	untrustProject,
 } from "./project-trust.js";
 import { buildProjectTrustBannerPayload } from "./project-trust-banner.js";
+import { PROJECT_TRUST_API_CHANNELS } from "./project-trust-interop.js";
 import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 import { normalizeStartupProfile, type StartupProfile } from "./startup-profile.js";
@@ -1304,20 +1311,21 @@ export async function createTallowSession(
 	await resolveOpSecrets();
 
 	const cwd = options.cwd ?? process.cwd();
+	const tallowHome = getRuntimeTallowHome();
 	const projectTrust = resolveProjectTrust(cwd);
 	applyProjectTrustContextToEnv(projectTrust);
 	const eventBus = createEventBus();
 
 	// ── Auth & Models ────────────────────────────────────────────────────────
 
-	const authPath = join(TALLOW_HOME, "auth.json");
+	const authPath = join(tallowHome, "auth.json");
 	const { authStorage, migration } = createSecureAuthStorage(authPath);
 	if (migration.migratedProviders.length > 0) {
 		console.error(
 			`\x1b[33m🔐 Migrated ${migration.migratedProviders.length} auth credential(s) to secure references: ${migration.migratedProviders.join(", ")}\x1b[0m`
 		);
 	}
-	const modelRegistry = new ModelRegistry(authStorage, join(TALLOW_HOME, "models.json"));
+	const modelRegistry = new ModelRegistry(authStorage, join(tallowHome, "models.json"));
 
 	// ── Runtime API key (not persisted) ──────────────────────────────────────
 	// Accepts programmatic SDK `apiKey` option or env overrides:
@@ -1338,7 +1346,7 @@ export async function createTallowSession(
 
 	// ── Settings ─────────────────────────────────────────────────────────────
 
-	const settingsManager = SettingsManager.create(cwd, TALLOW_HOME);
+	const settingsManager = SettingsManager.create(cwd, tallowHome);
 	if (options.settings) {
 		settingsManager.applyOverrides(options.settings);
 	}
@@ -1378,7 +1386,7 @@ export async function createTallowSession(
 	// Bundled resources from the package
 	if (!extensionsOnly && !options.noBundledExtensions && existsSync(BUNDLED.extensions)) {
 		// Discover user extensions that might override bundled ones
-		const userExtDir = join(TALLOW_HOME, "extensions");
+		const userExtDir = join(tallowHome, "extensions");
 		const userExtNames = new Set<string>();
 		const userExtPaths = new Map<string, string>();
 		if (existsSync(userExtDir)) {
@@ -1424,7 +1432,7 @@ export async function createTallowSession(
 
 	const resolvedPlugins: ResolvedPlugin[] = [];
 	if (!extensionsOnly) {
-		const pluginSpecs = collectPluginSpecs(cwd, options.plugins, projectTrust.status);
+		const pluginSpecs = collectPluginSpecs(cwd, options.plugins, projectTrust.status, tallowHome);
 		const pluginResult = resolvePlugins(pluginSpecs);
 
 		// Report plugin errors (non-fatal — one bad plugin doesn't block startup)
@@ -1469,8 +1477,8 @@ export async function createTallowSession(
 
 		// Expose plugin commands/agents dirs as env vars for the command-prompt
 		// and agent-commands-tool extensions to discover at runtime.
-		appendPathListEnv("TALLOW_PLUGIN_COMMANDS_DIRS", pluginCommandsDirs);
-		appendPathListEnv("TALLOW_PLUGIN_AGENTS_DIRS", pluginAgentsDirs);
+		setPathListEnv("TALLOW_PLUGIN_COMMANDS_DIRS", pluginCommandsDirs);
+		setPathListEnv("TALLOW_PLUGIN_AGENTS_DIRS", pluginAgentsDirs);
 	}
 
 	// ── Package AGENTS.md loading ────────────────────────────────────────────
@@ -1493,7 +1501,7 @@ export async function createTallowSession(
 
 	const loader = new DefaultResourceLoader({
 		cwd,
-		agentDir: TALLOW_HOME,
+		agentDir: tallowHome,
 		settingsManager,
 		eventBus,
 		additionalExtensionPaths: dedupedExtensionPaths,
@@ -1619,7 +1627,7 @@ export async function createTallowSession(
 
 	const result = await createAgentSession({
 		cwd,
-		agentDir: TALLOW_HOME,
+		agentDir: tallowHome,
 		model: resolvedModel,
 		thinkingLevel: options.thinkingLevel,
 		authStorage,
@@ -1661,14 +1669,14 @@ export async function createTallowSession(
  * @param cwd - Current working directory (for project settings)
  * @param cliPlugins - Additional plugin specs from CLI --plugin-dir or options.plugins
  * @param trustStatus - Current project trust status
- * @param tallowHome - Optional tallow home override for settings lookup (defaults to TALLOW_HOME)
+ * @param tallowHome - Optional tallow home override for settings lookup (defaults to runtime TALLOW_HOME)
  * @returns Deduplicated array of plugin spec strings
  */
 export function collectPluginSpecs(
 	cwd: string,
 	cliPlugins: string[] | undefined,
 	trustStatus: ProjectTrustStatus,
-	tallowHome = TALLOW_HOME
+	tallowHome = getRuntimeTallowHome()
 ): string[] {
 	const specs = new Set<string>();
 
@@ -1702,22 +1710,27 @@ export function collectPluginSpecs(
 }
 
 /**
- * Append filesystem paths to a path-list env var using platform delimiter.
+ * Replace a path-list env var using platform delimiter.
  *
- * Existing values are preserved, new values are appended, and duplicates
- * are removed while preserving first-seen order.
+ * Each session writes its own exact plugin resource set so stale values from
+ * earlier sessions cannot leak into later ones in the same long-lived process.
  *
  * @param key - Environment variable key
- * @param values - Absolute directory paths to append
+ * @param values - Absolute directory paths to store
+ * @param env - Environment object to mutate (defaults to process.env)
  * @returns Nothing
  */
-function appendPathListEnv(key: string, values: string[]): void {
-	if (values.length === 0) return;
-
-	const existingRaw = process.env[key];
-	const existing = existingRaw ? existingRaw.split(delimiter).filter((v) => v.length > 0) : [];
-	const merged = [...new Set([...existing, ...values])];
-	process.env[key] = merged.join(delimiter);
+export function setPathListEnv(
+	key: string,
+	values: readonly string[],
+	env: NodeJS.ProcessEnv = process.env
+): void {
+	const deduped = [...new Set(values.filter((value) => value.length > 0))];
+	if (deduped.length === 0) {
+		delete env[key];
+		return;
+	}
+	env[key] = deduped.join(delimiter);
 }
 
 /** Context file loaded from a package directory. */
@@ -1747,7 +1760,7 @@ function loadAgentsFilesFromPackages(settingsManager: SettingsManager, cwd: stri
 	// Use a PackageManager to resolve installed paths for all source types
 	const pkgManager = new DefaultPackageManager({
 		cwd,
-		agentDir: TALLOW_HOME,
+		agentDir: getRuntimeTallowHome(),
 		settingsManager,
 	});
 
@@ -1822,13 +1835,56 @@ function createProjectTrustExtension(
 	initialTrust: ProjectTrustContext
 ): ExtensionFactory {
 	return (pi) => {
+		let currentCwd = cwd;
 		let trustContext = initialTrust;
 
-		pi.on("session_start", async (_event, ctx) => {
-			if (!ctx.hasUI) return;
-			if (trustContext.status === "trusted") return;
+		/**
+		 * Re-resolve trust for the active cwd and project it into env.
+		 *
+		 * @param nextCwd - Working directory whose trust state should become active
+		 * @returns Refreshed trust context
+		 */
+		const syncTrustContext = (nextCwd: string): ProjectTrustContext => {
+			currentCwd = nextCwd;
+			trustContext = resolveProjectTrust(currentCwd);
+			applyProjectTrustContextToEnv(trustContext);
+			return trustContext;
+		};
 
-			const banner = buildProjectTrustBannerPayload(trustContext);
+		const trustApi = {
+			inspect(targetCwd: string): ProjectTrustContext {
+				return resolveProjectTrust(targetCwd);
+			},
+			trust(targetCwd: string): ProjectTrustContext {
+				const nextTrust = trustProject(targetCwd);
+				if (nextTrust.canonicalCwd === trustContext.canonicalCwd) {
+					applyProjectTrustContextToEnv(nextTrust);
+					trustContext = nextTrust;
+				}
+				return nextTrust;
+			},
+		};
+
+		const publishTrustApi = (): void => {
+			pi.events.emit(PROJECT_TRUST_API_CHANNELS.api, { api: trustApi });
+		};
+
+		pi.events.on(PROJECT_TRUST_API_CHANNELS.apiRequest, publishTrustApi);
+		publishTrustApi();
+
+		pi.events.on("tallow:cwd_changed", (payload: unknown) => {
+			if (!payload || typeof payload !== "object") return;
+			const nextCwd = (payload as { cwd?: unknown }).cwd;
+			if (typeof nextCwd !== "string" || nextCwd.length === 0) return;
+			syncTrustContext(nextCwd);
+		});
+
+		pi.on("session_start", async (_event, ctx) => {
+			const currentTrust = syncTrustContext(currentCwd);
+			if (!ctx.hasUI) return;
+			if (currentTrust.status === "trusted") return;
+
+			const banner = buildProjectTrustBannerPayload(currentTrust);
 			ctx.ui.notify(banner.content, "warning");
 			pi.sendMessage(
 				{
@@ -1844,41 +1900,46 @@ function createProjectTrustExtension(
 		pi.registerCommand("trust-project", {
 			description: "Trust this project and enable repo-controlled execution surfaces",
 			handler: async (_args, ctx) => {
-				trustContext = trustProject(cwd);
+				currentCwd = process.cwd();
+				trustContext = trustProject(currentCwd);
 				applyProjectTrustContextToEnv(trustContext);
-				ctx.ui.notify(
-					`Trusted project: ${trustContext.canonicalCwd}\n` +
-						"Restart this session to apply blocked project surfaces.",
-					"info"
-				);
+				ctx.ui.setWorkingMessage("Reloading workspace after trust change...");
+				try {
+					await ctx.reload();
+				} finally {
+					ctx.ui.setWorkingMessage();
+				}
+				ctx.ui.notify(`Trusted project: ${trustContext.canonicalCwd}`, "info");
 			},
 		});
 
 		pi.registerCommand("untrust-project", {
 			description: "Remove trust for this project and block repo-controlled execution surfaces",
 			handler: async (_args, ctx) => {
-				trustContext = untrustProject(cwd);
+				currentCwd = process.cwd();
+				trustContext = untrustProject(currentCwd);
 				applyProjectTrustContextToEnv(trustContext);
-				ctx.ui.notify(
-					`Removed trust for project: ${trustContext.canonicalCwd}\n` +
-						"Restart this session to enforce trust-gated blocking.",
-					"warning"
-				);
+				ctx.ui.setWorkingMessage("Reloading workspace after trust change...");
+				try {
+					await ctx.reload();
+				} finally {
+					ctx.ui.setWorkingMessage();
+				}
+				ctx.ui.notify(`Removed trust for project: ${trustContext.canonicalCwd}`, "warning");
 			},
 		});
 
 		pi.registerCommand("trust-status", {
 			description: "Show trust status and fingerprint details for this project",
 			handler: async (_args, ctx) => {
-				trustContext = resolveProjectTrust(cwd);
-				applyProjectTrustContextToEnv(trustContext);
+				const currentTrust = syncTrustContext(process.cwd());
 				const lines = [
-					`status: ${trustContext.status}`,
-					`project: ${trustContext.canonicalCwd}`,
-					`current fingerprint: ${trustContext.fingerprint}`,
-					`stored fingerprint: ${trustContext.storedFingerprint ?? "(none)"}`,
+					`status: ${currentTrust.status}`,
+					`project: ${currentTrust.canonicalCwd}`,
+					`current fingerprint: ${currentTrust.fingerprint}`,
+					`stored fingerprint: ${currentTrust.storedFingerprint ?? "(none)"}`,
 				];
-				if (trustContext.status !== "trusted") {
+				if (currentTrust.status !== "trusted") {
 					lines.push("repo-controlled project surfaces are currently blocked");
 				}
 				ctx.ui.notify(lines.join("\n"), "info");
@@ -2393,7 +2454,8 @@ function detectOutputTruncation(pi: ExtensionAPI): void {
  * @returns Nothing
  */
 function ensureTallowHome(startupProfile: TallowStartupProfile): void {
-	const dirs = [TALLOW_HOME, join(TALLOW_HOME, "sessions"), join(TALLOW_HOME, "extensions")];
+	const tallowHome = getRuntimeTallowHome();
+	const dirs = [tallowHome, join(tallowHome, "sessions"), join(tallowHome, "extensions")];
 
 	for (const dir of dirs) {
 		if (!existsSync(dir)) {
@@ -2402,7 +2464,7 @@ function ensureTallowHome(startupProfile: TallowStartupProfile): void {
 	}
 
 	// Migrate flat session files to per-cwd subdirectories (one-time, idempotent)
-	migrateSessionsToPerCwdDirs(join(TALLOW_HOME, "sessions"));
+	migrateSessionsToPerCwdDirs(join(tallowHome, "sessions"));
 
 	// Kill orphaned child processes from crashed/killed previous sessions
 	const orphansKilled = cleanupOrphanPids();
@@ -2443,7 +2505,7 @@ const TALLOW_KEYBINDINGS: Record<string, string | string[]> = {
  * Merges with any existing user customizations — tallow keys take precedence.
  */
 function ensureKeybindings(): void {
-	const keybindingsPath = join(TALLOW_HOME, "keybindings.json");
+	const keybindingsPath = join(getRuntimeTallowHome(), "keybindings.json");
 
 	let existing: Record<string, unknown> = {};
 	if (existsSync(keybindingsPath)) {

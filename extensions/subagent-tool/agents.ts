@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { getTallowPath } from "../_shared/tallow-paths.js";
 import type { IsolationMode } from "./schema.js";
 
@@ -396,7 +397,8 @@ function mergeDefaults(...sources: (AgentDefaults | undefined)[]): AgentDefaults
 export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryResult {
 	const userTallowDir = getTallowPath("agents");
 	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
-	const projectDirs = findProjectAgentsDirs(cwd);
+	const allowProjectAgents = isProjectTrusted(cwd);
+	const projectDirs = allowProjectAgents ? findProjectAgentsDirs(cwd) : [];
 	const projectAgentsDir = projectDirs.at(-1) ?? null;
 
 	// Load in priority order: .claude/ first so .tallow/ wins via last-wins

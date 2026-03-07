@@ -1,3 +1,6 @@
+import type { ChildProcess, SpawnOptions } from "node:child_process";
+import { spawn as defaultSpawn } from "node:child_process";
+
 /** Candidate executable for spawning an agent subprocess. */
 export interface AgentRunnerCandidate {
 	readonly command: string;
@@ -23,12 +26,51 @@ export interface AgentRunnerResolutionOptions {
 	readonly execPath?: string;
 }
 
+/** Spawn function shape used for child-process test injection. */
+export type AgentRunnerSpawn = (
+	command: string,
+	args: readonly string[],
+	options: SpawnOptions
+) => ChildProcess;
+
+/** Options for spawning a subprocess through resolved runner candidates. */
+export interface SpawnAgentRunnerOptions {
+	/** Arguments passed to the selected runner command. */
+	readonly args: readonly string[];
+	/** Runner label used in diagnostics. */
+	readonly runnerLabel: string;
+	/** Resolution options controlling runner discovery. */
+	readonly resolution: AgentRunnerResolutionOptions;
+	/** Spawn options passed through to child_process.spawn. */
+	readonly spawnOptions: SpawnOptions;
+	/** Optional spawn implementation override for tests. */
+	readonly spawnImpl?: AgentRunnerSpawn;
+}
+
+/** Successful runner spawn result. */
+export interface SpawnAgentRunnerSuccess {
+	readonly ok: true;
+	readonly proc: ChildProcess;
+	readonly runner: AgentRunnerCandidate;
+}
+
+/** Failed runner spawn result. */
+export interface SpawnAgentRunnerFailure {
+	readonly ok: false;
+	readonly reason: string;
+}
+
+/** Union result for runner spawn attempts. */
+export type SpawnAgentRunnerResult = SpawnAgentRunnerFailure | SpawnAgentRunnerSuccess;
+
 /** Default primary command for tallow agent subprocesses. */
 const DEFAULT_PRIMARY_COMMAND = "tallow";
 /** Default legacy fallback command for backward compatibility. */
 const DEFAULT_LEGACY_COMMANDS = ["pi"] as const;
 /** Default entrypoint suffixes that identify tallow CLI scripts. */
 const DEFAULT_ENTRYPOINT_SUFFIXES = ["/dist/cli.js"] as const;
+/** Default override env var for agent subprocess runners. */
+export const DEFAULT_AGENT_RUNNER_ENV = "TALLOW_AGENT_RUNNER";
 
 /**
  * Normalize path-like values for comparison.
@@ -164,6 +206,27 @@ export function resolveAgentRunnerCandidates(
 /**
  * Build an actionable runner-resolution failure message.
  *
+ * @param runnerLabel - Human-readable runner kind for diagnostics
+ * @param candidates - Candidate runners attempted in order
+ * @param overrideEnvVar - Override env var name shown in guidance
+ * @param lastError - Optional trailing spawn error message
+ * @returns User-facing diagnostic message
+ */
+export function formatMissingRunnerError(
+	runnerLabel: string,
+	candidates: readonly AgentRunnerCandidate[],
+	overrideEnvVar: string,
+	lastError?: string
+): string {
+	const attempted =
+		candidates.length > 0 ? candidates.map((candidate) => candidate.command).join(", ") : "(none)";
+	const errorSuffix = lastError ? ` Last error: ${lastError}` : "";
+	return `${runnerLabel} runner not found. Tried: ${attempted}. Set ${overrideEnvVar} to a valid tallow binary.${errorSuffix}`;
+}
+
+/**
+ * Build the hook-specific runner-resolution failure message.
+ *
  * @param candidates - Candidate runners attempted in order
  * @param overrideEnvVar - Override env var name shown in guidance
  * @param lastError - Optional trailing spawn error message
@@ -174,8 +237,100 @@ export function formatMissingAgentRunnerError(
 	overrideEnvVar: string,
 	lastError?: string
 ): string {
-	const attempted =
-		candidates.length > 0 ? candidates.map((candidate) => candidate.command).join(", ") : "(none)";
-	const errorSuffix = lastError ? ` Last error: ${lastError}` : "";
-	return `Hook agent runner not found. Tried: ${attempted}. Set ${overrideEnvVar} to a valid tallow binary.${errorSuffix}`;
+	return formatMissingRunnerError("Hook agent", candidates, overrideEnvVar, lastError);
+}
+
+/**
+ * Wait for a spawned child process to either start or fail immediately.
+ *
+ * @param proc - Child process returned by spawn
+ * @returns Startup result with either spawn success or startup error
+ */
+function waitForSpawnOutcome(
+	proc: ChildProcess
+): Promise<{ ok: false; error: NodeJS.ErrnoException } | { ok: true }> {
+	return new Promise((resolve) => {
+		let settled = false;
+
+		const cleanup = (): void => {
+			proc.off("spawn", onSpawn);
+			proc.off("error", onError);
+		};
+
+		const settle = (result: { ok: false; error: NodeJS.ErrnoException } | { ok: true }): void => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			resolve(result);
+		};
+
+		const onSpawn = (): void => {
+			settle({ ok: true });
+		};
+
+		const onError = (error: Error): void => {
+			settle({ ok: false, error: error as NodeJS.ErrnoException });
+		};
+
+		proc.once("spawn", onSpawn);
+		proc.once("error", onError);
+	});
+}
+
+/**
+ * Spawn a subprocess using the best available runner candidate.
+ *
+ * Retries on missing executables (`ENOENT`) so callers transparently fall back
+ * from the current process or `tallow` to legacy `pi` when needed.
+ *
+ * @param options - Runner resolution and spawn options
+ * @returns Spawned process plus the selected runner, or a diagnostic failure
+ */
+export async function spawnWithResolvedAgentRunner(
+	options: SpawnAgentRunnerOptions
+): Promise<SpawnAgentRunnerResult> {
+	const spawnImpl = options.spawnImpl ?? defaultSpawn;
+	const runners = resolveAgentRunnerCandidates(options.resolution);
+	if (runners.length === 0) {
+		return {
+			ok: false,
+			reason: formatMissingRunnerError(
+				options.runnerLabel,
+				runners,
+				options.resolution.overrideEnvVar
+			),
+		};
+	}
+
+	let lastSpawnError: NodeJS.ErrnoException | undefined;
+	for (const runner of runners) {
+		const launchArgs = [...runner.preArgs, ...options.args];
+		const proc = spawnImpl(runner.command, launchArgs, options.spawnOptions);
+		const startup = await waitForSpawnOutcome(proc);
+		if (startup.ok) {
+			return {
+				ok: true,
+				proc,
+				runner,
+			};
+		}
+		if (startup.error.code === "ENOENT") {
+			lastSpawnError = startup.error;
+			continue;
+		}
+		return {
+			ok: false,
+			reason: `${options.runnerLabel} failed to start with ${runner.command}: ${startup.error.message}`,
+		};
+	}
+
+	return {
+		ok: false,
+		reason: formatMissingRunnerError(
+			options.runnerLabel,
+			runners,
+			options.resolution.overrideEnvVar,
+			lastSpawnError?.message
+		),
+	};
 }

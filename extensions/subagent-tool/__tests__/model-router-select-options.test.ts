@@ -35,6 +35,8 @@ mockScope.module("../task-classifier.js", () => ({
 let routeModel!: typeof import("../model-router.js").routeModel;
 
 let originalHome: string | undefined;
+let originalTrustCwd: string | undefined;
+let originalTrustStatus: string | undefined;
 let testCwd = "";
 let testHome = "";
 
@@ -65,7 +67,11 @@ beforeEach(() => {
 	testCwd = mkdtempSync(join(tmpdir(), "tallow-router-select-options-cwd-"));
 	testHome = mkdtempSync(join(tmpdir(), "tallow-router-select-options-home-"));
 	originalHome = process.env.HOME;
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 	process.env.HOME = testHome;
+	process.env.TALLOW_PROJECT_TRUST_CWD = testCwd;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 });
 
 afterEach(() => {
@@ -73,6 +79,16 @@ afterEach(() => {
 		delete process.env.HOME;
 	} else {
 		process.env.HOME = originalHome;
+	}
+	if (originalTrustCwd === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	}
+	if (originalTrustStatus === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
 	}
 	rmSync(testCwd, { force: true, recursive: true });
 	rmSync(testHome, { force: true, recursive: true });
