@@ -107,7 +107,7 @@ export async function buildForkArgs(
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 
 	if (options.model) {
-		args.push("--models", options.model);
+		args.push("--model", options.model);
 	}
 	if (options.tools && options.tools.length > 0) {
 		args.push("--tools", options.tools.join(","));
