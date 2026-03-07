@@ -87,6 +87,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `setModel(model: Model<any>)` — Set the current model.
 - `getThinkingLevel()` — Get current thinking level.
 - `setThinkingLevel(level: ThinkingLevel)` — Set thinking level (clamped to model capabilities).
+- `unregisterProvider(name: string)` — Unregister a previously registered provider.
 - `events` — Shared event bus for extension communication.
 
 ### Events (`pi.on(event, handler)`)
