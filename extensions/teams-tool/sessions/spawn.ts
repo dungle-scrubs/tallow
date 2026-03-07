@@ -15,6 +15,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
+import { getTallowPath } from "../../_shared/tallow-paths.js";
 import { type RoutingHints, routeModel } from "../../subagent-tool/model-router.js";
 import { resolveStandardTools } from "../state/team-view.js";
 import type { Teammate } from "../state/types.js";
@@ -58,14 +59,18 @@ export async function spawnTeammateSession(
 		throw new Error(`Model not found: "${routing.query}". Available: ${available}`);
 	}
 	const resolved = routing.model;
-	const { findModel } = await import("../state/team-view.js");
-	const model = findModel(resolved.id);
-	if (!model) {
-		throw new Error(`Model resolved to "${resolved.id}" but not found in registry`);
-	}
 
-	const authStorage = AuthStorage.create();
-	const modelRegistry = new ModelRegistry(authStorage);
+	// Use the user's tallow auth and model config so teammates inherit
+	// API keys and custom model definitions from the main session.
+	const authStorage = AuthStorage.create(getTallowPath("auth.json"));
+	const modelRegistry = new ModelRegistry(authStorage, getTallowPath("models.json"));
+
+	const model = modelRegistry.find(resolved.provider, resolved.id);
+	if (!model) {
+		throw new Error(
+			`Model resolved to "${resolved.id}" (provider: ${resolved.provider}) but not found in registry`
+		);
+	}
 
 	const otherNames = Array.from(team.teammates.keys()).filter((n) => n !== name);
 	const systemPrompt = [
