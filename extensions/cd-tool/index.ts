@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
@@ -15,6 +15,10 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { getWorkspaceTransitionHost } from "../../src/workspace-transition.js";
+import {
+	getRelaySocketPath,
+	requestTransitionViaRelay,
+} from "../../src/workspace-transition-relay.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 /** Details returned from the cd tool. */
@@ -44,20 +48,49 @@ function isMaintainProjectDirEnabled(): boolean {
 }
 
 /**
+ * Remap original-repo absolute paths into the active session worktree.
+ *
+ * When `--worktree` is active, callers may still hand the cd tool a path under
+ * the original repository root. Keep navigation inside the detached worktree by
+ * translating matching paths to the mirrored location under TALLOW_WORKTREE_PATH.
+ *
+ * @param resolvedPath - Already-resolved absolute path
+ * @returns Remapped absolute path when session worktree metadata applies
+ */
+function remapIntoActiveSessionWorktree(resolvedPath: string): string {
+	const worktreeRoot = process.env.TALLOW_WORKTREE_PATH;
+	const originalRepoRoot = process.env.TALLOW_WORKTREE_ORIGINAL_CWD;
+	if (!worktreeRoot || !originalRepoRoot) {
+		return resolvedPath;
+	}
+
+	const safeOriginalRepoRoot = resolve(originalRepoRoot);
+	const isWithinOriginalRepo =
+		resolvedPath === safeOriginalRepoRoot ||
+		resolvedPath.startsWith(`${safeOriginalRepoRoot}${sep}`);
+	if (!isWithinOriginalRepo) {
+		return resolvedPath;
+	}
+
+	return resolve(worktreeRoot, relative(safeOriginalRepoRoot, resolvedPath));
+}
+
+/**
  * Resolve and validate a directory path, expanding `~` to home.
  *
  * @param inputPath - Path to resolve
+ * @param baseCwd - Working directory used for relative paths
  * @returns Resolved absolute directory path
  * @throws {Error} When the path does not exist or is not a directory
  */
-function resolvePath(inputPath: string): string {
+function resolvePath(inputPath: string, baseCwd: string): string {
 	let resolvedPath = inputPath;
 	if (resolvedPath.startsWith("~")) {
 		const home = process.env.HOME || process.env.USERPROFILE || "";
 		resolvedPath = resolvedPath.replace(/^~/, home);
 	}
 
-	resolvedPath = resolve(resolvedPath);
+	resolvedPath = remapIntoActiveSessionWorktree(resolve(baseCwd, resolvedPath));
 	if (!existsSync(resolvedPath)) {
 		throw new Error(`Path does not exist: ${resolvedPath}`);
 	}
@@ -84,19 +117,30 @@ async function requestWorkspaceTransition(
 	ctx: Pick<ExtensionContext, "ui"> & { cwd?: string }
 ) {
 	const host = getWorkspaceTransitionHost();
-	if (!host) {
-		return {
-			reason: "Workspace transitions are only available in the interactive TUI session right now.",
-			status: "unavailable" as const,
-		};
+	if (host) {
+		return host.requestTransition({
+			initiator,
+			sourceCwd: ctx.cwd ?? process.cwd(),
+			targetCwd: resolvedPath,
+			ui: ctx.ui,
+		});
 	}
 
-	return host.requestTransition({
-		initiator,
-		sourceCwd: process.cwd(),
-		targetCwd: resolvedPath,
-		ui: ctx.ui,
-	});
+	// No local host — try the parent session's relay server.
+	const relaySocket = getRelaySocketPath();
+	if (relaySocket) {
+		return requestTransitionViaRelay(
+			relaySocket,
+			ctx.cwd ?? process.cwd(),
+			resolvedPath,
+			initiator
+		);
+	}
+
+	return {
+		reason: "Workspace transitions are only available in the interactive TUI session right now.",
+		status: "unavailable" as const,
+	};
 }
 
 /**
@@ -108,14 +152,14 @@ async function requestWorkspaceTransition(
  */
 async function handleCdCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
 	const inputPath = args.trim();
+	const currentCwd = ctx.cwd;
 	if (!inputPath) {
-		ctx.ui.notify(`Current directory: ${process.cwd()}`, "info");
+		ctx.ui.notify(`Current directory: ${currentCwd}`, "info");
 		return;
 	}
 
 	try {
-		const resolvedPath = resolvePath(inputPath);
-		const currentCwd = process.cwd();
+		const resolvedPath = resolvePath(inputPath, currentCwd);
 		if (resolvedPath === currentCwd) {
 			ctx.ui.notify(`Already in: ${resolvedPath}`, "info");
 			return;
@@ -164,8 +208,9 @@ async function executeCdTool(
 	details: CdToolDetails;
 	isError: boolean;
 }> {
+	const currentCwd = ctx.cwd;
 	try {
-		const resolvedPath = resolvePath(params.path);
+		const resolvedPath = resolvePath(params.path, currentCwd);
 		const result = await requestWorkspaceTransition("tool", resolvedPath, ctx);
 		if (result.status === "completed") {
 			return {
@@ -178,7 +223,7 @@ async function executeCdTool(
 					},
 				],
 				details: {
-					current: process.cwd(),
+					current: resolvedPath,
 					requested: resolvedPath,
 					status: "completed",
 					trustedOnEntry: result.trustedOnEntry,
@@ -190,7 +235,7 @@ async function executeCdTool(
 			return {
 				content: [{ type: "text", text: "Workspace transition canceled by the user." }],
 				details: {
-					current: process.cwd(),
+					current: currentCwd,
 					requested: resolvedPath,
 					status: "cancelled",
 				},
@@ -200,7 +245,7 @@ async function executeCdTool(
 		return {
 			content: [{ type: "text", text: result.reason }],
 			details: {
-				current: process.cwd(),
+				current: currentCwd,
 				requested: resolvedPath,
 				reason: result.reason,
 				status: "unavailable",
@@ -212,7 +257,7 @@ async function executeCdTool(
 		return {
 			content: [{ type: "text", text: reason }],
 			details: {
-				current: process.cwd(),
+				current: currentCwd,
 				reason,
 				status: "resolve_failed",
 			},
