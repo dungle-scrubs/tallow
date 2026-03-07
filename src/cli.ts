@@ -54,8 +54,12 @@ import {
 	type TallowSessionOptions,
 } from "./sdk.js";
 import { resolveStartupProfile } from "./startup-profile.js";
-import { registerWorkspaceTransitionHost } from "./workspace-transition.js";
+import {
+	registerWorkspaceTransitionHost,
+	type WorkspaceTransitionUI,
+} from "./workspace-transition.js";
 import { createInteractiveWorkspaceTransitionHost } from "./workspace-transition-interactive.js";
+import { createTransitionRelayServer } from "./workspace-transition-relay.js";
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -469,10 +473,40 @@ async function run(opts: {
 							}
 						)
 					);
+
+					// Relay server lets child processes (subagents, worktree runs)
+					// request workspace transitions through the parent TUI.
+					const { cleanup: cleanupRelay } = createTransitionRelayServer(
+						(): WorkspaceTransitionUI => {
+							try {
+								const modeAny = mode as unknown as Record<string, unknown>;
+								if (typeof modeAny.createExtensionUIContext === "function") {
+									const ctx = (modeAny.createExtensionUIContext as () => Record<string, unknown>)();
+									if (typeof ctx?.select === "function" && typeof ctx?.notify === "function") {
+										return {
+											select: ctx.select as WorkspaceTransitionUI["select"],
+											notify: ctx.notify as WorkspaceTransitionUI["notify"],
+											setWorkingMessage: (ctx.setWorkingMessage ??
+												(() => {})) as WorkspaceTransitionUI["setWorkingMessage"],
+										};
+									}
+								}
+							} catch {
+								// Fall through to auto-approve fallback.
+							}
+							return {
+								select: async (_title: string, options: string[]) => options[0],
+								notify: () => {},
+								setWorkingMessage: () => {},
+							};
+						}
+					);
+
 					try {
 						await mode.run();
 					} finally {
 						registerWorkspaceTransitionHost(null);
+						cleanupRelay();
 					}
 				}
 				break;
