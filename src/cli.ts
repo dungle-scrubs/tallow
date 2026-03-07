@@ -54,6 +54,8 @@ import {
 	type TallowSessionOptions,
 } from "./sdk.js";
 import { resolveStartupProfile } from "./startup-profile.js";
+import { registerWorkspaceTransitionHost } from "./workspace-transition.js";
+import { createInteractiveWorkspaceTransitionHost } from "./workspace-transition-interactive.js";
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
@@ -453,7 +455,21 @@ async function run(opts: {
 					const mode = new InteractiveMode(tallow.session, {
 						modelFallbackMessage: tallow.modelFallbackMessage,
 					});
-					await mode.run();
+					registerWorkspaceTransitionHost(
+						createInteractiveWorkspaceTransitionHost(
+							mode as unknown as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
+							sessionOpts,
+							tallow.sessionId,
+							(session) => {
+								cleanupSessionRef.current = session;
+							}
+						)
+					);
+					try {
+						await mode.run();
+					} finally {
+						registerWorkspaceTransitionHost(null);
+					}
 				}
 				break;
 			}
