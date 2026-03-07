@@ -35,7 +35,7 @@ describe("Install Smoke Test", () => {
 
 		// Run installer in headless mode with a mock provider.
 		// Use TALLOW_API_KEY_REF (op:// reference) to avoid macOS Keychain access.
-		execFileSync("node", [INSTALL_SCRIPT, "--yes", "--default-provider", "mock"], {
+		const output = execFileSync("node", [INSTALL_SCRIPT, "--yes", "--default-provider", "mock"], {
 			env: {
 				...process.env,
 				HOME: tmpHome,
@@ -45,7 +45,10 @@ describe("Install Smoke Test", () => {
 			cwd: PROJECT_ROOT,
 			timeout: 30_000,
 			stdio: "pipe",
-		});
+		}).toString();
+
+		expect(output).toContain("CLI binary: unchanged by this installer run");
+		expect(output).not.toContain("rebuild + reinstall");
 
 		const tallowDir = join(tmpHome, ".tallow");
 		expect(existsSync(tallowDir)).toBe(true);

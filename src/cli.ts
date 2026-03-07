@@ -125,8 +125,11 @@ program
 
 program
 	.command("install")
-	.description("Interactive installer — choose extensions, themes, and set up tallow")
-	.option("-y, --yes", "Non-interactive: keep all settings, update templates")
+	.description("Interactive installer — choose extensions, themes, and manage ~/.tallow")
+	.option(
+		"-y, --yes",
+		"Non-interactive: refresh templates and apply only the explicit config flags you pass"
+	)
 	.option("--default-provider <provider>", "Set default provider (anthropic, openai, google)")
 	.option("--default-model <model>", "Set default model ID (e.g., claude-sonnet-4)")
 	// --api-key removed: leaks secrets in `ps` output. Use TALLOW_API_KEY/TALLOW_API_KEY_REF.
@@ -137,7 +140,8 @@ program
 	)
 	.action(async () => {
 		// Dynamically import so the main CLI stays lightweight
-		await import("./install.js");
+		const { runInstallerCli } = await import("./install.js");
+		await runInstallerCli();
 	});
 
 program

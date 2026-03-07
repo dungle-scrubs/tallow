@@ -4,11 +4,11 @@
  * Tallow interactive installer.
  *
  * Usage:
- *   npx tallow install             (after global install)
- *   node dist/install.js           (from source)
+ *   npx tallow install             (run installer from the published package)
+ *   node dist/install.js           (run installer from a source checkout)
  *
  * Flags:
- *   --yes, -y                Non-interactive: rebuild + reinstall, keep all settings.
+ *   --yes, -y                Non-interactive: refresh templates and apply explicit config flags.
  *   --default-provider <p>   Set default provider (anthropic, openai, google, etc.)
  *   --default-model <m>      Set default model ID (e.g., claude-sonnet-4)
  *   --theme <name>           Set default theme
@@ -18,8 +18,9 @@
  *   TALLOW_API_KEY=... tallow install -y --default-provider anthropic
  *   TALLOW_API_KEY_REF=op://Vault/Item/field tallow install -y --default-provider anthropic
  *
- * Walks the user through selecting which bundled components to install,
- * builds the project, links the binary globally, and sets up ~/.tallow/.
+ * Walks the user through selecting which bundled components to install
+ * and sets up ~/.tallow/. Updating the installed CLI binary is handled
+ * separately by the user's package manager or source checkout workflow.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
@@ -66,6 +67,31 @@ interface InstallChoices {
 	readonly extensions: readonly string[];
 	readonly themes: readonly string[];
 }
+
+type PackageManager = "bun" | "npm" | "pnpm";
+
+type BinaryUpgradeGuidance =
+	| {
+			readonly commands: readonly string[];
+			readonly detail: string;
+			readonly kind: "package_manager";
+	  }
+	| {
+			readonly commands: readonly string[];
+			readonly detail: string;
+			readonly kind: "source_checkout";
+	  }
+	| {
+			readonly commands: readonly string[];
+			readonly detail: string;
+			readonly kind: "unknown";
+	  };
+
+const GLOBAL_UPGRADE_COMMANDS = {
+	bun: "bun install -g tallow@latest",
+	npm: "npm install -g tallow@latest",
+	pnpm: "pnpm add -g tallow@latest",
+} as const;
 
 // ─── Discovery ───────────────────────────────────────────────────────────────
 
@@ -254,6 +280,93 @@ function applyInstallFlags(flags: InstallFlags): readonly string[] {
 	return summary;
 }
 
+/**
+ * Detect the package manager that invoked the current installer process.
+ * This is best-effort only; direct `tallow install` runs often do not include
+ * package-manager metadata, so callers must handle `undefined`.
+ *
+ * @param userAgent - npm-style user agent string from the current environment
+ * @returns Detected package manager, if the user agent is recognizable
+ */
+export function detectPackageManager(
+	userAgent: string | undefined = process.env.npm_config_user_agent
+): PackageManager | undefined {
+	if (!userAgent) return undefined;
+	if (userAgent.includes("pnpm/")) return "pnpm";
+	if (userAgent.includes("bun/")) return "bun";
+	if (userAgent.includes("npm/")) return "npm";
+	return undefined;
+}
+
+/**
+ * Check whether the installer is running from a source checkout instead of a
+ * published package tarball.
+ *
+ * @param packageDir - Package root to inspect
+ * @returns True when repo-local rebuild instructions are appropriate
+ */
+export function isSourceCheckout(packageDir: string = PACKAGE_DIR): boolean {
+	return existsSync(join(packageDir, ".git"));
+}
+
+/**
+ * Resolve actionable CLI upgrade guidance without claiming that the installer
+ * can update the binary automatically.
+ *
+ * @param options - Optional overrides for tests and custom callers
+ * @returns Upgrade guidance tailored to the detected execution context
+ */
+export function resolveBinaryUpgradeGuidance(options?: {
+	readonly packageDir?: string;
+	readonly packageManager?: PackageManager;
+}): BinaryUpgradeGuidance {
+	const packageDir = options?.packageDir ?? PACKAGE_DIR;
+	const packageManager = options?.packageManager ?? detectPackageManager();
+
+	if (isSourceCheckout(packageDir)) {
+		return {
+			commands: ["git pull", "bun install", "bun run build"],
+			detail: "Update the source checkout separately with:",
+			kind: "source_checkout",
+		};
+	}
+
+	if (packageManager) {
+		return {
+			commands: [GLOBAL_UPGRADE_COMMANDS[packageManager]],
+			detail: "Update the installed tallow CLI separately with:",
+			kind: "package_manager",
+		};
+	}
+
+	return {
+		commands: [
+			GLOBAL_UPGRADE_COMMANDS.npm,
+			GLOBAL_UPGRADE_COMMANDS.pnpm,
+			GLOBAL_UPGRADE_COMMANDS.bun,
+		],
+		detail:
+			"This installer does not upgrade the CLI binary. Re-run the install command you originally used, for example:",
+		kind: "unknown",
+	};
+}
+
+/**
+ * Format CLI upgrade guidance for prompt notes and terminal output.
+ *
+ * @param guidance - Upgrade guidance to render
+ * @returns Human-readable multi-line guidance
+ */
+export function formatBinaryUpgradeGuidance(guidance: BinaryUpgradeGuidance): string {
+	return [guidance.detail, ...guidance.commands.map((command) => `• ${command}`)].join("\n");
+}
+
+/**
+ * Ensure the destination directory exists before writing installer output.
+ *
+ * @param dir - Directory to create when missing
+ * @returns Nothing
+ */
 function ensureDir(dir: string): void {
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
@@ -435,6 +548,11 @@ function describeExisting(existing: ExistingInstall): string {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+/**
+ * Run the installer in headless mode.
+ *
+ * @returns Promise that resolves when the refresh and optional config updates finish
+ */
 async function runNonInteractive(): Promise<void> {
 	const flags = parseInstallFlags();
 	const hasFlags = !!(
@@ -446,6 +564,7 @@ async function runNonInteractive(): Promise<void> {
 		flags.thinking
 	);
 	const existing = detectExistingInstall();
+	const upgradeGuidance = resolveBinaryUpgradeGuidance();
 
 	if (!existing && !hasFlags) {
 		console.error(
@@ -454,7 +573,7 @@ async function runNonInteractive(): Promise<void> {
 		process.exit(1);
 	}
 
-	console.log("🕯️  tallow install (non-interactive)");
+	console.log("🕯️  tallow install (non-interactive template/config refresh)");
 	console.log("");
 
 	// Ensure directories exist for first-time headless setup
@@ -465,6 +584,8 @@ async function runNonInteractive(): Promise<void> {
 	const templates = installTemplates();
 	if (templates.copied > 0) {
 		console.log(`✓ Added ${templates.copied} new template files`);
+	} else {
+		console.log("✓ No new template files to add");
 	}
 
 	// Apply headless flags (provider, model, env-provided key/ref, theme, thinking)
@@ -478,10 +599,20 @@ async function runNonInteractive(): Promise<void> {
 	}
 
 	console.log("");
+	console.log("CLI binary: unchanged by this installer run");
+	for (const line of formatBinaryUpgradeGuidance(upgradeGuidance).split("\n")) {
+		console.log(`  ${line}`);
+	}
+	console.log("");
 	console.log("Done! 🕯️");
 }
 
-async function main(): Promise<void> {
+/**
+ * Run the installer entrypoint for both the dedicated script and the CLI command.
+ *
+ * @returns Promise that resolves when the installer flow completes
+ */
+export async function runInstallerCli(): Promise<void> {
 	// Non-interactive mode
 	if (process.argv.includes("--yes") || process.argv.includes("-y")) {
 		return runNonInteractive();
@@ -504,13 +635,13 @@ async function main(): Promise<void> {
 		p.log.info("Existing installation detected at ~/.tallow/");
 		p.note(describeExisting(existing), "Current config");
 
-		const upgradeAction = await p.select({
+		const installAction = await p.select({
 			message: "What would you like to do?",
 			options: [
 				{
-					label: "Upgrade in place",
-					hint: "Rebuild & reinstall, keep all settings",
-					value: "upgrade" as const,
+					label: "Refresh starter templates",
+					hint: "Copy new agents/commands, keep settings untouched",
+					value: "refresh" as const,
 				},
 				{
 					label: "Reconfigure",
@@ -525,13 +656,13 @@ async function main(): Promise<void> {
 			],
 		});
 
-		if (isCancel(upgradeAction)) cancelled();
+		if (isCancel(installAction)) cancelled();
 
-		if (upgradeAction === "upgrade") {
-			return await runUpgrade(existing);
+		if (installAction === "refresh") {
+			return await runTemplateRefresh(existing);
 		}
 
-		if (upgradeAction === "fresh") {
+		if (installAction === "fresh") {
 			const confirmFresh = await p.confirm({
 				message:
 					"This will reset your settings.json to defaults. Sessions, auth, hooks, and custom extensions are safe. Continue?",
@@ -551,18 +682,30 @@ async function main(): Promise<void> {
 	return await runFullInstall(allExtensions, allThemes, {});
 }
 
-// ─── Upgrade in place ────────────────────────────────────────────────────────
+// ─── Existing install: template refresh ─────────────────────────────────────
 
-async function runUpgrade(existing: ExistingInstall): Promise<void> {
+/**
+ * Refresh bundled starter templates for an existing ~/.tallow installation.
+ *
+ * @param existing - Current install metadata used for completion messaging
+ * @returns Promise that resolves when the refresh flow finishes
+ */
+async function runTemplateRefresh(existing: ExistingInstall): Promise<void> {
+	const upgradeGuidance = resolveBinaryUpgradeGuidance();
+
 	p.note(
-		["• Update template files (agents, commands)", "• Keep all existing settings untouched"].join(
-			"\n"
-		),
-		"Upgrade plan"
+		[
+			"• Copy new template files (agents, commands)",
+			"• Keep all existing settings untouched",
+			"",
+			"This does not update the installed tallow binary.",
+			formatBinaryUpgradeGuidance(upgradeGuidance),
+		].join("\n"),
+		"Template refresh plan"
 	);
 
 	const confirm = await p.confirm({
-		message: "Proceed with upgrade?",
+		message: "Proceed with template refresh?",
 		initialValue: true,
 	});
 
@@ -572,14 +715,17 @@ async function runUpgrade(existing: ExistingInstall): Promise<void> {
 	const templates = installTemplates();
 	if (templates.copied > 0) {
 		p.log.info(`Added ${templates.copied} new template files`);
+	} else {
+		p.log.info("No new template files were added");
 	}
 
 	p.note(
 		[
 			"Settings, sessions, auth, hooks — all preserved",
+			"Installed CLI version: unchanged",
 			`Theme: ${existing.settings.theme ?? "default"}`,
 		].join("\n"),
-		"Upgrade complete"
+		"Refresh complete"
 	);
 
 	p.outro("Done! Happy coding 🕯️");
@@ -782,7 +928,19 @@ async function runFullInstall(
 	p.outro("Done! Happy coding 🕯️");
 }
 
-main().catch((error) => {
-	console.error("Install failed:", error);
-	process.exit(1);
-});
+/**
+ * Determine whether this module is the current Node.js entrypoint.
+ *
+ * @returns True when the installer is executed directly
+ */
+function isDirectExecution(): boolean {
+	const entryPath = process.argv[1];
+	return entryPath !== undefined && resolve(entryPath) === __filename_;
+}
+
+if (isDirectExecution()) {
+	runInstallerCli().catch((error) => {
+		console.error("Install failed:", error);
+		process.exit(1);
+	});
+}
