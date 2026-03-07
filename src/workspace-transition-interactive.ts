@@ -55,6 +55,23 @@ type AgentSessionLike = TallowSession["session"] & {
 	thinkingLevel?: TallowSessionOptions["thinkingLevel"];
 };
 
+/** Injectable runtime dependencies for transition-host tests. */
+interface WorkspaceTransitionDeps {
+	readonly changeDirectory: (cwd: string) => void;
+	readonly createSession: (options: TallowSessionOptions) => Promise<TallowSession>;
+	readonly resolveTrust: (cwd: string) => { status: "trusted" | "untrusted" | "stale_fingerprint" };
+	readonly trustProject: (cwd: string) => unknown;
+}
+
+const DEFAULT_WORKSPACE_TRANSITION_DEPS: WorkspaceTransitionDeps = {
+	changeDirectory: (cwd: string): void => {
+		process.chdir(cwd);
+	},
+	createSession: createTallowSession,
+	resolveTrust: resolveProjectTrust,
+	trustProject,
+};
+
 /**
  * Ask the user for explicit approval before leaving the current workspace.
  *
@@ -112,8 +129,11 @@ async function requestWorkspaceTrustDecision(
  * @param request - Transition request payload
  * @returns Final trust decision, or null when the user cancelled
  */
-async function resolveTrustOnEntry(request: WorkspaceTransitionRequest): Promise<boolean | null> {
-	const trustContext = resolveProjectTrust(request.targetCwd);
+async function resolveTrustOnEntry(
+	request: WorkspaceTransitionRequest,
+	deps: WorkspaceTransitionDeps
+): Promise<boolean | null> {
+	const trustContext = deps.resolveTrust(request.targetCwd);
 	if (trustContext.status === "trusted") {
 		return true;
 	}
@@ -123,7 +143,7 @@ async function resolveTrustOnEntry(request: WorkspaceTransitionRequest): Promise
 		return null;
 	}
 	if (decision === "trust") {
-		trustProject(request.targetCwd);
+		deps.trustProject(request.targetCwd);
 		return true;
 	}
 	return false;
@@ -269,7 +289,8 @@ async function performSessionTransition(
 	request: WorkspaceTransitionRequest,
 	trustedOnEntry: boolean,
 	sessionId: string,
-	setCleanupSession: (session: TallowSession["session"]) => void
+	setCleanupSession: (session: TallowSession["session"]) => void,
+	deps: WorkspaceTransitionDeps
 ): Promise<WorkspaceTransitionResult> {
 	const previousSession = mode.session;
 	if (request.initiator === "tool") {
@@ -280,10 +301,10 @@ async function performSessionTransition(
 	request.ui.setWorkingMessage("Reloading workspace after directory change...");
 	try {
 		await shutdownPreviousSession(previousSession);
-		const next = await createTallowSession(
+		const next = await deps.createSession(
 			buildTransitionSessionOptions(baseOptions, previousSession, request.targetCwd, sessionId)
 		);
-		process.chdir(request.targetCwd);
+		deps.changeDirectory(request.targetCwd);
 		await swapInteractiveModeSession(mode, next, setCleanupSession);
 
 		const transitionMessage = createTransitionMessage(request, trustedOnEntry);
@@ -320,7 +341,8 @@ export function createInteractiveWorkspaceTransitionHost(
 	mode: InteractiveModeLike,
 	sessionOptions: TallowSessionOptions,
 	sessionId: string,
-	setCleanupSession: (session: TallowSession["session"]) => void
+	setCleanupSession: (session: TallowSession["session"]) => void,
+	deps: WorkspaceTransitionDeps = DEFAULT_WORKSPACE_TRANSITION_DEPS
 ): WorkspaceTransitionHost {
 	let transitionInFlight = false;
 
@@ -337,7 +359,7 @@ export function createInteractiveWorkspaceTransitionHost(
 			if (request.targetCwd === request.sourceCwd) {
 				return {
 					status: "completed",
-					trustedOnEntry: resolveProjectTrust(request.targetCwd).status === "trusted",
+					trustedOnEntry: deps.resolveTrust(request.targetCwd).status === "trusted",
 				};
 			}
 
@@ -346,7 +368,7 @@ export function createInteractiveWorkspaceTransitionHost(
 				return { status: "cancelled" };
 			}
 
-			const trustedOnEntry = await resolveTrustOnEntry(request);
+			const trustedOnEntry = await resolveTrustOnEntry(request, deps);
 			if (trustedOnEntry === null) {
 				return { status: "cancelled" };
 			}
@@ -359,7 +381,8 @@ export function createInteractiveWorkspaceTransitionHost(
 					request,
 					trustedOnEntry,
 					sessionId,
-					setCleanupSession
+					setCleanupSession,
+					deps
 				);
 			} finally {
 				transitionInFlight = false;
