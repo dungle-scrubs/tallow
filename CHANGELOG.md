@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.19](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.18...tallow-v0.8.19) (2026-03-07)
+
+
+### Added
+
+* **bash-tool:** use 3-option select for high-risk confirmations ([0229aa1](https://github.com/dungle-scrubs/tallow/commit/0229aa136382e164ef3abb4b539fc15135c2bb3b))
+* **shell-policy:** add always-allow option for high-risk commands ([1780aa4](https://github.com/dungle-scrubs/tallow/commit/1780aa4f9f3479c6020880f96ee9a0c7de73ad7c))
+* **workspace-transition:** add Unix-socket relay for child-process cd ([97f6a68](https://github.com/dungle-scrubs/tallow/commit/97f6a6811467f0c98bf24b61c078570b5f02b651))
+
+
+### Fixed
+
+* **cd-tool:** use ctx.cwd for path resolution and remap worktree paths ([7dfd7ea](https://github.com/dungle-scrubs/tallow/commit/7dfd7ea68a47b9391ee1b9d27ddf0bb6b0e6d86b))
+* **teams-tool:** use tallow auth and model config in team spawns ([0f08485](https://github.com/dungle-scrubs/tallow/commit/0f0848526e465ff9f7d0f0096bf86a12932ac7e4))
+
+
+### Documentation
+
+* add missing changelog entries for 0.8.19 ([f0ea4a1](https://github.com/dungle-scrubs/tallow/commit/f0ea4a18f2754c201505986254aba93851f2fa57))
+
+
+### Maintenance
+
+* **shell-policy:** add always-allow tests and update callers ([19d66d2](https://github.com/dungle-scrubs/tallow/commit/19d66d22433d87232399516ac4c1b9f263309879))
+* **teams-tool:** add spawn auth path resolution tests ([5ae804e](https://github.com/dungle-scrubs/tallow/commit/5ae804ea57832279421f60701fe21f2517575016))
+
 ## [Unreleased]
 
 ### Added
