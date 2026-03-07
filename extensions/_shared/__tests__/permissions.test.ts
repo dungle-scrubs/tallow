@@ -34,6 +34,8 @@ let rawTempDir: string;
 /** Canonicalized temp dir (resolves /var → /private/var on macOS). */
 let tempDir: string;
 
+/** Original trust cwd env var restored after each test. */
+let originalTrustCwd: string | undefined;
 /** Original trust status env var restored after each test. */
 let originalTrustStatus: string | undefined;
 
@@ -62,11 +64,18 @@ beforeEach(() => {
 	rawTempDir = mkdtempSync(join(tmpdir(), "perm-test-"));
 	// Canonicalize to resolve macOS /var → /private/var symlink
 	tempDir = realpathSync(rawTempDir);
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
 	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+	process.env.TALLOW_PROJECT_TRUST_CWD = tempDir;
 	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 });
 
 afterEach(() => {
+	if (originalTrustCwd !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	}
 	if (originalTrustStatus !== undefined) {
 		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
 	} else {

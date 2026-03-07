@@ -1329,7 +1329,7 @@ export function loadPermissionConfig(
 	const sources: PermissionSource[] = [];
 	const home = homedir();
 	const tallowHome = process.env.PI_CODING_AGENT_DIR ?? join(home, ".tallow");
-	const allowProjectSettings = isProjectTrusted();
+	const allowProjectSettings = isProjectTrusted(cwd);
 
 	// CLI tier
 	if (

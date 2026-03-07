@@ -12,6 +12,7 @@ import {
 let cwd: string;
 let homeDir: string;
 let originalHome: string | undefined;
+let originalTrustCwd: string | undefined;
 let originalTrustStatus: string | undefined;
 
 /**
@@ -30,14 +31,22 @@ beforeEach(() => {
 	cwd = mkdtempSync(join(tmpdir(), "tallow-mcp-cwd-"));
 	homeDir = mkdtempSync(join(tmpdir(), "tallow-mcp-home-"));
 	originalHome = process.env.HOME;
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
 	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 	process.env.HOME = homeDir;
+	process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
 	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 });
 
 afterEach(() => {
 	if (originalHome !== undefined) process.env.HOME = originalHome;
 	else delete process.env.HOME;
+
+	if (originalTrustCwd !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	}
 
 	if (originalTrustStatus !== undefined) {
 		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;

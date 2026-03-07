@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { type SessionHeader, SessionManager } from "@mariozechner/pi-coding-agent";
 import { atomicWriteFileSync } from "./atomic-write.js";
-import { TALLOW_HOME } from "./config.js";
+import { getRuntimeTallowHome } from "./config.js";
 import { encodeSessionDirName } from "./session-migration.js";
 
 /** Current session file format version (mirrors pi's CURRENT_SESSION_VERSION) */
@@ -62,7 +62,7 @@ function assertContainedSessionPath(sessionsDir: string, filePath: string): void
  * @returns Absolute path to the session subdirectory
  */
 function sessionDirForCwd(cwd: string): string {
-	return join(TALLOW_HOME, "sessions", encodeSessionDirName(cwd));
+	return join(getRuntimeTallowHome(), "sessions", encodeSessionDirName(cwd));
 }
 
 /**

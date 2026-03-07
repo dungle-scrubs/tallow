@@ -689,7 +689,7 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
 export function loadHooksConfig(cwd: string): HooksConfig {
 	const home = process.env.HOME || "";
 	const merged: HooksConfig = {};
-	const allowProjectSources = isProjectTrusted();
+	const allowProjectSources = isProjectTrusted(cwd);
 
 	// 1. Package hooks (lowest priority)
 	const globalSettingsPath = path.join(home, ".tallow", "settings.json");

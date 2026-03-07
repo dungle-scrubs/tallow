@@ -7,11 +7,12 @@
  * Example: `/planner implement user authentication`
  */
 
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_AGENT_RUNNER_ENV, spawnWithResolvedAgentRunner } from "../../src/agent-runner.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 export interface AgentFrontmatter {
@@ -276,6 +277,7 @@ function loadAgents(): Agent[] {
 	const agentDir = getTallowHomeDir();
 	const userDir = path.join(agentDir, "agents");
 	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
+	const allowProjectAgents = isProjectTrusted(process.cwd());
 	const projectDir = path.join(process.cwd(), ".tallow", "agents");
 	const projectClaudeDir = path.join(process.cwd(), ".claude", "agents");
 
@@ -293,7 +295,7 @@ function loadAgents(): Agent[] {
 	const packageDirs = [
 		...new Set([
 			...getPackageAgentDirs(globalSettingsPath),
-			...getPackageAgentDirs(projectSettingsPath),
+			...(allowProjectAgents ? getPackageAgentDirs(projectSettingsPath) : []),
 			...getPluginAgentDirsFromEnv(),
 		]),
 	];
@@ -306,8 +308,10 @@ function loadAgents(): Agent[] {
 	}
 	for (const agent of loadAgentsFromDir(userClaudeDir)) agentMap.set(agent.name, agent);
 	for (const agent of loadAgentsFromDir(userDir)) agentMap.set(agent.name, agent);
-	for (const agent of loadAgentsFromDir(projectClaudeDir)) agentMap.set(agent.name, agent);
-	for (const agent of loadAgentsFromDir(projectDir)) agentMap.set(agent.name, agent);
+	if (allowProjectAgents) {
+		for (const agent of loadAgentsFromDir(projectClaudeDir)) agentMap.set(agent.name, agent);
+		for (const agent of loadAgentsFromDir(projectDir)) agentMap.set(agent.name, agent);
+	}
 
 	return Array.from(agentMap.values());
 }
@@ -382,12 +386,31 @@ export default function (pi: ExtensionAPI) {
 				if (agent.mcpServers && agent.mcpServers.length > 0) {
 					spawnEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
 				}
-				const proc = spawn("pi", piArgs, {
-					cwd: ctx.cwd,
-					shell: false,
-					stdio: ["ignore", "pipe", "pipe"],
-					env: spawnEnv,
+				const spawnResult = await spawnWithResolvedAgentRunner({
+					args: piArgs,
+					runnerLabel: "Agent command",
+					resolution: {
+						overrideEnvVar: DEFAULT_AGENT_RUNNER_ENV,
+					},
+					spawnOptions: {
+						cwd: ctx.cwd,
+						shell: false,
+						stdio: ["ignore", "pipe", "pipe"],
+						env: spawnEnv,
+					},
 				});
+				if (!spawnResult.ok) {
+					if (tmpPromptPath) {
+						try {
+							fs.unlinkSync(tmpPromptPath);
+						} catch {
+							// ignore
+						}
+					}
+					ctx.ui.notify(`Failed to spawn agent: ${spawnResult.reason}`, "error");
+					return;
+				}
+				const proc = spawnResult.proc;
 
 				let stdout = "";
 				let stderr = "";

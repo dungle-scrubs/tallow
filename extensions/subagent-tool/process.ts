@@ -6,13 +6,13 @@
  * and permission denial detection.
  */
 
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { DEFAULT_AGENT_RUNNER_ENV, spawnWithResolvedAgentRunner } from "../../src/agent-runner.js";
 import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitWorktreeLifecycleEvent,
@@ -722,19 +722,24 @@ export async function spawnBackgroundSubagent(
 		childEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
 	}
 
-	let proc: ReturnType<typeof spawn>;
-	try {
-		proc = spawn("pi", args, {
+	const backgroundSpawn = await spawnWithResolvedAgentRunner({
+		args,
+		runnerLabel: "Subagent",
+		resolution: {
+			overrideEnvVar: DEFAULT_AGENT_RUNNER_ENV,
+		},
+		spawnOptions: {
 			cwd: effectiveCwd,
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
 			env: childEnv,
-		});
-	} catch (error) {
+		},
+	});
+	if (!backgroundSpawn.ok) {
 		cleanupIsolation("subagent", id, isolationContext, piEvents);
-		const reason = error instanceof Error ? error.message : String(error);
-		return `Failed to spawn background subagent ${agentName}: ${reason}`;
+		return `Failed to spawn background subagent ${agentName}: ${backgroundSpawn.reason}`;
 	}
+	const proc = backgroundSpawn.proc;
 
 	// Emit subagent_start event
 	piEvents?.emit("subagent_start", {
@@ -1199,13 +1204,28 @@ export async function runSingleAgent(
 		}
 
 		let fgTurnCount = 0;
-		const exitCode = await new Promise<number>((resolve) => {
-			const proc = spawn("pi", args, {
+		const foregroundSpawn = await spawnWithResolvedAgentRunner({
+			args,
+			runnerLabel: "Subagent",
+			resolution: {
+				overrideEnvVar: DEFAULT_AGENT_RUNNER_ENV,
+			},
+			spawnOptions: {
 				cwd: effectiveCwd,
 				shell: false,
 				stdio: ["ignore", "pipe", "pipe"],
 				env: fgChildEnv,
-			});
+			},
+		});
+		if (!foregroundSpawn.ok) {
+			throw new Error(foregroundSpawn.reason);
+		}
+		const exitCode = await new Promise<number>((resolve) => {
+			const proc = foregroundSpawn.proc;
+			if (!proc.stdout || !proc.stderr) {
+				resolve(1);
+				return;
+			}
 
 			let abortListener: (() => void) | null = null;
 			let buffer = "";

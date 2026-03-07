@@ -5,8 +5,20 @@ import { join } from "node:path";
 import { discoverAgents } from "../agents.js";
 
 const createdDirs: string[] = [];
+let originalTrustCwd: string | undefined;
+let originalTrustStatus: string | undefined;
 
 afterEach(() => {
+	if (originalTrustCwd === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	}
+	if (originalTrustStatus === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+	}
 	for (const dir of createdDirs.splice(0)) {
 		rmSync(dir, { force: true, recursive: true });
 	}
@@ -21,6 +33,10 @@ function createProjectWithAgentsDir(): string {
 	const projectRoot = mkdtempSync(join(tmpdir(), "subagent-isolation-test-"));
 	createdDirs.push(projectRoot);
 	mkdirSync(join(projectRoot, ".tallow", "agents"), { recursive: true });
+	originalTrustCwd ??= process.env.TALLOW_PROJECT_TRUST_CWD;
+	originalTrustStatus ??= process.env.TALLOW_PROJECT_TRUST_STATUS;
+	process.env.TALLOW_PROJECT_TRUST_CWD = projectRoot;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 	return projectRoot;
 }
 

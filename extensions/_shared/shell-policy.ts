@@ -456,7 +456,7 @@ export function isShellInterpolationEnabled(cwd: string = process.cwd()): boolea
 	if (process.env.TALLOW_SHELL_INTERPOLATION === "1") return true;
 
 	const globalSettingsPath = getTallowSettingsPath();
-	const settingsPaths = isProjectTrusted()
+	const settingsPaths = isProjectTrusted(cwd)
 		? [join(cwd, ".tallow", "settings.json"), globalSettingsPath]
 		: [globalSettingsPath];
 

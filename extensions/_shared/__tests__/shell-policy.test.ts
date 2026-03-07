@@ -29,6 +29,7 @@ setDefaultTimeout(15_000);
 const ORIG_ENABLE = process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
 const ORIG_LEGACY_ENABLE = process.env.TALLOW_SHELL_INTERPOLATION;
 const ORIG_BYPASS = process.env.TALLOW_ALLOW_UNSAFE_SHELL;
+const ORIG_TRUST_CWD = process.env.TALLOW_PROJECT_TRUST_CWD;
 const ORIG_TRUST_STATUS = process.env.TALLOW_PROJECT_TRUST_STATUS;
 
 /**
@@ -53,6 +54,12 @@ function restoreEnv(): void {
 		delete process.env.TALLOW_ALLOW_UNSAFE_SHELL;
 	} else {
 		process.env.TALLOW_ALLOW_UNSAFE_SHELL = ORIG_BYPASS;
+	}
+
+	if (ORIG_TRUST_CWD === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_CWD = ORIG_TRUST_CWD;
 	}
 
 	if (ORIG_TRUST_STATUS === undefined) {
@@ -139,6 +146,7 @@ describe("environment flags", () => {
 			);
 
 			process.env.HOME = home;
+			process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
 			process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
 			expect(isShellInterpolationEnabled(cwd)).toBe(false);
 
@@ -229,6 +237,7 @@ describe("permission-rule messaging alignment", () => {
 					},
 				})
 			);
+			process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
 			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 			resetPermissionCache();
 
@@ -255,6 +264,7 @@ describe("permission-rule messaging alignment", () => {
 					},
 				})
 			);
+			process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
 			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 			resetPermissionCache();
 

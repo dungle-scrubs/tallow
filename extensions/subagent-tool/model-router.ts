@@ -31,6 +31,7 @@ import {
 	resolveModelFuzzy,
 	selectModels,
 } from "@dungle-scrubs/synapse";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { getTallowPath, getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import { classifyTask } from "./task-classifier.js";
 
@@ -429,7 +430,7 @@ function resolveModePolicyOverridesField(
  *
  * Reads from:
  * 1) `~/.tallow/settings.json` (user-level)
- * 2) `<cwd>/.tallow/settings.json` (project-level, overrides user-level)
+ * 2) `<cwd>/.tallow/settings.json` (project-level, overrides user-level when trusted)
  *
  * Invalid values fall back to lower-precedence values, then defaults.
  *
@@ -439,9 +440,12 @@ function resolveModePolicyOverridesField(
 export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 	const userSettingsPath = getTallowSettingsPath();
 	const projectSettingsPath = path.join(cwd, ".tallow", "settings.json");
+	const allowProjectRouting = isProjectTrusted(cwd);
 
 	const userRouting = readRawRoutingConfig(userSettingsPath);
-	const projectRouting = readRawRoutingConfig(projectSettingsPath);
+	const projectRouting = allowProjectRouting
+		? readRawRoutingConfig(projectSettingsPath)
+		: undefined;
 
 	return {
 		costPreference: resolveEnumField(
@@ -456,7 +460,8 @@ export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 			DEFAULT_CONFIG.enabled
 		),
 		exclude: resolveStringArrayField(projectRouting?.exclude, userRouting?.exclude),
-		matrixOverridesPath: resolveOptionalStringField(
+		matrixOverridesPath: resolveProjectScopedPathField(
+			cwd,
 			projectRouting?.matrixOverridesPath,
 			userRouting?.matrixOverridesPath
 		),
@@ -481,7 +486,8 @@ export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 			userRouting?.signalsMaxAgeMs,
 			DEFAULT_CONFIG.signalsMaxAgeMs
 		),
-		signalsSnapshotPath: resolveOptionalStringField(
+		signalsSnapshotPath: resolveProjectScopedPathField(
+			cwd,
 			projectRouting?.signalsSnapshotPath,
 			userRouting?.signalsSnapshotPath
 		),
@@ -489,6 +495,46 @@ export function loadRoutingConfig(cwd: string = process.cwd()): RoutingConfig {
 }
 
 // ─── Routing Data Sources ────────────────────────────────────────────────────
+
+/**
+ * Return whether a project-configured file path stays within the project root.
+ *
+ * Repo-controlled routing files must not escape the trusted project root.
+ * User-level settings remain free to reference arbitrary paths.
+ *
+ * @param cwd - Project root used for containment checks
+ * @param configuredPath - Raw path string from project settings
+ * @returns True when the resolved path remains within the project root
+ */
+function isProjectScopedPathContained(cwd: string, configuredPath: string): boolean {
+	const absolutePath = resolveConfiguredPath(cwd, configuredPath);
+	const relativePath = path.relative(cwd, absolutePath);
+	return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+/**
+ * Resolve an optional path field while enforcing project containment.
+ *
+ * Project-level values are honored only when they stay within the project
+ * root. Invalid or escaping project values fall back to the user-level value.
+ *
+ * @param cwd - Project root used for containment checks
+ * @param projectValue - Project-level raw field value
+ * @param userValue - User-level raw field value
+ * @returns Sanitized optional path string
+ */
+function resolveProjectScopedPathField(
+	cwd: string,
+	projectValue: unknown,
+	userValue: unknown
+): string | undefined {
+	if (typeof projectValue === "string" && projectValue.length > 0) {
+		if (isProjectScopedPathContained(cwd, projectValue)) {
+			return projectValue;
+		}
+	}
+	return resolveOptionalStringField(undefined, userValue);
+}
 
 /**
  * Resolve a settings-configured path into an absolute path.

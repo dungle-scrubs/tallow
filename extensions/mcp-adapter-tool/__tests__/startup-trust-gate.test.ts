@@ -11,6 +11,7 @@ let homeDir: string;
 let harness: ExtensionHarness;
 let originalHome: string | undefined;
 let originalMcpServersFilter: string | undefined;
+let originalTrustCwd: string | undefined;
 let originalTrustStatus: string | undefined;
 let notifications: Array<{ level: string; message: string }>;
 
@@ -81,10 +82,12 @@ beforeEach(async () => {
 
 	originalHome = process.env.HOME;
 	originalMcpServersFilter = process.env.PI_MCP_SERVERS;
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
 	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 
 	process.env.HOME = homeDir;
 	delete process.env.PI_MCP_SERVERS;
+	process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
 	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 
 	harness = ExtensionHarness.create();
@@ -99,6 +102,12 @@ afterEach(() => {
 		process.env.PI_MCP_SERVERS = originalMcpServersFilter;
 	} else {
 		delete process.env.PI_MCP_SERVERS;
+	}
+
+	if (originalTrustCwd !== undefined) {
+		process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	} else {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
 	}
 
 	if (originalTrustStatus !== undefined) {

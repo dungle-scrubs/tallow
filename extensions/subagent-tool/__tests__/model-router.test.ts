@@ -16,6 +16,8 @@ let testCwd = "";
 let testHome = "";
 let originalHome: string | undefined;
 let originalTallowHome: string | undefined;
+let originalTrustCwd: string | undefined;
+let originalTrustStatus: string | undefined;
 
 /**
  * Write a JSON file, creating parent directories as needed.
@@ -34,8 +36,12 @@ beforeEach(() => {
 	testHome = mkdtempSync(join(tmpdir(), "tallow-routing-home-"));
 	originalHome = process.env.HOME;
 	originalTallowHome = process.env.TALLOW_CODING_AGENT_DIR;
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 	process.env.HOME = testHome;
 	process.env.TALLOW_CODING_AGENT_DIR = join(testHome, ".tallow");
+	process.env.TALLOW_PROJECT_TRUST_CWD = testCwd;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 });
 
 afterEach(() => {
@@ -48,6 +54,16 @@ afterEach(() => {
 		delete process.env.TALLOW_CODING_AGENT_DIR;
 	} else {
 		process.env.TALLOW_CODING_AGENT_DIR = originalTallowHome;
+	}
+	if (originalTrustCwd === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	}
+	if (originalTrustStatus === undefined) {
+		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	} else {
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
 	}
 	rmSync(testCwd, { recursive: true, force: true });
 	rmSync(testHome, { recursive: true, force: true });
@@ -202,5 +218,50 @@ describe("loadRoutingConfig", () => {
 				constraints: { minUptime: 0.99 },
 			},
 		});
+	});
+
+	it("ignores project routing settings when the project is not trusted", () => {
+		writeJson(join(testHome, ".tallow", "settings.json"), {
+			routing: {
+				costPreference: "eco",
+				enabled: false,
+				mode: "fast",
+				primaryType: "text",
+			},
+		});
+		writeJson(join(testCwd, ".tallow", "settings.json"), {
+			routing: {
+				costPreference: "premium",
+				enabled: true,
+				mode: "reliable",
+				primaryType: "vision",
+			},
+		});
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+
+		const config = loadRoutingConfig(testCwd);
+		expect(config.costPreference).toBe("eco");
+		expect(config.enabled).toBe(false);
+		expect(config.mode).toBe("fast");
+		expect(config.primaryType).toBe("text");
+	});
+
+	it("falls back to user routing paths when project paths escape the repo", () => {
+		writeJson(join(testHome, ".tallow", "settings.json"), {
+			routing: {
+				matrixOverridesPath: "~/.tallow/global-overrides.json",
+				signalsSnapshotPath: "~/.tallow/global-signals.json",
+			},
+		});
+		writeJson(join(testCwd, ".tallow", "settings.json"), {
+			routing: {
+				matrixOverridesPath: "../outside.json",
+				signalsSnapshotPath: "/tmp/outside.json",
+			},
+		});
+
+		const config = loadRoutingConfig(testCwd);
+		expect(config.matrixOverridesPath).toBe("~/.tallow/global-overrides.json");
+		expect(config.signalsSnapshotPath).toBe("~/.tallow/global-signals.json");
 	});
 });
