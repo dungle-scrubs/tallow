@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.18](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.17...tallow-v0.8.18) (2026-03-07)
+
+
+### Maintenance
+
+* **deps:** bump pi-* dependencies ([742f98c](https://github.com/dungle-scrubs/tallow/commit/742f98c93ff29531645a580cf2c8b086b6c47543))
+
 ## [0.8.17](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.16...tallow-v0.8.17) (2026-03-07)
 
 
