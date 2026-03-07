@@ -11,12 +11,7 @@ import { registerTeamsToolExtension } from "./tools/register-extension.js";
 
 export { autoDispatch, wakeTeammate } from "./dispatch/auto-dispatch.js";
 export { spawnTeammateSession } from "./sessions/spawn.js";
-export {
-	buildTeamView,
-	findModel,
-	getLastOutput,
-	resolveStandardTools,
-} from "./state/team-view.js";
+export { buildTeamView, getLastOutput, resolveStandardTools } from "./state/team-view.js";
 // Domain exports
 export type { Teammate, TeamView } from "./state/types.js";
 // Store exports (backward compatibility)

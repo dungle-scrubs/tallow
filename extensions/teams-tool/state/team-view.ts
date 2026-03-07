@@ -3,7 +3,6 @@
  * No side effects — all functions are referentially transparent.
  */
 
-import { getModels, getProviders } from "@mariozechner/pi-ai";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import {
 	createBashTool,
@@ -111,20 +110,6 @@ export function getRecentMessageLinks(team: Team<Teammate>): string[] {
 /** Type-safe accessor: at runtime, teammates always have a session. */
 export function getRuntimeTeam(name: string): Team<Teammate> | undefined {
 	return getTeam(name) as Team<Teammate> | undefined;
-}
-
-/**
- * Resolve a model name to a Model object by searching all providers.
- * @param modelName - Model ID (e.g. "claude-sonnet-4-5")
- * @returns The Model, or undefined if not found
- */
-export function findModel(modelName: string) {
-	for (const provider of getProviders()) {
-		const models = getModels(provider);
-		const match = models.find((m) => m.id === modelName);
-		if (match) return match;
-	}
-	return undefined;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: tool factories have different return types
