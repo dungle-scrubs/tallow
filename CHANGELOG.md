@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **installation:** correct installer and upgrade docs to match package-manager, source-build, and `tallow install` behavior
 - **context-usage:** document `contextBudget` settings and budget signal semantics
 - **web-fetch-tool:** document adaptive cap rules, fallback behavior, and
   diagnostic detail fields

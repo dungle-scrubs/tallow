@@ -51,7 +51,7 @@ node dist/install.js
 ```
 
 The installer walks you through selecting extensions, themes, and agents,
-then links the `tallow` binary globally.
+then writes config and starter templates into `~/.tallow/`.
 
 </details>
 

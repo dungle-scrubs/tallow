@@ -9,7 +9,25 @@ description: How to install and set up tallow.
 
 ## Quick install
 
-Clone the repository and run the interactive installer:
+### Published package
+
+Install the CLI with your package manager, then run the installer once to
+create `~/.tallow/` and choose extensions and themes:
+
+```bash
+bun install -g tallow
+tallow install
+```
+
+Or run it without a global install:
+
+```bash
+bunx tallow install
+```
+
+### From source
+
+Clone the repository, build it, then run the installer:
 
 ```bash
 git clone https://github.com/dungle-scrubs/tallow.git
@@ -28,52 +46,91 @@ The installer walks you through:
    enabled or disabled as a unit.
 3. **Themes** — choose which of the 34 built-in themes to
    include and pick a default.
-4. **Global binary** — optionally run `bun link` so the
-   `tallow` command is available everywhere.
 
 When finished the installer creates `~/.tallow/` with your
 `settings.json`, a `sessions/` directory, and an `extensions/`
 directory for any custom extensions you add later.
 
+> The installer manages `~/.tallow/`. Installing or upgrading the
+> `tallow` binary itself is handled by your package manager, or by
+> rebuilding the repo when running from source.
+
 ## Non-interactive install
 
-For CI, scripts, or quick rebuilds, pass `--yes` (or `-y`):
+For CI, scripts, or headless setup, pass `--yes` (or `-y`):
 
 ```bash
+tallow install --yes
+
+# From a source checkout
 node dist/install.js --yes
 ```
+
+In non-interactive mode, the installer:
+
+- copies any newly bundled template files into `~/.tallow/agents/`
+  and `~/.tallow/commands/`, skipping files that already exist
+- only changes settings or auth values when you pass explicit flags
+  or env vars
 
 For headless auth bootstrapping, provide credentials via env vars
 (not CLI args):
 
 ```bash
-TALLOW_API_KEY=sk-ant-... node dist/install.js --yes --default-provider anthropic
-TALLOW_API_KEY_REF=op://Services/Anthropic/api-key node dist/install.js --yes --default-provider anthropic
+TALLOW_API_KEY=sk-ant-... tallow install --yes --default-provider anthropic
+TALLOW_API_KEY_REF=op://Services/Anthropic/api-key tallow install --yes --default-provider anthropic
 ```
 
-This rebuilds from source, reinstalls the global binary, and
-keeps all existing settings untouched. It requires an existing
-`~/.tallow/` directory — run the interactive installer at least
-once first.
+For a first-time headless setup, pass at least one configuration
+flag. If you also want to seed provider auth, pair
+`--default-provider` with `TALLOW_API_KEY` or `TALLOW_API_KEY_REF`.
 
 ## Upgrading
 
-If tallow is already installed, the installer detects it
-automatically and offers three options:
+Updating tallow has two separate parts:
 
-| Option | What it does |
-|--------|--------------|
-| **Upgrade in place** | Rebuild and reinstall. All settings, sessions, auth, hooks, and packages are preserved. |
-| **Reconfigure** | Re-run the extension/theme selection flow. Sessions, auth, hooks, and custom extensions are preserved. |
-| **Fresh install** | Reset `settings.json` to defaults. Sessions, auth, hooks, and custom extensions are still preserved. |
+1. **Update the CLI/package** using the same method you used to
+   install it.
+2. **Re-run the installer** only if you want new starter templates
+   or want to change installer-managed settings.
 
-You can also upgrade non-interactively:
+### Update the CLI/package
 
 ```bash
+# Global install
+bun install -g tallow@latest
+
+# One-off runs without a global install
+bunx tallow@latest install
+
+# From source
 cd /path/to/tallow
 git pull
+bun install
+bun run build
+```
+
+### Re-run the installer
+
+If tallow is already set up, `tallow install` offers these flows:
+
+| Option | What it actually does |
+|--------|------------------------|
+| **Refresh starter templates** | Copies any newly bundled template files into `~/.tallow/agents/` and `~/.tallow/commands/`. Existing settings stay untouched. |
+| **Reconfigure** | Re-runs extension/theme selection using your current selections as defaults. Updates installer-managed settings (`theme` and `disabledExtensions`) while preserving sessions, auth, hooks, packages, custom extensions, and other settings keys. |
+| **Fresh install** | Re-runs the same selection flow from default installer choices instead of your current selections. It still preserves `~/.tallow/` data and only rewrites installer-managed settings. |
+
+For scripted refreshes, use:
+
+```bash
+tallow install --yes
+
+# From a source checkout
 node dist/install.js --yes
 ```
+
+Add `--default-provider`, `--default-model`, `--theme`, or
+`--thinking` to change only those specific values.
 
 ## After installation
 
