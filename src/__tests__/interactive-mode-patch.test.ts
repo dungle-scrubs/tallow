@@ -502,4 +502,108 @@ describe("patchInteractiveModePrototype", () => {
 			| undefined;
 		expect(hasQueued?.()).toBe(false);
 	});
+
+	// ── message_update coalescing (plan 176) ──────────────────────────────
+
+	it("coalesces rapid message_update events into one handleEvent call per I/O cycle", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		// Fire 20 rapid message_update events (simulates streaming tokens)
+		for (let i = 0; i < 20; i++) {
+			mode.handleEvent({
+				type: "message_update",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: `token-${i}` }],
+				},
+			});
+		}
+
+		// None should have been processed synchronously
+		expect(mode.handleEventCalls).toBe(0);
+
+		// Wait for setImmediate to flush
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		// Only one call should have been made (the last coalesced event)
+		expect(mode.handleEventCalls).toBe(1);
+		expect(mode.lastHandledEvent?.message?.content?.[0]).toEqual({
+			type: "text",
+			text: "token-19",
+		});
+	});
+
+	it("flushes pending message_update before message_end", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		// Buffer a message_update
+		mode.handleEvent({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "text", text: "partial" }] },
+		});
+
+		// Now fire message_end — should flush the pending update first
+		await mode.handleEvent({
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "final" }],
+				stopReason: "stop",
+			},
+		});
+
+		// handleEvent should have been called twice: once for flushed update, once for message_end
+		expect(mode.handleEventCalls).toBe(2);
+	});
+
+	it("flushes pending message_update before tool_execution_start", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		// Buffer a message_update
+		mode.handleEvent({
+			type: "message_update",
+			message: { role: "assistant", content: [{ type: "text", text: "thinking..." }] },
+		});
+
+		// Fire tool_execution_start — should flush first
+		await mode.handleEvent({ type: "tool_execution_start" });
+
+		// Two calls: flushed update + tool_execution_start
+		expect(mode.handleEventCalls).toBe(2);
+	});
+
+	it("does not coalesce non-message_update events", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleEvent({ type: "message_start" });
+		expect(mode.handleEventCalls).toBe(1);
+
+		await mode.handleEvent({ type: "tool_execution_end" });
+		expect(mode.handleEventCalls).toBe(2);
+	});
+
+	it("handles agent_end after coalesced message_updates", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		// Simulate streaming burst followed by agent_end
+		for (let i = 0; i < 10; i++) {
+			mode.handleEvent({
+				type: "message_update",
+				message: { role: "assistant", content: [{ type: "text", text: `t-${i}` }] },
+			});
+		}
+
+		// agent_end should flush the pending update
+		await mode.handleEvent({ type: "agent_end" });
+
+		// 1 flushed message_update + 1 agent_end
+		expect(mode.handleEventCalls).toBe(2);
+		// agent_end cleanup should still run
+		expect(mode.pendingWorkingMessage).toBeUndefined();
+	});
 });

@@ -139,6 +139,67 @@ const compactionRetryWatchdogTimers = new WeakMap<
 >();
 
 /**
+ * Per-instance state for message_update coalescing.
+ *
+ * During high-frequency streaming, many `message_update` events fire per
+ * second. Processing each one individually (update component + requestRender)
+ * generates sustained microtask pressure that starves stdin I/O.
+ *
+ * By coalescing: only the latest `message_update` per `setImmediate` cycle is
+ * processed. This caps UI updates to ~60fps while guaranteeing I/O yield
+ * points between updates.
+ *
+ * @see Plan 176 — Input still blocked during streaming (Layer 2)
+ */
+interface MessageUpdateCoalesceState {
+	/** The latest buffered message_update event, or null if none pending. */
+	pendingEvent: InteractiveModeEventLike | null;
+	/** Whether a setImmediate flush is already scheduled. */
+	flushScheduled: boolean;
+}
+
+const messageUpdateCoalesceState = new WeakMap<
+	InteractiveModeInstanceLike,
+	MessageUpdateCoalesceState
+>();
+
+/**
+ * Returns (or creates) the coalesce state for an interactive mode instance.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Coalesce state for this instance
+ */
+function getCoalesceState(mode: InteractiveModeInstanceLike): MessageUpdateCoalesceState {
+	let state = messageUpdateCoalesceState.get(mode);
+	if (!state) {
+		state = { pendingEvent: null, flushScheduled: false };
+		messageUpdateCoalesceState.set(mode, state);
+	}
+	return state;
+}
+
+/**
+ * Immediately flushes any pending coalesced message_update event.
+ *
+ * Called before events that depend on streaming state being current
+ * (message_end, agent_end, tool events) to prevent stale UI.
+ *
+ * @param mode - Interactive mode instance
+ * @param handler - Original handleEvent to call with the flushed event
+ * @returns Promise that resolves after the flush completes (or immediately if nothing pending)
+ */
+async function flushPendingMessageUpdate(
+	mode: InteractiveModeInstanceLike,
+	handler: (event: InteractiveModeEventLike) => Promise<unknown>
+): Promise<void> {
+	const state = getCoalesceState(mode);
+	if (!state.pendingEvent) return;
+	const event = state.pendingEvent;
+	state.pendingEvent = null;
+	await handler.call(mode, event);
+}
+
+/**
  * Returns whether assistant content includes tool calls.
  *
  * Overflow suppression is only safe when no tool calls are present. Tool-call
@@ -343,6 +404,42 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 		) {
 			if (event?.type === "auto_compaction_start" || isCompactionContinuationSignal(event)) {
 				clearCompactionRetryWatchdog(this);
+			}
+
+			// ── message_update coalescing (plan 176) ─────────────────────────
+			// During rapid streaming, message_update fires per token. Coalesce
+			// into one UI update per setImmediate cycle (~60fps) so the event
+			// loop reaches the I/O poll phase and stdin stays responsive.
+			if (event?.type === "message_update") {
+				const coalesce = getCoalesceState(this);
+				// Keep AgentSession event references immutable.
+				const uiEvent = suppressOverflowAssistantErrorLine(event, this.session);
+				coalesce.pendingEvent = uiEvent;
+
+				if (!coalesce.flushScheduled) {
+					coalesce.flushScheduled = true;
+					setImmediate(async () => {
+						const state = getCoalesceState(this);
+						state.flushScheduled = false;
+						const pending = state.pendingEvent;
+						state.pendingEvent = null;
+						if (pending) {
+							await originalHandleEvent.call(this, pending);
+						}
+					});
+				}
+				return;
+			}
+
+			// For events that depend on streaming state being current, flush
+			// any pending message_update first so the component is up-to-date.
+			if (
+				event?.type === "message_end" ||
+				event?.type === "agent_end" ||
+				event?.type === "tool_execution_start" ||
+				event?.type === "tool_execution_end"
+			) {
+				await flushPendingMessageUpdate(this, originalHandleEvent);
 			}
 
 			// Keep AgentSession event references immutable for persistence/compaction checks.
