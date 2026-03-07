@@ -45,7 +45,12 @@ import {
 	onInteropEvent,
 } from "../_shared/interop-events.js";
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
-import { enforceExplicitPolicy, evaluateCommand, recordAudit } from "../_shared/shell-policy.js";
+import {
+	enforceExplicitPolicy,
+	evaluateCommand,
+	recordAudit,
+	type ShellConfirmResponse,
+} from "../_shared/shell-policy.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import {
 	appendSection,
@@ -1854,8 +1859,27 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		if (!command) return;
 
 		const verdict = evaluateCommand(command, "bg_bash", ctx.cwd);
-		const blocked = await enforceExplicitPolicy(command, "bg_bash", ctx.cwd, ctx.hasUI, (msg) =>
-			ctx.ui.confirm("Shell Policy", msg)
+		const blocked = await enforceExplicitPolicy(
+			command,
+			"bg_bash",
+			ctx.cwd,
+			ctx.hasUI,
+			async (msg, derivedPattern): Promise<ShellConfirmResponse> => {
+				if (derivedPattern) {
+					const options = ["Yes (once)", `Always allow "${derivedPattern}"`, "No"];
+					const choice = await ctx.ui.select("Shell Policy", options);
+					if (choice === options[0]) return "yes";
+					if (choice === options[1]) {
+						ctx.ui.notify(`✅ Added ${derivedPattern} to always-allow rules`, "info");
+						return "always";
+					}
+					return choice === options[2] ? "no" : undefined;
+				}
+				const confirmed = await ctx.ui.confirm("Shell Policy", msg);
+				if (confirmed === true) return "yes";
+				if (confirmed === false) return "no";
+				return undefined;
+			}
 		);
 		if (blocked) {
 			return blocked;
