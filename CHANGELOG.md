@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.tallow/settings.json` so matching commands skip confirmation in
   future sessions
 
+### Changed
+
+- **tui:** global select cursor changed from → to ↗
+
+### Fixed
+
+- **teams-tool:** use tallow auth and model config in team spawns
+
 ## [0.8.18](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.17...tallow-v0.8.18) (2026-03-07)
 
 
