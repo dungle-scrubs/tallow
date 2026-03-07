@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.17](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.16...tallow-v0.8.17) (2026-03-07)
+
+
+### Added
+
+* **context-files:** add path-scoped rule activation ([63dd5b7](https://github.com/dungle-scrubs/tallow/commit/63dd5b711bdee85531a623d011badd4c5754a3ad))
+* **web-fetch-tool:** add dendrite fallback ([5129c48](https://github.com/dungle-scrubs/tallow/commit/5129c48584a939cdc17eac4fe20f2792ee9efb20))
+* **wezterm:** intelligent pane use for TTY commands and secret privacy ([50971c8](https://github.com/dungle-scrubs/tallow/commit/50971c8d50b549b3fe61e1ff0a959561372ce413))
+* **workspace-transition:** finish Plan B cd transitions ([87969d7](https://github.com/dungle-scrubs/tallow/commit/87969d75cf55b530aeb53b504a3e6706bebaef94))
+
+
+### Fixed
+
+* **context:** treat unknown usage as unavailable ([b0e70d2](https://github.com/dungle-scrubs/tallow/commit/b0e70d29941bde5b5b115e7e4e74a49f6a5aa4d5))
+* **installer:** stop claiming binary self-upgrades ([6a818f4](https://github.com/dungle-scrubs/tallow/commit/6a818f46ac19331a85de538341552126cbe0e5bd))
+* **interactive:** surface overflow and compaction retry failures ([11dfbd7](https://github.com/dungle-scrubs/tallow/commit/11dfbd756ab11374df356a0218e49bfd4f1bcb91))
+* **sdk:** abort compaction before session resets ([b89238b](https://github.com/dungle-scrubs/tallow/commit/b89238b0561200e65d43a8e8249839e03871d29d))
+* **slash-command-bridge:** add live compact heartbeat progress ([d2b0100](https://github.com/dungle-scrubs/tallow/commit/d2b010062dafccc3de09f513a50b14a4cd5d6d35))
+* **tui:** yield render scheduling during streaming ([6e074bf](https://github.com/dungle-scrubs/tallow/commit/6e074bfb10dd2ab96a539fcbdf667cd6d79518ac))
+* **wezterm:** unescape send_text and use --no-paste for execution ([994e5bc](https://github.com/dungle-scrubs/tallow/commit/994e5bcdc2b3ae5e8f3ed787cb49b8eed26bd1a2))
+
+
+### Changed
+
+* **background-task-tool:** collapse consecutive poll calls in-place ([a9a662f](https://github.com/dungle-scrubs/tallow/commit/a9a662fef99656a9a43ebf984bde65ad7599423c))
+* **core:** harden trust-scoped workspace plumbing ([5292d63](https://github.com/dungle-scrubs/tallow/commit/5292d634390764040c8c01ac3fe174f57739f080))
+
+
+### Documentation
+
+* **changelog:** add scoped-rules release note ([806df99](https://github.com/dungle-scrubs/tallow/commit/806df9954d4438adb46afe3c0dd7a4a07cbede4d))
+* **changelog:** note compact heartbeat progress feedback ([ba4248d](https://github.com/dungle-scrubs/tallow/commit/ba4248dbb48ed452438ce9a9e11dfabc016943e1))
+* **changelog:** note streaming input scheduling fix ([e070755](https://github.com/dungle-scrubs/tallow/commit/e0707552e92b4bca4710e73ba820e9bd96a965c2))
+* **context-files:** document scoped rule compatibility ([97abd74](https://github.com/dungle-scrubs/tallow/commit/97abd7488a7df1e0d1f70ff94b8b119f3d8dd1d5))
+* **context:** document unknown-usage no-data behavior ([c954833](https://github.com/dungle-scrubs/tallow/commit/c954833567519a29e56f2ca9937659772d635b39))
+* **installation:** clarify installer upgrade flows ([97db4df](https://github.com/dungle-scrubs/tallow/commit/97db4df234ec75d9ab107a350a36a6d9a3e42039))
+* **web-fetch-tool:** document dendrite fallback ([608e672](https://github.com/dungle-scrubs/tallow/commit/608e672b64efd93647c5367beacd564707a9d553))
+
+
+### Maintenance
+
+* **background-task-tool:** add consecutive poll detection tests ([8910af9](https://github.com/dungle-scrubs/tallow/commit/8910af91299d19273df3eb6ec53ee9ec8b4191b2))
+* **skills:** refresh tallow-expert reference ([f1ec89a](https://github.com/dungle-scrubs/tallow/commit/f1ec89ab70d4d7e51f37d45843ecbe9f41353342))
+* **workspace-transition:** cover host orchestration ([8a773cc](https://github.com/dungle-scrubs/tallow/commit/8a773cc80e7f7640fc33fc38c5bf6635dfc77301))
+
 ## [0.8.16](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.15...tallow-v0.8.16) (2026-03-05)
 
 
