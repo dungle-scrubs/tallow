@@ -60,6 +60,7 @@ import { migrateSessionsToPerCwdDirs } from "./session-migration.js";
 import { createSessionWithId, findSessionById } from "./session-utils.js";
 import { normalizeStartupProfile, type StartupProfile } from "./startup-profile.js";
 import { emitStartupTiming, isStartupTimingEnabled } from "./startup-timing.js";
+import { applyStreamingYieldPatch } from "./streaming-yield-patch.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1305,6 +1306,7 @@ export async function createTallowSession(
 		await applyInteractiveModeStaleUiPatch();
 	}
 	await applyAgentSessionCompactionCancelPatch();
+	await applyStreamingYieldPatch();
 
 	// Resolve any op:// secrets not loaded from cache during bootstrap.
 	// Runs in parallel (~2.4s for all) instead of sequential (~2.4s each).
