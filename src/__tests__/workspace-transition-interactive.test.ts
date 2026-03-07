@@ -270,7 +270,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 		const nextSession = createFakeSession("next");
 		const mode = createFakeMode(previousSession, events);
 		const { deps, state } = createDeps(nextSession, "trusted", events);
-		const { ui } = createFakeUi(["↗ Enter /repo/b"], events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
 		const cleanupSessions: string[] = [];
 		const host = createInteractiveWorkspaceTransitionHost(
 			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
@@ -328,7 +328,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 		const nextSession = createFakeSession("next");
 		const mode = createFakeMode(previousSession, events);
 		const { deps } = createDeps(nextSession, "trusted", events);
-		const { ui } = createFakeUi(["↗ Enter /repo/b"], events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
 		const host = createInteractiveWorkspaceTransitionHost(
 			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
 			{ session: { type: "memory" } },
@@ -353,7 +353,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 		const mode = createFakeMode(previousSession, events);
 		const { deps, state } = createDeps(nextSession, "untrusted", events);
 		const { ui } = createFakeUi(
-			["↗ Enter /repo/b", "🔓 Trust folder + reload with repo-controlled surfaces enabled"],
+			["Enter /repo/b", "🔓 Trust folder + reload with repo-controlled surfaces enabled"],
 			events
 		);
 		const host = createInteractiveWorkspaceTransitionHost(
@@ -378,7 +378,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 		const mode = createFakeMode(previousSession, events);
 		const { deps, state } = createDeps(nextSession, "stale_fingerprint", events);
 		const { ui } = createFakeUi(
-			["↗ Enter /repo/b", "🔒 Open untrusted + reload with repo-controlled surfaces blocked"],
+			["Enter /repo/b", "🔒 Open untrusted + reload with repo-controlled surfaces blocked"],
 			events
 		);
 		const host = createInteractiveWorkspaceTransitionHost(
@@ -404,7 +404,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 		const nextSession = createFakeSession("next");
 		const mode = createFakeMode(previousSession, events);
 		const { deps, state } = createDeps(nextSession, "trusted", events);
-		const { ui } = createFakeUi(["• Stay in /repo/a"], events);
+		const { ui } = createFakeUi(["Stay in /repo/a"], events);
 		const host = createInteractiveWorkspaceTransitionHost(
 			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
 			{ session: { type: "new" } },
@@ -439,7 +439,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 				throw new Error("session bootstrap failed");
 			},
 		};
-		const { ui } = createFakeUi(["↗ Enter /repo/b"], events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
 		const host = createInteractiveWorkspaceTransitionHost(
 			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
 			{ session: { type: "new" } },
@@ -490,7 +490,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 				return createSessionPromise;
 			},
 		};
-		const { ui } = createFakeUi(["↗ Enter /repo/b", "↗ Enter /repo/b"], events);
+		const { ui } = createFakeUi(["Enter /repo/b", "Enter /repo/b"], events);
 		const host = createInteractiveWorkspaceTransitionHost(
 			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
 			{ session: { type: "new" } },

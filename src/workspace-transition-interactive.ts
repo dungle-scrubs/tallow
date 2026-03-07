@@ -82,10 +82,10 @@ async function requestWorkspaceJumpApproval(
 	request: WorkspaceTransitionRequest
 ): Promise<WorkspaceJumpApproval> {
 	const choice = await request.ui.select("Directory jump — choose the landing zone", [
-		`↗ Enter ${request.targetCwd}`,
-		`• Stay in ${request.sourceCwd}`,
+		`Enter ${request.targetCwd}`,
+		`Stay in ${request.sourceCwd}`,
 	]);
-	if (!choice || choice.startsWith("• ")) {
+	if (!choice || choice.startsWith("Stay")) {
 		return "cancel";
 	}
 	return "proceed";

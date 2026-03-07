@@ -84,7 +84,7 @@ export class SelectList implements Component {
 			let line = "";
 			if (isSelected) {
 				// Use arrow indicator for selection - entire line uses selectedText color
-				const prefixWidth = 2; // "→ " is 2 characters visually
+				const prefixWidth = 2; // "↗ " is 2 characters visually
 				const displayValue = item.label || item.value;
 
 				if (descriptionSingleLine && width > 40) {
@@ -100,16 +100,16 @@ export class SelectList implements Component {
 					if (remainingWidth > 10) {
 						const truncatedDesc = truncateToWidth(descriptionSingleLine, remainingWidth, "");
 						// Apply selectedText to entire line content
-						line = this.theme.selectedText(`→ ${truncatedValue}${spacing}${truncatedDesc}`);
+						line = this.theme.selectedText(`↗ ${truncatedValue}${spacing}${truncatedDesc}`);
 					} else {
 						// Not enough space for description
 						const maxWidth = width - prefixWidth - 2;
-						line = this.theme.selectedText(`→ ${truncateToWidth(displayValue, maxWidth, "")}`);
+						line = this.theme.selectedText(`↗ ${truncateToWidth(displayValue, maxWidth, "")}`);
 					}
 				} else {
 					// No description or not enough width
 					const maxWidth = width - prefixWidth - 2;
-					line = this.theme.selectedText(`→ ${truncateToWidth(displayValue, maxWidth, "")}`);
+					line = this.theme.selectedText(`↗ ${truncateToWidth(displayValue, maxWidth, "")}`);
 				}
 			} else {
 				const displayValue = item.label || item.value;
