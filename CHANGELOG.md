@@ -61,6 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workspace-transition:** interactive Plan B workspace transitions for `/cd`
+  and the `cd` tool — explicit approval, trust choice, session recreation,
+  and restarted-turn synthetic context after tool-driven moves
 - **sdk:** context-budget guardrails with per-turn planner envelopes,
   ingestion-time tool-result truncation, and deterministic unknown-usage fallback
 - **web-fetch-tool:** adaptive `maxBytes` resolution from planner envelopes,

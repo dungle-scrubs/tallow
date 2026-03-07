@@ -4,6 +4,18 @@ description: Change tallow's working directory via command or tool.
 ---
 
 Provides directory navigation as both a `/cd <path>` slash command
-for users and a `cd` tool for the LLM. Paths are validated before
-changing, non-existent or non-directory paths return clear errors.
-Supports `~` expansion to home directory.
+for users and a `cd` tool for the LLM.
+
+## Behavior
+
+- validates the target path before changing workspaces
+- requires explicit user approval before leaving the current workspace
+- asks whether an untrusted target should be trusted or opened untrusted
+- recreates the session in the target workspace instead of continuing with an
+  in-place `process.chdir()` mutation
+- when the `cd` tool is used, ends the current turn and restarts in the new
+  workspace with a one-shot synthetic transition message so the model can
+  re-evaluate the new repo before continuing
+
+Non-existent paths and non-directory paths return clear errors. `~` expands to
+home as expected.
