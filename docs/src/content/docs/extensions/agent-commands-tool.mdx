@@ -5,8 +5,8 @@ description: Register agents as slash commands for direct invocation.
 
 import Gallery from '../../../components/Gallery.astro';
 
-Registers every agent as a `/agent-name` slash command. Typing
-`/planner implement user authentication` directly spawns the
+Registers every agent as a `/agent:<name>` slash command. Typing
+`/agent:planner implement user authentication` directly spawns the
 planner agent as a subprocess with that task.
 
 No tool call overhead, the agent runs immediately as a child

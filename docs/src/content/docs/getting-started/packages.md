@@ -39,7 +39,7 @@ my-package/
 ├── prompts/
 │   └── explain.md       → becomes /explain
 ├── agents/
-│   └── planner.md       → becomes /planner
+│   └── planner.md       → becomes /agent:planner
 ├── skills/
 │   └── my-skill/
 │       └── SKILL.md     → loaded by name
@@ -79,7 +79,7 @@ Three extensions independently scan package directories:
 | Package feature | Extension | What it does |
 |-----------------|-----------|--------------|
 | `commands/*.md` | [command-prompt](/extensions/command-prompt/) | Loads markdown files as `/slash` commands |
-| `agents/*.md` | [agent-commands](/extensions/agent-commands-tool/) | Loads agent definitions as `/agent-name` commands |
+| `agents/*.md` | [agent-commands](/extensions/agent-commands-tool/) | Loads agent definitions as `/agent:<name>` commands |
 | `hooks.json` | [hooks](/extensions/hooks/) | Loads lifecycle hooks for tool gating, automation, etc. |
 
 Each extension resolves paths from `settings.json` `packages`,

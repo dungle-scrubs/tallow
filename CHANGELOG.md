@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **shell-policy:** "Always Allow" option for high-risk shell command
+  confirmations — persists `Bash(pattern)` rules to
+  `~/.tallow/settings.json` so matching commands skip confirmation in
+  future sessions
+
+### Changed
+
+- **install:** use `@dungle-scrubs/tallow` as the canonical published package
+  name in installer guidance and upgrade commands
+- **tui:** global select cursor changed from → to ↗
+
+### Fixed
+
+- **subagent:** use `--model` instead of `--models` for forked subprocesses
+- **teams-tool:** use tallow auth and model config in team spawns
+
+### Documentation
+
+- **docs:** align README/docs agent-template counts, bundled template lists,
+  and `/agent:<name>` invocation examples with shipped templates
+- **docs:** rename the homepage extension section to featured extensions and
+  refresh docs metadata counts
+- **context-fork:** document the correct `--model` subprocess flag
+
+### Maintenance
+
+- **deps:** bump pi-* dependencies
+- **tests:** exclude `_defaults.md` from agent-template drift counts and verify
+  scoped package links plus key docs metadata
+
+
 ## [0.8.20](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.19...tallow-v0.8.20) (2026-03-08)
 
 
@@ -48,23 +83,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * **shell-policy:** add always-allow tests and update callers ([19d66d2](https://github.com/dungle-scrubs/tallow/commit/19d66d22433d87232399516ac4c1b9f263309879))
 * **teams-tool:** add spawn auth path resolution tests ([5ae804e](https://github.com/dungle-scrubs/tallow/commit/5ae804ea57832279421f60701fe21f2517575016))
-
-## [Unreleased]
-
-### Added
-
-- **shell-policy:** "Always Allow" option for high-risk shell command
-  confirmations — persists `Bash(pattern)` rules to
-  `~/.tallow/settings.json` so matching commands skip confirmation in
-  future sessions
-
-### Changed
-
-- **tui:** global select cursor changed from → to ↗
-
-### Fixed
-
-- **teams-tool:** use tallow auth and model config in team spawns
 
 ## [0.8.18](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.17...tallow-v0.8.18) (2026-03-07)
 
@@ -169,51 +187,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **deps:** bump pi-* dependencies ([7fea391](https://github.com/dungle-scrubs/tallow/commit/7fea39130e3df6f692178496d298f0fd366130db))
 * **deps:** bump pi-* dependencies ([6db17c4](https://github.com/dungle-scrubs/tallow/commit/6db17c4e331e82b48379d1139a6279067a3fca4b))
 * **plan-mode:** add plan intent detection test suite ([a88bd55](https://github.com/dungle-scrubs/tallow/commit/a88bd55d8ddb9307b46927cda36d6e18e8d8ccde))
-
-## [Unreleased]
-
-### Added
-
-- **workspace-transition:** interactive Plan B workspace transitions for `/cd`
-  and the `cd` tool — explicit approval, trust choice, session recreation,
-  and restarted-turn synthetic context after tool-driven moves
-- **sdk:** context-budget guardrails with per-turn planner envelopes,
-  ingestion-time tool-result truncation, and deterministic unknown-usage fallback
-- **web-fetch-tool:** adaptive `maxBytes` resolution from planner envelopes,
-  policy bounds, and user-specified hard upper bounds
-- **web-fetch-tool:** optional `dendrite-scraper` CLI fallback for bot-guarded,
-  JS-heavy, or retryable-error pages via the published package or `uvx`
-- **integration:** context-budget guard integration coverage for batched
-  `web_fetch` calls and envelope lifecycle reset between turns
-- **context-files:** path-scoped rules in `.tallow/rules/` and `.claude/rules/`
-  via `paths`/`path` frontmatter, activated by read/edit/write file activity
-
-### Changed
-
-- **sdk:** inject per-turn context budget status line into the system prompt
-- **sdk:** preserve historical `toolResultRetention` behavior while adding
-  same-turn ingestion safeguards
-
-### Fixed
-
-- **slash-command-bridge:** show live elapsed heartbeat updates during
-  model-invoked `/compact`
-- **sdk:** cancel in-flight compaction before `newSession`/`switchSession`
-  boundaries to preserve fresh-session resets
-- **context-usage,slash-command-bridge:** treat unknown usage (`tokens: null`)
-  as unavailable instead of rendering misleading zero-token summaries
-- **tui:** yield render scheduling to the check phase so editor input stays
-  responsive while assistant text streams
-
-### Documentation
-
-- **installation:** correct installer and upgrade docs to match package-manager, source-build, and `tallow install` behavior
-- **context-usage:** document `contextBudget` settings and budget signal semantics
-- **web-fetch-tool:** document adaptive cap rules, fallback behavior, and
-  diagnostic detail fields
-- **context-files:** document path-scoped rules compatibility across
-  `.tallow/rules/` and `.claude/rules/`, including `paths`/`path`
-  frontmatter activation semantics
 
 ## [0.8.14](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.13...tallow-v0.8.14) (2026-02-26)
 
@@ -427,33 +400,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **trust:** cover boxed project trust banner and payload ([8dc3878](https://github.com/dungle-scrubs/tallow/commit/8dc38781adad6df55618e53529eddd5b4a1a9c3f))
 * **tui:** add border and shrink-regression coverage ([f946979](https://github.com/dungle-scrubs/tallow/commit/f946979a3fd543723e84833e3f5811bed7133f88))
 
-## [Unreleased]
-
-### Added
-
-- **plan-mode:** prompt for optional user guidance when blocked tool results occur during plan execution and inject `[PLAN GUIDANCE — Step n: ...]` steer context
-- **read-tool-enhanced:** parse `.ipynb` notebooks into structured markdown/code/output text with safe image and html placeholders
-- **sdk,context-usage,debug:** summarize oversized historical tool results after each turn and surface retained/reclaimed payload bytes for long-session profiling
-- **worktree:** add detached session and subagent worktree isolation with lifecycle hooks, stale cleanup, and CLI `-w/--worktree` support
-
-### Changed
-
-- **extensions:** lazy-initialize command expansion, context scanning, context fork indexing, and MCP startup connections behind first-use triggers
-- **lsp:** allow configuring language-server startup timeout via `lsp.startupTimeoutMs` with project-over-user precedence
-- **permissions:** add structured deny/ask reason metadata with redaction-safe messaging and shell-policy alignment
-- **subagent-tool:** compact completed background-agent histories with retained final output, bounded debug tails, and stale-record cleanup
-- **teams-tool:** enforce ring-buffer retention for team message logs with debug and limit env overrides
-
-### Fixed
-
-- **tasks:** render foreground subagents inline-only while keeping bottom widget lanes background-only
-- **tui:** realign differential-render viewport coordinates after shrink churn to prevent input editor border lines from being cleared
-
-### Documentation
-
-- **agents:** add extension startup policy guidance for minimal `session_start` handlers and shared lazy initialization
-- **permissions:** add allow/ask/deny reason examples with redaction behavior
-
 ## [0.8.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.5...tallow-v0.8.6) (2026-02-20)
 
 
@@ -654,98 +600,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * **ci:** remove redundant publish.yml — release.yml handles OIDC publish ([07f7110](https://github.com/dungle-scrubs/tallow/commit/07f71109015bc37c090e7568adfceb179a8828dc))
 
-## [Unreleased]
-
-### Added
-
-- **core:** `IS_DEMO` / `TALLOW_DEMO` env var and `--demo` CLI flag to hide
-  sensitive info (paths, session IDs) for screen recordings and live demos
-- **custom-footer:** `[DEMO]` badge and path sanitization when demo mode is active
-- **sdk:** export `isDemoMode()` and `sanitizePath()` helpers for extensions
-- **plugins:** plugin resolver with cache, format detection, and session
-  startup integration
-- **context-files:** discover nested subdirectory rule files in
-  `.tallow/rules/` and `.claude/rules/`
-- **init:** nested `.claude/` → `.tallow/` directory rename and nested
-  `CLAUDE.md` → `AGENTS.md` migration in `/init`
-- **trust:** per-project trust store with config fingerprinting and
-  `/trust-project`, `/untrust-project`, `/trust-status` commands
-- **startup:** add `startupProfile` (`interactive`/`headless`) session option,
-  headless UI-extension skip policy, and `TALLOW_STARTUP_TIMING` metrics for
-  create-session, bind-extensions, and first-token
-
-### Changed
-
-- **subagent:** extract model resolver, router, and matrix to
-  `@dungle-scrubs/synapse`
-- **subagent:** surface `routing` settings (`enabled`, `primaryType`,
-  `costPreference`) in schema/docs and support project-over-user
-  precedence for routing defaults
-- **web-fetch:** remove Firecrawl fallback and JS-detection — plain HTTP
-  fetch with 50KB truncation only
-- **debug:** rename `/diag*` commands to `/diagnostics*` and make
-  `/diagnostics` capability-aware with WezTerm live-pane follow fallback
-- **tasks/teams-tool:** align task and team dashboard rendering to shared
-  presentation roles, emphasizing identity/action context over process chatter
-
-### Fixed
-
-- **tools:** add missing `isError` flag to error responses in lsp, read,
-  and ask-user-question
-- **debug:** redact secret-like fields in debug log payloads before
-  truncation
-- **lsp:** bound startup and request operations with timeout + abort cleanup
-  so hung language servers do not block tool calls
-- **hooks:** translate Claude Code hook events and tool matchers from
-  `.claude/settings.json` so PreToolUse/PostToolUse/Stop hooks run in tallow
-- **hooks:** bound hook subprocess output buffers and enforce SIGTERM→SIGKILL
-  timeout/abort escalation for command and agent hooks
-- **tui:** clear stale working and queued steering/follow-up UI state on
-  turn end via interactive-mode runtime patch
-- **trust:** block untrusted project execution surfaces (`plugins`, hooks,
-  `mcpServers`, `packages`, `permissions`, shell interpolation, project extensions)
-- **mcp-adapter:** always load global `mcpServers`, gate project servers on trust,
-  and warn when project MCP config is skipped
-- **mcp-adapter:** abort timed-out and stopped SSE requests at the network layer
-  and clear pending request bookkeeping
-- **deps:** pin `ajv`, `fast-xml-parser`, and `minimatch` via overrides to
-  remediate current advisory paths from `@mariozechner/pi-ai`,
-  `@aws-sdk/xml-builder`, and `@mariozechner/pi-coding-agent`; remove
-  overrides once upstream ranges include fixed versions
-- **plugins:** ignore `<cwd>/.pi/settings.json` plugin entries
-- **plan-mode:** enforce strict read-only tool allowlist and block
-  non-allowlisted extension tools while plan mode is active
-- **pid-cleanup:** verify process start identity before signaling tracked PIDs
-  to prevent PID-reuse kills of unrelated processes
-- **wezterm-notify:** stabilize tab loader visibility by using agent-level
-  lifecycle signaling and redraw-driven spinner advancement to avoid short-run flicker
-- **subagent-tool:** add foreground liveness watchdog detection for stalled workers,
-  enforce SIGTERM→SIGKILL termination, and provide stalled-aware parallel
-  partial-result handling with interactive and headless escape hatches
-- **subagent-tool:** automatically retry stalled parallel workers once in
-  single-worker mode with narrowed-scope guidance and explicit model pinning
-  before returning partial error results
-- **tasks/subagent:** propagate `stalled` subagent status through interop snapshots
-  and widget rendering with explicit running/stalled labels
-
-### Documentation
-
-- **docs:** add WezTerm integration guide covering pane control, turn status
-  signaling, tab bar indicators, and WezTerm Lua configuration
-- **wezterm-notify:** new extension — signals agent turn status to WezTerm via
-  OSC 1337 user variables, enabling tab spinner and done-color indicators
-- **docs:** add presentation-role guidance for tool-display, tasks,
-  subagent-tool, and teams-tool, plus extension-first/TUI-fork-last-resort policy
-  updates in AGENTS.md
-
-### Removed
-
-- **image-gen:** remove image-gen extension (moved to external plugin)
-
-### Maintenance
-
-- **ci:** remove redundant `publish.yml` — `release.yml` handles OIDC publish
-
 ## [0.7.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.7.5...tallow-v0.7.6) (2026-02-17)
 
 
@@ -900,8 +754,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * stop tracking AGENTS.md (user-local file) ([7591e7f](https://github.com/dungle-scrubs/tallow/commit/7591e7fadd32bda8cd9bf9c2ecbe33f3cf93ddb7))
 * **subagent-tool:** add gpt-5.3-codex, spark, and 5.1-codex-max to matrix ([11d30a9](https://github.com/dungle-scrubs/tallow/commit/11d30a9cee00080160a9d570beb031c206b0b64e))
 * treat feat as patch bump while pre-1.0 ([646cd71](https://github.com/dungle-scrubs/tallow/commit/646cd71687213dd40d093a6615505ead1b8f8bdf))
-
-## [Unreleased]
 
 ## [0.7.1] - 2026-02-16
 
