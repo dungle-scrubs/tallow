@@ -14,6 +14,7 @@ The tool uses **context-budget-aware caps** so a large fetch does not blow up a 
 | `url` | string | — | URL to fetch |
 | `maxBytes` | number | adaptive | Hard upper bound for tool output; may be reduced by safety budget |
 | `format` | string | `"text"` | Output hint: `"text"`, `"markdown"`, or `"html"` |
+| `allowPackageFallback` | boolean | `false` | Opt in to running the published `dendrite-scraper` package when plain HTTP is insufficient |
 
 ## Adaptive budget behavior
 
@@ -49,7 +50,7 @@ misuse.
 
 ## Dendrite fallback
 
-Fallback is only attempted for `text`/`markdown` requests when plain HTTP is likely useless:
+Fallback is only attempted when `allowPackageFallback: true` and the request is for `text`/`markdown` output where plain HTTP is likely useless:
 
 - fetch errors
 - retryable HTTP statuses like `403`, `429`, or `503`

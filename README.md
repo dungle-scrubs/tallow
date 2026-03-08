@@ -212,7 +212,7 @@ See the [SDK docs](https://tallow.dungle-scrubs.com) for all options.
 
 - Requires Node.js 22+ (uses modern ESM features)
 - Session persistence is local — no cloud sync
-- `web_fetch` is plain HTTP by default; for bot-guarded or JS-heavy pages it can fall back to the published `dendrite-scraper` package when `dendrite-scraper` or `uvx` is available
+- `web_fetch` is plain HTTP by default; for bot-guarded or JS-heavy pages it can opt in to the published `dendrite-scraper` package when `dendrite-scraper` or `uvx` is available
 
 ## Contributing
 

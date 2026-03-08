@@ -502,7 +502,11 @@ export default function (pi: ExtensionAPI): void {
 WHEN TO USE:
 - Need to read web page content
 - Fetching documentation or articles
-- Checking API responses`,
+- Checking API responses
+
+SAFETY:
+- Limited to public http/https targets by default
+- Package-based scraping fallback is opt-in via allowPackageFallback`,
 		parameters: Type.Object({
 			url: Type.String({ description: "URL to fetch" }),
 			maxBytes: Type.Optional(
@@ -514,6 +518,12 @@ WHEN TO USE:
 			format: Type.Optional(
 				Type.Union([Type.Literal("text"), Type.Literal("markdown"), Type.Literal("html")], {
 					description: 'Output format hint: "text" (default), "markdown", or "html"',
+				})
+			),
+			allowPackageFallback: Type.Optional(
+				Type.Boolean({
+					description:
+						"Allow the tool to run the published dendrite-scraper package via local binary or uvx when plain HTTP is insufficient",
 				})
 			),
 		}),
@@ -540,6 +550,7 @@ WHEN TO USE:
 				url: params.url,
 			} satisfies WebFetchDetails;
 
+			const allowPackageFallback = params.allowPackageFallback === true;
 			const validation = await validateFetchUrl(params.url);
 			if (!validation.ok) {
 				const error = `Blocked URL: ${validation.reason}`;
@@ -571,9 +582,13 @@ WHEN TO USE:
 					responseText: fullText,
 					status: response.status,
 				});
+				const fallbackDisabledNote =
+					fallbackReason && !allowPackageFallback
+						? "\n\nPackage fallback disabled. Re-run with allowPackageFallback: true to allow dendrite-scraper."
+						: "";
 				let fallbackFailure: string | undefined;
 
-				if (fallbackReason) {
+				if (fallbackReason && allowPackageFallback) {
 					const fallback = await runDendriteFallback(pi, params.url, signal);
 					if (fallback.ok) {
 						const text = fallback.value.payload.markdown ?? "";
@@ -604,7 +619,7 @@ WHEN TO USE:
 					const error = `HTTP ${response.status}: ${response.statusText}`;
 					const fallback = fallbackFailure
 						? `\n\nDendrite fallback failed: ${fallbackFailure}`
-						: "";
+						: fallbackDisabledNote;
 					return {
 						content: [{ type: "text", text: `${error}${fallback}` }],
 						details: {
@@ -613,7 +628,7 @@ WHEN TO USE:
 							contentType,
 							error: `${error}${fallback}`,
 							fallbackReason,
-							fallbackUsed: Boolean(fallbackReason),
+							fallbackUsed: Boolean(fallbackReason && allowPackageFallback),
 							isError: true,
 							status: response.status,
 						} satisfies WebFetchDetails,
@@ -635,8 +650,12 @@ WHEN TO USE:
 			} catch (error: unknown) {
 				const msg = error instanceof Error ? error.message : String(error);
 				const fallbackReason = shouldUseDendriteFallback({ error: msg, format: params.format });
+				const fallbackDisabledNote =
+					fallbackReason && !allowPackageFallback
+						? "\n\nPackage fallback disabled. Re-run with allowPackageFallback: true to allow dendrite-scraper."
+						: "";
 				let fallbackFailure: string | undefined;
-				if (fallbackReason) {
+				if (fallbackReason && allowPackageFallback) {
 					const fallback = await runDendriteFallback(pi, params.url, signal);
 					if (fallback.ok) {
 						const text = fallback.value.payload.markdown ?? "";
@@ -663,7 +682,7 @@ WHEN TO USE:
 					fallbackFailure = fallback.error;
 				}
 
-				const errorText = `Fetch error: ${msg}${fallbackFailure ? `\n\nDendrite fallback failed: ${fallbackFailure}` : ""}`;
+				const errorText = `Fetch error: ${msg}${fallbackFailure ? `\n\nDendrite fallback failed: ${fallbackFailure}` : fallbackDisabledNote}`;
 				return {
 					content: [{ type: "text", text: errorText }],
 					details: {
@@ -671,7 +690,7 @@ WHEN TO USE:
 						backend: "http",
 						error: errorText,
 						fallbackReason,
-						fallbackUsed: Boolean(fallbackReason),
+						fallbackUsed: Boolean(fallbackReason && allowPackageFallback),
 						isError: true,
 					} satisfies WebFetchDetails,
 				};
