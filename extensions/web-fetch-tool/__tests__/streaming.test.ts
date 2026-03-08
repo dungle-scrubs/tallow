@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
-import webFetchExtension, { readResponseBodyWithCap } from "../index.js";
+import webFetchExtension, {
+	readResponseBodyWithCap,
+	setDirectHttpRequestImplForTests,
+} from "../index.js";
 
-const originalFetch = globalThis.fetch;
 const encoder = new TextEncoder();
 
 afterEach(() => {
-	globalThis.fetch = originalFetch;
+	setDirectHttpRequestImplForTests(undefined);
 });
 
 describe("readResponseBodyWithCap", () => {
@@ -42,15 +44,17 @@ describe("web_fetch streaming limits", () => {
 	test("returns truncated output without buffering the full stream", async () => {
 		const harness = ExtensionHarness.create();
 
-		globalThis.fetch = async () =>
-			new Response(
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response(
 				new ReadableStream<Uint8Array>({
 					pull(controller) {
 						controller.enqueue(encoder.encode("y".repeat(16384)));
 					},
 				}),
 				{ headers: { "content-type": "text/plain" } }
-			);
+			),
+			url: validation.url.toString(),
+		}));
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");

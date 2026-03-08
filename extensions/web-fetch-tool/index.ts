@@ -9,8 +9,12 @@
  * envelopes via the shared context-budget interop.
  */
 
+import type { LookupOptions } from "node:dns";
 import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import { Readable } from "node:stream";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -66,12 +70,23 @@ const RESPONSE_SNIFF_BYTES = 64 * 1024;
 /** Hostnames that should never be fetched by default. */
 const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
 
+/** User agent sent for direct HTTP fetches. */
+const WEB_FETCH_USER_AGENT =
+	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/** Maximum number of manual redirect hops allowed for direct fetches. */
+const MAX_REDIRECT_HOPS = 5;
+
+/** Redirect statuses handled manually so every hop can be validated. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
 /** Resolver contract used by URL validation tests. */
 export type HostResolver = (hostname: string) => Promise<readonly string[]>;
 
 /** Result of validating a fetch target URL. */
 export type FetchUrlValidationResult =
-	| { readonly ok: true; readonly url: URL }
+	| { readonly ok: true; readonly resolvedAddresses: readonly string[]; readonly url: URL }
 	| { readonly ok: false; readonly reason: string };
 
 /**
@@ -186,9 +201,10 @@ export async function validateFetchUrl(
 		return { ok: false, reason: `blocked private IP address: ${hostname}` };
 	}
 
+	let resolvedAddresses: readonly string[] = [];
 	try {
-		const addresses = await resolveHost(hostname);
-		const blockedAddress = addresses.find((address) => isBlockedIpAddress(address));
+		resolvedAddresses = await resolveHost(hostname);
+		const blockedAddress = resolvedAddresses.find((address) => isBlockedIpAddress(address));
 		if (blockedAddress) {
 			return {
 				ok: false,
@@ -196,11 +212,286 @@ export async function validateFetchUrl(
 			};
 		}
 	} catch {
-		// DNS lookup failures are handled by fetch itself. Only successful lookups
+		// DNS lookup failures are handled by the request path itself. Only successful lookups
 		// participate in private-network blocking.
 	}
 
-	return { ok: true, url: parsed };
+	if (resolvedAddresses.length === 0 && isIP(hostname) !== 0) {
+		resolvedAddresses = [hostname];
+	}
+
+	return { ok: true, resolvedAddresses, url: parsed };
+}
+
+/** One validated redirect hop observed during direct HTTP fetches. */
+interface RedirectHopTelemetry {
+	readonly fromUrl: string;
+	readonly pinnedAddress?: string;
+	readonly status: number;
+	readonly toUrl: string;
+}
+
+/** Response metadata returned by the pinned direct HTTP client. */
+interface DirectHttpResponse {
+	readonly pinnedAddress?: string;
+	readonly response: Response;
+	readonly url: string;
+}
+
+/** Direct HTTP implementation signature used by production and tests. */
+export type DirectHttpRequestImpl = (
+	validation: Extract<FetchUrlValidationResult, { readonly ok: true }>,
+	signal: AbortSignal | undefined
+) => Promise<DirectHttpResponse>;
+
+/** Result of a redirect-aware direct HTTP fetch. */
+type DirectFetchResult =
+	| {
+			readonly ok: true;
+			readonly pinnedAddress?: string;
+			readonly redirectChain: readonly RedirectHopTelemetry[];
+			readonly redirectCount: number;
+			readonly response: Response;
+			readonly url: string;
+	  }
+	| {
+			readonly error: string;
+			readonly ok: false;
+			readonly pinnedAddress?: string;
+			readonly redirectChain: readonly RedirectHopTelemetry[];
+			readonly redirectCount: number;
+			readonly status?: number;
+			readonly url: string;
+	  };
+
+/** Active direct HTTP implementation (overridable in tests). */
+let directHttpRequestImpl: DirectHttpRequestImpl = performPinnedDirectHttpRequest;
+
+/**
+ * Override the low-level direct HTTP implementation for tests.
+ *
+ * @param impl - Replacement implementation, or undefined to restore default
+ * @returns void
+ */
+export function setDirectHttpRequestImplForTests(impl?: DirectHttpRequestImpl): void {
+	directHttpRequestImpl = impl ?? performPinnedDirectHttpRequest;
+}
+
+/**
+ * Pick the IP address that the request should pin to for this hop.
+ *
+ * @param validation - Validated fetch target
+ * @returns Pinned IP literal, or null when DNS resolution should remain system-managed
+ */
+function resolvePinnedAddress(
+	validation: Extract<FetchUrlValidationResult, { readonly ok: true }>
+): string | null {
+	if (isIP(validation.url.hostname) !== 0) {
+		return validation.url.hostname;
+	}
+	return validation.resolvedAddresses[0] ?? null;
+}
+
+/**
+ * Build a DNS lookup override that always returns the validated IP address.
+ *
+ * @param pinnedAddress - Validated IP address to pin the socket to
+ * @returns Lookup override for http/https request options
+ */
+function createPinnedLookup(
+	pinnedAddress: string
+): (
+	hostname: string,
+	options: LookupOptions,
+	callback: (
+		error: Error | null,
+		address: string | Array<{ address: string; family: number }>,
+		family?: number
+	) => void
+) => void {
+	return (_hostname, options, callback) => {
+		const family = isIP(pinnedAddress);
+		if (options.all) {
+			callback(null, [{ address: pinnedAddress, family }]);
+			return;
+		}
+		callback(null, pinnedAddress, family);
+	};
+}
+
+/**
+ * Normalize Node's incoming headers object into a Response-compatible shape.
+ *
+ * @param headers - Incoming response headers from http/https
+ * @returns Headers instance safe to pass into the Fetch Response constructor
+ */
+function toResponseHeaders(headers: Record<string, string | string[] | undefined>): Headers {
+	const normalized = new Headers();
+	for (const [key, value] of Object.entries(headers)) {
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				normalized.append(key, item);
+			}
+			continue;
+		}
+		if (typeof value === "string") {
+			normalized.append(key, value);
+		}
+	}
+	return normalized;
+}
+
+/**
+ * Perform one direct HTTP request while pinning the socket lookup to the
+ * validated IP address for the current hop.
+ *
+ * @param validation - Validated target URL plus resolved IPs
+ * @param signal - Abort signal for the request
+ * @returns Response metadata compatible with downstream processing
+ */
+export async function performPinnedDirectHttpRequest(
+	validation: Extract<FetchUrlValidationResult, { readonly ok: true }>,
+	signal: AbortSignal | undefined
+): Promise<DirectHttpResponse> {
+	const pinnedAddress = resolvePinnedAddress(validation) ?? undefined;
+	const requestFn = validation.url.protocol === "https:" ? httpsRequest : httpRequest;
+
+	return await new Promise<DirectHttpResponse>((resolve, reject) => {
+		const request = requestFn(
+			{
+				headers: {
+					"Accept-Encoding": "identity",
+					"User-Agent": WEB_FETCH_USER_AGENT,
+				},
+				hostname: validation.url.hostname,
+				lookup: pinnedAddress ? createPinnedLookup(pinnedAddress) : undefined,
+				method: "GET",
+				path: `${validation.url.pathname}${validation.url.search}`,
+				port: validation.url.port || undefined,
+				signal,
+			},
+			(incoming) => {
+				resolve({
+					pinnedAddress,
+					response: new Response(Readable.toWeb(incoming) as ReadableStream, {
+						headers: toResponseHeaders(incoming.headers),
+						status: incoming.statusCode ?? 0,
+						statusText: incoming.statusMessage ?? "",
+					}),
+					url: validation.url.toString(),
+				});
+			}
+		);
+
+		request.on("error", reject);
+		request.end();
+	});
+}
+
+/**
+ * Fetch a URL while manually validating every redirect hop.
+ *
+ * Redirects are not auto-followed. Each `Location` target is resolved against
+ * the current URL, re-validated, and then fetched explicitly. This closes the
+ * straightforward redirect-to-localhost/private-network SSRF bypass and pins
+ * each request to the IP address that passed validation.
+ *
+ * @param rawUrl - Initial user-supplied URL
+ * @param signal - Abort signal for the in-flight request
+ * @returns Final response or a structured error/block result
+ */
+async function fetchWithValidatedRedirects(
+	rawUrl: string,
+	signal: AbortSignal | undefined
+): Promise<DirectFetchResult> {
+	let currentUrl = rawUrl;
+	const redirectChain: RedirectHopTelemetry[] = [];
+	let lastPinnedAddress: string | undefined;
+
+	for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
+		const validation = await validateFetchUrl(currentUrl);
+		if (!validation.ok) {
+			return {
+				ok: false,
+				error: `Blocked URL: ${validation.reason}`,
+				pinnedAddress: lastPinnedAddress,
+				redirectChain,
+				redirectCount: redirectChain.length,
+				url: currentUrl,
+			};
+		}
+
+		const directResponse = await directHttpRequestImpl(validation, signal);
+		const { response } = directResponse;
+		lastPinnedAddress = directResponse.pinnedAddress;
+
+		if (!REDIRECT_STATUSES.has(response.status)) {
+			return {
+				ok: true,
+				pinnedAddress: directResponse.pinnedAddress,
+				redirectChain,
+				redirectCount: redirectChain.length,
+				response,
+				url: directResponse.url,
+			};
+		}
+
+		if (hop === MAX_REDIRECT_HOPS) {
+			return {
+				ok: false,
+				error: `Too many redirects (>${MAX_REDIRECT_HOPS})`,
+				pinnedAddress: directResponse.pinnedAddress,
+				redirectChain,
+				redirectCount: redirectChain.length,
+				status: response.status,
+				url: directResponse.url,
+			};
+		}
+
+		const location = response.headers.get("location");
+		if (!location) {
+			return {
+				ok: false,
+				error: `Redirect response missing location header (HTTP ${response.status})`,
+				pinnedAddress: directResponse.pinnedAddress,
+				redirectChain,
+				redirectCount: redirectChain.length,
+				status: response.status,
+				url: directResponse.url,
+			};
+		}
+
+		const nextUrl = new URL(location, validation.url);
+		redirectChain.push({
+			fromUrl: directResponse.url,
+			pinnedAddress: directResponse.pinnedAddress,
+			status: response.status,
+			toUrl: nextUrl.toString(),
+		});
+		const nextValidation = await validateFetchUrl(nextUrl.toString());
+		if (!nextValidation.ok) {
+			return {
+				ok: false,
+				error: `Blocked redirect target: ${nextValidation.reason}`,
+				pinnedAddress: directResponse.pinnedAddress,
+				redirectChain,
+				redirectCount: redirectChain.length,
+				status: response.status,
+				url: nextUrl.toString(),
+			};
+		}
+
+		currentUrl = nextValidation.url.toString();
+	}
+
+	return {
+		ok: false,
+		error: `Too many redirects (>${MAX_REDIRECT_HOPS})`,
+		pinnedAddress: lastPinnedAddress,
+		redirectChain,
+		redirectCount: redirectChain.length,
+		url: currentUrl,
+	};
 }
 
 // ── Adaptive cap resolution (pure, exported for tests) ──────────────
@@ -275,6 +566,9 @@ interface WebFetchDetails {
 	readonly fallbackUsed?: boolean;
 	readonly isError?: boolean;
 	readonly llmCleaned?: boolean;
+	readonly pinnedAddress?: string;
+	readonly redirectChain?: readonly RedirectHopTelemetry[];
+	readonly redirectCount?: number;
 	readonly source?: string;
 	readonly status?: number;
 	readonly totalBytes?: number;
@@ -656,30 +950,34 @@ SAFETY:
 			} satisfies WebFetchDetails;
 
 			const allowPackageFallback = params.allowPackageFallback === true;
-			const validation = await validateFetchUrl(params.url);
-			if (!validation.ok) {
-				const error = `Blocked URL: ${validation.reason}`;
-				return {
-					content: [{ type: "text", text: error }],
-					details: {
-						...baseDetails,
-						backend: "http",
-						error,
-						isError: true,
-					} satisfies WebFetchDetails,
-				};
-			}
 
 			try {
-				const response = await fetch(validation.url, {
-					signal,
-					headers: {
-						"User-Agent":
-							"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-					},
-				});
+				const directFetch = await fetchWithValidatedRedirects(params.url, signal);
+				if (!directFetch.ok) {
+					return {
+						content: [{ type: "text", text: directFetch.error }],
+						details: {
+							...baseDetails,
+							backend: "http",
+							error: directFetch.error,
+							isError: true,
+							pinnedAddress: directFetch.pinnedAddress,
+							redirectChain: directFetch.redirectChain,
+							redirectCount: directFetch.redirectCount,
+							status: directFetch.status,
+							url: directFetch.url,
+						} satisfies WebFetchDetails,
+					};
+				}
 
+				const { response } = directFetch;
 				const contentType = response.headers.get("content-type") || "";
+				const fetchedUrl = directFetch.url;
+				const httpTelemetry = {
+					pinnedAddress: directFetch.pinnedAddress,
+					redirectChain: directFetch.redirectChain,
+					redirectCount: directFetch.redirectCount,
+				} as const;
 				const body = await readResponseBodyWithCap(response, maxBytes, RESPONSE_SNIFF_BYTES);
 				const fallbackReason = shouldUseDendriteFallback({
 					contentType,
@@ -702,6 +1000,7 @@ SAFETY:
 							content: [{ type: "text", text: final.content }],
 							details: {
 								...baseDetails,
+								...httpTelemetry,
 								attempts: fallback.value.payload.attempts,
 								backend: "dendrite-scraper",
 								botDetected: fallback.value.payload.bot_detected,
@@ -713,7 +1012,7 @@ SAFETY:
 								source: fallback.value.payload.source ?? fallback.value.source,
 								totalBytes: final.totalBytes,
 								truncated: final.truncated,
-								url: fallback.value.payload.url ?? params.url,
+								url: fallback.value.payload.url ?? fetchedUrl,
 							} satisfies WebFetchDetails,
 						};
 					}
@@ -729,6 +1028,7 @@ SAFETY:
 						content: [{ type: "text", text: `${error}${fallback}` }],
 						details: {
 							...baseDetails,
+							...httpTelemetry,
 							backend: "http",
 							contentType,
 							error: `${error}${fallback}`,
@@ -736,6 +1036,7 @@ SAFETY:
 							fallbackUsed: Boolean(fallbackReason && allowPackageFallback),
 							isError: true,
 							status: response.status,
+							url: fetchedUrl,
 						} satisfies WebFetchDetails,
 					};
 				}
@@ -748,12 +1049,14 @@ SAFETY:
 					content: [{ type: "text", text: final.content }],
 					details: {
 						...baseDetails,
+						...httpTelemetry,
 						backend: "http",
 						contentType,
 						status: response.status,
 						totalBytes: final.totalBytes,
 						totalBytesExact: final.totalBytesExact,
 						truncated: final.truncated,
+						url: fetchedUrl,
 					} satisfies WebFetchDetails,
 				};
 			} catch (error: unknown) {
@@ -833,10 +1136,15 @@ SAFETY:
 				const size = details.totalBytes ? ` (${(details.totalBytes / 1024).toFixed(1)}KB)` : "";
 				const truncNote = details.truncated ? " [truncated]" : "";
 				const budgetNote = details.budgetLimited ? " [budget-limited]" : "";
+				const redirectNote =
+					typeof details.redirectCount === "number" && details.redirectCount > 0
+						? ` [redirects:${details.redirectCount}]`
+						: "";
+				const pinnedNote = details.pinnedAddress ? ` [ip:${details.pinnedAddress}]` : "";
 				footer =
 					theme.fg("success", `${getIcon("success")} `) +
 					theme.fg("dim", `${details.url ?? ""}${backend}`) +
-					theme.fg("muted", size + truncNote + budgetNote);
+					theme.fg("muted", size + truncNote + budgetNote + redirectNote + pinnedNote);
 			}
 
 			// Expanded: content preview first, footer last.
@@ -845,7 +1153,19 @@ SAFETY:
 				const content = text?.type === "text" ? text.text : "";
 				const preview = content.slice(0, 500) + (content.length > 500 ? "..." : "");
 				const contentLines = preview.split("\n").map((line) => theme.fg("dim", line));
-				return renderLines([...contentLines, footer]);
+				const telemetryLines: string[] = [];
+				if (details.pinnedAddress) {
+					telemetryLines.push(theme.fg("muted", `pinned ip: ${details.pinnedAddress}`));
+				}
+				for (const hop of details.redirectChain ?? []) {
+					telemetryLines.push(
+						theme.fg(
+							"muted",
+							`redirect ${hop.status}: ${hop.fromUrl} -> ${hop.toUrl}${hop.pinnedAddress ? ` (ip ${hop.pinnedAddress})` : ""}`
+						)
+					);
+				}
+				return renderLines([...contentLines, ...telemetryLines, footer]);
 			}
 
 			// Collapsed: footer only.

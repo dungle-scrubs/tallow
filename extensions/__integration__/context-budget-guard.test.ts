@@ -8,15 +8,14 @@ import { Type } from "@sinclair/typebox";
 import { TOOL_RESULT_BUDGET_GUARD_MARKER } from "../../src/sdk.js";
 import { createScriptedStreamFn } from "../../test-utils/mock-model.js";
 import { createSessionRunner, type SessionRunner } from "../../test-utils/session-runner.js";
-import webFetchExtension from "../web-fetch-tool/index.js";
+import webFetchExtension, { setDirectHttpRequestImplForTests } from "../web-fetch-tool/index.js";
 
 let runner: SessionRunner | undefined;
-const originalFetch = globalThis.fetch;
 
 afterEach(() => {
 	runner?.dispose();
 	runner = undefined;
-	globalThis.fetch = originalFetch;
+	setDirectHttpRequestImplForTests(undefined);
 });
 
 /** Build a read-like probe tool with structured details. */
@@ -84,11 +83,13 @@ function hasOverflowRecoveryFailure(events: AgentSessionEvent[]): boolean {
 
 describe("context budget guard integration", () => {
 	test("applies planner envelopes to batched web_fetch and preserves read/bash details", async () => {
-		globalThis.fetch = async () =>
-			new Response("x".repeat(200 * 1024), {
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response("x".repeat(200 * 1024), {
 				headers: { "content-type": "text/html" },
 				status: 200,
-			});
+			}),
+			url: validation.url.toString(),
+		}));
 
 		const webFetchDetails: Array<{
 			batchSize?: number;
@@ -163,11 +164,13 @@ describe("context budget guard integration", () => {
 	}, 60_000);
 
 	test("envelopes are consumed and reset between turns", async () => {
-		globalThis.fetch = async () =>
-			new Response("x".repeat(64 * 1024), {
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response("x".repeat(64 * 1024), {
 				headers: { "content-type": "text/html" },
 				status: 200,
-			});
+			}),
+			url: validation.url.toString(),
+		}));
 
 		const batchSizes: number[] = [];
 		const tracker: ExtensionFactory = (pi: ExtensionAPI): void => {

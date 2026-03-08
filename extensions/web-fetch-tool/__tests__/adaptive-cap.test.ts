@@ -4,7 +4,11 @@ import {
 	CONTEXT_BUDGET_API_CHANNELS,
 	type ContextBudgetEnvelope,
 } from "../../_shared/context-budget-interop.js";
-import webFetchExtension, { type CapResolutionInput, resolveAdaptiveCap } from "../index.js";
+import webFetchExtension, {
+	type CapResolutionInput,
+	resolveAdaptiveCap,
+	setDirectHttpRequestImplForTests,
+} from "../index.js";
 
 /** Build a CapResolutionInput with test defaults. */
 function makeInput(overrides: Partial<CapResolutionInput> = {}): CapResolutionInput {
@@ -23,10 +27,8 @@ function makeEnvelope(maxBytes: number, batchSize = 1): ContextBudgetEnvelope {
 	return { batchSize, maxBytes };
 }
 
-const originalFetch = globalThis.fetch;
-
 afterEach(() => {
-	globalThis.fetch = originalFetch;
+	setDirectHttpRequestImplForTests(undefined);
 });
 
 describe("resolveAdaptiveCap", () => {
@@ -82,11 +84,13 @@ describe("web_fetch planner handshake", () => {
 			});
 		});
 
-		globalThis.fetch = async () =>
-			new Response("x".repeat(20 * 1024), {
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response("x".repeat(20 * 1024), {
 				headers: { "content-type": "text/html" },
 				status: 200,
-			});
+			}),
+			url: validation.url.toString(),
+		}));
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");
@@ -121,11 +125,13 @@ describe("web_fetch planner handshake", () => {
 			});
 		});
 
-		globalThis.fetch = async () =>
-			new Response("x".repeat(80 * 1024), {
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response("x".repeat(80 * 1024), {
 				headers: { "content-type": "text/html" },
 				status: 200,
-			});
+			}),
+			url: validation.url.toString(),
+		}));
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");
@@ -161,12 +167,14 @@ describe("web_fetch dendrite fallback", () => {
 			};
 		};
 
-		globalThis.fetch = async () =>
-			new Response("Access denied. Please enable JavaScript.", {
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response("Access denied. Please enable JavaScript.", {
 				headers: { "content-type": "text/html" },
 				status: 403,
 				statusText: "Forbidden",
-			});
+			}),
+			url: validation.url.toString(),
+		}));
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");
@@ -206,12 +214,14 @@ describe("web_fetch dendrite fallback", () => {
 			};
 		};
 
-		globalThis.fetch = async () =>
-			new Response("Access denied. Please enable JavaScript.", {
+		setDirectHttpRequestImplForTests(async (validation) => ({
+			response: new Response("Access denied. Please enable JavaScript.", {
 				headers: { "content-type": "text/html" },
 				status: 403,
 				statusText: "Forbidden",
-			});
+			}),
+			url: validation.url.toString(),
+		}));
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");
@@ -261,9 +271,9 @@ describe("web_fetch dendrite fallback", () => {
 			};
 		};
 
-		globalThis.fetch = async () => {
+		setDirectHttpRequestImplForTests(async () => {
 			throw new Error("getaddrinfo ENOTFOUND example.com");
-		};
+		});
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");

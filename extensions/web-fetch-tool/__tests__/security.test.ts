@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createServer } from "node:http";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
-import webFetchExtension, { isBlockedIpAddress, validateFetchUrl } from "../index.js";
-
-const originalFetch = globalThis.fetch;
+import webFetchExtension, {
+	isBlockedIpAddress,
+	performPinnedDirectHttpRequest,
+	setDirectHttpRequestImplForTests,
+	validateFetchUrl,
+} from "../index.js";
 
 afterEach(() => {
-	globalThis.fetch = originalFetch;
+	setDirectHttpRequestImplForTests(undefined);
 });
 
 describe("validateFetchUrl", () => {
@@ -42,14 +46,59 @@ describe("validateFetchUrl", () => {
 	});
 });
 
+describe("pinned direct HTTP requests", () => {
+	test("uses the validated IP while preserving the original Host header", async () => {
+		let observedHost = "";
+		let observedPath = "";
+		const server = createServer((req, res) => {
+			observedHost = req.headers.host ?? "";
+			observedPath = req.url ?? "";
+			res.writeHead(200, { "content-type": "text/plain" });
+			res.end("ok");
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("server address missing");
+
+			const result = await performPinnedDirectHttpRequest(
+				{
+					ok: true,
+					resolvedAddresses: ["127.0.0.1"],
+					url: new URL(`http://example.com:${address.port}/pinned`),
+				},
+				undefined
+			);
+			const text = await result.response.text();
+
+			expect(text).toBe("ok");
+			expect(result.pinnedAddress).toBe("127.0.0.1");
+			expect(result.url).toBe(`http://example.com:${address.port}/pinned`);
+			expect(observedHost).toBe(`example.com:${address.port}`);
+			expect(observedPath).toBe("/pinned");
+		} finally {
+			await new Promise<void>((resolve, reject) => {
+				server.close((error) => {
+					if (error) reject(error);
+					else resolve();
+				});
+			});
+		}
+	});
+});
+
 describe("web_fetch security enforcement", () => {
 	test("returns an error before fetch for blocked private URLs", async () => {
 		const harness = ExtensionHarness.create();
-		let fetchCalled = false;
-		globalThis.fetch = async () => {
-			fetchCalled = true;
-			return new Response("should not run");
-		};
+		let requestCalled = false;
+		setDirectHttpRequestImplForTests(async (validation) => {
+			requestCalled = true;
+			return {
+				response: new Response("should not run"),
+				url: validation.url.toString(),
+			};
+		});
 
 		await harness.loadExtension(webFetchExtension);
 		const tool = harness.tools.get("web_fetch");
@@ -62,11 +111,113 @@ describe("web_fetch security enforcement", () => {
 			() => {}
 		);
 
-		expect(fetchCalled).toBe(false);
+		expect(requestCalled).toBe(false);
 		expect(result.content[0]).toEqual({
 			type: "text",
 			text: "Blocked URL: blocked local hostname: localhost",
 		});
 		expect(result.details).toMatchObject({ isError: true });
+	});
+
+	test("reports redirect telemetry for successful redirect chains", async () => {
+		const harness = ExtensionHarness.create();
+		let requestCalls = 0;
+		setDirectHttpRequestImplForTests(async (validation) => {
+			requestCalls += 1;
+			if (requestCalls === 1) {
+				return {
+					pinnedAddress: "93.184.216.34",
+					response: new Response("", {
+						headers: { location: "https://example.com/final" },
+						status: 301,
+					}),
+					url: validation.url.toString(),
+				};
+			}
+			return {
+				pinnedAddress: "93.184.216.35",
+				response: new Response("ok", {
+					headers: { "content-type": "text/plain" },
+					status: 200,
+				}),
+				url: validation.url.toString(),
+			};
+		});
+
+		await harness.loadExtension(webFetchExtension);
+		const tool = harness.tools.get("web_fetch");
+		if (!tool) throw new Error("web_fetch tool missing");
+
+		const result = await tool.execute(
+			"tc-redirect-success",
+			{ url: "https://example.com/start" },
+			undefined,
+			() => {}
+		);
+
+		expect(requestCalls).toBe(2);
+		expect(result.details).toMatchObject({
+			pinnedAddress: "93.184.216.35",
+			redirectChain: [
+				{
+					fromUrl: "https://example.com/start",
+					pinnedAddress: "93.184.216.34",
+					status: 301,
+					toUrl: "https://example.com/final",
+				},
+			],
+			redirectCount: 1,
+			status: 200,
+			url: "https://example.com/final",
+		});
+	});
+
+	test("blocks redirect targets that jump to localhost", async () => {
+		const harness = ExtensionHarness.create();
+		let requestCalls = 0;
+		setDirectHttpRequestImplForTests(async (validation) => {
+			requestCalls += 1;
+			return {
+				pinnedAddress: "93.184.216.34",
+				response: new Response("", {
+					headers: { location: "http://localhost:3000/admin" },
+					status: 302,
+				}),
+				url: validation.url.toString(),
+			};
+		});
+
+		await harness.loadExtension(webFetchExtension);
+		const tool = harness.tools.get("web_fetch");
+		if (!tool) throw new Error("web_fetch tool missing");
+
+		const result = await tool.execute(
+			"tc-redirect",
+			{ url: "https://example.com/start" },
+			undefined,
+			() => {}
+		);
+		const text = result.content[0];
+
+		expect(requestCalls).toBe(1);
+		expect(text).toEqual({
+			type: "text",
+			text: "Blocked redirect target: blocked local hostname: localhost",
+		});
+		expect(result.details).toMatchObject({
+			isError: true,
+			pinnedAddress: "93.184.216.34",
+			redirectChain: [
+				{
+					fromUrl: "https://example.com/start",
+					pinnedAddress: "93.184.216.34",
+					status: 302,
+					toUrl: "http://localhost:3000/admin",
+				},
+			],
+			redirectCount: 1,
+			status: 302,
+			url: "http://localhost:3000/admin",
+		});
 	});
 });
