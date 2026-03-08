@@ -10,9 +10,12 @@
  * every N events it yields to the event loop via `setImmediate`, allowing
  * stdin (and other I/O) to be serviced between event processing bursts.
  *
+ * @see Plan 177 — Bun setImmediate does not yield to I/O
  * @see Plan 176 — Input still blocked during streaming (Layer 2)
  * @see Plan 171 — TUI render scheduling fix (Layer 1, predecessor)
  */
+
+import { yieldToIO } from "./yield-to-io.js";
 
 const APPLY_FLAG = "__tallow_streaming_yield_patch_applied__";
 
@@ -28,15 +31,6 @@ const APPLY_FLAG = "__tallow_streaming_yield_patch_applied__";
  * roughly 120Hz+ even at high token rates. Visually imperceptible.
  */
 const DEFAULT_YIELD_INTERVAL = 8;
-
-/**
- * Promise that resolves on the next check phase, after I/O polling.
- *
- * @returns Promise that yields to the event loop
- */
-function yieldToIO(): Promise<void> {
-	return new Promise((resolve) => setImmediate(resolve));
-}
 
 /**
  * Parse the yield interval from environment or return the default.

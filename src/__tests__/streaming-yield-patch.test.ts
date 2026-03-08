@@ -65,12 +65,15 @@ class FakeEventStream {
 }
 
 /**
- * Yield until the next setImmediate phase (after I/O polling).
+ * Yield until the next I/O phase.
  *
- * @returns Promise that resolves on the next check phase
+ * Uses `setTimeout(0)` because on Bun `setImmediate` never enters the
+ * I/O poll phase. This matches the yield mechanism used by the patched code.
+ *
+ * @returns Promise that resolves after I/O polling
  */
-function flushImmediate(): Promise<void> {
-	return new Promise((resolve) => setImmediate(resolve));
+function flushIO(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 describe("patchEventStreamPrototype", () => {
@@ -91,18 +94,19 @@ describe("patchEventStreamPrototype", () => {
 			}
 			stream.end();
 
-			// Track when setImmediate callbacks fire relative to event processing
+			// Track when I/O callbacks fire relative to event processing
 			let ioYieldCount = 0;
 			const eventIndices: number[] = [];
 
-			// Set up I/O yield detection: schedule a setImmediate that
-			// will fire whenever the event loop reaches the check phase
+			// Set up I/O yield detection: schedule a setTimeout(0) that
+			// will fire whenever the event loop enters the I/O poll phase.
+			// On Bun, setImmediate never triggers I/O, so we must use setTimeout.
 			const detectYields = (): void => {
-				setImmediate(() => {
+				setTimeout(() => {
 					ioYieldCount++;
 					// Keep detecting until stream is fully consumed
 					if (eventIndices.length < 12) detectYields();
-				});
+				}, 0);
 			};
 			detectYields();
 
@@ -114,9 +118,9 @@ describe("patchEventStreamPrototype", () => {
 			// All 12 events should have been consumed
 			expect(eventIndices).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
-			// Wait for any remaining setImmediate callbacks
-			await flushImmediate();
-			await flushImmediate();
+			// Wait for any remaining I/O callbacks
+			await flushIO();
+			await flushIO();
 
 			// With interval=4 and 12 events, we expect yields at events 4, 8, 12 = 3 yields.
 			// The I/O yield detector should have fired at least during those windows.
@@ -147,7 +151,7 @@ describe("patchEventStreamPrototype", () => {
 			// Push events one at a time with I/O yields between them
 			for (let i = 0; i < 6; i++) {
 				stream.push({ type: "message_update", index: i });
-				await flushImmediate();
+				await flushIO();
 			}
 			stream.end();
 			await consumer;
