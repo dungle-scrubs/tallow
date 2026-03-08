@@ -50,7 +50,18 @@ jobs:
       - name: Strip bun workspace overrides before npm publish
         run: node -e "const p=require('./package.json'); delete p.overrides; require('fs').writeFileSync('package.json', JSON.stringify(p, null, '\t') + '\n')"
 
-      - name: Publish with OIDC provenance
+      - name: Publish @dungle-scrubs/tallow with OIDC provenance
         run: npm publish --access public
+        env:
+          NPM_CONFIG_PROVENANCE: true
+
+      - name: Publish unscoped tallow mirror
+        run: |
+          node -e "
+            const p = require('./package.json');
+            p.name = 'tallow';
+            require('fs').writeFileSync('package.json', JSON.stringify(p, null, '\t') + '\n');
+          "
+          npm publish --access public
         env:
           NPM_CONFIG_PROVENANCE: true
