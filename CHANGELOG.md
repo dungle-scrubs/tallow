@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.20](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.19...tallow-v0.8.20) (2026-03-08)
+
+
+### Fixed
+
+* **streaming:** coalesce message_update events in handleEvent ([013eb1b](https://github.com/dungle-scrubs/tallow/commit/013eb1b9460b403faea94661b307ae37108d4ada))
+* **streaming:** yield to I/O during EventStream iteration ([04a010f](https://github.com/dungle-scrubs/tallow/commit/04a010f9bad2e6be94881b06814aabdf7ab29e10))
+
+
+### Documentation
+
+* remove npx/bunx install instructions ([a26d670](https://github.com/dungle-scrubs/tallow/commit/a26d670da5f63154861568aa93f5aa276064baad))
+
+
+### Maintenance
+
+* dual-publish to both tallow and @dungle-scrubs/tallow ([8cc4d6d](https://github.com/dungle-scrubs/tallow/commit/8cc4d6dd5f1792f8671b3bf9b2aa18481768b7fe))
+
 ## [0.8.19](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.18...tallow-v0.8.19) (2026-03-07)
 
 
