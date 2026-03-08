@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { scheduleAfterIO } from "./yield-to-io.js";
 
 interface QueuedMessagesLike {
 	followUp?: unknown[];
@@ -145,16 +146,17 @@ const compactionRetryWatchdogTimers = new WeakMap<
  * second. Processing each one individually (update component + requestRender)
  * generates sustained microtask pressure that starves stdin I/O.
  *
- * By coalescing: only the latest `message_update` per `setImmediate` cycle is
+ * By coalescing: only the latest `message_update` per I/O cycle is
  * processed. This caps UI updates to ~60fps while guaranteeing I/O yield
  * points between updates.
  *
  * @see Plan 176 — Input still blocked during streaming (Layer 2)
+ * @see Plan 177 — Bun setImmediate does not yield to I/O
  */
 interface MessageUpdateCoalesceState {
 	/** The latest buffered message_update event, or null if none pending. */
 	pendingEvent: InteractiveModeEventLike | null;
-	/** Whether a setImmediate flush is already scheduled. */
+	/** Whether an I/O-yielding flush is already scheduled. */
 	flushScheduled: boolean;
 }
 
@@ -408,8 +410,11 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 
 			// ── message_update coalescing (plan 176) ─────────────────────────
 			// During rapid streaming, message_update fires per token. Coalesce
-			// into one UI update per setImmediate cycle (~60fps) so the event
-			// loop reaches the I/O poll phase and stdin stays responsive.
+			// into one UI update per I/O cycle (~60fps) so the event loop
+			// reaches the I/O poll phase and stdin stays responsive.
+			//
+			// Uses scheduleAfterIO instead of setImmediate because Bun's
+			// setImmediate never enters the I/O poll phase. See plan 177.
 			if (event?.type === "message_update") {
 				const coalesce = getCoalesceState(this);
 				// Keep AgentSession event references immutable.
@@ -418,7 +423,7 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 
 				if (!coalesce.flushScheduled) {
 					coalesce.flushScheduled = true;
-					setImmediate(async () => {
+					scheduleAfterIO(async () => {
 						const state = getCoalesceState(this);
 						state.flushScheduled = false;
 						const pending = state.pendingEvent;

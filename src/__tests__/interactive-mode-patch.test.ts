@@ -523,8 +523,8 @@ describe("patchInteractiveModePrototype", () => {
 		// None should have been processed synchronously
 		expect(mode.handleEventCalls).toBe(0);
 
-		// Wait for setImmediate to flush
-		await new Promise<void>((resolve) => setImmediate(resolve));
+		// Wait for I/O flush (scheduleAfterIO uses setTimeout(0) on Bun)
+		await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 		// Only one call should have been made (the last coalesced event)
 		expect(mode.handleEventCalls).toBe(1);
