@@ -2,9 +2,9 @@
  * Git Snapshot Manager
  *
  * Creates and restores lightweight git ref-based snapshots at conversation
- * turn boundaries. Uses a temporary GIT_INDEX_FILE to capture the full
- * working tree state (tracked + untracked) without touching the user's
- * staging area or polluting the reflog.
+ * turn boundaries. Uses a temporary GIT_INDEX_FILE to capture git's tracked
+ * + unignored working tree view without touching the user's staging area or
+ * polluting the reflog.
  *
  * Snapshot commits are created via `git write-tree` + `git commit-tree`
  * on the temporary index, then stored under a namespaced ref:
@@ -41,7 +41,8 @@ export interface SnapshotInfo {
 /**
  * Manages git ref-based snapshots for rewind functionality.
  *
- * Each snapshot captures the full working tree state at a turn boundary.
+ * Each snapshot captures git's tracked + unignored view of the working tree
+ * at a turn boundary. Ignored files remain outside the snapshot model.
  * Snapshots are stored as lightweight refs that can be restored independently.
  */
 export class SnapshotManager {
@@ -85,7 +86,7 @@ export class SnapshotManager {
 	 * area) is never touched and no reflog entries are created.
 	 *
 	 * Strategy:
-	 * 1. Stage all files (tracked + untracked) into a temp index
+	 * 1. Stage all tracked + unignored files into a temp index
 	 * 2. Write a tree object from that temp index
 	 * 3. Compare against HEAD's tree — bail if identical
 	 * 4. Create a commit from the tree, parented on HEAD
@@ -140,7 +141,7 @@ export class SnapshotManager {
 	 *
 	 * Strategy:
 	 * 1. List files in the snapshot tree
-	 * 2. List current working tree files (tracked + untracked)
+	 * 2. List current working tree files (tracked + unignored)
 	 * 3. Checkout all snapshot files from the ref
 	 * 4. Delete files that exist now but didn't exist in the snapshot
 	 * 5. Reset the index to HEAD (checkout stages files it touches)
@@ -237,7 +238,7 @@ export class SnapshotManager {
 	}
 
 	/**
-	 * Gets all current files in the working tree (tracked + untracked).
+	 * Gets all current files in the working tree (tracked + unignored).
 	 *
 	 * @returns Array of file paths relative to the repo root
 	 */

@@ -62,8 +62,8 @@ multiple models in parallel.
 **Context fork** — Branch into an isolated subprocess with its own tools and model,
 then merge results back into the main session.
 
-**Workspace rewind** — Every conversation turn snapshots your file changes. Roll back
-to any earlier turn when something goes wrong.
+**Workspace rewind** — Every conversation turn snapshots tracked and unignored file
+changes. Roll back to any earlier turn when something goes wrong.
 
 **Background tasks** — Kick off long-running work without blocking the session.
 Track task lifecycle explicitly and check back when ready.

@@ -171,6 +171,24 @@ describe("SnapshotManager", () => {
 		expect(existsSync(join(tmpDir, "new-file.ts"))).toBe(false);
 	});
 
+	it("leaves ignored files outside the snapshot and restore set", () => {
+		writeFileSync(join(tmpDir, ".gitignore"), "ignored.log\n");
+		git(["add", ".gitignore"], tmpDir);
+		git(["commit", "-m", "add ignore rules"], tmpDir);
+
+		writeFileSync(join(tmpDir, "tracked.txt"), "snapshot-tracked");
+		writeFileSync(join(tmpDir, "ignored.log"), "ignored-before-snapshot");
+		const ref = mgr.createSnapshot(1);
+		expect(ref).not.toBeNull();
+
+		writeFileSync(join(tmpDir, "tracked.txt"), "tracked-after-snapshot");
+		writeFileSync(join(tmpDir, "ignored.log"), "ignored-after-snapshot");
+		mgr.restoreSnapshot(ref as string);
+
+		expect(readFileSync(join(tmpDir, "tracked.txt"), "utf-8")).toBe("snapshot-tracked");
+		expect(readFileSync(join(tmpDir, "ignored.log"), "utf-8")).toBe("ignored-after-snapshot");
+	});
+
 	it("should list snapshots ordered by turn index", () => {
 		writeFileSync(join(tmpDir, "a.txt"), "v1");
 		mgr.createSnapshot(1);
