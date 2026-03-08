@@ -121,7 +121,7 @@ export default function rewind(pi: ExtensionAPI): void {
 			message: {
 				customType: "rewind-context",
 				content:
-					"The user can run /rewind to undo all file changes back to a previous conversation turn. " +
+					"The user can run /rewind to undo tracked and unignored file changes back to a previous conversation turn. " +
 					`There are ${snapshotList.length} snapshot(s) available.`,
 				display: false,
 			},
@@ -165,7 +165,7 @@ export default function rewind(pi: ExtensionAPI): void {
 				"Rewind",
 				`Roll back to turn ${selected.turnIndex}? ` +
 					`${fileCount > 0 ? `${fileCount} tracked file(s) were modified in that turn. ` : ""}` +
-					"This will restore the working tree to that point and delete files created after it."
+					"This restores tracked and unignored files to that point and deletes later tracked/unignored files. Ignored files are not included."
 			);
 
 			if (!confirmed) {

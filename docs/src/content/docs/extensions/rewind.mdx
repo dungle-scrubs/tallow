@@ -3,11 +3,11 @@ title: rewind
 description: Undo file changes by rolling back to a previous conversation turn via git snapshots.
 ---
 
-Roll back all file changes to a previous conversation turn. Tracks every
-file modification made by the agent (edits, writes) and creates lightweight
-git snapshots at turn boundaries. When you run `/rewind`, a turn selector
-lets you pick a rollback point, and the working tree is restored to that
-state.
+Roll back tracked and unignored file changes to a previous conversation
+turn. Tracks every file modification made by the agent (edits, writes)
+and creates lightweight git snapshots at turn boundaries. When you run
+`/rewind`, a turn selector lets you pick a rollback point, and the
+working tree is restored to that state.
 
 ## Usage
 
@@ -16,24 +16,29 @@ state.
 ```
 
 Shows a list of conversation turns with their modified files, most recent
-first. Select a turn to roll back to, confirm, and all files are restored
-to that point. Files created after the selected turn are deleted.
+first. Select a turn to roll back to, confirm, and tracked/unignored
+files are restored to that point. Files created after the selected turn
+are deleted when they are tracked or unignored.
 
 ## How it works
 
 1. **File tracking** — Intercepts `tool_result` events for `edit` and
    `write` tools to record which files were modified each turn.
 2. **Git snapshots** — At each turn boundary (`turn_end`), creates a
-   lightweight git ref via `git stash create` + `git update-ref`. This
-   captures the full working tree state including bash side effects.
+   lightweight git ref from git's tracked + unignored view of the
+   working tree. That captures normal edit/write changes and unignored
+   bash side effects without touching the user's real index.
 3. **Restore** — Uses `git checkout <ref> -- .` to atomically restore
-   tracked files, then deletes files that were created after the snapshot.
+   tracked snapshot files, then deletes files that were created after
+   the snapshot when git reports them as tracked or unignored.
 
 ## Requirements
 
 - **Git repository** — The working directory must be inside a git repo.
   The extension silently disables in non-git directories.
 - **Git in PATH** — Standard git commands must be available.
+- **Ignored files are out of scope** — `.gitignore`d files are not part
+  of the snapshot or restore set.
 
 ## Snapshot storage
 
