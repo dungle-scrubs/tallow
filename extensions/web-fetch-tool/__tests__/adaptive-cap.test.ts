@@ -148,7 +148,46 @@ describe("web_fetch planner handshake", () => {
 });
 
 describe("web_fetch dendrite fallback", () => {
-	test("uses dendrite-scraper binary on retryable HTTP pages", async () => {
+	test("does not run package fallback unless explicitly enabled", async () => {
+		const harness = ExtensionHarness.create();
+		const execCalls: string[] = [];
+		(harness.api as { exec: typeof harness.api.exec }).exec = async (command, args) => {
+			execCalls.push([command, ...args].join(" "));
+			return {
+				code: 0,
+				killed: false,
+				stderr: "",
+				stdout: "",
+			};
+		};
+
+		globalThis.fetch = async () =>
+			new Response("Access denied. Please enable JavaScript.", {
+				headers: { "content-type": "text/html" },
+				status: 403,
+				statusText: "Forbidden",
+			});
+
+		await harness.loadExtension(webFetchExtension);
+		const tool = harness.tools.get("web_fetch");
+		if (!tool) throw new Error("web_fetch tool missing");
+
+		const result = await tool.execute("tc-1", { url: "https://example.com" }, undefined, () => {});
+		const text = result.content[0];
+		const details = result.details as {
+			error?: string;
+			fallbackReason?: string;
+			fallbackUsed?: boolean;
+		};
+
+		expect(text?.type).toBe("text");
+		expect(text?.type === "text" ? text.text : "").toContain("Package fallback disabled");
+		expect(details.fallbackReason).toContain("HTTP 403");
+		expect(details.fallbackUsed).toBe(false);
+		expect(execCalls).toEqual([]);
+	});
+
+	test("uses dendrite-scraper binary on retryable HTTP pages when explicitly enabled", async () => {
 		const harness = ExtensionHarness.create();
 		const execCalls: string[] = [];
 		(harness.api as { exec: typeof harness.api.exec }).exec = async (command, args) => {
@@ -178,7 +217,12 @@ describe("web_fetch dendrite fallback", () => {
 		const tool = harness.tools.get("web_fetch");
 		if (!tool) throw new Error("web_fetch tool missing");
 
-		const result = await tool.execute("tc-1", { url: "https://example.com" }, undefined, () => {});
+		const result = await tool.execute(
+			"tc-1",
+			{ allowPackageFallback: true, url: "https://example.com" },
+			undefined,
+			() => {}
+		);
 		const text = result.content[0];
 		const details = result.details as {
 			backend?: string;
@@ -196,7 +240,7 @@ describe("web_fetch dendrite fallback", () => {
 		expect(execCalls).toEqual(["dendrite-scraper scrape --timeout 45 https://example.com"]);
 	});
 
-	test("falls back to uvx when the binary is unavailable", async () => {
+	test("falls back to uvx when the binary is unavailable and fallback is enabled", async () => {
 		const harness = ExtensionHarness.create();
 		const execCalls: string[] = [];
 		(harness.api as { exec: typeof harness.api.exec }).exec = async (command, args) => {
@@ -225,7 +269,12 @@ describe("web_fetch dendrite fallback", () => {
 		const tool = harness.tools.get("web_fetch");
 		if (!tool) throw new Error("web_fetch tool missing");
 
-		const result = await tool.execute("tc-1", { url: "https://example.com" }, undefined, () => {});
+		const result = await tool.execute(
+			"tc-1",
+			{ allowPackageFallback: true, url: "https://example.com" },
+			undefined,
+			() => {}
+		);
 		const text = result.content[0];
 		const details = result.details as {
 			fallbackCommand?: string;
