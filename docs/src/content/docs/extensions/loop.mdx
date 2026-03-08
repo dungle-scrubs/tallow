@@ -1,0 +1,58 @@
+---
+title: loop
+description: Run a prompt or slash command on a recurring interval within the current session.
+---
+
+Run a prompt or slash command on a recurring interval. The interval timer
+starts **after** the previous iteration completes (post-completion delay),
+so runs never overlap even when execution takes longer than the interval.
+
+## Usage
+
+```
+/loop 5m check the deploy status
+/loop 30s /stats
+/loop 1h summarize git log --oneline -20
+/loop stop
+/loop status
+```
+
+| Subcommand | Behavior |
+|------------|----------|
+| `<interval> <prompt>` | Start (or replace) a recurring loop |
+| `stop` / `off` | Cancel the active loop |
+| `status` | Show current loop state |
+| *(empty)* | Show status or usage |
+
+## Interval format
+
+Accepts `<number><unit>` where unit is `s` (seconds), `m` (minutes), or
+`h` (hours). Examples: `30s`, `5m`, `1h`.
+
+## How it works
+
+1. `/loop 5m check deploy` parses the interval and prompt, then schedules
+   a timer.
+2. When the timer fires, the prompt is sent via `sendUserMessage` —
+   triggering a normal agent turn.
+3. After the agent completes (`agent_end` event), the next timer is
+   scheduled with the configured delay.
+4. The status bar shows a live countdown during wait periods and a
+   "running" indicator during execution.
+
+## Behavior
+
+- **One loop at a time** — Starting a new loop replaces any active loop.
+- **Post-completion delay** — The interval is the quiet time *between*
+  iterations, not the wall-clock period.
+- **Slash commands as prompts** — `/loop 5m /stats` works — the prompt
+  goes through the full input pipeline including command expansion.
+- **Session lifecycle** — Loops are automatically stopped on session
+  switch, shutdown, or `/clear`.
+
+## Extension metadata
+
+| Field | Value |
+|-------|-------|
+| Category | automation |
+| Requires | *(none)* |

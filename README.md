@@ -20,7 +20,7 @@
 Tallow is a terminal coding agent that starts minimal and scales up. Install only the
 extensions, themes, and agent templates your project needs, or enable everything. It drops into
 existing Claude Code projects via `.claude/` bridging, so nothing breaks when you switch.
-Ships with 51 extensions, 34 themes, and 9 bundled agent templates.
+Ships with 52 extensions, 34 themes, and 9 bundled agent templates.
 
 ## Quick start
 

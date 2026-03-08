@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **loop:** `/loop` command — run a prompt or slash command on a recurring
+  interval (e.g. `/loop 5m check deploy`). Uses post-completion delay to
+  prevent overlapping runs, with live countdown in the status bar
 - **shell-policy:** "Always Allow" option for high-risk shell command
   confirmations — persists `Bash(pattern)` rules to
   `~/.tallow/settings.json` so matching commands skip confirmation in

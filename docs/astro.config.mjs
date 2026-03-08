@@ -67,7 +67,7 @@ export default defineConfig({
 			title: "tallow",
 			favicon: "/favicon.ico",
 			description:
-				"An extensible, multi-model coding agent for your terminal. 51 extensions, 34 themes, multi-agent teams, and lifecycle hooks. Compatible with Claude Code.",
+				"An extensible, multi-model coding agent for your terminal. 52 extensions, 34 themes, multi-agent teams, and lifecycle hooks. Compatible with Claude Code.",
 			head: [
 				{
 					tag: "meta",
