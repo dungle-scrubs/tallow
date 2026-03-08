@@ -25,7 +25,7 @@ Ships with 51 extensions, 34 themes, and 10 specialized agents.
 ## Quick start
 
 ```bash
-npm install -g tallow   # or: pnpm add -g tallow / bun install -g tallow
+npm install -g @dungle-scrubs/tallow
 tallow install          # pick extensions, themes, agents
 tallow                  # start coding
 ```
