@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.21](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.20...tallow-v0.8.21) (2026-03-08)
+
+
+### Added
+
+* **core:** add runtime-adaptive yield-to-io utility ([db796da](https://github.com/dungle-scrubs/tallow/commit/db796da423ad520ae401bc7246ee39d863c186b3))
+* **loop:** add /loop command for recurring prompt execution ([4b2e55a](https://github.com/dungle-scrubs/tallow/commit/4b2e55a544d2350535fa56f97706517607fcee96))
+
+
+### Fixed
+
+* **rewind:** narrow rollback claims to tracked files ([7f0dcbd](https://github.com/dungle-scrubs/tallow/commit/7f0dcbda98b9f4ba9680992b7919d64be6d9377e))
+* **session-memory:** scope recall to current project by default ([02b08a7](https://github.com/dungle-scrubs/tallow/commit/02b08a7eab51a6baed5385898d351e6f38363e2d))
+* **shell-policy:** use exact command in "Always allow" rules instead of wildcards ([fb225be](https://github.com/dungle-scrubs/tallow/commit/fb225bee48fe976de3c6d06ba31a48221e1631d1))
+* **streaming:** replace setImmediate with yield-to-io in patches ([fd35af4](https://github.com/dungle-scrubs/tallow/commit/fd35af4fe7c7144d40ad8b14615489e8a3498f26))
+* **subagent:** use --model instead of --models in subprocess args ([f3de491](https://github.com/dungle-scrubs/tallow/commit/f3de49182987d04061dd5ca2cfcba79783ece5a9))
+* **tui:** replace setImmediate with setTimeout(0) in scheduleRender ([5b336ac](https://github.com/dungle-scrubs/tallow/commit/5b336ac140418f637587e0cd8a9f661ecd3a2435))
+* use @dungle-scrubs/tallow in install docs and revert dual-publish ([4e43ee0](https://github.com/dungle-scrubs/tallow/commit/4e43ee09a24be787cfb4a703622996078acd9295))
+* **web-fetch:** block private network targets ([64863d7](https://github.com/dungle-scrubs/tallow/commit/64863d73d51cec4bcab2dd5815a191b2afee9d1a))
+* **web-fetch:** require explicit opt-in for scraper fallback ([b723144](https://github.com/dungle-scrubs/tallow/commit/b723144c84c1955f9dd7bae41bb0b18fff30e965))
+* **web-fetch:** stop buffering entire responses ([bdaa305](https://github.com/dungle-scrubs/tallow/commit/bdaa305da44fb3576b61daf98ede70a2ed464852))
+
+
+### Documentation
+
+* fix docs and changelog drift ([a52932a](https://github.com/dungle-scrubs/tallow/commit/a52932ac914d6a6fc56e8333961fdb45a27de81a))
+* **installation:** use bun global install commands ([18b8a40](https://github.com/dungle-scrubs/tallow/commit/18b8a4012b557f2c485815dec05318a84c627605))
+* **loop:** add extension docs page and update counts (51→52) ([b77d719](https://github.com/dungle-scrubs/tallow/commit/b77d719f3c6fdc7c05f38e0327bcbadd8738cf2e))
+
+
+### Maintenance
+
+* add docs and changelog validation scripts ([17d88f8](https://github.com/dungle-scrubs/tallow/commit/17d88f827002a40ed36fc3355c086f8beaea5d7b))
+* **context-budget:** tolerate first-call planner race ([ec7a2a5](https://github.com/dungle-scrubs/tallow/commit/ec7a2a58464400e7087550a4c9e62657a36298f9))
+* **deps:** bump pi-* dependencies ([6fb8200](https://github.com/dungle-scrubs/tallow/commit/6fb8200a39f9b0d32bf73412699d6f4644de169a))
+* **installer:** align upgrade guidance expectations ([4e31abe](https://github.com/dungle-scrubs/tallow/commit/4e31abe5ce94dc726a139a95bfe2f059e7ab3202))
+* **loop:** add unit tests for interval parsing, countdown, and args ([b5c1eb2](https://github.com/dungle-scrubs/tallow/commit/b5c1eb2317658f37e47014ed953909e39fdbc38b))
+* run docs validation checks in review workflows ([7882dd1](https://github.com/dungle-scrubs/tallow/commit/7882dd1e40d1f11abed498f78651c91fa11aaee9))
+* **shell-policy:** update tests for exact-command allow patterns ([39b3be0](https://github.com/dungle-scrubs/tallow/commit/39b3be0aefa2963ec1661ad0bcc3a92933e43cbd))
+
 ## [Unreleased]
 
 ### Added
