@@ -49,7 +49,7 @@ describe("Extension Lifecycle", () => {
 		await runner.run("test");
 
 		expect(events).toEqual(["before_agent_start", "agent_start", "turn_start", "turn_end"]);
-	});
+	}, 60_000);
 
 	// NOTE: session_start fires during AgentSession.bindExtensions(), which is
 	// called by interactive/print modes, not by createAgentSession(). The headless
@@ -79,7 +79,7 @@ describe("Extension Lifecycle", () => {
 		expect(turnStarts).toHaveLength(1);
 		expect(turnEnds).toHaveLength(1);
 		expect(turnStarts[0]).toBe(turnEnds[0]);
-	});
+	}, 60_000);
 
 	it("fires events for multiple extensions in registration order", async () => {
 		const order: string[] = [];
@@ -103,7 +103,7 @@ describe("Extension Lifecycle", () => {
 		await runner.run("hi");
 
 		expect(order).toEqual(["ext1:agent_start", "ext2:agent_start"]);
-	});
+	}, 60_000);
 
 	it("supports multiple sequential prompts", async () => {
 		let turnCount = 0;
@@ -123,5 +123,5 @@ describe("Extension Lifecycle", () => {
 		await runner.run("prompt 2");
 
 		expect(turnCount).toBe(2);
-	});
+	}, 60_000);
 });

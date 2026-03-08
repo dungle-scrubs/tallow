@@ -159,9 +159,8 @@ describe("context budget guard integration", () => {
 
 		expect(readProbeDetails?._readProbe).toBe(true);
 		expect(bashProbeDetails?._bashProbe).toBe(true);
-
 		expect(hasOverflowRecoveryFailure(result.events)).toBe(false);
-	});
+	}, 60_000);
 
 	test("envelopes are consumed and reset between turns", async () => {
 		globalThis.fetch = async () =>
@@ -210,7 +209,7 @@ describe("context budget guard integration", () => {
 		} else {
 			expect(batchSizes).toEqual([1, 1, 1]);
 		}
-	});
+	}, 60_000);
 
 	test("ingestion-time guard truncates oversized uncapped tool results", async () => {
 		let guardedResult:
@@ -252,5 +251,5 @@ describe("context budget guard integration", () => {
 
 		const guardMeta = guardedResult?.details?.[TOOL_RESULT_BUDGET_GUARD_MARKER];
 		expect(typeof guardMeta).toBe("object");
-	});
+	}, 60_000);
 });

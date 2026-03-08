@@ -359,6 +359,94 @@ export function parseToolFlag(toolString: string): ToolArray {
 }
 
 /**
+ * Extract tool names from a tool-definition array.
+ *
+ * @param tools - Tool definitions from session options
+ * @returns Sorted unique tool names
+ */
+function extractToolNames(tools: readonly unknown[] | undefined): string[] {
+	if (!tools) return [];
+	const names = new Set<string>();
+	for (const tool of tools) {
+		const name = (tool as { name?: unknown }).name;
+		if (typeof name === "string" && name.length > 0) {
+			names.add(name);
+		}
+	}
+	return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Resolve the explicit tool names allowed for this session.
+ *
+ * When the caller passes `options.tools`, tallow treats that as the complete
+ * tool allowlist. Explicit custom tools are included because the caller opted
+ * into them directly.
+ *
+ * @param options - Session options being used to create the session
+ * @returns Allowed tool names, or null when no explicit allowlist was provided
+ */
+function resolveExplicitToolRestrictionNames(options: TallowSessionOptions): string[] | null {
+	if (options.tools === undefined) return null;
+	const names = new Set<string>(extractToolNames(options.tools));
+	for (const name of extractToolNames(options.customTools)) {
+		names.add(name);
+	}
+	return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Create a built-in extension that enforces an explicit session tool allowlist.
+ *
+ * This closes the gap where extension-registered tools could remain active even
+ * when the caller requested `--tools readonly` or `--tools none`.
+ *
+ * @param allowedToolNames - Tool names allowed for the session
+ * @returns Extension factory
+ */
+function createExplicitToolRestrictionExtension(
+	allowedToolNames: readonly string[]
+): ExtensionFactory {
+	return (pi: ExtensionAPI): void => {
+		const allowed = new Set(allowedToolNames);
+		const allowedLabel = allowedToolNames.join(", ");
+
+		/**
+		 * Keep the active tool set aligned with the explicit allowlist.
+		 *
+		 * @returns void
+		 */
+		const enforceActiveToolSet = (): void => {
+			const filtered = pi.getActiveTools().filter((name) => allowed.has(name));
+			pi.setActiveTools(filtered);
+		};
+
+		pi.on("session_start", async () => {
+			enforceActiveToolSet();
+		});
+
+		pi.on("turn_start", async () => {
+			enforceActiveToolSet();
+		});
+
+		pi.on("tool_call", async (event) => {
+			if (allowed.has(event.toolName)) {
+				return;
+			}
+
+			const reason =
+				allowedToolNames.length === 0
+					? "This session was started with an empty tool allowlist. No tools are available."
+					: `Tool "${event.toolName}" is not available in this session. Allowed tools: ${allowedLabel}`;
+			return {
+				block: true,
+				reason,
+			};
+		});
+	};
+}
+
+/**
  * Resolve the effective tool-result retention policy from layered settings.
  *
  * Precedence: global settings < project settings < runtime overrides.
@@ -1500,6 +1588,7 @@ export async function createTallowSession(
 	const dedupedExtensionPaths = [...new Set(additionalExtensionPaths)];
 	const shouldApplyExtensionStartupPolicies =
 		shouldBlockProjectExtensions || startupProfile === "headless";
+	const explicitToolRestrictionNames = resolveExplicitToolRestrictionNames(options);
 
 	const loader = new DefaultResourceLoader({
 		cwd,
@@ -1517,6 +1606,9 @@ export async function createTallowSession(
 			createContextBudgetPlannerExtension(contextBudgetPolicy),
 			detectOutputTruncation,
 			createProjectTrustExtension(cwd, projectTrust),
+			...(explicitToolRestrictionNames
+				? [createExplicitToolRestrictionExtension(explicitToolRestrictionNames)]
+				: []),
 			...(options.extensionFactories ?? []),
 		],
 		noExtensions: extensionsOnly,
@@ -1640,6 +1732,13 @@ export async function createTallowSession(
 		tools: options.tools,
 		customTools: options.customTools,
 	});
+
+	if (explicitToolRestrictionNames) {
+		const sessionWithToolControl = result.session as typeof result.session & {
+			setActiveToolsByName?: (toolNames: readonly string[]) => void;
+		};
+		sessionWithToolControl.setActiveToolsByName?.(explicitToolRestrictionNames);
+	}
 
 	startupTiming.mark("create-session", createSessionStartedAtMs);
 	instrumentSessionStartupTimings(result.session, startupTiming);

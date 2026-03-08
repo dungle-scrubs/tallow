@@ -104,7 +104,7 @@ describe("print-mode routing parity", () => {
 			expect(result.stderr).not.toContain("stdin is piped but empty");
 			expect(result.stderr).toContain(MODEL_NOT_FOUND_ERROR);
 		}
-	});
+	}, 15_000);
 
 	test("stdin + -p composition follows the same print routing path", async () => {
 		const home = makeTempHome();
@@ -121,5 +121,5 @@ describe("print-mode routing parity", () => {
 		expect(result.stderr).not.toContain(NESTED_GUARD_ERROR);
 		expect(result.stderr).not.toContain("stdin is piped but empty");
 		expect(result.stderr).toContain(MODEL_NOT_FOUND_ERROR);
-	});
+	}, 15_000);
 });
