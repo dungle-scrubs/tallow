@@ -60,6 +60,9 @@ const DENDRITE_HTML_MARKERS = [
 	/please turn javascript on/i,
 ] as const;
 
+/** Extra response bytes retained for fallback detection before canceling the stream. */
+const RESPONSE_SNIFF_BYTES = 64 * 1024;
+
 /** Hostnames that should never be fetched by default. */
 const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
 
@@ -275,8 +278,21 @@ interface WebFetchDetails {
 	readonly source?: string;
 	readonly status?: number;
 	readonly totalBytes?: number;
+	readonly totalBytesExact?: boolean;
 	readonly truncated?: boolean;
 	readonly url?: string;
+}
+
+/** Response body captured with an early streaming cutoff. */
+interface CappedResponseBody {
+	/** Buffered response text, capped at maxBytes + sniff bytes. */
+	readonly text: string;
+	/** Best-known total byte count for the original response. */
+	readonly totalBytes: number;
+	/** Whether totalBytes is exact or only a lower bound. */
+	readonly totalBytesExact: boolean;
+	/** Whether the response stream was cut off early. */
+	readonly truncated: boolean;
 }
 
 /**
@@ -462,27 +478,116 @@ async function runDendriteFallback(
 }
 
 /**
+ * Read a response body incrementally and stop once the retention cap is reached.
+ *
+ * Keeps at most `maxBytes + sniffBytes` in memory so large responses do not
+ * force the tool to buffer the entire body before truncation. When the body is
+ * cut off early and no Content-Length header is available, `totalBytes` is a
+ * lower bound rather than an exact final size.
+ *
+ * @param response - Fetch response to read
+ * @param maxBytes - Output cap requested by the tool
+ * @param sniffBytes - Extra bytes retained for fallback detection heuristics
+ * @returns Buffered text and truncation metadata
+ */
+export async function readResponseBodyWithCap(
+	response: Response,
+	maxBytes: number,
+	sniffBytes: number
+): Promise<CappedResponseBody> {
+	const limit = maxBytes + sniffBytes;
+	const contentLengthHeader = response.headers.get("content-length");
+	const contentLength =
+		typeof contentLengthHeader === "string" && /^\d+$/.test(contentLengthHeader)
+			? Number(contentLengthHeader)
+			: undefined;
+
+	if (!response.body) {
+		const text = await response.text();
+		const totalBytes = Buffer.byteLength(text, "utf-8");
+		return {
+			text,
+			totalBytes,
+			totalBytesExact: true,
+			truncated: totalBytes > limit,
+		};
+	}
+
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let bufferedBytes = 0;
+	let observedBytes = 0;
+	let truncated = false;
+
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+
+			observedBytes += value.byteLength;
+			if (bufferedBytes < limit) {
+				const remaining = limit - bufferedBytes;
+				const chunk = value.byteLength > remaining ? value.slice(0, remaining) : value;
+				chunks.push(chunk);
+				bufferedBytes += chunk.byteLength;
+			}
+
+			if (observedBytes >= limit) {
+				truncated = true;
+				await reader.cancel();
+				break;
+			}
+		}
+	} finally {
+		reader.releaseLock();
+	}
+
+	const bufferedText = new TextDecoder().decode(
+		Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
+	);
+	const totalBytes = contentLength ?? observedBytes;
+	return {
+		text: bufferedText,
+		totalBytes,
+		totalBytesExact: contentLength !== undefined || !truncated,
+		truncated,
+	};
+}
+
+/**
  * Apply byte truncation and append a consistent truncation note.
  *
  * @param text - Content to limit
  * @param maxBytes - Byte cap to enforce
+ * @param options - Optional total-byte metadata from streaming reads
  * @returns Final content plus truncation metadata
  */
 function finalizeContent(
 	text: string,
-	maxBytes: number
+	maxBytes: number,
+	options?: {
+		readonly totalBytes?: number;
+		readonly totalBytesExact?: boolean;
+	}
 ): {
 	readonly content: string;
 	readonly totalBytes: number;
+	readonly totalBytesExact: boolean;
 	readonly truncated: boolean;
 } {
-	const totalBytes = Buffer.byteLength(text, "utf-8");
-	const truncated = totalBytes > maxBytes;
+	const measuredBytes = Buffer.byteLength(text, "utf-8");
+	const totalBytes = options?.totalBytes ?? measuredBytes;
+	const totalBytesExact = options?.totalBytesExact ?? true;
+	const truncated = totalBytes > maxBytes || measuredBytes > maxBytes;
 	let content = truncated ? truncateTextToBytes(text, maxBytes) : text;
 	if (truncated) {
-		content += `\n\n[Truncated: showing ${(maxBytes / 1024).toFixed(1)}KB of ${(totalBytes / 1024).toFixed(1)}KB]`;
+		const totalLabel = totalBytesExact
+			? `${(totalBytes / 1024).toFixed(1)}KB`
+			: `at least ${(totalBytes / 1024).toFixed(1)}KB`;
+		content += `\n\n[Truncated: showing ${(maxBytes / 1024).toFixed(1)}KB of ${totalLabel}]`;
 	}
-	return { content, totalBytes, truncated };
+	return { content, totalBytes, totalBytesExact, truncated };
 }
 
 /**
@@ -575,11 +680,11 @@ SAFETY:
 				});
 
 				const contentType = response.headers.get("content-type") || "";
-				const fullText = await response.text();
+				const body = await readResponseBodyWithCap(response, maxBytes, RESPONSE_SNIFF_BYTES);
 				const fallbackReason = shouldUseDendriteFallback({
 					contentType,
 					format: params.format,
-					responseText: fullText,
+					responseText: body.text,
 					status: response.status,
 				});
 				const fallbackDisabledNote =
@@ -635,7 +740,10 @@ SAFETY:
 					};
 				}
 
-				const final = finalizeContent(fullText, maxBytes);
+				const final = finalizeContent(body.text, maxBytes, {
+					totalBytes: body.totalBytes,
+					totalBytesExact: body.totalBytesExact,
+				});
 				return {
 					content: [{ type: "text", text: final.content }],
 					details: {
@@ -644,6 +752,7 @@ SAFETY:
 						contentType,
 						status: response.status,
 						totalBytes: final.totalBytes,
+						totalBytesExact: final.totalBytesExact,
 						truncated: final.truncated,
 					} satisfies WebFetchDetails,
 				};

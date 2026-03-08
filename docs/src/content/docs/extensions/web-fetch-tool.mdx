@@ -5,7 +5,7 @@ description: "Fetch web content with context-budget-aware output caps and option
 
 `web_fetch` retrieves a URL over HTTP and returns text output.
 
-The tool uses **context-budget-aware caps** so a large fetch does not blow up a single turn. When direct HTTP fetches hit a bot wall or JS-only shell, it can fall back to the published `dendrite-scraper` CLI.
+The tool uses **context-budget-aware caps** and stops reading large responses once the retention window is full, so a single fetch does not buffer an entire page in memory. When direct HTTP fetches hit a bot wall or JS-only shell, it can fall back to the published `dendrite-scraper` CLI.
 
 ## Parameters
 
