@@ -7,8 +7,10 @@
  * 1. Extension count in README/docs matches filesystem
  * 2. Every extension has a docs page
  * 3. Theme count in docs matches filesystem
- * 4. Agent count in docs matches templates
+ * 4. Agent-template count in README/docs matches shipped templates
  * 5. No npm/yarn/pnpm references in docs (bun-only project)
+ * 6. Public package references point at @dungle-scrubs/tallow
+ * 7. Key doc metadata and CLI-flag references match the codebase
  *
  * Usage:
  *   node tests/docs-drift.mjs
@@ -81,6 +83,17 @@ function countFiles(dir, ext) {
 }
 
 /**
+ * Count bundled agent templates, excluding helper files like _defaults.md.
+ *
+ * @returns {number} Bundled agent template count
+ */
+function countAgentTemplates() {
+	const agentsDir = join(ROOT, "templates/agents");
+	if (!existsSync(agentsDir)) return 0;
+	return readdirSync(agentsDir).filter((f) => f.endsWith(".md") && !f.startsWith("_")).length;
+}
+
+/**
  * Extract all numbers adjacent to "extension" in a file.
  *
  * @param {string} filePath - File to scan
@@ -90,6 +103,19 @@ function extractExtensionCounts(filePath) {
 	if (!existsSync(filePath)) return [];
 	const content = readFileSync(filePath, "utf-8");
 	const matches = [...content.matchAll(/(\d+)\s+(?:bundled\s+)?extensions?\b/gi)];
+	return matches.map((m) => Number(m[1]));
+}
+
+/**
+ * Extract all numbers adjacent to "agent template" in a file.
+ *
+ * @param {string} filePath - File to scan
+ * @returns {number[]} Extracted counts
+ */
+function extractAgentTemplateCounts(filePath) {
+	if (!existsSync(filePath)) return [];
+	const content = readFileSync(filePath, "utf-8");
+	const matches = [...content.matchAll(/(\d+)\s+(?:bundled\s+)?agent\s+templates?\b/gi)];
 	return matches.map((m) => Number(m[1]));
 }
 
@@ -147,14 +173,32 @@ if (themeMatch) {
 	);
 }
 
-// 4. Agent count
-const agentCount = countFiles(join(ROOT, "templates/agents"), ".md");
-const agentMatch = readme.match(/(\d+)\s+(?:specialized\s+)?agents?\b/i);
-if (agentMatch) {
+// 4. Agent-template count
+const agentTemplateCount = countAgentTemplates();
+const readmeAgentCounts = extractAgentTemplateCounts(join(ROOT, "README.md"));
+for (const count of readmeAgentCounts) {
 	check(
-		`README.md agent count (${agentMatch[1]})`,
-		Number(agentMatch[1]) === agentCount,
-		`expected ${agentCount}`
+		`README.md says ${count} agent templates`,
+		count === agentTemplateCount,
+		`expected ${agentTemplateCount}`
+	);
+}
+
+const introAgentCounts = extractAgentTemplateCounts(introPath);
+for (const count of introAgentCounts) {
+	check(
+		`introduction.md says ${count} agent templates`,
+		count === agentTemplateCount,
+		`expected ${agentTemplateCount}`
+	);
+}
+
+const indexAgentCounts = extractAgentTemplateCounts(indexPath);
+for (const count of indexAgentCounts) {
+	check(
+		`index.mdx says ${count} agent templates`,
+		count === agentTemplateCount,
+		`expected ${agentTemplateCount}`
 	);
 }
 
@@ -176,6 +220,31 @@ for (const relPath of docsToCheck) {
 		npmRefs.length > 0 ? `found: ${npmRefs.map((m) => m[0]).join(", ")}` : undefined
 	);
 }
+
+// 6. Public package references point at the scoped package
+check(
+	"README.md links to the scoped npm package",
+	readme.includes("https://www.npmjs.com/package/@dungle-scrubs/tallow"),
+	"expected npm badge link to point at @dungle-scrubs/tallow"
+);
+
+// 7. Key doc metadata and CLI-flag references match the codebase
+const astroConfig = readFileSync(join(ROOT, "docs/astro.config.mjs"), "utf-8");
+check(
+	"docs/astro.config.mjs extension metadata matches filesystem",
+	astroConfig.includes(`${extCount} extensions`),
+	`expected docs metadata to mention ${extCount} extensions`
+);
+
+const contextForkDocs = readFileSync(
+	join(ROOT, "docs/src/content/docs/extensions/context-fork.mdx"),
+	"utf-8"
+);
+check(
+	"context-fork docs use --model (not --models)",
+	contextForkDocs.includes("--model <model>") && !contextForkDocs.includes("--models <model>"),
+	"expected docs to describe the singular --model flag"
+);
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 

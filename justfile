@@ -70,6 +70,14 @@ test-int:
 test-e2e:
     node tests/e2e-commands.mjs
 
+# Verify changelog structure invariants
+test-changelog:
+    node tests/changelog-structure.mjs
+
+# Verify docs changelog sync wiring and generated output
+test-changelog-sync:
+    node docs/scripts/sync-changelog.mjs && node tests/changelog-sync.mjs
+
 # ── Run ──────────────────────────────────────────
 
 # Run tallow interactively (from built dist)
@@ -101,6 +109,10 @@ docs-build:
 # Preview docs build
 docs-preview:
     cd docs && bun run preview
+
+# Run all docs/changelog validation guards
+validate-docs:
+    bun run test:docs
 
 # ── Cleanup ──────────────────────────────────────
 
