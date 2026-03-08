@@ -176,44 +176,41 @@ const auditTrail: ShellAuditEntry[] =
 // ── Pattern Derivation ───────────────────────────────────────────────────────
 
 /**
- * Mapping from HIGH_RISK_PATTERNS to their derived allow-rule prefixes.
+ * High-risk patterns eligible for "Always allow" exact-command rules.
  *
- * Each entry pairs a regex (subset of HIGH_RISK_PATTERNS) with a function that
- * extracts the command prefix from the original (unstripped) command text.
- * The prefix is appended with `*` to form a `Bash(prefix *)` allow rule.
+ * These are the unanchored variants of HIGH_RISK_PATTERNS, used to detect
+ * high-risk command families in trimmed command text. When a command matches,
+ * `deriveAllowPattern` returns the exact command as a `Bash(...)` allow rule
+ * rather than a wildcard pattern.
  */
-const PATTERN_PREFIX_EXTRACTORS: ReadonlyArray<{
-	readonly pattern: RegExp;
-	readonly prefix: string;
-	/** When true, prefix is the complete rule body (no ` *` suffix appended). */
-	readonly exact?: boolean;
-}> = [
-	{ pattern: /\brm\s+-\w*r\w*/i, prefix: "rm -rf" },
-	{ pattern: /\bsudo\b/i, prefix: "sudo" },
-	{ pattern: /\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b/i, prefix: "curl * | *sh", exact: true },
-	{ pattern: /\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i, prefix: "wget * | *sh", exact: true },
-	{ pattern: /\bchmod\s+-R\s+777\b/i, prefix: "chmod -R 777" },
-	{ pattern: /\bchown\s+-R\s+root\b/i, prefix: "chown -R root" },
-	{ pattern: /\bgit\s+reset\s+--hard\b/i, prefix: "git reset --hard" },
-	{ pattern: /\bgit\s+clean\s+-f/i, prefix: "git clean" },
-	{ pattern: /\bdd\s+if\s*=/i, prefix: "dd" },
+const HIGH_RISK_ALLOW_PATTERNS: readonly RegExp[] = [
+	/\brm\s+-\w*r\w*/i,
+	/\bsudo\b/i,
+	/\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b/i,
+	/\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i,
+	/\bchmod\s+-R\s+777\b/i,
+	/\bchown\s+-R\s+root\b/i,
+	/\bgit\s+reset\s+--hard\b/i,
+	/\bgit\s+clean\s+-f/i,
+	/\bdd\s+if\s*=/i,
 ];
 
 /**
- * Derive a `Bash(pattern)` allow rule from a high-risk command.
+ * Derive a `Bash(command)` allow rule from a high-risk command.
  *
- * Matches the command against known high-risk pattern prefixes and returns
- * a conservative glob rule that covers the command family without
- * over-whitelisting. Uses the first matching pattern.
+ * Matches the command against known high-risk patterns and returns an
+ * exact-command allow rule. This ensures that approving one specific
+ * high-risk command (e.g. `rm -rf ./dist`) does not blanket-approve
+ * all commands in that family (e.g. all `rm -rf` commands).
  *
  * @param command - Raw command text
- * @returns Derived `Bash(prefix *)` rule string, or null if no pattern matches
+ * @returns Derived `Bash(<exact-command>)` rule string, or null if no pattern matches
  */
 export function deriveAllowPattern(command: string): string | null {
 	const trimmed = command.trim();
-	for (const { pattern, prefix, exact } of PATTERN_PREFIX_EXTRACTORS) {
+	for (const pattern of HIGH_RISK_ALLOW_PATTERNS) {
 		if (pattern.test(trimmed)) {
-			return exact ? `Bash(${prefix})` : `Bash(${prefix} *)`;
+			return `Bash(${trimmed})`;
 		}
 	}
 	return null;
