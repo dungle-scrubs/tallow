@@ -301,10 +301,20 @@ async function performSessionTransition(
 	request.ui.setWorkingMessage("Reloading workspace after directory change...");
 	try {
 		await shutdownPreviousSession(previousSession);
-		const next = await deps.createSession(
-			buildTransitionSessionOptions(baseOptions, previousSession, request.targetCwd, sessionId)
-		);
 		deps.changeDirectory(request.targetCwd);
+		let next: TallowSession;
+		try {
+			next = await deps.createSession(
+				buildTransitionSessionOptions(baseOptions, previousSession, request.targetCwd, sessionId)
+			);
+		} catch (error) {
+			try {
+				deps.changeDirectory(request.sourceCwd);
+			} catch {
+				// Best effort only — preserve the original session even if cwd rollback fails.
+			}
+			throw error;
+		}
 		await swapInteractiveModeSession(mode, next, setCleanupSession);
 
 		const transitionMessage = createTransitionMessage(request, trustedOnEntry);

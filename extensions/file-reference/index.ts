@@ -315,8 +315,8 @@ export async function expandFileReferences(text: string, cwd: string): Promise<s
  * @param pi - Extension API provided by the runtime
  */
 export default function (pi: ExtensionAPI) {
-	pi.on("input", async (event) => {
-		const result = await expandFileReferences(event.text, process.cwd());
+	pi.on("input", async (event, ctx) => {
+		const result = await expandFileReferences(event.text, ctx?.cwd ?? process.cwd());
 		if (result === event.text) {
 			return { action: "continue" as const };
 		}

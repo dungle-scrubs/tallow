@@ -526,10 +526,12 @@ export default function readSummary(pi: ExtensionAPI): void {
 			);
 		},
 
-		async execute(toolCallId, params, signal, onUpdate, _ctx) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const effectiveCwd = ctx?.cwd ?? process.cwd();
+			const scopedReadTool = createReadTool(effectiveCwd);
 			let path = params.path ?? "file";
 
-			const absolutePath = resolve(process.cwd(), path);
+			const absolutePath = resolve(effectiveCwd, path);
 
 			// ── PDF handling ────────────────────────────────────
 			if (await isPdf(absolutePath)) {
@@ -547,7 +549,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 			// detect early to capture structured metadata for display.
 			const detectedMime = await detectImageFormatFromFile(absolutePath);
 			if (detectedMime) {
-				const result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
+				const result = await scopedReadTool.execute(toolCallId, params, signal, onUpdate);
 
 				// Extract image metadata from the base tool's result
 				const imageContent = result.content.find((c: { type: string }) => c.type === "image") as
@@ -594,9 +596,9 @@ export default function readSummary(pi: ExtensionAPI): void {
 			}
 
 			// ── Standard file handling ──────────────────────────
-			let result: Awaited<ReturnType<typeof baseReadTool.execute>>;
+			let result: Awaited<ReturnType<typeof scopedReadTool.execute>>;
 			try {
-				result = await baseReadTool.execute(toolCallId, params, signal, onUpdate);
+				result = await scopedReadTool.execute(toolCallId, params, signal, onUpdate);
 			} catch (err: unknown) {
 				// Auto-correct wrong skill paths: if ENOENT on a skill-looking path,
 				// look up the correct path from loaded skills and retry transparently.
@@ -607,7 +609,7 @@ export default function readSummary(pi: ExtensionAPI): void {
 					const correctPath = resolveSkillFallback(path);
 					if (correctPath) {
 						path = correctPath;
-						result = await baseReadTool.execute(
+						result = await scopedReadTool.execute(
 							toolCallId,
 							{ ...params, path: correctPath },
 							signal,

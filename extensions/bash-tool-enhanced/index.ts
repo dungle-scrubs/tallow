@@ -268,10 +268,20 @@ function detectRipgrep(): boolean {
 	}
 }
 
-export default function bashLive(pi: ExtensionAPI): void {
-	const baseBashTool = createBashTool(process.cwd(), {
-		spawnHook: (ctx) => ({ ...ctx, cwd: process.cwd() }),
+/**
+ * Create a bash tool instance bound to the effective session working directory.
+ *
+ * @param cwd - Working directory that tool execution should use
+ * @returns Scoped bash tool instance
+ */
+function createScopedBashTool(cwd: string) {
+	return createBashTool(cwd, {
+		spawnHook: (ctx) => ({ ...ctx, cwd }),
 	});
+}
+
+export default function bashLive(pi: ExtensionAPI): void {
+	const baseBashTool = createScopedBashTool(process.cwd());
 	const displayConfig = getToolDisplayConfig("bash");
 
 	// Capture project root for BASH_MAINTAIN_PROJECT_WORKING_DIR
@@ -303,6 +313,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 	hasRipgrep = detectRipgrep();
 
 	pi.on("session_start", async (_event, ctx) => {
+		projectCwd = ctx.cwd;
 		if (!hasRipgrep) {
 			ctx.ui.notify(
 				"ripgrep not found — install it for faster search (brew install ripgrep)",
@@ -345,6 +356,9 @@ export default function bashLive(pi: ExtensionAPI): void {
 		},
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const effectiveCwd = ctx.cwd ?? process.cwd();
+			const scopedBashTool = createScopedBashTool(effectiveCwd);
+
 			// BASH_MAINTAIN_PROJECT_WORKING_DIR: force commands to run from project root
 			if (readMaintainProjectDir() && projectCwd) {
 				if (fs.existsSync(projectCwd)) {
@@ -429,7 +443,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 			// Fast path: auto-background disabled or user-provided timeout shorter
 			if (autoTimeout <= 0 || (params.timeout && params.timeout * 1000 <= autoTimeout)) {
 				try {
-					return await baseBashTool.execute(toolCallId, params, signal, progressOnUpdate);
+					return await scopedBashTool.execute(toolCallId, params, signal, progressOnUpdate);
 				} catch (err) {
 					return handleBashError(err);
 				} finally {
@@ -473,7 +487,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 			};
 
 			// Start bash execution
-			const bashPromise = baseBashTool
+			const bashPromise = scopedBashTool
 				.execute(toolCallId, params, ownAbort.signal, wrappedOnUpdate)
 				.then((result) => ({ type: "completed" as const, result }))
 				.catch((err) => ({ type: "error" as const, err }));

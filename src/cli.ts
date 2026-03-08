@@ -37,7 +37,7 @@ const cleanupSessionRef = registerProcessCleanup();
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import {
 	InteractiveMode,
 	runPrintMode,
@@ -292,6 +292,7 @@ async function run(opts: {
 			cleanupStaleSessionWorktrees(repoRoot);
 			sessionWorktreePath = createSessionWorktree(repoRoot);
 			sessionOpts.cwd = sessionWorktreePath;
+			process.chdir(sessionWorktreePath);
 			process.env.TALLOW_WORKTREE_PATH = sessionWorktreePath;
 			process.env.TALLOW_WORKTREE_ORIGINAL_CWD = originalCwd;
 		} catch (error) {
@@ -375,6 +376,13 @@ async function run(opts: {
 	 */
 	const cleanupSessionWorktree = (): void => {
 		if (!sessionWorktreePath) return;
+		const currentCwd = process.cwd();
+		if (
+			currentCwd === sessionWorktreePath ||
+			currentCwd.startsWith(`${sessionWorktreePath}${sep}`)
+		) {
+			process.chdir(originalCwd);
+		}
 		removeSessionWorktree(sessionWorktreePath, sessionWorktreeRepoRoot);
 		if (sessionWorktreeRepoRoot) {
 			try {

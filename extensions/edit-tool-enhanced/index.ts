@@ -59,14 +59,16 @@ export function isInGitRepo(filePath: string): boolean {
  * @param filename - Relative or absolute file path
  * @param themeFg - Theme's `fg` function for coloring
  * @param lazygitAvailable - Whether lazygit is on PATH
+ * @param cwd - Base working directory used when filename is relative
  * @returns Formatted diff link string, or empty string
  */
 export function buildDiffLink(
 	filename: string,
 	themeFg: (style: ThemeColor, text: string) => string,
-	lazygitAvailable: boolean
+	lazygitAvailable: boolean,
+	cwd: string = process.cwd()
 ): string {
-	const absolutePath = path.resolve(process.cwd(), filename);
+	const absolutePath = path.isAbsolute(filename) ? filename : path.resolve(cwd, filename);
 	if (!lazygitAvailable || !isInGitRepo(absolutePath)) return "";
 	return ` ${themeFg("dim", hyperlink(`tallow://diff/${encodeURIComponent(absolutePath)}`, "diff"))}`;
 }
@@ -77,6 +79,7 @@ const hasLazygit = isOnPath("lazygit");
 const EDIT_MARKER = "__edit_live__";
 
 interface EditLiveDetails {
+	_absoluteFilename?: string;
 	_diff?: string;
 	_filename?: string;
 	[EDIT_MARKER]?: boolean;
@@ -102,19 +105,25 @@ export default function editLive(pi: ExtensionAPI): void {
 			);
 		},
 
-		async execute(toolCallId, params, signal, onUpdate, _ctx) {
-			const path = params.path ?? "file";
-			const result = await baseEditTool.execute(toolCallId, params, signal, onUpdate);
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const filePath = params.path ?? "file";
+			const effectiveCwd = ctx?.cwd ?? process.cwd();
+			const scopedEditTool = createEditTool(effectiveCwd);
+			const result = await scopedEditTool.execute(toolCallId, params, signal, onUpdate);
 			const details = result.details as EditToolDetails | undefined;
 			const diff = details?.diff ?? "";
+			const absoluteFilename = path.isAbsolute(filePath)
+				? filePath
+				: path.resolve(effectiveCwd, filePath);
 
 			return {
 				content: result.content,
 				details: {
 					...details,
 					[EDIT_MARKER]: true,
+					_absoluteFilename: absoluteFilename,
 					_diff: diff,
-					_filename: path,
+					_filename: filePath,
 				},
 			};
 		},
@@ -152,7 +161,8 @@ export default function editLive(pi: ExtensionAPI): void {
 			}
 
 			const finalFilename = details._filename ?? "file";
-			const diffLink = buildDiffLink(finalFilename, theme.fg.bind(theme), hasLazygit);
+			const diffTarget = details._absoluteFilename ?? finalFilename;
+			const diffLink = buildDiffLink(diffTarget, theme.fg.bind(theme), hasLazygit);
 
 			const verb = formatToolVerb("edit", true);
 			const footer =

@@ -305,8 +305,8 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 			"session.waitForIdle",
 			"ui.working:Reloading workspace after directory change...",
 			"session.shutdown",
-			"deps.createSession:/repo/b",
 			"deps.chdir:/repo/b",
+			"deps.createSession:/repo/b",
 			"loader.stop",
 			"status.clear",
 			"pending.clear",
@@ -452,7 +452,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 
 		expect(result).toEqual({ reason: "session bootstrap failed", status: "unavailable" });
 		expect(events).toContain("session.shutdown");
-		expect(state.changeDirectoryCalls).toEqual([]);
+		expect(state.changeDirectoryCalls).toEqual(["/repo/b", "/repo/a"]);
 		expect(mode.session).toBe(previousSession);
 	});
 

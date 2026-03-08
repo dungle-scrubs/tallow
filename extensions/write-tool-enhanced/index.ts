@@ -41,14 +41,15 @@ export default function writePreview(pi: ExtensionAPI): void {
 			);
 		},
 
-		async execute(toolCallId, params, signal, onUpdate, _ctx) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const path = params.path ?? "file";
 			const content = params.content ?? "";
 			const lines = content.split("\n").length;
 			const sizeKb = (content.length / 1024).toFixed(1);
 			const summary = `${path} (${lines} lines, ${sizeKb}KB)`;
+			const scopedWriteTool = createWriteTool(ctx?.cwd ?? process.cwd());
 
-			const result = await baseWriteTool.execute(toolCallId, params, signal, onUpdate);
+			const result = await scopedWriteTool.execute(toolCallId, params, signal, onUpdate);
 			return {
 				content: result.content,
 				details: {
