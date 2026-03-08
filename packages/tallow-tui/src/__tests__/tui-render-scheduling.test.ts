@@ -170,12 +170,15 @@ class CountingComponent implements Component {
 }
 
 /**
- * Yield until the next setImmediate phase.
+ * Yield until the next I/O phase.
  *
- * @returns {Promise<void>} Promise that resolves on the next check phase
+ * Uses `setTimeout(0)` because on Bun `setImmediate` never enters the
+ * I/O poll phase. This matches the `setTimeout(0)` used in `scheduleRender`.
+ *
+ * @returns {Promise<void>} Promise that resolves after I/O polling
  */
-function flushImmediate(): Promise<void> {
-	return new Promise((resolve) => setImmediate(resolve));
+function flushIO(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 /**
@@ -192,7 +195,7 @@ async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<voi
 		if (Date.now() > deadline) {
 			throw new Error("Condition not met before timeout");
 		}
-		await flushImmediate();
+		await flushIO();
 	}
 }
 
@@ -205,9 +208,9 @@ describe("TUI render scheduling", () => {
 		tui.setFocus(component);
 		tui.start();
 
-		setImmediate(() => {
+		setTimeout(() => {
 			terminal.emitInput("x");
-		});
+		}, 0);
 
 		await waitFor(() => component.renderCount >= 40);
 		expect(component.inputHandledAtRenderCount).not.toBeNull();
@@ -224,9 +227,9 @@ describe("TUI render scheduling", () => {
 		tui.setFocus(component);
 		tui.start();
 
-		setImmediate(() => {
+		setTimeout(() => {
 			terminal.emitInput("x");
-		});
+		}, 0);
 
 		await waitFor(() => component.inputVisibleAtRenderCount !== null);
 		expect(component.inputVisibleAtRenderCount).toBeLessThan(40);
@@ -245,7 +248,7 @@ describe("TUI render scheduling", () => {
 		for (let index = 0; index < 25; index += 1) {
 			tui.requestRender();
 		}
-		await flushImmediate();
+		await flushIO();
 
 		expect(component.renderCount).toBe(1);
 		expect(terminal.writes).toHaveLength(1);
