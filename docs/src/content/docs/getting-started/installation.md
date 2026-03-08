@@ -15,7 +15,7 @@ Install the CLI with your package manager, then run the installer once to
 create `~/.tallow/` and choose extensions and themes:
 
 ```bash
-bun install -g tallow
+npm install -g @dungle-scrubs/tallow
 tallow install
 ```
 
@@ -92,7 +92,7 @@ Updating tallow has two separate parts:
 
 ```bash
 # Global install
-bun install -g tallow@latest
+npm install -g @dungle-scrubs/tallow@latest
 
 # From source
 cd /path/to/tallow
