@@ -19,12 +19,6 @@ bun install -g tallow
 tallow install
 ```
 
-Or run it without a global install:
-
-```bash
-bunx tallow install
-```
-
 ### From source
 
 Clone the repository, build it, then run the installer:
@@ -99,9 +93,6 @@ Updating tallow has two separate parts:
 ```bash
 # Global install
 bun install -g tallow@latest
-
-# One-off runs without a global install
-bunx tallow@latest install
 
 # From source
 cd /path/to/tallow
