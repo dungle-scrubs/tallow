@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 const CLAUDE_DIR = ".claude";
@@ -178,9 +179,9 @@ export default function (pi: ExtensionAPI): void {
 			skillPaths.push(...getNonCollidingSkillPaths(userClaudeSkills, knownNames));
 		}
 
-		// Project-level: cwd/.claude/skills/
+		// Project-level: cwd/.claude/skills/ (trusted only)
 		const projectClaudeSkills = path.resolve(cwd, CLAUDE_DIR, "skills");
-		if (fs.existsSync(projectClaudeSkills)) {
+		if (isProjectTrusted(cwd) && fs.existsSync(projectClaudeSkills)) {
 			skillPaths.push(...getNonCollidingSkillPaths(projectClaudeSkills, knownNames));
 		}
 

@@ -33,6 +33,7 @@ import { delimiter } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { Key } from "@mariozechner/pi-tui";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 
 /** Frontmatter parsed from a prompt markdown file. */
 interface PromptFrontmatter {
@@ -570,20 +571,30 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	// Paired prompts/ and commands/ directories per scope
+	const allowProjectPrompts = isProjectTrusted(process.cwd());
 	const projectPromptsDir = path.join(process.cwd(), ".tallow", "prompts");
 	const projectCommandsDir = path.join(process.cwd(), ".tallow", "commands");
 	const projectClaudeCommandsDir = path.join(process.cwd(), ".claude", "commands");
 	const globalPromptsDir = path.join(agentDir, "prompts");
 	const globalCommandsDir = path.join(agentDir, "commands");
 	const globalClaudeCommandsDir = path.join(os.homedir(), ".claude", "commands");
+	const localCommandDirs = allowProjectPrompts
+		? [projectCommandsDir, projectClaudeCommandsDir, globalCommandsDir, globalClaudeCommandsDir]
+		: [globalCommandsDir, globalClaudeCommandsDir];
+	const localPromptDirs = allowProjectPrompts
+		? [projectPromptsDir, globalPromptsDir]
+		: [globalPromptsDir];
+	const nestedPromptGroups = allowProjectPrompts
+		? [
+				[projectPromptsDir, projectCommandsDir, projectClaudeCommandsDir],
+				[globalPromptsDir, globalCommandsDir, globalClaudeCommandsDir],
+			]
+		: [[globalPromptsDir, globalCommandsDir, globalClaudeCommandsDir]];
 
 	// ----- Local top-level: commands/ files not already in prompts/ -----
 	// Pi built-in handles prompts/ top-level; we cover commands/ top-level.
 	// .tallow/ dirs first so they win on first-seen collision; .claude/ after.
-	for (const cmd of discoverLocalTopLevelCommands(
-		[projectCommandsDir, projectClaudeCommandsDir, globalCommandsDir, globalClaudeCommandsDir],
-		[projectPromptsDir, globalPromptsDir]
-	)) {
+	for (const cmd of discoverLocalTopLevelCommands(localCommandDirs, localPromptDirs)) {
 		registerPrompt(pi, cmd.name, cmd.filePath, registered, () => promptVisibilityMode);
 	}
 
@@ -591,10 +602,7 @@ export default function (pi: ExtensionAPI): void {
 	// Project-local first so it wins on collisions with global.
 	// Within each scope, prompts/ first, .tallow/commands/ second, .claude/commands/ last
 	// (first-seen wins in discoverLocalNestedPrompts).
-	for (const dirs of [
-		[projectPromptsDir, projectCommandsDir, projectClaudeCommandsDir],
-		[globalPromptsDir, globalCommandsDir, globalClaudeCommandsDir],
-	]) {
+	for (const dirs of nestedPromptGroups) {
 		for (const prompt of discoverLocalNestedPrompts(dirs)) {
 			const commandName = `${prompt.dir}:${prompt.name}`;
 			registerPrompt(pi, commandName, prompt.filePath, registered, () => promptVisibilityMode);
@@ -608,7 +616,7 @@ export default function (pi: ExtensionAPI): void {
 	// Project settings first so they win on collisions.
 	// Each source merges prompts/ + commands/ for that package.
 	const packageSources = [
-		...discoverPackagePromptSources(projectSettings),
+		...(allowProjectPrompts ? discoverPackagePromptSources(projectSettings) : []),
 		...discoverPackagePromptSources(globalSettings),
 		...discoverPluginPromptSourcesFromEnv(),
 	];

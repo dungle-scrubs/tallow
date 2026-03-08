@@ -13,6 +13,9 @@ let harness: ExtensionHarness;
 let tmpDir: string;
 let cwdDir: string;
 let additionalDir: string;
+let originalCodingAgentDir: string | undefined;
+let originalTrustCwd: string | undefined;
+let originalTrustStatus: string | undefined;
 
 /** Notification log shared across tests. */
 let notifications: Array<{ message: string; level: string }> = [];
@@ -89,12 +92,25 @@ beforeEach(async () => {
 	mkdirSync(cwdDir, { recursive: true });
 	mkdirSync(additionalDir, { recursive: true });
 	notifications = [];
+	originalCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+	process.env.TALLOW_PROJECT_TRUST_CWD = cwdDir;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 
 	harness = ExtensionHarness.create();
 	await harness.loadExtension(contextFilesExtension);
 });
 
 afterEach(() => {
+	if (originalCodingAgentDir !== undefined)
+		process.env.PI_CODING_AGENT_DIR = originalCodingAgentDir;
+	else delete process.env.PI_CODING_AGENT_DIR;
+	if (originalTrustCwd !== undefined) process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	else delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	if (originalTrustStatus !== undefined)
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+	else delete process.env.TALLOW_PROJECT_TRUST_STATUS;
 	rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -203,6 +219,37 @@ describe("lazy context discovery", () => {
 			notification.message.startsWith("context-files: +")
 		);
 		expect(startupNotices.length).toBe(1);
+	});
+});
+
+describe("trust gating for project rules", () => {
+	test("skips project .tallow/.claude rules when project is untrusted", async () => {
+		const globalRulesDir = join(tmpDir, "home", "rules");
+		mkdirSync(globalRulesDir, { recursive: true });
+		mkdirSync(join(cwdDir, ".tallow", "rules"), { recursive: true });
+		mkdirSync(join(cwdDir, ".claude", "rules"), { recursive: true });
+		writeFileSync(join(globalRulesDir, "global.md"), "Global rule content");
+		writeFileSync(join(cwdDir, ".tallow", "rules", "project.md"), "Project rule content");
+		writeFileSync(join(cwdDir, ".claude", "rules", "claude.md"), "Claude rule content");
+		process.env.PI_CODING_AGENT_DIR = join(tmpDir, "home");
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+
+		await harness.fireEvent("session_start", { type: "session_start" }, buildCtx());
+		const [result] = await harness.fireEvent(
+			"before_agent_start",
+			buildBeforeAgentStartEvent("SYSTEM"),
+			buildCtx()
+		);
+
+		if (!result) {
+			expect(result).toBeUndefined();
+			return;
+		}
+
+		const systemPrompt = (result as { systemPrompt: string }).systemPrompt;
+		expect(systemPrompt).toContain("Global rule content");
+		expect(systemPrompt).not.toContain("Project rule content");
+		expect(systemPrompt).not.toContain("Claude rule content");
 	});
 });
 

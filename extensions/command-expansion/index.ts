@@ -21,6 +21,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills, stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 
 interface PromptTemplate {
 	name: string;
@@ -129,11 +130,10 @@ export function substituteArgs(content: string, args: string[]): string {
 function loadPromptTemplates(): PromptTemplate[] {
 	const templates: PromptTemplate[] = [];
 	const homeDir = os.homedir();
-
-	const dirs = [
-		path.join(homeDir, ".tallow", "prompts"),
-		path.join(process.cwd(), ".tallow", "prompts"),
-	];
+	const dirs = [path.join(homeDir, ".tallow", "prompts")];
+	if (isProjectTrusted(process.cwd())) {
+		dirs.push(path.join(process.cwd(), ".tallow", "prompts"));
+	}
 
 	for (const dir of dirs) {
 		if (!fs.existsSync(dir)) continue;

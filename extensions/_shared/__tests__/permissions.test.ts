@@ -38,6 +38,8 @@ let tempDir: string;
 let originalTrustCwd: string | undefined;
 /** Original trust status env var restored after each test. */
 let originalTrustStatus: string | undefined;
+/** Original coding-agent dir env var restored after each test. */
+let originalCodingAgentDir: string | undefined;
 
 const defaultVars: ExpansionVars = {
 	cwd: "/project",
@@ -66,8 +68,10 @@ beforeEach(() => {
 	tempDir = realpathSync(rawTempDir);
 	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
 	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+	originalCodingAgentDir = process.env.PI_CODING_AGENT_DIR;
 	process.env.TALLOW_PROJECT_TRUST_CWD = tempDir;
 	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+	process.env.PI_CODING_AGENT_DIR = join(tempDir, ".test-tallow-home");
 });
 
 afterEach(() => {
@@ -80,6 +84,11 @@ afterEach(() => {
 		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
 	} else {
 		delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+	}
+	if (originalCodingAgentDir !== undefined) {
+		process.env.PI_CODING_AGENT_DIR = originalCodingAgentDir;
+	} else {
+		delete process.env.PI_CODING_AGENT_DIR;
 	}
 	rmSync(rawTempDir, { recursive: true, force: true });
 });
@@ -794,6 +803,19 @@ describe("loadPermissionConfig", () => {
 		const { loaded } = loadPermissionConfig(tempDir);
 		expect(loaded.merged.deny).toHaveLength(0);
 		expect(loaded.sources.some((s) => s.path.includes(".tallow/settings.local.json"))).toBe(false);
+	});
+
+	test("untrusted projects ignore .claude permission sources", () => {
+		mkdirSync(join(tempDir, ".claude"), { recursive: true });
+		writeFileSync(
+			join(tempDir, ".claude", "settings.json"),
+			JSON.stringify({ permissions: { deny: ["Bash(ssh *)"] } })
+		);
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+		const { loaded } = loadPermissionConfig(tempDir);
+		expect(loaded.merged.deny).toHaveLength(0);
+		expect(loaded.sources.some((s) => s.path.includes(".claude/settings.json"))).toBe(false);
 	});
 
 	test("CLI config takes precedence", () => {

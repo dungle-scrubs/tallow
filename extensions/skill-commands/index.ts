@@ -13,6 +13,7 @@ import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills } from "@mariozechner/pi-coding-agent";
 import { atomicWriteFileSync } from "../_shared/atomic-write.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 
 /** Frontmatter parsed from a SKILL.md file. */
 interface SkillFrontmatter {
@@ -136,7 +137,9 @@ export default function (pi: ExtensionAPI) {
 	);
 	const projectClaudeSkills = join(process.cwd(), ".claude", "skills");
 	if (fs.existsSync(userClaudeSkills)) claudeSkillPaths.push(userClaudeSkills);
-	if (fs.existsSync(projectClaudeSkills)) claudeSkillPaths.push(projectClaudeSkills);
+	if (isProjectTrusted(process.cwd()) && fs.existsSync(projectClaudeSkills)) {
+		claudeSkillPaths.push(projectClaudeSkills);
+	}
 
 	// Load skills synchronously during extension init for autocomplete to work
 	const { skills } = loadSkills({ skillPaths: claudeSkillPaths });

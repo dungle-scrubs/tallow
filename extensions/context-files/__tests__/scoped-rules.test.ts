@@ -13,6 +13,8 @@ let tmpDir: string;
 let cwdDir: string;
 let homeDir: string;
 let originalHome: string | undefined;
+let originalTrustCwd: string | undefined;
+let originalTrustStatus: string | undefined;
 
 /** Notification log shared across tests. */
 let notifications: Array<{ message: string; level: string }> = [];
@@ -115,6 +117,8 @@ function countOccurrences(value: string, needle: string): number {
 
 beforeEach(async () => {
 	originalHome = process.env.HOME;
+	originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+	originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 	homeDir = join(tmpdir(), `ctx-scoped-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(homeDir, { recursive: true });
 	process.env.HOME = homeDir;
@@ -122,6 +126,8 @@ beforeEach(async () => {
 	tmpDir = join(tmpdir(), `ctx-scoped-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	cwdDir = join(tmpDir, "project");
 	mkdirSync(cwdDir, { recursive: true });
+	process.env.TALLOW_PROJECT_TRUST_CWD = cwdDir;
+	process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 	notifications = [];
 
 	harness = ExtensionHarness.create();
@@ -130,6 +136,11 @@ beforeEach(async () => {
 
 afterEach(() => {
 	process.env.HOME = originalHome;
+	if (originalTrustCwd !== undefined) process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+	else delete process.env.TALLOW_PROJECT_TRUST_CWD;
+	if (originalTrustStatus !== undefined)
+		process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+	else delete process.env.TALLOW_PROJECT_TRUST_STATUS;
 	rmSync(tmpDir, { recursive: true, force: true });
 	if (homeDir && homeDir !== originalHome) {
 		rmSync(homeDir, { recursive: true, force: true });

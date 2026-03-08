@@ -47,7 +47,7 @@ export function formatProjectTrustBanner(trust: ProjectTrustContext): string {
 		"",
 		"Blocked until trusted:",
 		"  plugins, hooks, mcpServers, packages, permissions, shellInterpolation,",
-		"  and project extensions.",
+		"  project extensions, agents, skills, prompts, rules, and Claude compatibility resources.",
 		"",
 		"Trusting this folder means trusting the code and config inside it.",
 		"Those files can change agent behavior and execute commands.",

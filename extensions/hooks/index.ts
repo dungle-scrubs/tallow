@@ -676,7 +676,7 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
  *   5. .tallow/settings.json                    (project settings, trusted only)
  *   6. ~/.tallow/extensions/∗/hooks.json        (global extension hooks)
  *   7. .tallow/extensions/∗/hooks.json          (project extension hooks, trusted only)
- *   8. .claude/settings.json                    (project Claude hooks, translated)
+ *   8. .claude/settings.json                    (project Claude hooks, translated, trusted only)
  *   9. ~/.claude/settings.json                  (global Claude hooks, translated)
  *
  * All sources are merged additively — matchers are concatenated per event.
@@ -730,10 +730,12 @@ export function loadHooksConfig(cwd: string): HooksConfig {
 	}
 
 	// 8. Claude project settings hooks (translated)
-	const claudeProjectPath = path.join(cwd, ".claude", "settings.json");
-	const claudeProjectSettings = readHooksFile(claudeProjectPath);
-	if (claudeProjectSettings) {
-		mergeHooks(merged, translateClaudeHooks(claudeProjectSettings, claudeProjectPath));
+	if (allowProjectSources) {
+		const claudeProjectPath = path.join(cwd, ".claude", "settings.json");
+		const claudeProjectSettings = readHooksFile(claudeProjectPath);
+		if (claudeProjectSettings) {
+			mergeHooks(merged, translateClaudeHooks(claudeProjectSettings, claudeProjectPath));
+		}
 	}
 
 	// 9. Claude global settings hooks (translated)

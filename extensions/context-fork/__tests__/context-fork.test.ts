@@ -40,10 +40,14 @@ describe("resolveModel", () => {
 describe("buildFrontmatterIndex", () => {
 	let tmpDir: string;
 	let originalCwd: string;
+	let originalTrustCwd: string | undefined;
+	let originalTrustStatus: string | undefined;
 
 	beforeAll(() => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fork-index-test-"));
 		originalCwd = process.cwd();
+		originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+		originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
 
 		// Create project structure with prompts and commands
 		const promptsDir = path.join(tmpDir, ".tallow", "prompts");
@@ -123,10 +127,17 @@ Use opus model.
 		);
 
 		process.chdir(tmpDir);
+		process.env.TALLOW_PROJECT_TRUST_CWD = tmpDir;
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
 	});
 
 	afterAll(() => {
 		process.chdir(originalCwd);
+		if (originalTrustCwd !== undefined) process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+		else delete process.env.TALLOW_PROJECT_TRUST_CWD;
+		if (originalTrustStatus !== undefined)
+			process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+		else delete process.env.TALLOW_PROJECT_TRUST_STATUS;
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
@@ -180,6 +191,60 @@ Use opus model.
 		const entry = index.get("review");
 		expect(entry?.filePath).toContain("review.md");
 		expect(fs.existsSync(entry?.filePath ?? "")).toBe(true);
+	});
+
+	test("skips project-local prompt metadata when project is untrusted", () => {
+		const originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+		const originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+		process.env.TALLOW_PROJECT_TRUST_CWD = tmpDir;
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+
+		try {
+			const index = buildFrontmatterIndex();
+			expect(index.has("review")).toBe(false);
+			expect(index.has("restricted")).toBe(false);
+			expect(index.has("tallow:deploy")).toBe(false);
+		} finally {
+			if (originalTrustCwd !== undefined) process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+			else delete process.env.TALLOW_PROJECT_TRUST_CWD;
+			if (originalTrustStatus !== undefined) {
+				process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+			} else delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+		}
+	});
+
+	test("skips package prompt metadata from project settings when project is untrusted", () => {
+		const pkgDir = path.join(tmpDir, "pkg-prompts");
+		fs.mkdirSync(path.join(pkgDir, "prompts"), { recursive: true });
+		fs.writeFileSync(
+			path.join(pkgDir, "prompts", "packaged.md"),
+			`---
+description: Packaged
+context: fork
+---
+Packaged prompt.
+`
+		);
+		fs.writeFileSync(
+			path.join(tmpDir, ".tallow", "settings.json"),
+			JSON.stringify({ packages: [pkgDir] })
+		);
+
+		const originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
+		const originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+		process.env.TALLOW_PROJECT_TRUST_CWD = tmpDir;
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "stale_fingerprint";
+
+		try {
+			const index = buildFrontmatterIndex();
+			expect(index.has("pkg-prompts:packaged")).toBe(false);
+		} finally {
+			if (originalTrustCwd !== undefined) process.env.TALLOW_PROJECT_TRUST_CWD = originalTrustCwd;
+			else delete process.env.TALLOW_PROJECT_TRUST_CWD;
+			if (originalTrustStatus !== undefined) {
+				process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
+			} else delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+		}
 	});
 
 	test("logs debug message for allowed-tools", () => {

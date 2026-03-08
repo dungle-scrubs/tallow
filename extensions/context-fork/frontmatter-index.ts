@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getAgentDir, loadSkills, parseFrontmatter } from "@mariozechner/pi-coding-agent";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 
 /** Parsed frontmatter fields relevant to context-fork. */
 export interface CommandFrontmatter {
@@ -241,25 +242,32 @@ export function buildFrontmatterIndex(debugLog?: (msg: string) => void): Frontma
 	}
 
 	const agentDir = getAgentDir();
+	const allowProjectPrompts = isProjectTrusted(process.cwd());
 
 	// Project-local prompts/commands (highest priority)
 	const projectPromptsDir = path.join(process.cwd(), ".tallow", "prompts");
 	const projectCommandsDir = path.join(process.cwd(), ".tallow", "commands");
 	const globalPromptsDir = path.join(agentDir, "prompts");
 	const globalCommandsDir = path.join(agentDir, "commands");
+	const localPromptDirs = allowProjectPrompts
+		? [projectPromptsDir, projectCommandsDir, globalPromptsDir, globalCommandsDir]
+		: [globalPromptsDir, globalCommandsDir];
+	const nestedPromptDirs = allowProjectPrompts
+		? [
+				[projectPromptsDir, projectCommandsDir],
+				[globalPromptsDir, globalCommandsDir],
+			]
+		: [[globalPromptsDir, globalCommandsDir]];
 
 	// Top-level: name
-	for (const dir of [projectPromptsDir, projectCommandsDir, globalPromptsDir, globalCommandsDir]) {
+	for (const dir of localPromptDirs) {
 		for (const { name, filePath } of scanTopLevel(dir)) {
 			maybeAdd(name, filePath);
 		}
 	}
 
 	// Nested: dir:name
-	for (const dirs of [
-		[projectPromptsDir, projectCommandsDir],
-		[globalPromptsDir, globalCommandsDir],
-	]) {
+	for (const dirs of nestedPromptDirs) {
 		for (const dir of dirs) {
 			for (const { name, filePath } of scanNested(dir)) {
 				maybeAdd(name, filePath);
@@ -270,8 +278,9 @@ export function buildFrontmatterIndex(debugLog?: (msg: string) => void): Frontma
 	// Package sources: namespace:name and namespace:dir:name
 	const globalSettings = path.join(agentDir, "settings.json");
 	const projectSettings = path.join(process.cwd(), ".tallow", "settings.json");
+	const settingsPaths = allowProjectPrompts ? [projectSettings, globalSettings] : [globalSettings];
 
-	for (const settingsPath of [projectSettings, globalSettings]) {
+	for (const settingsPath of settingsPaths) {
 		for (const { namespace, dirs } of getPackageDirs(settingsPath)) {
 			for (const dir of dirs) {
 				// Top-level: namespace:name

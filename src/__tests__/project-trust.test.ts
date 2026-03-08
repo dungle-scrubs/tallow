@@ -110,6 +110,51 @@ describe("fingerprint scope", () => {
 		const b = computeProjectFingerprint(projectDir);
 		expect(a).toBe(b);
 	});
+
+	test("includes trusted Claude compatibility settings", () => {
+		mkdirSync(join(projectDir, ".claude"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".claude", "settings.json"),
+			JSON.stringify({ permissions: { deny: ["Bash(ssh *)"] } })
+		);
+		const a = computeProjectFingerprint(projectDir);
+
+		writeFileSync(
+			join(projectDir, ".claude", "settings.json"),
+			JSON.stringify({ permissions: { deny: ["Bash(curl *)"] } })
+		);
+		const b = computeProjectFingerprint(projectDir);
+		expect(a).not.toBe(b);
+	});
+
+	test("includes trusted project agent directories", () => {
+		mkdirSync(join(projectDir, ".tallow", "agents"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".tallow", "agents", "reviewer.md"),
+			"---\nname: reviewer\ndescription: review code\n---\nReview carefully.\n"
+		);
+		const a = computeProjectFingerprint(projectDir);
+
+		writeFileSync(
+			join(projectDir, ".tallow", "agents", "reviewer.md"),
+			"---\nname: reviewer\ndescription: review code\n---\nReview aggressively.\n"
+		);
+		const b = computeProjectFingerprint(projectDir);
+		expect(a).not.toBe(b);
+	});
+
+	test("includes trusted project prompts and rules", () => {
+		mkdirSync(join(projectDir, ".tallow", "prompts"), { recursive: true });
+		mkdirSync(join(projectDir, ".tallow", "rules"), { recursive: true });
+		writeFileSync(join(projectDir, ".tallow", "prompts", "review.md"), "Prompt v1\n");
+		writeFileSync(join(projectDir, ".tallow", "rules", "rule.md"), "Rule v1\n");
+		const a = computeProjectFingerprint(projectDir);
+
+		writeFileSync(join(projectDir, ".tallow", "prompts", "review.md"), "Prompt v2\n");
+		writeFileSync(join(projectDir, ".tallow", "rules", "rule.md"), "Rule v2\n");
+		const b = computeProjectFingerprint(projectDir);
+		expect(a).not.toBe(b);
+	});
 });
 
 describe("trust env projection", () => {

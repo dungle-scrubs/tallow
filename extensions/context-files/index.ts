@@ -19,6 +19,7 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { parseFrontmatter } from "@mariozechner/pi-coding-agent";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 const CONTEXT_FILENAMES = ["CLAUDE.md", "AGENTS.md"] as const;
@@ -336,6 +337,7 @@ function collectMissingFiles(cwd: string): DiscoveryResult {
 	const scopedRuleFiles: ScopedRuleFile[] = [];
 	const warnings: string[] = [];
 	const globalDir = getTallowHomeDir();
+	const allowProjectRules = isProjectTrusted(cwd);
 
 	// --- Global level ---
 	// If pi loaded ~/.tallow/AGENTS.md, we pick up CLAUDE.md (and vice versa)
@@ -408,11 +410,13 @@ function collectMissingFiles(cwd: string): DiscoveryResult {
 	}
 
 	// --- Rules directories (.tallow/rules/, .claude/rules/) ---
-	const rulesDirs = [
-		path.join(cwd, ".tallow", "rules"),
-		path.join(cwd, ".claude", "rules"),
-		path.join(globalDir, "rules"),
-	];
+	const rulesDirs = allowProjectRules
+		? [
+				path.join(cwd, ".tallow", "rules"),
+				path.join(cwd, ".claude", "rules"),
+				path.join(globalDir, "rules"),
+			]
+		: [path.join(globalDir, "rules")];
 	for (const rulesDir of rulesDirs) {
 		for (const filepath of findRuleFiles(rulesDir)) {
 			const content = readFileSafe(filepath);
@@ -428,15 +432,17 @@ function collectMissingFiles(cwd: string): DiscoveryResult {
 	}
 
 	// --- Subdirectory rules (nested .tallow/rules/ and .claude/rules/) ---
-	for (const filepath of findSubdirRuleFiles(cwd)) {
-		const content = readFileSafe(filepath);
-		if (content) {
-			addDiscoveredFile(contextFiles, scopedRuleFiles, warnings, {
-				filepath,
-				content,
-				source: "subdirectory",
-				depth: filepath.split(path.sep).length,
-			});
+	if (allowProjectRules) {
+		for (const filepath of findSubdirRuleFiles(cwd)) {
+			const content = readFileSafe(filepath);
+			if (content) {
+				addDiscoveredFile(contextFiles, scopedRuleFiles, warnings, {
+					filepath,
+					content,
+					source: "subdirectory",
+					depth: filepath.split(path.sep).length,
+				});
+			}
 		}
 	}
 

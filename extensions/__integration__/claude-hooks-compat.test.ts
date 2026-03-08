@@ -162,4 +162,33 @@ describe("Claude hooks compatibility integration", () => {
 		expect(handlers).toContain("echo global-ext");
 		expect(handlers).not.toContain("echo project-ext");
 	});
+
+	it("blocks project .claude hooks when project is untrusted", () => {
+		writeJson(join(homeDir, ".claude", "settings.json"), {
+			hooks: {
+				PreToolUse: [
+					{
+						matcher: "Bash",
+						hooks: [{ type: "command", command: "echo global-claude" }],
+					},
+				],
+			},
+		});
+		writeJson(join(cwd, ".claude", "settings.json"), {
+			hooks: {
+				PreToolUse: [
+					{
+						matcher: "Bash",
+						hooks: [{ type: "command", command: "echo project-claude" }],
+					},
+				],
+			},
+		});
+
+		process.env.TALLOW_PROJECT_TRUST_STATUS = "untrusted";
+		const config = loadHooksConfig(cwd);
+		const handlers = config.tool_call?.map((entry) => entry.hooks[0]?.command);
+		expect(handlers).toContain("echo global-claude");
+		expect(handlers).not.toContain("echo project-claude");
+	});
 });

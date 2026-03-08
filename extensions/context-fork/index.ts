@@ -24,6 +24,7 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 import { isShellInterpolationEnabled } from "../_shared/shell-policy.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 import { expandShellCommands } from "../shell-interpolation/index.js";
@@ -201,6 +202,7 @@ function loadAllAgents(): Map<string, AgentConfig> {
 	const agentDir = getTallowHomeDir();
 	const userDir = path.join(agentDir, "agents");
 	const userClaudeDir = path.join(os.homedir(), ".claude", "agents");
+	const allowProjectAgents = isProjectTrusted(process.cwd());
 	const projectDir = path.join(process.cwd(), ".tallow", "agents");
 	const projectClaudeDir = path.join(process.cwd(), ".claude", "agents");
 
@@ -214,7 +216,7 @@ function loadAllAgents(): Map<string, AgentConfig> {
 	const projectSettingsPath = path.join(process.cwd(), ".tallow", "settings.json");
 	const packageDirs = [
 		...getPackageAgentDirs(globalSettingsPath),
-		...getPackageAgentDirs(projectSettingsPath),
+		...(allowProjectAgents ? getPackageAgentDirs(projectSettingsPath) : []),
 	];
 
 	// Load in priority order: bundled → packages → .claude/user → .tallow/user → .claude/project → .tallow/project
@@ -225,8 +227,10 @@ function loadAllAgents(): Map<string, AgentConfig> {
 	}
 	for (const agent of loadAgentsFromDir(userClaudeDir)) agentMap.set(agent.name, agent);
 	for (const agent of loadAgentsFromDir(userDir)) agentMap.set(agent.name, agent);
-	for (const agent of loadAgentsFromDir(projectClaudeDir)) agentMap.set(agent.name, agent);
-	for (const agent of loadAgentsFromDir(projectDir)) agentMap.set(agent.name, agent);
+	if (allowProjectAgents) {
+		for (const agent of loadAgentsFromDir(projectClaudeDir)) agentMap.set(agent.name, agent);
+		for (const agent of loadAgentsFromDir(projectDir)) agentMap.set(agent.name, agent);
+	}
 
 	return agentMap;
 }
