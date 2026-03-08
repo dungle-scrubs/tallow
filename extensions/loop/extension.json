@@ -1,0 +1,20 @@
+{
+	"name": "loop",
+	"version": "0.1.0",
+	"description": "Run a prompt on a recurring interval (/loop 5m check deploy)",
+	"whenToUse": "Use /loop to run a prompt or slash command repeatedly at a fixed interval.",
+	"capabilities": {
+		"commands": ["loop"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": false
+	},
+	"category": "automation",
+	"tags": ["loop", "recurring", "interval", "automation"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
