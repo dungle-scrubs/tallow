@@ -210,7 +210,7 @@ export class TUI extends Container {
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	public onDebug?: () => void;
 	private renderRequested = false;
-	private pendingRenderHandle?: ReturnType<typeof setImmediate>;
+	private pendingRenderHandle?: ReturnType<typeof setTimeout>;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
 	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
 	private inputBuffer = ""; // Buffer for parsing terminal responses
@@ -398,7 +398,7 @@ export class TUI extends Container {
 	stop(): void {
 		this.stopped = true;
 		if (this.pendingRenderHandle !== undefined) {
-			clearImmediate(this.pendingRenderHandle);
+			clearTimeout(this.pendingRenderHandle);
 			this.pendingRenderHandle = undefined;
 			this.renderRequested = false;
 		}
@@ -434,20 +434,24 @@ export class TUI extends Container {
 	/**
 	 * Schedule a single coalesced render in the check phase.
 	 *
-	 * Using `process.nextTick()` here lets streaming updates monopolize the event loop
-	 * because each render can queue another render before stdin polling runs. `setImmediate()`
-	 * yields to I/O first, which keeps the editor responsive while chatty models stream.
+	 * On Bun, `setImmediate` behaves like a microtask and never enters the I/O poll
+	 * phase, so stdin data callbacks are starved during streaming. `setTimeout(fn, 0)`
+	 * forces a real timer (~1ms) that guarantees I/O polling between renders.
 	 *
+	 * On Node.js, `setTimeout(0)` has a 1ms minimum delay — slightly slower than
+	 * `setImmediate` but still imperceptible (<13ms human threshold).
+	 *
+	 * @see Plan 177 — Bun setImmediate does not yield to I/O
 	 * @returns {void}
 	 */
 	private scheduleRender(): void {
 		this.renderRequested = true;
-		this.pendingRenderHandle = setImmediate(() => {
+		this.pendingRenderHandle = setTimeout(() => {
 			this.pendingRenderHandle = undefined;
 			this.renderRequested = false;
 			if (this.stopped) return;
 			this.doRender();
-		});
+		}, 0);
 	}
 
 	/** Input listener functions — called before the focused component receives input. */
