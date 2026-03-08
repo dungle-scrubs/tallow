@@ -52,4 +52,11 @@ bun test
 echo "==> Docs drift check"
 node tests/docs-drift.mjs
 
+echo "==> Changelog structure check"
+node tests/changelog-structure.mjs
+
+echo "==> Changelog sync check"
+node docs/scripts/sync-changelog.mjs
+node tests/changelog-sync.mjs
+
 echo "✅ Pre-PR checks passed"
