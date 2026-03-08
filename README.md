@@ -30,12 +30,6 @@ tallow install          # pick extensions, themes, agents
 tallow                  # start coding
 ```
 
-Or try it without installing globally:
-
-```bash
-npx tallow install      # or: pnpm dlx tallow install / bunx tallow install
-```
-
 > Requires Node.js ≥ 22 and an API key for at least one LLM provider
 > (Anthropic, OpenAI, Google, etc.)
 
