@@ -9,6 +9,8 @@
  * envelopes via the shared context-budget interop.
  */
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -57,6 +59,146 @@ const DENDRITE_HTML_MARKERS = [
 	/access denied/i,
 	/please turn javascript on/i,
 ] as const;
+
+/** Hostnames that should never be fetched by default. */
+const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"]);
+
+/** Resolver contract used by URL validation tests. */
+export type HostResolver = (hostname: string) => Promise<readonly string[]>;
+
+/** Result of validating a fetch target URL. */
+export type FetchUrlValidationResult =
+	| { readonly ok: true; readonly url: URL }
+	| { readonly ok: false; readonly reason: string };
+
+/**
+ * Check whether an IPv4 address is private, loopback, link-local, or otherwise local-only.
+ *
+ * @param address - IPv4 address literal
+ * @returns True when the address should be blocked for outbound fetches
+ */
+export function isBlockedIpv4Address(address: string): boolean {
+	const parts = address.split(".").map((part) => Number(part));
+	if (
+		parts.length !== 4 ||
+		parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+	) {
+		return false;
+	}
+
+	const [a, b] = parts as [number, number, number, number];
+	return (
+		a === 0 ||
+		a === 10 ||
+		a === 127 ||
+		(a === 169 && b === 254) ||
+		(a === 172 && b >= 16 && b <= 31) ||
+		(a === 192 && b === 168) ||
+		(a === 100 && b >= 64 && b <= 127) ||
+		(a === 192 && b === 0 && parts[2] === 0) ||
+		(a === 198 && (b === 18 || b === 19)) ||
+		a >= 224
+	);
+}
+
+/**
+ * Check whether an IPv6 address is loopback, unique-local, link-local, or unspecified.
+ *
+ * @param address - IPv6 address literal
+ * @returns True when the address should be blocked for outbound fetches
+ */
+export function isBlockedIpv6Address(address: string): boolean {
+	const normalized = address.toLowerCase();
+	return (
+		normalized === "::" ||
+		normalized === "::1" ||
+		normalized.startsWith("fc") ||
+		normalized.startsWith("fd") ||
+		normalized.startsWith("fe8") ||
+		normalized.startsWith("fe9") ||
+		normalized.startsWith("fea") ||
+		normalized.startsWith("feb")
+	);
+}
+
+/**
+ * Check whether an IP literal should be blocked by default.
+ *
+ * @param address - IPv4 or IPv6 literal
+ * @returns True when the address resolves to a local/private network target
+ */
+export function isBlockedIpAddress(address: string): boolean {
+	const version = isIP(address);
+	if (version === 4) return isBlockedIpv4Address(address);
+	if (version === 6) return isBlockedIpv6Address(address);
+	return false;
+}
+
+/**
+ * Resolve a hostname into IP addresses for SSRF validation.
+ *
+ * @param hostname - Hostname to resolve
+ * @returns All resolved IP literals
+ */
+async function resolveHostAddresses(hostname: string): Promise<readonly string[]> {
+	const results = await lookup(hostname, { all: true, verbatim: true });
+	return results.map((result) => result.address);
+}
+
+/**
+ * Validate a fetch target URL before any network call happens.
+ *
+ * Blocks unsupported schemes, credentialed URLs, localhost, `.local`, and
+ * targets that resolve to private or link-local addresses.
+ *
+ * @param rawUrl - User-provided URL string
+ * @param resolveHost - Optional host resolver for tests
+ * @returns Parsed URL when safe, otherwise a blocking reason
+ */
+export async function validateFetchUrl(
+	rawUrl: string,
+	resolveHost: HostResolver = resolveHostAddresses
+): Promise<FetchUrlValidationResult> {
+	let parsed: URL;
+	try {
+		parsed = new URL(rawUrl);
+	} catch {
+		return { ok: false, reason: "invalid URL" };
+	}
+
+	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+		return { ok: false, reason: `unsupported protocol: ${parsed.protocol}` };
+	}
+
+	if (parsed.username || parsed.password) {
+		return { ok: false, reason: "credentialed URLs are not allowed" };
+	}
+
+	const hostname = parsed.hostname.toLowerCase();
+	if (BLOCKED_HOSTNAMES.has(hostname) || hostname.endsWith(".local")) {
+		return { ok: false, reason: `blocked local hostname: ${hostname}` };
+	}
+
+	if (isBlockedIpAddress(hostname)) {
+		return { ok: false, reason: `blocked private IP address: ${hostname}` };
+	}
+
+	try {
+		const addresses = await resolveHost(hostname);
+		const blockedAddress = addresses.find((address) => isBlockedIpAddress(address));
+		if (blockedAddress) {
+			return {
+				ok: false,
+				reason: `hostname resolved to blocked private IP address: ${blockedAddress}`,
+			};
+		}
+	} catch {
+		// DNS lookup failures are handled by fetch itself. Only successful lookups
+		// participate in private-network blocking.
+	}
+
+	return { ok: true, url: parsed };
+}
 
 // ── Adaptive cap resolution (pure, exported for tests) ──────────────
 
@@ -398,8 +540,22 @@ WHEN TO USE:
 				url: params.url,
 			} satisfies WebFetchDetails;
 
+			const validation = await validateFetchUrl(params.url);
+			if (!validation.ok) {
+				const error = `Blocked URL: ${validation.reason}`;
+				return {
+					content: [{ type: "text", text: error }],
+					details: {
+						...baseDetails,
+						backend: "http",
+						error,
+						isError: true,
+					} satisfies WebFetchDetails,
+				};
+			}
+
 			try {
-				const response = await fetch(params.url, {
+				const response = await fetch(validation.url, {
 					signal,
 					headers: {
 						"User-Agent":

@@ -30,6 +30,23 @@ Rules:
 - Planner envelopes can reduce output further for safety.
 - Unknown usage states use conservative fallback caps.
 
+## Network safety
+
+`web_fetch` is limited to public `http` and `https` targets by
+default.
+
+Blocked targets include:
+
+- `localhost` and `.local` hostnames
+- loopback, link-local, and private IP ranges
+- hostnames that resolve to private or link-local addresses
+- credentialed URLs like `https://user:pass@example.com`
+- non-HTTP protocols
+
+This prevents the tool from probing local services, cloud metadata
+endpoints, and other private-network targets via prompt injection or
+misuse.
+
 ## Dendrite fallback
 
 Fallback is only attempted for `text`/`markdown` requests when plain HTTP is likely useless:
