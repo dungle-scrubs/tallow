@@ -52,8 +52,10 @@ describe("installer upgrade guidance", () => {
 		});
 
 		expect(guidance.kind).toBe("package_manager");
-		expect(guidance.commands).toEqual(["pnpm add -g tallow@latest"]);
-		expect(formatBinaryUpgradeGuidance(guidance)).toContain("pnpm add -g tallow@latest");
+		expect(guidance.commands).toEqual(["pnpm add -g @dungle-scrubs/tallow@latest"]);
+		expect(formatBinaryUpgradeGuidance(guidance)).toContain(
+			"pnpm add -g @dungle-scrubs/tallow@latest"
+		);
 	});
 
 	test("falls back to manual examples when install method is unknown", () => {
@@ -64,9 +66,9 @@ describe("installer upgrade guidance", () => {
 
 		expect(guidance.kind).toBe("unknown");
 		expect(guidance.commands).toEqual([
-			"npm install -g tallow@latest",
-			"pnpm add -g tallow@latest",
-			"bun install -g tallow@latest",
+			"npm install -g @dungle-scrubs/tallow@latest",
+			"pnpm add -g @dungle-scrubs/tallow@latest",
+			"bun add -g @dungle-scrubs/tallow@latest",
 		]);
 	});
 });
