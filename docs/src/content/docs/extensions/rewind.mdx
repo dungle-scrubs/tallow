@@ -30,7 +30,9 @@ are deleted when they are tracked or unignored.
    bash side effects without touching the user's real index.
 3. **Restore** — Uses `git checkout <ref> -- .` to atomically restore
    tracked snapshot files, then deletes files that were created after
-   the snapshot when git reports them as tracked or unignored.
+   the snapshot when git reports them as tracked or unignored. The
+   user's original git index is restored afterward so existing staged
+   work survives rewind.
 
 ## Requirements
 

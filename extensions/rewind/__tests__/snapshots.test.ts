@@ -272,6 +272,212 @@ describe("SnapshotManager", () => {
 		expect(after).toContain("staged.txt");
 	});
 
+	it("creates a turn snapshot ref even when the working tree matches HEAD", () => {
+		const result = mgr.createTurnSnapshot(1);
+		expect(result).not.toBeNull();
+		expect(result?.ref).toBe("refs/tallow/rewind/test-session/turn-1");
+
+		const snapshots = mgr.listSnapshots();
+		expect(snapshots).toHaveLength(1);
+		expect(snapshots[0]?.turnIndex).toBe(1);
+		const headSha = git(["rev-parse", "HEAD"], tmpDir);
+		expect(snapshots[0]?.sha).toBe(headSha);
+	});
+
+	it("skips temp-index snapshotting when the working tree is clean", () => {
+		const originalGitWithEnv = (
+			mgr as unknown as {
+				gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+			}
+		).gitWithEnv;
+		(
+			mgr as unknown as {
+				gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+			}
+		).gitWithEnv = () => {
+			throw new Error("gitWithEnv should not run for a clean turn snapshot");
+		};
+
+		try {
+			const result = mgr.createTurnSnapshot(1);
+			expect(result).not.toBeNull();
+			expect(result?.ref).toBe("refs/tallow/rewind/test-session/turn-1");
+		} finally {
+			(
+				mgr as unknown as {
+					gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+				}
+			).gitWithEnv = originalGitWithEnv;
+		}
+	});
+
+	it("preserves the user's staged index during restore", () => {
+		writeFileSync(join(tmpDir, "tracked.txt"), "base");
+		git(["add", "tracked.txt"], tmpDir);
+		git(["commit", "-m", "base tracked"], tmpDir);
+
+		writeFileSync(join(tmpDir, "tracked.txt"), "snapshot-state");
+		const snapResult = mgr.createTurnSnapshot(1);
+		expect(snapResult).not.toBeNull();
+
+		writeFileSync(join(tmpDir, "staged.txt"), "staged user content");
+		git(["add", "staged.txt"], tmpDir);
+		const beforeNames = git(["diff", "--cached", "--name-only"], tmpDir);
+		const beforeBlob = git(["show", ":staged.txt"], tmpDir);
+		expect(beforeNames).toContain("staged.txt");
+		expect(beforeBlob).toBe("staged user content");
+
+		writeFileSync(join(tmpDir, "tracked.txt"), "after-snapshot");
+		mgr.restoreSnapshot(snapResult?.ref);
+
+		const afterNames = git(["diff", "--cached", "--name-only"], tmpDir);
+		const afterBlob = git(["show", ":staged.txt"], tmpDir);
+		expect(afterNames).toContain("staged.txt");
+		expect(afterBlob).toBe("staged user content");
+		expect(readFileSync(join(tmpDir, "tracked.txt"), "utf-8")).toBe("snapshot-state");
+	});
+
+	// ── Error-path tests ────────────────────────────────────────
+
+	it("restoreSnapshot throws when git checkout fails", () => {
+		// Create a valid snapshot first
+		writeFileSync(join(tmpDir, "a.txt"), "v1");
+		git(["add", "a.txt"], tmpDir);
+		git(["commit", "-m", "add a"], tmpDir);
+		writeFileSync(join(tmpDir, "a.txt"), "v2");
+		const ref = mgr.createSnapshot(1);
+		expect(ref).not.toBeNull();
+
+		// Stub git() to return null for checkout commands
+		const originalGit = (mgr as unknown as { git: (args: string[]) => string | null }).git;
+		(mgr as unknown as { git: (args: string[]) => string | null }).git = (args: string[]) => {
+			if (args[0] === "checkout") return null;
+			return originalGit.call(mgr, args);
+		};
+
+		try {
+			expect(() => mgr.restoreSnapshot(ref as string)).toThrow(/git checkout failed for ref/);
+		} finally {
+			(mgr as unknown as { git: (args: string[]) => string | null }).git = originalGit;
+		}
+	});
+
+	it("createSnapshot returns null when git add -A fails", () => {
+		writeFileSync(join(tmpDir, "a.txt"), "changed");
+
+		// Stub gitWithEnv to return null (simulating git add -A failure)
+		const originalGitWithEnv = (
+			mgr as unknown as {
+				gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+			}
+		).gitWithEnv;
+
+		let writeTreeCalled = false;
+		(
+			mgr as unknown as {
+				gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+			}
+		).gitWithEnv = (args: string[], env: Record<string, string>) => {
+			if (args[0] === "add") return null;
+			if (args[0] === "write-tree") {
+				writeTreeCalled = true;
+				return originalGitWithEnv.call(mgr, args, env);
+			}
+			return originalGitWithEnv.call(mgr, args, env);
+		};
+
+		try {
+			const result = mgr.createSnapshot(1);
+			expect(result).toBeNull();
+			// write-tree should NOT have been called since add -A failed
+			expect(writeTreeCalled).toBe(false);
+		} finally {
+			(
+				mgr as unknown as {
+					gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+				}
+			).gitWithEnv = originalGitWithEnv;
+		}
+	});
+
+	it("createTurnSnapshot falls back to HEAD with headFallback flag when createSnapshot fails", () => {
+		writeFileSync(join(tmpDir, "a.txt"), "changed");
+
+		// Stub gitWithEnv to fail add -A, causing createSnapshot to return null
+		const originalGitWithEnv = (
+			mgr as unknown as {
+				gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+			}
+		).gitWithEnv;
+		(
+			mgr as unknown as {
+				gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+			}
+		).gitWithEnv = (args: string[]) => {
+			if (args[0] === "add") return null;
+			return null;
+		};
+
+		try {
+			const result = mgr.createTurnSnapshot(1);
+			expect(result).not.toBeNull();
+			expect(result?.headFallback).toBe(true);
+			expect(result?.ref).toBe("refs/tallow/rewind/test-session/turn-1");
+
+			// Verify the ref points to HEAD
+			const headSha = git(["rev-parse", "HEAD"], tmpDir);
+			const refSha = git(["rev-parse", result?.ref], tmpDir);
+			expect(refSha).toBe(headSha);
+		} finally {
+			(
+				mgr as unknown as {
+					gitWithEnv: (args: string[], env: Record<string, string>) => string | null;
+				}
+			).gitWithEnv = originalGitWithEnv;
+		}
+	});
+
+	it("createTurnSnapshot returns headFallback false for normal snapshots", () => {
+		writeFileSync(join(tmpDir, "a.txt"), "changed");
+		const result = mgr.createTurnSnapshot(1);
+		expect(result).not.toBeNull();
+		expect(result?.headFallback).toBe(false);
+		expect(result?.ref).toBe("refs/tallow/rewind/test-session/turn-1");
+	});
+
+	it("createTurnSnapshot returns headFallback false for clean working tree", () => {
+		// No changes — should directly use HEAD without fallback flag
+		const result = mgr.createTurnSnapshot(1);
+		expect(result).not.toBeNull();
+		expect(result?.headFallback).toBe(false);
+	});
+
+	it("full round-trip via createTurnSnapshot restores correct state", () => {
+		// Commit a base file
+		writeFileSync(join(tmpDir, "data.txt"), "base");
+		git(["add", "data.txt"], tmpDir);
+		git(["commit", "-m", "base data"], tmpDir);
+
+		// Modify file and snapshot at turn 1
+		writeFileSync(join(tmpDir, "data.txt"), "turn-1-state");
+		const snap1 = mgr.createTurnSnapshot(1);
+		expect(snap1).not.toBeNull();
+		expect(snap1?.headFallback).toBe(false);
+
+		// Modify file further (simulating turn 2)
+		writeFileSync(join(tmpDir, "data.txt"), "turn-2-state");
+		const snap2 = mgr.createTurnSnapshot(2);
+		expect(snap2).not.toBeNull();
+
+		// Rewind to turn 1
+		mgr.restoreSnapshot(snap1?.ref);
+		expect(readFileSync(join(tmpDir, "data.txt"), "utf-8")).toBe("turn-1-state");
+
+		// Rewind to turn 2
+		mgr.restoreSnapshot(snap2?.ref);
+		expect(readFileSync(join(tmpDir, "data.txt"), "utf-8")).toBe("turn-2-state");
+	});
+
 	it("should not pollute the reflog during snapshot creation", () => {
 		const reflogBefore = git(["reflog", "--format=%H"], tmpDir).split("\n").filter(Boolean).length;
 

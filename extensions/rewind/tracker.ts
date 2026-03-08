@@ -32,6 +32,8 @@ export interface RewindSnapshotEntry {
 	ref: string;
 	files: string[];
 	timestamp: number;
+	/** True when the snapshot fell back to HEAD because createSnapshot failed. */
+	headFallback?: boolean;
 }
 
 /** Tools that produce file modifications we can track by path. */

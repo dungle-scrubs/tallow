@@ -95,15 +95,16 @@ export default function rewind(pi: ExtensionAPI): void {
 
 		// Create snapshot regardless of tracked files — bash commands may
 		// have modified files that we didn't track via edit/write tools.
-		const ref = snapshots.createSnapshot(turnIndex);
-		if (!ref) return;
+		const snapshotResult = snapshots.createTurnSnapshot(turnIndex);
+		if (!snapshotResult) return;
 
 		// Persist snapshot metadata in the session
 		const entry: RewindSnapshotEntry = {
 			turnIndex,
-			ref,
+			ref: snapshotResult.ref,
 			files,
 			timestamp: Date.now(),
+			headFallback: snapshotResult.headFallback || undefined,
 		};
 
 		pi.appendEntry(SNAPSHOT_ENTRY_TYPE, entry);
@@ -144,20 +145,42 @@ export default function rewind(pi: ExtensionAPI): void {
 				return;
 			}
 
+			// Retrieve persisted entries to get file lists and fallback metadata
+			const entries = ctx.sessionManager.getEntries();
+			const snapshotEntries = entries
+				.filter(
+					(e): e is import("@mariozechner/pi-coding-agent").CustomEntry<RewindSnapshotEntry> =>
+						e.type === "custom" &&
+						(e as import("@mariozechner/pi-coding-agent").CustomEntry).customType ===
+							SNAPSHOT_ENTRY_TYPE
+				)
+				.map((e) => e.data)
+				.filter((d): d is RewindSnapshotEntry => d != null);
+
 			// Build turn data for the selector
 			const turnData = snapshotList.map((snap) => {
-				const entry = tracker.getAllTurns().find((t) => t.turnIndex === snap.turnIndex);
+				const trackerEntry = tracker.getAllTurns().find((t) => t.turnIndex === snap.turnIndex);
+				const snapshotEntry = snapshotEntries.find((e) => e.turnIndex === snap.turnIndex);
 				return {
 					turnIndex: snap.turnIndex,
 					ref: snap.ref,
-					files: entry?.files ?? [],
-					timestamp: entry?.timestamp ?? 0,
+					files: trackerEntry?.files ?? [],
+					timestamp: trackerEntry?.timestamp ?? 0,
+					headFallback: snapshotEntry?.headFallback ?? false,
 				};
 			});
 
 			// Show turn selector UI
 			const selected = await showTurnSelector(cmdCtx, turnData);
 			if (!selected) return;
+
+			// Warn if the selected snapshot fell back to HEAD
+			if (selected.headFallback) {
+				cmdCtx.ui.notify(
+					`⚠ Turn ${selected.turnIndex} snapshot may be incomplete — fell back to HEAD ref`,
+					"warning"
+				);
+			}
 
 			// Confirmation
 			const fileCount = selected.files.length;
