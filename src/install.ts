@@ -4,8 +4,8 @@
  * Tallow interactive installer.
  *
  * Usage:
- *   npx tallow install             (run installer from the published package)
- *   node dist/install.js           (run installer from a source checkout)
+ *   tallow install                (run installer from the published package)
+ *   node dist/install.js          (run installer from a source checkout)
  *
  * Flags:
  *   --yes, -y                Non-interactive: refresh templates and apply explicit config flags.
@@ -88,9 +88,9 @@ type BinaryUpgradeGuidance =
 	  };
 
 const GLOBAL_UPGRADE_COMMANDS = {
-	bun: "bun install -g tallow@latest",
-	npm: "npm install -g tallow@latest",
-	pnpm: "pnpm add -g tallow@latest",
+	bun: "bun add -g @dungle-scrubs/tallow@latest",
+	npm: "npm install -g @dungle-scrubs/tallow@latest",
+	pnpm: "pnpm add -g @dungle-scrubs/tallow@latest",
 } as const;
 
 // ─── Discovery ───────────────────────────────────────────────────────────────

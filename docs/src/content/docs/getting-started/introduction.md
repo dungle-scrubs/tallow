@@ -6,7 +6,7 @@ description: Why tallow exists and what it does.
 ## What is tallow?
 
 tallow is an opinionated coding agent built on pi. It bundles
-51 extensions, 8 agent profiles, 34 themes, and a skill system
+51 extensions, 9 agent templates, 34 themes, and a skill system
 into a single install. No manual extension management —
 everything ships together, ready to use.
 
@@ -42,23 +42,27 @@ and the installer's grouping. See
 [Creating Extensions](/development/creating-extensions/) for
 the full manifest spec.
 
-### Agents (8)
+### Agent templates (9)
 
-Built-in agent profiles, each with a specialized role and
-system prompt. Invoke any agent as a `/slash` command:
+Bundled agent templates are copied into `~/.tallow/agents/` by
+`tallow install`. They are user-owned files: edit them,
+override them per-project, or delete the ones you do not want.
+Each template becomes a `/agent:<name>` slash command.
 
-| Agent | Purpose |
-|-------|---------|
-| `/architect` | High-level architecture — plans before coding |
-| `/debug` | Methodical root cause analysis |
-| `/planner` | Read-only planning from context and requirements |
-| `/refactor` | Improve code structure without changing behavior |
-| `/reviewer` | Code review for quality and security |
-| `/scout` | Fast codebase recon for handoff to other agents |
-| `/worker` | General-purpose agent with full capabilities |
+| Template | Slash command | Purpose |
+|----------|---------------|---------|
+| `architect` | `/agent:architect` | High-level architecture — plans before coding |
+| `debug` | `/agent:debug` | Methodical root cause analysis |
+| `explore` | `/agent:explore` | Cheap, read-only codebase discovery |
+| `planner` | `/agent:planner` | Read-only planning from context and requirements |
+| `refactor` | `/agent:refactor` | Improve code structure without changing behavior |
+| `reviewer` | `/agent:reviewer` | Code review for quality and security |
+| `scout` | `/agent:scout` | Fast codebase recon for handoff to other agents |
+| `tallow-expert` | `/agent:tallow-expert` | Tallow codebase internals, extensions, and configuration |
+| `worker` | `/agent:worker` | General-purpose agent with full capabilities |
 
-Some agents restrict their tool access (e.g. `planner` and
-`reviewer` are read-only) to enforce their role.
+Some templates restrict their tool access (e.g. `explore`,
+`planner`, and `reviewer`) to enforce their role.
 
 ### Themes (34)
 

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/dungle-scrubs/tallow/actions/workflows/ci.yml">CI</a> ·
-  <a href="https://www.npmjs.com/package/tallow">npm</a> ·
+  <a href="https://www.npmjs.com/package/@dungle-scrubs/tallow">npm</a> ·
   <a href="https://tallow.dungle-scrubs.com">Docs</a> ·
   <a href="https://opensource.org/licenses/MIT">MIT</a>
 </p>
@@ -18,15 +18,15 @@
 ---
 
 Tallow is a terminal coding agent that starts minimal and scales up. Install only the
-extensions, themes, and agents your project needs, or enable everything. It drops into
+extensions, themes, and agent templates your project needs, or enable everything. It drops into
 existing Claude Code projects via `.claude/` bridging, so nothing breaks when you switch.
-Ships with 51 extensions, 34 themes, and 10 specialized agents.
+Ships with 51 extensions, 34 themes, and 9 bundled agent templates.
 
 ## Quick start
 
 ```bash
 bun add -g @dungle-scrubs/tallow
-tallow install          # pick extensions, themes, agents
+tallow install          # pick extensions, themes, agent templates
 tallow                  # start coding
 ```
 
@@ -44,7 +44,7 @@ bun run build
 node dist/install.js
 ```
 
-The installer walks you through selecting extensions, themes, and agents,
+The installer walks you through selecting extensions, themes, and agent templates,
 then writes config and starter templates into `~/.tallow/`.
 
 </details>
