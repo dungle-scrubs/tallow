@@ -12,7 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Api, AssistantMessage, Model } from "@mariozechner/pi-ai";
 import { completeSimple } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -104,6 +104,29 @@ function getIndexer(): SessionIndexer {
 		indexer = new SessionIndexer(dbPath);
 	}
 	return indexer;
+}
+
+/**
+ * Resolve the effective project filter for session recall.
+ *
+ * By default, recall is scoped to the current project's basename to avoid
+ * leaking unrelated project history. Callers can override that scope by
+ * passing an explicit `project` value.
+ *
+ * @param project - Explicit project filter from tool params
+ * @param cwd - Current working directory for deriving the default project
+ * @returns Explicit project filter, derived current project name, or undefined
+ */
+export function resolveProjectFilter(project: string | undefined, cwd: string): string | undefined {
+	if (typeof project === "string" && project.trim().length > 0) {
+		return project.trim();
+	}
+
+	const trimmedCwd = cwd.trim();
+	if (!trimmedCwd) return undefined;
+
+	const derivedProject = basename(trimmedCwd);
+	return derivedProject.length > 0 ? derivedProject : undefined;
 }
 
 /**
@@ -237,8 +260,8 @@ export default function (pi: ExtensionAPI) {
 			"Search and recall relevant context from previous tallow sessions. " +
 			"Use when the user references something discussed in a prior session, or when you need " +
 			"historical context about decisions, plans, or designs. Returns curated, filtered " +
-			"excerpts — not raw search results. Searches across all sessions for the current project " +
-			"by default, or specify a project name to search elsewhere.",
+			"excerpts — not raw search results. Defaults to the current project; specify a project " +
+			"name to search elsewhere.",
 		parameters: SessionRecallParams,
 
 		renderResult(result, _options, theme) {
@@ -287,6 +310,7 @@ export default function (pi: ExtensionAPI) {
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { query, looking_for, project, date_from, date_to } = params;
+			const projectFilter = resolveProjectFilter(project, ctx.cwd);
 
 			try {
 				// ── 1. Discover all session directories ────────────────────────
@@ -314,10 +338,10 @@ export default function (pi: ExtensionAPI) {
 				// ── 3. Search ──────────────────────────────────────────────────
 				ctx.ui.setWorkingMessage("Searching sessions…");
 				const results = idx.search(query, {
-					project,
 					dateFrom: date_from,
 					dateTo: date_to,
 					limit: 15,
+					project: projectFilter,
 				});
 
 				if (results.length === 0) {
@@ -326,7 +350,9 @@ export default function (pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `No matching sessions found for "${query}"${project ? ` in project "${project}"` : ""}.`,
+								text:
+									`No matching sessions found for "${query}"` +
+									`${projectFilter ? ` in project "${projectFilter}"` : ""}.`,
 							},
 						],
 						details: {
