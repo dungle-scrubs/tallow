@@ -42,6 +42,23 @@ export {
 	TALLOW_VERSION,
 } from "./config.js";
 export {
+	createTelemetryHandle,
+	extractTraceContextFromEnv,
+	injectTraceContextToEnv,
+	modelAttributes,
+	promptAttributes,
+	sessionAttributes,
+	subagentAttributes,
+	type TallowSpanAttributes,
+	type TallowSpanName,
+	type TallowTelemetryConfig,
+	TELEMETRY_API_CHANNELS,
+	type TelemetryHandle,
+	type TraceContextCarrier,
+	teammateAttributes,
+	toolAttributes,
+} from "./otel.js";
+export {
 	type ClaudePluginManifest,
 	type ClaudePluginResources,
 	clearPluginCache,

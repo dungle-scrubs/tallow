@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **otel:** opt-in OpenTelemetry distributed tracing via `telemetry` option
+  in `TallowSessionOptions`. Emits `tallow.*` spans for session lifecycle,
+  prompt turns, tool calls, and model invocations. All span attributes are
+  metadata-only — no prompt text, tool payloads, or secrets are captured.
+  Zero-cost no-op when disabled
+- **otel:** W3C `traceparent`/`tracestate` propagation through CLI env and
+  subagent child processes for cross-process trace continuity
+- **otel:** safe attribute builders (`sessionAttributes`, `promptAttributes`,
+  `modelAttributes`, `toolAttributes`, `subagentAttributes`,
+  `teammateAttributes`) with CWD hashing and redaction guarantees
+- **otel:** event bus telemetry handle sharing so extensions can access trace
+  context without direct coupling
+
 ### Fixed
 
 - **rewind:** windowed turn selector using `ctx.ui.custom()` — `/rewind`

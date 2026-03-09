@@ -38,6 +38,14 @@ import {
 	TALLOW_VERSION,
 } from "./config.js";
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
+import {
+	createTelemetryHandle,
+	extractTraceContextFromEnv,
+	sessionAttributes,
+	type TallowTelemetryConfig,
+	TELEMETRY_API_CHANNELS,
+	type TelemetryHandle,
+} from "./otel.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
 import {
 	extractClaudePluginResources,
@@ -145,6 +153,19 @@ export interface TallowSessionOptions {
 
 	/** Settings overrides */
 	settings?: Record<string, unknown>;
+
+	/**
+	 * OpenTelemetry configuration for distributed tracing.
+	 *
+	 * When provided, tallow emits `tallow.*` spans for session lifecycle,
+	 * model calls, tool execution, subagent runs, and teammate sessions.
+	 * All span attributes are metadata-only — no prompt text, tool payloads,
+	 * or secrets are captured.
+	 *
+	 * Requires `@opentelemetry/api` (peer dependency). When omitted,
+	 * telemetry is completely disabled with zero runtime overhead.
+	 */
+	telemetry?: TallowTelemetryConfig;
 }
 
 /** Marker key used on summarized historical tool results. */
@@ -934,6 +955,9 @@ export interface TallowSession {
 
 	/** Session ID (UUID or user-provided) for programmatic chaining */
 	sessionId: string;
+
+	/** Session-scoped telemetry handle for OTEL span creation. */
+	telemetry: TelemetryHandle;
 }
 
 /** Catalog entry for a bundled extension shipped with tallow. */
@@ -1406,6 +1430,17 @@ export async function createTallowSession(
 	applyProjectTrustContextToEnv(projectTrust);
 	const eventBus = createEventBus();
 
+	// ── Telemetry ────────────────────────────────────────────────────────────
+	// Create session-scoped telemetry handle. When config is absent this is a
+	// zero-cost no-op. Incoming trace context from env enables CLI continuation.
+
+	const incomingTraceContext = options.telemetry ? extractTraceContextFromEnv() : null;
+	const telemetry = await createTelemetryHandle(
+		options.telemetry,
+		TALLOW_VERSION,
+		incomingTraceContext
+	);
+
 	// ── Auth & Models ────────────────────────────────────────────────────────
 
 	const authPath = join(tallowHome, "auth.json");
@@ -1606,6 +1641,7 @@ export async function createTallowSession(
 			createContextBudgetPlannerExtension(contextBudgetPolicy),
 			detectOutputTruncation,
 			createProjectTrustExtension(cwd, projectTrust),
+			createTelemetryExtension(telemetry, cwd),
 			...(explicitToolRestrictionNames
 				? [createExplicitToolRestrictionExtension(explicitToolRestrictionNames)]
 				: []),
@@ -1751,6 +1787,7 @@ export async function createTallowSession(
 		extensionOverrides,
 		resolvedPlugins,
 		sessionId: sessionManager.getSessionId(),
+		telemetry,
 	};
 }
 
@@ -1922,6 +1959,90 @@ function discoverExtensionDirs(baseDir: string): string[] {
 		// Directory doesn't exist or isn't readable
 	}
 	return paths;
+}
+
+/**
+ * Create a built-in extension that instruments session lifecycle with OTEL spans.
+ *
+ * Publishes the telemetry handle via event bus so other extensions (subagent,
+ * teams) can access it for trace context propagation. Instruments:
+ * - session_start / session_end → session span
+ * - turn_start / turn_end → prompt spans
+ * - tool_call / tool_result → tool spans
+ * - model selection and compaction events
+ *
+ * All instrumentation is zero-cost when telemetry is disabled (no-op handle).
+ *
+ * @param telemetry - Session-scoped telemetry handle
+ * @param cwd - Working directory for session attributes
+ * @returns Extension factory
+ */
+function createTelemetryExtension(telemetry: TelemetryHandle, cwd: string): ExtensionFactory {
+	return (pi: ExtensionAPI): void => {
+		// Track active spans for proper lifecycle management.
+		let sessionSpan: import("@opentelemetry/api").Span | null = null;
+		let promptSpan: import("@opentelemetry/api").Span | null = null;
+		const toolSpans = new Map<string, import("@opentelemetry/api").Span>();
+
+		// Publish the telemetry handle via event bus for extensions.
+		const publishTelemetryApi = (): void => {
+			pi.events.emit(TELEMETRY_API_CHANNELS.api, { handle: telemetry });
+		};
+
+		pi.events.on(TELEMETRY_API_CHANNELS.apiRequest, publishTelemetryApi);
+
+		// ── Session Lifecycle ────────────────────────────────────────────────
+
+		pi.on("session_start", async (_event, ctx) => {
+			publishTelemetryApi();
+
+			const sessionId = ctx.sessionManager.getSessionId();
+			sessionSpan = telemetry.startSpan("tallow.session.create", sessionAttributes(sessionId, cwd));
+		});
+
+		pi.on("agent_end", async () => {
+			if (sessionSpan) {
+				sessionSpan.end();
+				sessionSpan = null;
+			}
+		});
+
+		// ── Prompt / Turn ────────────────────────────────────────────────────
+
+		pi.on("turn_start", async (event) => {
+			promptSpan = telemetry.startSpan("tallow.prompt", {
+				"tallow.prompt.turn_index": event.turnIndex,
+			});
+		});
+
+		pi.on("turn_end", async () => {
+			if (promptSpan) {
+				promptSpan.end();
+				promptSpan = null;
+			}
+		});
+
+		// ── Tool Calls ───────────────────────────────────────────────────────
+
+		pi.on("tool_call", async (event) => {
+			const span = telemetry.startSpan("tallow.tool.call", {
+				"tallow.tool.name": event.toolName,
+				"tallow.tool.call_id": event.toolCallId,
+			});
+			toolSpans.set(event.toolCallId, span);
+		});
+
+		pi.on("tool_result", async (event) => {
+			const span = toolSpans.get(event.toolCallId);
+			if (span) {
+				if (event.isError) {
+					span.setStatus?.({ code: 2, message: "tool_error" });
+				}
+				span.end();
+				toolSpans.delete(event.toolCallId);
+			}
+		});
+	};
 }
 
 /**

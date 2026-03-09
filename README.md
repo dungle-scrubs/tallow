@@ -206,6 +206,24 @@ await session.prompt("What files are in this directory?");
 session.dispose();
 ```
 
+#### OpenTelemetry tracing
+
+Opt-in distributed tracing for SDK consumers (e.g. marrow):
+
+```typescript
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import { createTallowSession } from "tallow";
+
+const provider = new NodeTracerProvider();
+const { session } = await createTallowSession({
+  telemetry: { tracerProvider: provider },
+});
+// Spans: tallow.session.create, tallow.prompt, tallow.tool.call, ...
+```
+
+CLI subprocesses propagate `TRACEPARENT`/`TRACESTATE` automatically when
+telemetry is enabled. Zero overhead when disabled.
+
 See the [SDK docs](https://tallow.dungle-scrubs.com) for all options.
 
 ## Known limitations

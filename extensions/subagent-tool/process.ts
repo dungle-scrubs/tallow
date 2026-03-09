@@ -13,6 +13,11 @@ import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DEFAULT_AGENT_RUNNER_ENV, spawnWithResolvedAgentRunner } from "../../src/agent-runner.js";
+import {
+	injectTraceContextToEnv,
+	TELEMETRY_API_CHANNELS,
+	type TelemetryHandle,
+} from "../../src/otel.js";
 import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitWorktreeLifecycleEvent,
@@ -57,12 +62,37 @@ import {
 /** Reference to pi extension API, for sendMessage from async completion handlers. */
 let _piRef: ExtensionAPI | null = null;
 
+/** Session-scoped telemetry handle for trace context propagation. */
+let _telemetryHandle: TelemetryHandle | null = null;
+
 /**
  * Set the pi extension API reference for async completion handlers.
  * @param pi - Extension API reference
  */
 export function setPiRef(pi: ExtensionAPI | null): void {
 	_piRef = pi;
+}
+
+/**
+ * Set the telemetry handle for trace context propagation to child processes.
+ *
+ * @param handle - Telemetry handle from session, or null to clear
+ */
+export function setTelemetryHandle(handle: TelemetryHandle | null): void {
+	_telemetryHandle = handle;
+}
+
+/**
+ * Inject trace context into a child process environment when telemetry is active.
+ *
+ * @param env - Child process environment to mutate
+ */
+function injectTraceContextIfActive(env: Record<string, string>): void {
+	if (!_telemetryHandle?.enabled) return;
+	const carrier = _telemetryHandle.getTraceContext();
+	if (carrier) {
+		injectTraceContextToEnv(carrier, env);
+	}
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -721,6 +751,7 @@ export async function spawnBackgroundSubagent(
 	if (agent.mcpServers && agent.mcpServers.length > 0) {
 		childEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
 	}
+	injectTraceContextIfActive(childEnv);
 
 	const backgroundSpawn = await spawnWithResolvedAgentRunner({
 		args,
@@ -1202,6 +1233,7 @@ export async function runSingleAgent(
 		if (agent.mcpServers && agent.mcpServers.length > 0) {
 			fgChildEnv.PI_MCP_SERVERS = agent.mcpServers.join(",");
 		}
+		injectTraceContextIfActive(fgChildEnv);
 
 		let fgTurnCount = 0;
 		const foregroundSpawn = await spawnWithResolvedAgentRunner({

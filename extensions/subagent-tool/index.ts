@@ -52,6 +52,7 @@ import {
 	type OnUpdateCallback,
 	runSingleAgent,
 	setPiRef,
+	setTelemetryHandle,
 	spawnBackgroundSubagent,
 } from "./process.js";
 import type { IsolationMode, SubagentCompleteDetails } from "./schema.js";
@@ -135,11 +136,23 @@ export default function (pi: ExtensionAPI) {
 		})
 	);
 
-	// Also clear on session start
+	// Also clear on session start; acquire telemetry handle for trace propagation.
 	pi.on("session_start", async (_event, ctx) => {
 		setUiContext(ctx);
 		clearAllSubagents(pi.events);
 		publishSubagentSnapshot(pi.events);
+
+		// Request telemetry handle for subprocess trace context injection.
+		const { TELEMETRY_API_CHANNELS } = await import("../../src/otel.js");
+		const onTelemetryApi = (payload: unknown): void => {
+			if (payload && typeof payload === "object" && "handle" in payload) {
+				setTelemetryHandle(
+					(payload as { handle: import("../../src/otel.js").TelemetryHandle }).handle
+				);
+			}
+		};
+		pi.events.on(TELEMETRY_API_CHANNELS.api, onTelemetryApi);
+		pi.events.emit(TELEMETRY_API_CHANNELS.apiRequest, {});
 	});
 
 	// Kill all running background subagents on interrupt (agent_end).
