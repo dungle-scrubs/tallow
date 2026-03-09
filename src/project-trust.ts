@@ -30,10 +30,21 @@ export interface ProjectTrustContext {
 	readonly status: ProjectTrustStatus;
 }
 
-/** On-disk trust store entry for a single project. */
+/** Persisted trust schema version for fingerprints written by this build. */
+const PROJECT_TRUST_SCHEMA_VERSION = 2;
+
+/** In-memory trust store entry for a single project. */
 interface ProjectTrustStoreEntry {
 	readonly fingerprint: string;
 	readonly trustedAt: string;
+	readonly version: number | null;
+}
+
+/** Serialized trust store entry written to disk. */
+interface PersistedProjectTrustStoreEntry {
+	readonly fingerprint: string;
+	readonly trustedAt: string;
+	readonly version?: number;
 }
 
 /** Parsed trust store keyed by canonical project path. */
@@ -78,6 +89,64 @@ function getTrustStoreDir(): string {
 }
 
 /**
+ * Build a current-schema trust store entry.
+ *
+ * @param fingerprint - Current trust fingerprint
+ * @param trustedAt - Original trust approval timestamp
+ * @returns Current-schema trust store entry
+ */
+function createCurrentTrustStoreEntry(
+	fingerprint: string,
+	trustedAt: string
+): ProjectTrustStoreEntry {
+	return {
+		fingerprint,
+		trustedAt,
+		version: PROJECT_TRUST_SCHEMA_VERSION,
+	};
+}
+
+/**
+ * Return true when a stored trust entry predates the current schema.
+ *
+ * @param entry - Trust store entry to inspect
+ * @returns True when the entry should be migrated forward
+ */
+function shouldMigrateTrustStoreEntry(entry: ProjectTrustStoreEntry): boolean {
+	if (entry.version === null) return true;
+	return entry.version < PROJECT_TRUST_SCHEMA_VERSION;
+}
+
+/**
+ * Convert an in-memory trust store to its persisted JSON representation.
+ *
+ * Legacy entries omit the `version` key to preserve their original shape
+ * unless they are explicitly migrated.
+ *
+ * @param store - Trust store to serialize
+ * @returns JSON-safe trust store object
+ */
+function serializeTrustStore(
+	store: ProjectTrustStore
+): Record<string, PersistedProjectTrustStoreEntry> {
+	const persisted: Record<string, PersistedProjectTrustStoreEntry> = {};
+	for (const [key, entry] of Object.entries(store)) {
+		persisted[key] =
+			typeof entry.version === "number"
+				? {
+						fingerprint: entry.fingerprint,
+						trustedAt: entry.trustedAt,
+						version: entry.version,
+					}
+				: {
+						fingerprint: entry.fingerprint,
+						trustedAt: entry.trustedAt,
+					};
+	}
+	return persisted;
+}
+
+/**
  * Load the project trust store from disk.
  *
  * Corrupt or unreadable data is treated as an empty store to fail closed.
@@ -96,9 +165,13 @@ function loadTrustStore(): ProjectTrustStore {
 		const store: ProjectTrustStore = {};
 		for (const [key, value] of Object.entries(parsed)) {
 			if (!value || typeof value !== "object") continue;
-			const entry = value as Partial<ProjectTrustStoreEntry>;
+			const entry = value as Partial<PersistedProjectTrustStoreEntry>;
 			if (typeof entry.fingerprint !== "string" || typeof entry.trustedAt !== "string") continue;
-			store[key] = { fingerprint: entry.fingerprint, trustedAt: entry.trustedAt };
+			store[key] = {
+				fingerprint: entry.fingerprint,
+				trustedAt: entry.trustedAt,
+				version: typeof entry.version === "number" ? entry.version : null,
+			};
 		}
 		return store;
 	} catch {
@@ -121,7 +194,7 @@ function saveTrustStore(store: ProjectTrustStore): void {
 		if (!existsSync(trustDir)) {
 			mkdirSync(trustDir, { recursive: true });
 		}
-		const json = JSON.stringify(store, null, "\t");
+		const json = JSON.stringify(serializeTrustStore(store), null, "\t");
 		atomicWriteFileSync(getTrustStorePath(), `${json}\n`);
 	} catch {
 		// Persist failures leave trust ephemeral for this process but do not
@@ -322,7 +395,7 @@ export function computeProjectFingerprint(canonicalCwd: string): string {
 	const projectConfigDir = join(canonicalCwd, ".tallow");
 	const projectClaudeDir = join(canonicalCwd, ".claude");
 
-	hash.update("tallow-project-trust/v2\n");
+	hash.update(`tallow-project-trust/v${PROJECT_TRUST_SCHEMA_VERSION}\n`);
 
 	hashSettingsFile(
 		hash,
@@ -433,18 +506,36 @@ export function resolveProjectTrust(cwd: string): ProjectTrustContext {
 	const fingerprint = computeProjectFingerprint(canonicalCwd);
 	const store = loadTrustStore();
 	const entry = store[canonicalCwd] ?? null;
-	const storedFingerprint = entry?.fingerprint ?? null;
 
-	let status: ProjectTrustStatus;
 	if (!entry) {
-		status = "untrusted";
-	} else if (entry.fingerprint === fingerprint) {
-		status = "trusted";
-	} else {
-		status = "stale_fingerprint";
+		return {
+			canonicalCwd,
+			fingerprint,
+			storedFingerprint: null,
+			status: "untrusted",
+		};
 	}
 
-	return { canonicalCwd, fingerprint, storedFingerprint, status };
+	if (shouldMigrateTrustStoreEntry(entry)) {
+		const migratedEntry = createCurrentTrustStoreEntry(fingerprint, entry.trustedAt);
+		store[canonicalCwd] = migratedEntry;
+		saveTrustStore(store);
+		return {
+			canonicalCwd,
+			fingerprint,
+			storedFingerprint: migratedEntry.fingerprint,
+			status: "trusted",
+		};
+	}
+
+	const status: ProjectTrustStatus =
+		entry.fingerprint === fingerprint ? "trusted" : "stale_fingerprint";
+	return {
+		canonicalCwd,
+		fingerprint,
+		storedFingerprint: entry.fingerprint,
+		status,
+	};
 }
 
 /**
@@ -459,10 +550,7 @@ export function trustProject(cwd: string): ProjectTrustContext {
 	const fingerprint = computeProjectFingerprint(canonicalCwd);
 	const store = loadTrustStore();
 
-	store[canonicalCwd] = {
-		fingerprint,
-		trustedAt: new Date().toISOString(),
-	};
+	store[canonicalCwd] = createCurrentTrustStoreEntry(fingerprint, new Date().toISOString());
 
 	saveTrustStore(store);
 
