@@ -1616,7 +1616,9 @@ export async function createTallowSession(
 
 	if (projectTrust.status !== "trusted") {
 		console.error(
-			"\x1b[33m⚠ Project is untrusted — repo-controlled execution surfaces are blocked until /trust-project\x1b[0m"
+			projectTrust.status === "stale_fingerprint"
+				? "\x1b[33m⚠ Project trust is stale — repo-controlled execution surfaces are blocked until /trust-project\x1b[0m"
+				: "\x1b[33m⚠ Project is untrusted — repo-controlled execution surfaces are blocked until /trust-project\x1b[0m"
 		);
 	}
 

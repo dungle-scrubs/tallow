@@ -41,6 +41,7 @@ describe("formatProjectTrustBanner", () => {
 		expect(banner).toContain("└");
 		expect(banner).toContain("PROJECT TRUST REQUIRED");
 		expect(banner).toContain("This project is currently untrusted.");
+		expect(banner).toContain("commands");
 		expect(banner).toContain("Trusting this folder means trusting the code and config inside it.");
 		expect(banner).toContain("Use /trust-project to enable these surfaces for this folder.");
 	});

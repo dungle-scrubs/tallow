@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **rewind:** windowed turn selector using `ctx.ui.custom()` — `/rewind`
   with 35+ turns no longer overflows the terminal viewport. The list is
   now windowed with scroll indicators and keyboard navigation wrapping
+- **trust:** migrate legacy project trust entries so previously trusted
+  folders do not false-positive as stale after trust fingerprint upgrades
 
 ### Added
 
