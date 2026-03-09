@@ -16,6 +16,7 @@ import {
 	APP_NAME,
 	bootstrap,
 	isDemoMode,
+	PACKAGE_DIR,
 	sanitizePath,
 	TALLOW_HOME,
 	TALLOW_VERSION,
@@ -45,6 +46,7 @@ import {
 	SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { Command, Option } from "commander";
+import { maybeAutoRebuildCurrentCli } from "./cli-auto-rebuild.js";
 import {
 	type BundledExtensionCatalogEntry,
 	createTallowSession,
@@ -157,6 +159,7 @@ program
 		runExtensionsCommand(id, options);
 	});
 
+maybeAutoRebuildCurrentCli({ packageDir: PACKAGE_DIR });
 program.parse();
 
 // ─── Main ────────────────────────────────────────────────────────────────────
