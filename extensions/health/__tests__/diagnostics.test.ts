@@ -37,12 +37,18 @@ function makeInput(overrides: Partial<DiagnosticInput> = {}): DiagnosticInput {
 		context: { tokens: 5000, contextWindow: 200000, percent: 2.5, status: "OK" },
 		tools: { activeCount: 10, totalCount: 15, activeNames: ["read", "bash", "edit"] },
 		environment: {
-			tallowVersion: "0.2.0",
+			buildFreshness: "unknown",
+			executablePath: "/tmp/pkg/dist/cli.js",
+			executableRealpath: "/tmp/pkg/dist/cli.js",
+			installMode: "published_package",
+			packageDir: "/tmp/pkg",
+			packageRealpath: "/tmp/pkg",
 			piVersion: "0.52.12",
 			nodeVersion: "v22.0.0",
 			platform: "darwin/arm64",
 			tallowHome: tmpDir,
-			packageDir: "/tmp/pkg",
+			tallowVersion: "0.2.0",
+			staleGroups: [],
 		},
 		tallowHome: tmpDir,
 		cwd: tmpDir,
@@ -103,6 +109,30 @@ describe("runDiagnostics", () => {
 		);
 		const ctxCheck = checks.find((c) => c.name === "Context");
 		expect(ctxCheck?.status).toBe("fail");
+	});
+
+	test("warns when a linked local build is stale", () => {
+		const checks = runDiagnostics(
+			makeInput({
+				environment: {
+					buildFreshness: "stale",
+					executablePath: "/tmp/pkg/bin/tallow",
+					executableRealpath: "/tmp/pkg/dist/cli.js",
+					installMode: "linked_local_checkout",
+					packageDir: "/tmp/pkg",
+					packageRealpath: "/tmp/pkg",
+					piVersion: "0.52.12",
+					nodeVersion: "v22.0.0",
+					platform: "darwin/arm64",
+					tallowHome: tmpDir,
+					tallowVersion: "0.2.0",
+					staleGroups: ["core"],
+				},
+			})
+		);
+		const buildCheck = checks.find((c) => c.name === "Build");
+		expect(buildCheck?.status).toBe("warn");
+		expect(buildCheck?.message).toContain("stale");
 	});
 
 	test("warns context when in warning range", () => {

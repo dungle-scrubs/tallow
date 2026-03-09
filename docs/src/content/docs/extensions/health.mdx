@@ -15,7 +15,7 @@ box as a tree-style layout covering seven sections:
 | **Tools** | Active vs total count, active tool names |
 | **Commands** | Registered count with per-source breakdown |
 | **Extensions** | Active theme name |
-| **Environment** | Tallow version, framework version, Node version, platform, home and package directories |
+| **Environment** | Tallow version, framework version, Node version, platform, install mode, build freshness, executable path, and home/package directories |
 
 ## Commands
 
@@ -38,6 +38,23 @@ The output adapts to terminal width:
 
 Long values (e.g. tool lists) are truncated with `…` to prevent
 overflow.
+
+## Runtime provenance
+
+The **Environment** section also shows how the current CLI was
+launched:
+
+- **Install** — `published package`, `linked local checkout`, or
+  `source checkout`
+- **Build** — whether a local checkout is `fresh` or `stale`
+- **Exec / Exec→** — the invoked executable path and its resolved
+  realpath
+- **Package / Package→** — the configured package directory and its
+  resolved realpath
+
+This is the quickest way to confirm whether `tallow` is running from
+an installed package or a linked local checkout with stale `dist/`
+output.
 
 ## Context status
 
