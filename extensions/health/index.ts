@@ -15,6 +15,7 @@ import type {
 	Theme,
 } from "@mariozechner/pi-coding-agent";
 import { BorderedBox, ROUNDED, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { resolveRuntimeProvenance } from "../../src/runtime-provenance.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -66,12 +67,18 @@ interface HealthDetails {
 		readonly themeOrUnknown: string;
 	};
 	readonly environment: {
-		readonly tallowVersion: string;
+		readonly buildFreshness: "fresh" | "stale" | "unknown";
+		readonly executablePath: string;
+		readonly executableRealpath: string;
+		readonly installMode: "linked_local_checkout" | "published_package" | "source_checkout";
+		readonly packageDir: string;
+		readonly packageRealpath: string;
 		readonly piVersion: string;
 		readonly nodeVersion: string;
 		readonly platform: string;
 		readonly tallowHome: string;
-		readonly packageDir: string;
+		readonly tallowVersion: string;
+		readonly staleGroups: readonly string[];
 	};
 	readonly diagnostics: readonly DiagnosticCheck[];
 }
@@ -119,6 +126,30 @@ function formatTokens(count: number): string {
 	if (count < 10_000) return `${(count / 1000).toFixed(1)}k`;
 	if (count < 1_000_000) return `${Math.round(count / 1000)}k`;
 	return `${(count / 1_000_000).toFixed(1)}M`;
+}
+
+/**
+ * Convert a runtime install mode into readable health output.
+ * @param installMode - Runtime install mode
+ * @returns Human-readable install mode label
+ */
+function formatInstallMode(installMode: HealthDetails["environment"]["installMode"]): string {
+	if (installMode === "linked_local_checkout") return "linked local checkout";
+	if (installMode === "published_package") return "published package";
+	return "source checkout";
+}
+
+/**
+ * Convert build freshness and stale groups into readable health output.
+ * @param environment - Environment details from the health payload
+ * @returns Human-readable build freshness label
+ */
+function formatBuildFreshness(environment: HealthDetails["environment"]): string {
+	if (environment.buildFreshness === "unknown") return "n/a";
+	if (environment.buildFreshness === "fresh") return "fresh";
+	return environment.staleGroups.length > 0
+		? `stale (${environment.staleGroups.join(", ")})`
+		: "stale";
 }
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
@@ -203,8 +234,13 @@ function buildSections(d: HealthDetails): Section[] {
 		{ label: "Pi", value: d.environment.piVersion, last: false },
 		{ label: "Node", value: d.environment.nodeVersion, last: false },
 		{ label: "Platform", value: d.environment.platform, last: false },
+		{ label: "Install", value: formatInstallMode(d.environment.installMode), last: false },
+		{ label: "Build", value: formatBuildFreshness(d.environment), last: false },
+		{ label: "Exec", value: d.environment.executablePath, last: false },
+		{ label: "Exec→", value: d.environment.executableRealpath, last: false },
 		{ label: "Home", value: d.environment.tallowHome, last: false },
-		{ label: "Package", value: d.environment.packageDir, last: true },
+		{ label: "Package", value: d.environment.packageDir, last: false },
+		{ label: "Package→", value: d.environment.packageRealpath, last: true },
 	];
 
 	const diagnosticRows = d.diagnostics.map((check, i) => {
@@ -531,7 +567,29 @@ export function runDiagnostics(input: DiagnosticInput): DiagnosticCheck[] {
 		checks.push({ name: "Node", status: "pass", message: input.environment.nodeVersion });
 	}
 
-	// 6. Settings file exists
+	// 6. Local runtime build freshness
+	if (input.environment.buildFreshness === "stale") {
+		checks.push({
+			name: "Build",
+			status: "warn",
+			message: `Local build is stale (${input.environment.staleGroups.join(", ")})`,
+			suggestion: "Re-run `tallow` or run `bun run build` in the checkout",
+		});
+	} else if (input.environment.installMode === "linked_local_checkout") {
+		checks.push({
+			name: "Build",
+			status: "pass",
+			message: "Linked local checkout is up to date",
+		});
+	} else if (input.environment.installMode === "source_checkout") {
+		checks.push({
+			name: "Build",
+			status: "pass",
+			message: "Source checkout build is up to date",
+		});
+	}
+
+	// 7. Settings file exists
 	const settingsPath = join(input.tallowHome, "settings.json");
 	if (existsSync(settingsPath)) {
 		try {
@@ -549,7 +607,7 @@ export function runDiagnostics(input: DiagnosticInput): DiagnosticCheck[] {
 		checks.push({ name: "Settings", status: "pass", message: "Using defaults" });
 	}
 
-	// 7. Project context files
+	// 8. Project context files
 	const hasAgents = existsSync(join(input.cwd, "AGENTS.md"));
 	const hasClaude = existsSync(join(input.cwd, "CLAUDE.md"));
 	if (hasAgents || hasClaude) {
@@ -683,13 +741,20 @@ export default function healthExtension(pi: ExtensionAPI): void {
 		};
 
 		// ── Environment ──────────────────────────────────────────────
+		const runtimeProvenance = resolveRuntimeProvenance({ packageDir });
 		const environmentData = {
-			tallowVersion,
+			buildFreshness: runtimeProvenance.buildFreshness,
+			executablePath: runtimeProvenance.executablePath ?? "unknown",
+			executableRealpath: runtimeProvenance.executableRealpath ?? "unknown",
+			installMode: runtimeProvenance.installMode,
+			packageDir: runtimeProvenance.packageDir,
+			packageRealpath: runtimeProvenance.packageRealpath,
 			piVersion,
 			nodeVersion: process.version,
 			platform: `${process.platform}/${process.arch}`,
 			tallowHome,
-			packageDir,
+			tallowVersion,
+			staleGroups: runtimeProvenance.staleGroups,
 		};
 
 		// ── Diagnostics ──────────────────────────────────────────────
