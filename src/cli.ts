@@ -36,7 +36,7 @@ registerFatalErrorHandlers();
 const cleanupSessionRef = registerProcessCleanup();
 
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import {
@@ -124,6 +124,8 @@ program
 	.option("--home", "Print Tallow home directory")
 	.option("--demo", "Demo mode: hide sensitive info (paths, session IDs) for recordings")
 	.option("--debug", "Enable debug diagnostic logging")
+	.option("--append-system-prompt <text>", "Append text or file contents to the system prompt")
+	.option("--system-prompt <text>", "Override the system prompt entirely")
 	.addOption(new Option("--init").hideHelp())
 	.addOption(new Option("--init-only").hideHelp())
 	.addOption(new Option("--maintenance").hideHelp())
@@ -162,6 +164,28 @@ program
 maybeAutoRebuildCurrentCli({ packageDir: PACKAGE_DIR });
 program.parse();
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve a prompt input that may be inline text or a file path.
+ * Matches pi framework behavior: if the value is a valid file path, reads it;
+ * otherwise returns the string as-is.
+ *
+ * @param input - Inline text or path to a file containing the prompt
+ * @returns Resolved prompt text, or undefined if input is undefined
+ */
+function resolvePromptInput(input: string | undefined): string | undefined {
+	if (!input) return undefined;
+	if (existsSync(input)) {
+		try {
+			return readFileSync(input, "utf-8");
+		} catch {
+			return input;
+		}
+	}
+	return input;
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 /**
@@ -172,6 +196,7 @@ program.parse();
  */
 async function run(opts: {
 	allowedTools?: string[];
+	appendSystemPrompt?: string;
 	continue?: boolean;
 	debug?: boolean;
 	demo?: boolean;
@@ -193,6 +218,7 @@ async function run(opts: {
 	resume?: string;
 	session?: boolean;
 	sessionId?: string;
+	systemPrompt?: string;
 	thinking?: string;
 	tools?: string;
 	worktree?: boolean;
@@ -273,8 +299,13 @@ async function run(opts: {
 		process.exit(1);
 	}
 
+	// Resolve --append-system-prompt / --system-prompt (supports file paths, matching pi behavior)
+	const resolvedAppendSystemPrompt = resolvePromptInput(opts.appendSystemPrompt);
+	const resolvedSystemPrompt = resolvePromptInput(opts.systemPrompt);
+
 	const sessionOpts: TallowSessionOptions = {
 		additionalExtensions: resolvedExtensionPaths.length > 0 ? resolvedExtensionPaths : undefined,
+		appendSystemPrompt: resolvedAppendSystemPrompt,
 		// apiKey resolved from TALLOW_API_KEY env var inside createTallowSession
 		extensionsOnly: opts.extensionsOnly,
 		modelId,
@@ -282,6 +313,7 @@ async function run(opts: {
 		noBundledSkills: opts.extensions === false,
 		plugins: opts.pluginDir,
 		provider,
+		systemPrompt: resolvedSystemPrompt,
 	};
 
 	let sessionWorktreePath: string | undefined;
