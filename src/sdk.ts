@@ -772,6 +772,79 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ─── Shared Skills Resolution ────────────────────────────────────────────────
+
+/**
+ * Resolve shared skill directory paths from global settings.
+ *
+ * Reads `sharedSkillsDirs` from global settings (project settings are
+ * intentionally ignored — shared skills are a user-level concept).
+ * Each entry is tilde-expanded and validated:
+ *
+ * - Must be an absolute path (after `~` expansion)
+ * - Must exist on disk
+ * - Must be a directory
+ *
+ * Invalid entries emit a warning to stderr and are silently skipped.
+ *
+ * @param globalSettings - Global settings record (may include `sharedSkillsDirs`)
+ * @returns Array of validated, resolved directory paths
+ */
+export function resolveSharedSkillsDirs(
+	globalSettings: Record<string, unknown> | undefined
+): string[] {
+	if (!globalSettings) return [];
+	const raw = globalSettings.sharedSkillsDirs;
+	if (!Array.isArray(raw)) return [];
+
+	const home = homedir();
+	const resolved: string[] = [];
+
+	for (const entry of raw) {
+		if (typeof entry !== "string" || !entry.trim()) {
+			console.error("\x1b[33m⚠ sharedSkillsDirs: entries must be non-empty strings\x1b[0m");
+			continue;
+		}
+
+		const trimmed = entry.trim();
+		let expanded: string;
+		if (trimmed === "~") {
+			expanded = home;
+		} else if (trimmed.startsWith("~/")) {
+			expanded = join(home, trimmed.slice(2));
+		} else if (trimmed.startsWith("/")) {
+			expanded = trimmed;
+		} else {
+			console.error(
+				`\x1b[33m⚠ sharedSkillsDirs: "${trimmed}" must be an absolute path or start with ~/\x1b[0m`
+			);
+			continue;
+		}
+
+		if (!existsSync(expanded)) {
+			// Silently skip non-existent directories — the user may not have
+			// created the shared skills dir yet, and that's fine.
+			continue;
+		}
+
+		try {
+			const stats = statSync(expanded);
+			if (!stats.isDirectory()) {
+				console.error(
+					`\x1b[33m⚠ sharedSkillsDirs: "${expanded}" exists but is not a directory\x1b[0m`
+				);
+				continue;
+			}
+		} catch {
+			continue;
+		}
+
+		resolved.push(expanded);
+	}
+
+	return resolved;
+}
+
 /**
  * Estimate UTF-8 bytes for JSON-serializable details payloads.
  *
@@ -1497,10 +1570,17 @@ export async function createTallowSession(
 		runtimeSettings: options.settings,
 	});
 
+	// ── Shared Skills ────────────────────────────────────────────────────────
+	// Global-only setting: project settings cannot inject shared skill dirs.
+
+	const sharedSkillsDirs = resolveSharedSkillsDirs(
+		settingsManager.getGlobalSettings() as Record<string, unknown>
+	);
+
 	// ── Resource Loader ──────────────────────────────────────────────────────
 
 	const additionalExtensionPaths: string[] = [];
-	const additionalSkillPaths: string[] = [];
+	const additionalSkillPaths: string[] = [...sharedSkillsDirs];
 	const additionalPromptPaths: string[] = [];
 	const additionalThemePaths: string[] = [];
 	const extensionsOnly = options.extensionsOnly === true;
