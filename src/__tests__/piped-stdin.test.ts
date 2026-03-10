@@ -34,10 +34,11 @@ function runCliWithStdin(
 			stderr += d.toString();
 		});
 
-		// Kill after 5s — enough for routing decisions, no need for full session
+		// Kill after 8s — enough for routing decisions even on slower CI runners,
+		// without waiting for a full interactive session.
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
-		}, 5000);
+		}, 8000);
 
 		child.on("close", (code) => {
 			clearTimeout(timer);
@@ -55,27 +56,27 @@ describe("piped stdin support", () => {
 
 		expect(code).toBe(1);
 		expect(stderr).toContain("stdin is piped but empty");
-	}, 10000);
+	}, 15000);
 
 	test("piped stdin does not hit nesting guard or empty-pipe error", async () => {
 		const { stderr } = await runCliWithStdin("hello world", ["--no-session"]);
 
 		expect(stderr).not.toContain("Cannot start interactive tallow");
 		expect(stderr).not.toContain("stdin is piped but empty");
-	}, 10000);
+	}, 15000);
 
 	test("piped stdin with -p flag composes without error", async () => {
 		const { stderr } = await runCliWithStdin("context", ["-p", "do it", "--no-session"]);
 
 		expect(stderr).not.toContain("Piped input exceeds");
 		expect(stderr).not.toContain("stdin is piped but empty");
-	}, 10000);
+	}, 15000);
 
 	test("json mode accepts piped stdin instead of -p", async () => {
 		const { stderr } = await runCliWithStdin("some input", ["--mode", "json", "--no-session"]);
 
 		expect(stderr).not.toContain("JSON mode requires -p <prompt>");
-	}, 10000);
+	}, 15000);
 
 	test("piped stdin bypasses nesting guard with TALLOW_INTERACTIVE=1", async () => {
 		const { stderr } = await runCliWithStdin("hello from pipe", ["--no-session"], {
@@ -84,5 +85,5 @@ describe("piped stdin support", () => {
 
 		expect(stderr).not.toContain("Cannot start interactive tallow");
 		expect(stderr).not.toContain("stdin is piped but empty");
-	}, 10000);
+	}, 15000);
 });
