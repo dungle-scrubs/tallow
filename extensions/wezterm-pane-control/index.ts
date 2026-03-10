@@ -424,6 +424,11 @@ function runOrThrow(runCli: WeztermCliRunner, args: readonly string[]): string {
 /**
  * Build system-prompt guidance for WezTerm pane control behavior.
  *
+ * Encodes a bg_bash-first policy: panes are the exception, not the default.
+ * Long-running processes (dev servers, watchers, builds) should use bg_bash.
+ * Panes are reserved for explicit user requests, interactive TTYs, and
+ * sensitive output that the LLM must not see.
+ *
  * @param currentPaneId - Current WezTerm pane ID
  * @returns Guidance block appended to the system prompt
  */
@@ -435,16 +440,23 @@ export function buildWeztermPaneGuidance(currentPaneId: number): string {
 		"Use the wezterm_pane tool to manage panes: split, close, focus, zoom, resize, send/read text, or spawn new tabs.",
 		'Use action "list" to see panes in the current tab.',
 		"",
-		"## When to use a pane",
+		"## Default: use bg_bash, not panes",
 		"",
-		"Spawn a pane or tab when a command needs something bash/bg_bash cannot provide:",
-		"- Interactive TTY (Rich progress bars, TUI apps, curses UIs, interactive prompts)",
-		"- Long-running process the user wants to visually monitor in a separate pane",
-		"- Process that needs a proper shell environment",
+		"For long-running processes (dev servers, watchers, builds, tests, compilers),",
+		"use `bg_bash` with `background: true`. Monitor output with `task_output`.",
+		"This is the default — do NOT open a pane unless one of the exceptions below applies.",
 		"",
-		"When it is clear a command needs a TTY, just create the pane and run it — do not ask.",
-		"When it is ambiguous whether a pane is needed, use ask_user_question to let the user decide.",
-		"For simple commands that work fine in bash/bg_bash, prefer those — do not over-use panes.",
+		"## When to open a pane (exceptions only)",
+		"",
+		"Open a pane or tab ONLY when one of these is true:",
+		"",
+		'1. **User explicitly requests it** — they said "open a pane", "split", "new tab", or similar.',
+		"2. **Interactive TTY required** — the process needs keystroke input, a curses/TUI interface,",
+		"   or renders progress bars that require a real terminal (not just stdout lines).",
+		"3. **Sensitive output** — the command will display secrets, tokens, or passwords that the LLM",
+		"   must not see. Spawn the pane, send the command, but do NOT read_text the output.",
+		"",
+		"If uncertain whether a pane is needed, use bg_bash. Do not open a pane speculatively.",
 		"",
 		"## Sending commands",
 		"",
