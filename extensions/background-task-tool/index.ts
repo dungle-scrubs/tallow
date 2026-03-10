@@ -25,9 +25,7 @@ import {
 	type Theme,
 } from "@mariozechner/pi-coding-agent";
 import {
-	Container,
 	Key,
-	Loader,
 	matchesKey,
 	Text,
 	type TUI,
@@ -35,7 +33,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { getIcon, getSpinner } from "../_icons/index.js";
+import { getIcon } from "../_icons/index.js";
 import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitInteropEvent,
@@ -128,11 +126,8 @@ let piRef: ExtensionAPI | null = null;
  */
 const promotedAbortControllers = new Map<string, AbortController>();
 
-// TUI reference captured at session_start for Loader in renderResult
+// TUI reference captured at session_start for widgets
 let tuiRef: TUI | null = null;
-
-// Persistent Loader instances per streaming task (avoids leaking intervals)
-const activeLoaders = new Map<string, InstanceType<typeof Loader>>();
 
 // In-memory task registry (published via typed interop events)
 const tasks = new Map<string, BackgroundTask>();
@@ -465,7 +460,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	piEventsRef = pi.events;
 	piRef = pi;
 
-	// Register inline result renderer for fire-and-forget task completions
+	// Register inline result renderer for background task completions
 	pi.registerMessageRenderer<BgTaskCompleteDetails>(
 		"background-task-complete",
 		(message, _options, theme) => {
@@ -511,10 +506,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	);
 
 	/**
-	 * Post an inline notification when a fire-and-forget task completes.
-	 *
+	 * Post an inline notification when a background task completes.
 	 * Checks the inlineAgentResults setting before posting.
-	 * Only fires for fire-and-forget tasks (background: true).
 	 *
 	 * @param task - Completed background task
 	 * @returns void
@@ -544,12 +537,21 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		});
 	}
 
+	/** Debounce timer for widget updates during rapid output. */
+	let widgetDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Minimum interval between widget re-renders (milliseconds). */
+	const WIDGET_DEBOUNCE_MS = 150;
+
+	/** Maximum tail lines per task in the widget. */
+	const WIDGET_TAIL_LINES = 3;
+
 	/**
 	 * Updates the status bar indicator for running background tasks.
+	 *
 	 * @param ctx - Extension context for UI access
 	 */
-	function updateWidget(ctx: ExtensionContext): void {
-		// Guard: ctx.ui may be undefined if context is stale (e.g., from async callback after shutdown)
+	function updateStatusBar(ctx: ExtensionContext): void {
 		if (!ctx?.ui) return;
 
 		const running = [...tasks.values()].filter((t) => t.status === "running");
@@ -559,8 +561,60 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		// Status bar only - widget is rendered by tasks extension
 		ctx.ui.setStatus("bg-tasks", `${FG_PURPLE}⚙ ${running.length} bg${RESET_ALL}`);
+	}
+
+	/**
+	 * Render the bottom widget showing live output from running background tasks.
+	 * Shows each running task with a compact command preview and tail output.
+	 * Placed above the editor so async work is visible without cluttering the chat.
+	 *
+	 * @param ctx - Extension context for widget access
+	 */
+	function updateTaskWidget(ctx: ExtensionContext): void {
+		if (!ctx?.ui) return;
+
+		const running = [...tasks.values()].filter((t) => t.status === "running");
+
+		if (running.length === 0) {
+			ctx.ui.setWidget("bg-tasks", undefined);
+			return;
+		}
+
+		const lines: string[] = [];
+		for (const task of running) {
+			const elapsed = formatDuration(Date.now() - task.startTime);
+			const cmd = truncateCommand(task.command, 50);
+			const lineCount = task.output.join("").split("\n").length;
+			const header = `${FG_PURPLE}⚙${RESET_ALL} ${FG_WHITE}${cmd}${RESET_ALL} ${FG_PURPLE_MUTED}(${elapsed}, ${lineCount} lines)${RESET_ALL}`;
+			lines.push(header);
+
+			// Show tail output lines
+			const fullOutput = task.output.join("");
+			if (fullOutput.length > 0) {
+				const outputLines = fullOutput.split("\n").filter((l) => l.trim().length > 0);
+				const tail = outputLines.slice(-WIDGET_TAIL_LINES);
+				for (const line of tail) {
+					const clean = line.length > 80 ? `${line.slice(0, 79)}…` : line;
+					lines.push(`  ${FG_PURPLE_MUTED}│${RESET_ALL} ${FG_PURPLE_MUTED}${clean}${RESET_ALL}`);
+				}
+			}
+		}
+
+		ctx.ui.setWidget("bg-tasks", lines, { placement: "aboveEditor" });
+	}
+
+	/**
+	 * Debounced widget update — called from onData to avoid thrashing renders.
+	 *
+	 * @param ctx - Extension context for widget access
+	 */
+	function debouncedWidgetUpdate(ctx: ExtensionContext): void {
+		if (widgetDebounceTimer) return;
+		widgetDebounceTimer = setTimeout(() => {
+			widgetDebounceTimer = null;
+			updateTaskWidget(ctx);
+		}, WIDGET_DEBOUNCE_MS);
 	}
 
 	/**
@@ -570,7 +624,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	 * @returns void
 	 */
 	function syncTaskState(ctx: ExtensionContext): void {
-		updateWidget(ctx);
+		updateStatusBar(ctx);
+		updateTaskWidget(ctx);
 		publishBackgroundTaskSnapshot(pi.events);
 	}
 
@@ -608,7 +663,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		name: "bg_bash",
 		label: "bg_bash",
 		description:
-			"Run a bash command in the background. By default, streams live output and waits for completion. Set background=true for fire-and-forget daemons/servers.\n\nWHEN TO USE:\n- Starting daemons or servers (with background: true)\n- Long-running builds or tests (default: streams output)\n- Any process you want to run independently\n\nWARNING: Never use bash tool with & to background processes - it will hang. Use bg_bash instead.",
+			"Run a bash command in the background. Returns immediately without blocking. Output streams to a bottom widget visible to the user.\n\nWHEN TO USE:\n- Starting daemons or servers\n- Long-running builds or tests\n- Any process you want to run independently\n\nThe command runs asynchronously. Use task_status/task_output to check results.\n\nWARNING: Never use bash tool with & to background processes - it will hang. Use bg_bash instead.",
 		parameters: Type.Object({
 			command: Type.String({
 				description: "Bash command to run in background",
@@ -620,15 +675,13 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			),
 			background: Type.Optional(
 				Type.Boolean({
-					description:
-						"If true, return immediately without streaming output. Use for daemons/servers.",
+					description: "Deprecated — bg_bash always runs in background. Ignored.",
 				})
 			),
 		}),
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const taskId = generateTaskId();
 			const cwd = ctx.cwd;
-			const fireAndForget = params.background === true;
 
 			const task: BackgroundTask = {
 				id: taskId,
@@ -658,7 +711,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				registerPid(child.pid, params.command);
 			}
 
-			// Buffer output (and stream if not fire-and-forget)
+			// Buffer output and update widget (never blocks the agent)
 			const onData = (data: Buffer) => {
 				// Guard: ignore data arriving after task is no longer running
 				if (task.status !== "running") return;
@@ -673,14 +726,8 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					}
 				}
 
-				// Stream live updates to the TUI
-				if (!fireAndForget) {
-					const output = task.output.join("");
-					onUpdate?.({
-						content: [{ type: "text", text: output || "(no output yet)" }],
-						details: { taskId },
-					});
-				}
+				// Update the bottom widget with live output (debounced)
+				debouncedWidgetUpdate(ctx);
 			};
 
 			const lifecycle = createProcessLifecycle({
@@ -702,7 +749,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 					task.process = null;
 					syncTaskState(ctx);
 				},
-				signal: fireAndForget ? undefined : signal,
+				signal: undefined,
 				timeoutMs: params.timeout && params.timeout > 0 ? params.timeout * 1000 : undefined,
 			});
 
@@ -746,65 +793,25 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 				syncTaskState(ctx);
 			};
 
-			// Fire-and-forget: return immediately
-			if (fireAndForget) {
-				void lifecycle.waitForExit().then((result) => {
-					applyLifecycleResult({
-						...(result.type === "close" ? { code: result.code } : {}),
-						...(result.type === "error" ? { error: result.error } : {}),
-						type: result.type,
-					});
-					postInlineResult(task);
+			// Always non-blocking: return immediately, process runs in background
+			void lifecycle.waitForExit().then((result) => {
+				applyLifecycleResult({
+					...(result.type === "close" ? { code: result.code } : {}),
+					...(result.type === "error" ? { error: result.error } : {}),
+					type: result.type,
 				});
-				lifecycle.detach();
-				syncTaskState(ctx);
-				lastCompletedPoll = null;
-
-				return {
-					details: { taskId, command: params.command, fireAndForget: true },
-					content: [
-						{
-							type: "text",
-							text: `Background task started (fire-and-forget).\nTask ID: ${taskId}\nCommand: ${params.command}\nUse task_output("${taskId}") to check later.`,
-						},
-					],
-				};
-			}
-
-			// Streaming mode: wait for process to complete
-			syncTaskState(ctx);
-
-			const lifecycleResult = await lifecycle.waitForExit();
-			applyLifecycleResult({
-				...(lifecycleResult.type === "close" ? { code: lifecycleResult.code } : {}),
-				...(lifecycleResult.type === "error" ? { error: lifecycleResult.error } : {}),
-				type: lifecycleResult.type,
+				postInlineResult(task);
 			});
-
-			// Stop and clean up the persistent Loader for this task
-			const loader = activeLoaders.get(taskId);
-			if (loader) {
-				loader.stop();
-				activeLoaders.delete(taskId);
-			}
-
-			const output = task.output.join("");
-			const duration = formatDuration((task.endTime || Date.now()) - task.startTime);
+			lifecycle.detach();
+			syncTaskState(ctx);
 			lastCompletedPoll = null;
 
 			return {
-				details: {
-					taskId,
-					command: params.command,
-					status: task.status,
-					duration,
-					exitCode: task.exitCode,
-					output,
-				},
+				details: { taskId, command: params.command },
 				content: [
 					{
 						type: "text",
-						text: output || "(no output)",
+						text: `Background task started.\nTask ID: ${taskId}\nCommand: ${params.command}\nUse task_status("${taskId}") to check progress.\nUse task_output("${taskId}") to retrieve output.`,
 					},
 				],
 			};
@@ -812,149 +819,22 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 		renderCall(args, theme) {
 			const cmd = truncateCommand(args.command as string, 60);
-			const bg = args.background ? formatPresentationText(theme, "meta", " (detached)") : "";
 			return new Text(
 				formatPresentationText(theme, "title", "bg_bash ") +
-					formatPresentationText(theme, "action", cmd) +
-					bg,
+					formatPresentationText(theme, "action", cmd),
 				0,
 				0
 			);
 		},
 
-		renderResult(result, { expanded, isPartial }, theme) {
-			const details = result.details as
-				| {
-						fireAndForget?: boolean;
-						taskId?: string;
-						status?: string;
-						duration?: string;
-						exitCode?: number | null;
-				  }
-				| undefined;
-
-			// Fire-and-forget: compact one-liner
-			if (details?.fireAndForget) {
-				return renderLines([
-					formatPresentationText(theme, "status_success", "⚙ Started (detached)"),
-				]);
-			}
-
-			const COLLAPSED_LINES = 10;
-			const EXPANDED_LINES = 50;
-
-			// Extract output (available during streaming via onUpdate and after completion)
-			const text = result.content[0];
-			const output = text?.type === "text" ? text.text : "";
-
-			// While running: show streamed output + loader spinner at bottom
-			if (isPartial) {
-				const container = new Container();
-
-				if (output) {
-					const allLines = output.split("\n").filter((l: string) => l.length > 0);
-					const maxLines = COLLAPSED_LINES;
-					const truncated = allLines.length > maxLines;
-					const tail = truncated ? allLines.slice(-maxLines) : allLines;
-					const lines: string[] = [];
-					if (truncated) {
-						appendSection(lines, [
-							formatPresentationText(
-								theme,
-								"meta",
-								`... ${allLines.length - maxLines} more lines above`
-							),
-						]);
-					}
-					appendSection(
-						lines,
-						tail.map((line) => styleBackgroundOutputLine(theme, line))
-					);
-					container.addChild(renderLines(lines, { wrap: true }));
-				}
-
-				// Reuse persistent Loader (one per task, avoids leaking intervals)
-				const tid = details?.taskId ?? "__bg_default";
-				let loader = activeLoaders.get(tid);
-				if (!loader && tuiRef) {
-					loader = new Loader(
-						tuiRef,
-						(s) => theme.fg("warning", s),
-						(s) => theme.fg("muted", s),
-						"Running..."
-					);
-					(loader as unknown as Record<string, string[]>).frames = getSpinner();
-					activeLoaders.set(tid, loader);
-				}
-				if (loader) {
-					container.addChild(loader);
-				} else {
-					container.addChild(
-						new Text(formatPresentationText(theme, "status_warning", "Running..."), 0, 0)
-					);
-				}
-
-				return container;
-			}
-
-			// Completed: show output
-			if (!output) return renderLines([formatPresentationText(theme, "meta", "(no output)")]);
-
-			const allLines = output.split("\n").filter((l: string) => l.length > 0);
-			const maxLines = expanded ? EXPANDED_LINES : COLLAPSED_LINES;
-			const truncated = allLines.length > maxLines;
-			const tail = truncated ? allLines.slice(-maxLines) : allLines;
-			const lines: string[] = [];
-
-			if (truncated) {
-				appendSection(lines, [
-					formatPresentationText(
-						theme,
-						"meta",
-						`... ${allLines.length - maxLines} more lines above`
-					),
-				]);
-			}
-			appendSection(
-				lines,
-				tail.map((line) => styleBackgroundOutputLine(theme, line))
-			);
-			if (truncated && !expanded) {
-				appendSection(lines, [
-					`${formatPresentationText(theme, "meta", `... ${allLines.length - maxLines} more lines`)} ${formatPresentationText(theme, "hint", keyHint("expandTools", "to expand"))}`,
-				]);
-			}
-
-			if (details?.status) {
-				const statusIcon =
-					details.status === "completed"
-						? getIcon("success")
-						: details.status === "running"
-							? getIcon("in_progress")
-							: getIcon("error");
-				const statusRole =
-					details.status === "completed"
-						? "status_success"
-						: details.status === "running"
-							? "status_warning"
-							: "status_error";
-				const statusMetaParts: string[] = [];
-				if (details.exitCode !== null && details.exitCode !== undefined) {
-					statusMetaParts.push(`exit ${details.exitCode}`);
-				}
-				if (details.duration) statusMetaParts.push(details.duration);
-				const statusMeta = statusMetaParts.length > 0 ? ` (${statusMetaParts.join(", ")})` : "";
-				appendSection(
-					lines,
-					[
-						formatPresentationText(theme, statusRole, `${statusIcon} bg_bash ${details.status}`) +
-							formatPresentationText(theme, "meta", statusMeta),
-					],
-					{ blankBefore: true }
-				);
-			}
-
-			return renderLines(lines, { wrap: expanded });
+		renderResult(result, _opts, theme) {
+			// bg_bash always returns immediately — compact one-liner
+			const details = result.details as { taskId?: string; command?: string } | undefined;
+			const taskId = details?.taskId ?? "?";
+			return renderLines([
+				formatPresentationText(theme, "status_success", `⚙ Started`) +
+					formatPresentationText(theme, "meta", ` → task_output("${taskId}")`),
+			]);
 		},
 	});
 
@@ -1812,14 +1692,13 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		interopStateRequestCleanup = undefined;
 	});
 
-	// Capture TUI reference and update status on session start
+	// Capture TUI reference and initialize on session start
 	pi.on("session_start", async (_event, ctx) => {
-		// Capture TUI via a throwaway widget so Loader can be used in renderResult
+		// Capture TUI via a throwaway widget for requestRender access
 		ctx.ui.setWidget("bg-tasks-tui-capture", (tui, _theme) => {
 			tuiRef = tui;
 			return { render: () => [], invalidate: () => {} };
 		});
-		// Immediately remove — we just needed the reference
 		ctx.ui.setWidget("bg-tasks-tui-capture", undefined);
 
 		ctx.ui.setStatus("bg-tasks", undefined);
