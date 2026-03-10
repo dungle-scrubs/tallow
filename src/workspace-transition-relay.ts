@@ -1,5 +1,5 @@
 /**
- * Unix-socket relay for workspace transitions.
+ * IPC relay for workspace transitions.
  *
  * The parent interactive session starts a relay server. Child processes
  * (subagents, headless runs) inherit the socket path via env and can
@@ -20,8 +20,17 @@ import {
 /** Env var holding the parent relay socket path for child processes. */
 export const TRANSITION_RELAY_SOCKET_ENV = "TALLOW_TRANSITION_RELAY_SOCKET";
 
+/** Windows named-pipe prefix for Node IPC endpoints. */
+const WINDOWS_NAMED_PIPE_PREFIX = "\\\\.\\pipe\\";
+
 /** Timeout for relay client requests in milliseconds. */
 const RELAY_REQUEST_TIMEOUT_MS = 60_000;
+
+/** Running relay server handle returned to callers. */
+export interface TransitionRelayServer {
+	readonly socketPath: string;
+	readonly cleanup: () => void;
+}
 
 /** Wire format for relay requests (newline-delimited JSON). */
 interface RelayRequestPayload {
@@ -29,6 +38,53 @@ interface RelayRequestPayload {
 	readonly sourceCwd: string;
 	readonly targetCwd: string;
 	readonly initiator: "command" | "tool";
+}
+
+/**
+ * Build the IPC endpoint used by the workspace-transition relay.
+ *
+ * Windows requires named pipes rather than filesystem `.sock` paths.
+ * Non-Windows platforms continue to use a temp-file Unix socket.
+ *
+ * @param platformName - Platform to build the endpoint for
+ * @param processId - Process ID included in the endpoint name
+ * @param tempDirectory - Temp directory for Unix socket files
+ * @returns Platform-appropriate IPC endpoint string
+ */
+export function buildTransitionRelaySocketPath(
+	platformName: NodeJS.Platform = process.platform,
+	processId = process.pid,
+	tempDirectory = tmpdir()
+): string {
+	if (platformName === "win32") {
+		return `${WINDOWS_NAMED_PIPE_PREFIX}tallow-relay-${processId}`;
+	}
+
+	return join(tempDirectory, `tallow-relay-${processId}.sock`);
+}
+
+/**
+ * Determine whether a relay endpoint is backed by a normal filesystem path.
+ *
+ * Named pipes are not regular files and must not be cleaned up with
+ * `unlinkSync()`.
+ *
+ * @param socketPath - Relay endpoint string
+ * @returns True when the endpoint is a normal filesystem path
+ */
+export function isFilesystemRelaySocketPath(socketPath: string): boolean {
+	return !socketPath.startsWith(WINDOWS_NAMED_PIPE_PREFIX);
+}
+
+/**
+ * Normalize unknown relay startup errors into real `Error` objects.
+ *
+ * @param error - Unknown thrown value
+ * @returns Normalized error instance
+ */
+function normalizeRelayStartupError(error: unknown): Error {
+	if (error instanceof Error) return error;
+	return new Error(String(error));
 }
 
 /**
@@ -76,7 +132,7 @@ async function handleRelayConnection(
 }
 
 /**
- * Start a Unix-socket relay server for workspace transitions.
+ * Start an IPC relay server for workspace transitions.
  *
  * Called by the parent interactive session. Child processes discover the
  * socket path via `TALLOW_TRANSITION_RELAY_SOCKET` and connect to request
@@ -85,17 +141,19 @@ async function handleRelayConnection(
  * @param getUI - Factory returning the parent-side UI for approval prompts
  * @returns Socket path and cleanup function
  */
-export function createTransitionRelayServer(getUI: () => WorkspaceTransitionUI): {
-	readonly socketPath: string;
-	readonly cleanup: () => void;
-} {
-	const socketPath = join(tmpdir(), `tallow-relay-${process.pid}.sock`);
+export function createTransitionRelayServer(
+	getUI: () => WorkspaceTransitionUI
+): TransitionRelayServer {
+	const socketPath = buildTransitionRelaySocketPath();
 
-	// Remove stale socket from a crashed session.
-	try {
-		if (existsSync(socketPath)) unlinkSync(socketPath);
-	} catch {
-		// Best-effort.
+	// Remove stale filesystem sockets from crashed sessions. Named pipes are
+	// kernel objects, not normal files, so file-based cleanup is invalid there.
+	if (isFilesystemRelaySocketPath(socketPath)) {
+		try {
+			if (existsSync(socketPath)) unlinkSync(socketPath);
+		} catch {
+			// Best-effort.
+		}
 	}
 
 	const server: Server = createServer((conn) => {
@@ -118,13 +176,39 @@ export function createTransitionRelayServer(getUI: () => WorkspaceTransitionUI):
 		cleanup: () => {
 			delete process.env[TRANSITION_RELAY_SOCKET_ENV];
 			server.close();
-			try {
-				unlinkSync(socketPath);
-			} catch {
-				// Best-effort.
+			if (isFilesystemRelaySocketPath(socketPath)) {
+				try {
+					unlinkSync(socketPath);
+				} catch {
+					// Best-effort.
+				}
 			}
 		},
 	};
+}
+
+/**
+ * Attempt to start the workspace-transition relay without making startup fatal.
+ *
+ * @param getUI - Factory returning the parent-side UI for approval prompts
+ * @param onError - Optional callback invoked when relay startup fails
+ * @param createRelayServer - Injectable factory used by tests
+ * @returns Relay server handle when startup succeeds, otherwise null
+ */
+export function tryCreateTransitionRelayServer(
+	getUI: () => WorkspaceTransitionUI,
+	onError?: (error: Error) => void,
+	createRelayServer: (
+		getUI: () => WorkspaceTransitionUI
+	) => TransitionRelayServer = createTransitionRelayServer
+): TransitionRelayServer | null {
+	try {
+		return createRelayServer(getUI);
+	} catch (error) {
+		delete process.env[TRANSITION_RELAY_SOCKET_ENV];
+		onError?.(normalizeRelayStartupError(error));
+		return null;
+	}
 }
 
 /**
@@ -139,7 +223,7 @@ export function getRelaySocketPath(): string | undefined {
 /**
  * Request a workspace transition via the parent session's relay server.
  *
- * @param socketPath - Unix socket path of the relay server
+ * @param socketPath - IPC endpoint of the relay server
  * @param sourceCwd - Current working directory before transition
  * @param targetCwd - Target working directory after transition
  * @param initiator - Whether the request came from a command or tool

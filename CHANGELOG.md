@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CLI launch before restarting into the fresh build
 - **trust:** migrate legacy project trust entries so previously trusted
   folders do not false-positive as stale after trust fingerprint upgrades
+- **workspace-transition:** use Windows named pipes for the child-process relay
+  and degrade gracefully when relay startup is unavailable
 
 ### Added
 
