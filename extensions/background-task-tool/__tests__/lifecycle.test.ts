@@ -196,54 +196,70 @@ describe("Background task tool registration", () => {
 	});
 });
 
-// ── bg_bash streaming mode ───────────────────────────────────────────────────
+// ── bg_bash always-async mode ─────────────────────────────────────────────────
 
-describe("bg_bash streaming mode", () => {
-	it("runs a simple command and captures output", async () => {
+describe("bg_bash always-async mode", () => {
+	it("returns immediately with task ID", async () => {
 		const bgBash = getTool(harness, "bg_bash");
 		const result = await execTool(bgBash, { command: "echo hello world" });
 
-		expect(firstText(result)).toContain("hello world");
-		const details = result.details as { status?: string; exitCode?: number };
-		expect(details.status).toBe("completed");
-		expect(details.exitCode).toBe(0);
+		const details = result.details as { taskId?: string };
+		expect(details.taskId).toBeDefined();
+		expect(details.taskId).toMatch(/^bg_/);
+		expect(firstText(result)).toContain("Task ID:");
+	});
+
+	it("captures output retrievable via task_output", async () => {
+		const bgBash = getTool(harness, "bg_bash");
+		const taskOutput = getTool(harness, "task_output");
+
+		const run = await execTool(bgBash, { command: "echo hello world" });
+		const taskId = (run.details as { taskId: string }).taskId;
+
+		// Wait for process to complete
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		const output = await execTool(taskOutput, { taskId });
+		expect(firstText(output)).toContain("hello world");
 	});
 
 	it("captures exit code from failing commands", async () => {
 		const bgBash = getTool(harness, "bg_bash");
-		const result = await execTool(bgBash, { command: "exit 42" });
+		const taskStatus = getTool(harness, "task_status");
 
-		const details = result.details as { status?: string; exitCode?: number };
+		const run = await execTool(bgBash, { command: "exit 42" });
+		const taskId = (run.details as { taskId: string }).taskId;
+
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		const status = await execTool(taskStatus, { taskId });
+		const details = status.details as { status?: string; exitCode?: number };
 		expect(details.status).toBe("failed");
 		expect(details.exitCode).toBe(42);
 	});
 
-	it("reports duration in result details", async () => {
-		const bgBash = getTool(harness, "bg_bash");
-		const result = await execTool(bgBash, { command: "echo fast" });
-
-		const details = result.details as { duration?: string };
-		expect(details.duration).toBeDefined();
-		expect(details.duration).toContain("s");
-	});
-
 	it("captures stderr in output", async () => {
 		const bgBash = getTool(harness, "bg_bash");
-		const result = await execTool(bgBash, { command: "echo error >&2" });
+		const taskOutput = getTool(harness, "task_output");
 
-		expect(firstText(result)).toContain("error");
+		const run = await execTool(bgBash, { command: "echo error >&2" });
+		const taskId = (run.details as { taskId: string }).taskId;
+
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
+		const output = await execTool(taskOutput, { taskId });
+		expect(firstText(output)).toContain("error");
 	});
 });
 
 // ── bg_bash fire-and-forget mode ─────────────────────────────────────────────
 
-describe("bg_bash fire-and-forget mode", () => {
-	it("returns immediately with task ID", async () => {
+describe("bg_bash background flag (deprecated, always async)", () => {
+	it("background=true still returns immediately with task ID", async () => {
 		const bgBash = getTool(harness, "bg_bash");
 		const result = await execTool(bgBash, { command: "sleep 0.1", background: true });
 
-		const details = result.details as { taskId?: string; fireAndForget?: boolean };
-		expect(details.fireAndForget).toBe(true);
+		const details = result.details as { taskId?: string };
 		expect(details.taskId).toBeDefined();
 		expect(details.taskId).toMatch(/^bg_/);
 		expect(firstText(result)).toContain("Task ID:");
@@ -255,7 +271,7 @@ describe("bg_bash fire-and-forget mode", () => {
 		const taskStatus = getTool(harness, "task_status");
 		const taskOutput = getTool(harness, "task_output");
 
-		const run = await execTool(bgBash, { command: "echo ignored", background: true });
+		const run = await execTool(bgBash, { command: "echo ignored" });
 		const taskId = (run.details as { taskId: string }).taskId;
 
 		await new Promise((resolve) => setTimeout(resolve, 5));
@@ -271,7 +287,7 @@ describe("bg_bash fire-and-forget mode", () => {
 		const bgBash = getTool(harness, "bg_bash");
 		const taskStatus = getTool(harness, "task_status");
 
-		const result = await execTool(bgBash, { command: "sleep 0.05", background: true });
+		const result = await execTool(bgBash, { command: "sleep 0.05" });
 		const taskId = (result.details as { taskId: string }).taskId;
 
 		const status = await execTool(taskStatus, { taskId });
@@ -290,6 +306,8 @@ describe("task_output", () => {
 
 		const run = await execTool(bgBash, { command: "echo line1; echo line2" });
 		const taskId = (run.details as { taskId: string }).taskId;
+
+		await new Promise((resolve) => setTimeout(resolve, 100));
 
 		const output = await execTool(taskOutput, { taskId });
 		expect(firstText(output)).toContain("line1");
@@ -312,6 +330,8 @@ describe("task_output", () => {
 		});
 		const taskId = (run.details as { taskId: string }).taskId;
 
+		await new Promise((resolve) => setTimeout(resolve, 100));
+
 		const output = await execTool(taskOutput, { taskId, tail: 3 });
 		const text = firstText(output);
 		expect(text).toContain("line10");
@@ -328,6 +348,8 @@ describe("task_status", () => {
 
 		const run = await execTool(bgBash, { command: "echo done" });
 		const taskId = (run.details as { taskId: string }).taskId;
+
+		await new Promise((resolve) => setTimeout(resolve, 100));
 
 		const status = await execTool(taskStatus, { taskId });
 		const details = status.details as { status?: string; exitCode?: number };
@@ -359,6 +381,9 @@ describe("task_kill", () => {
 
 		const run = await execTool(bgBash, { command: "echo done" });
 		const taskId = (run.details as { taskId: string }).taskId;
+
+		// Wait for the async process to complete
+		await new Promise((resolve) => setTimeout(resolve, 100));
 
 		const result = await execTool(taskKill, { taskId });
 		expect(firstText(result)).toContain("not running");
