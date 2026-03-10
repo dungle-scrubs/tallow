@@ -92,15 +92,31 @@ describe("wezterm-pane-control registration", () => {
 });
 
 describe("buildWeztermPaneGuidance", () => {
-	it("includes pane usage, sending, and privacy guidance", () => {
+	it("includes bg_bash-first default, pane exceptions, sending, and privacy guidance", () => {
 		const guidance = buildWeztermPaneGuidance(116);
 		expect(guidance).toContain("WezTerm pane 116");
-		expect(guidance).toContain("Interactive TTY");
-		expect(guidance).toContain("just create the pane and run it");
-		expect(guidance).toContain("ask_user_question");
+		// bg_bash-first default
+		expect(guidance).toContain("use bg_bash");
+		expect(guidance).toContain("bg_bash");
+		// Pane exceptions
+		expect(guidance).toContain("Interactive TTY required");
+		expect(guidance).toContain("User explicitly requests it");
+		expect(guidance).toContain("Sensitive output");
+		// Anti-speculative clause
+		expect(guidance).toContain("Do not open a pane speculatively");
+		// Sending commands
 		expect(guidance).toContain("appending \\n");
+		// Privacy
 		expect(guidance).toContain("Do NOT call read_text on that pane");
 		expect(guidance).toContain("LLM must not consume secrets");
+	});
+
+	it("does not contain removed over-permissive guidance", () => {
+		const guidance = buildWeztermPaneGuidance(116);
+		expect(guidance).not.toContain("Long-running process the user wants to visually monitor");
+		expect(guidance).not.toContain("Process that needs a proper shell environment");
+		expect(guidance).not.toContain("ask_user_question");
+		expect(guidance).not.toContain("just create the pane and run it");
 	});
 });
 
