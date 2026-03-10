@@ -1005,10 +1005,14 @@ export class TUI extends Container {
 		}
 
 		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
+		// Detect viewport basis drift: maxLinesRendered exceeds actual content,
+		// causing viewportTop to be computed from a stale high-water mark.
+		// Compare against newLines.length (not previousLines.length) so the
+		// correction fires on the same render cycle as a shrink, not one cycle late.
 		const hasViewportBasisDrift =
 			this.overlayStack.length === 0 &&
 			this.previousLines.length > 0 &&
-			this.maxLinesRendered > this.previousLines.length &&
+			this.maxLinesRendered > newLines.length &&
 			prevViewportTop !== previousContentViewportTop;
 
 		// After shrink-heavy updates with clearOnShrink disabled, maxLinesRendered can stay larger
@@ -1180,13 +1184,21 @@ export class TUI extends Container {
 
 		// If we had more lines before, clear them and move cursor back
 		if (this.previousLines.length > newLines.length) {
+			const extraLines = this.previousLines.length - newLines.length;
+			// Safety guard: when extraLines exceeds terminal height, the \r\n
+			// sequence would scroll the viewport and desynchronize cursor tracking.
+			// Fall back to a full redraw instead (same guard as the deleted-lines-only path).
+			if (extraLines > height) {
+				logRedraw(`extraLines > height in diff path (${extraLines} > ${height})`);
+				fullRender(true);
+				return;
+			}
 			// Move to end of new content first if we stopped before it
 			if (renderEnd < newLines.length - 1) {
 				const moveDown = newLines.length - 1 - renderEnd;
 				buffer += `\x1b[${moveDown}B`;
 				finalCursorRow = newLines.length - 1;
 			}
-			const extraLines = this.previousLines.length - newLines.length;
 			for (let i = newLines.length; i < this.previousLines.length; i++) {
 				buffer += "\r\n\x1b[2K";
 			}
@@ -1199,6 +1211,18 @@ export class TUI extends Container {
 		if (process.env.PI_TUI_DEBUG === "1") {
 			const debugDir = "/tmp/tui";
 			fs.mkdirSync(debugDir, { recursive: true });
+
+			// Log large height fluctuations for diagnosing intermittent ghost gaps
+			const heightDelta = newLines.length - this.previousLines.length;
+			if (Math.abs(heightDelta) > 5) {
+				const fluctPath = path.join(debugDir, "height-fluctuations.log");
+				const fluctMsg =
+					`[${new Date().toISOString()}] heightFluctuation: ${heightDelta > 0 ? "+" : ""}${heightDelta} ` +
+					`(prev=${this.previousLines.length}, new=${newLines.length}, ` +
+					`maxLR=${this.maxLinesRendered}, viewportTop=${viewportTop})\n`;
+				fs.appendFileSync(fluctPath, fluctMsg);
+			}
+
 			const debugPath = path.join(
 				debugDir,
 				`render-${Date.now()}-${crypto.randomUUID().slice(0, 8)}.log`
@@ -1215,6 +1239,7 @@ export class TUI extends Container {
 				`cursorPos: ${JSON.stringify(cursorPos)}`,
 				`newLines.length: ${newLines.length}`,
 				`previousLines.length: ${this.previousLines.length}`,
+				`maxLinesRendered: ${this.maxLinesRendered}`,
 				"",
 				"=== newLines ===",
 				JSON.stringify(newLines, null, 2),
@@ -1236,8 +1261,15 @@ export class TUI extends Container {
 		// hardwareCursorRow tracks actual terminal cursor position (for movement)
 		this.cursorRow = Math.max(0, newLines.length - 1);
 		this.hardwareCursorRow = finalCursorRow;
-		// Track terminal's working area (grows but doesn't shrink unless cleared)
-		this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+		// Track terminal's working area.
+		// When overlays are active, keep the high-water mark so overlay padding stays
+		// stable. When no overlays are active and content shrank, decay to actual
+		// content size — this prevents permanent ghost height from stale maxLinesRendered.
+		if (this.overlayStack.length === 0) {
+			this.maxLinesRendered = newLines.length;
+		} else {
+			this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
+		}
 		this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
 
 		// Position hardware cursor for IME
