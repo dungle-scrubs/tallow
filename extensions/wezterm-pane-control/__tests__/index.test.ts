@@ -5,6 +5,9 @@ import weztermPaneControl, {
 	buildWeztermPaneGuidance,
 	executeWeztermAction,
 	filterPanesToCurrentTab,
+	hasExplicitPaneRequest,
+	hasSensitiveOutputMention,
+	isPaneCreatingAction,
 	unescapeText,
 	type WeztermCliResult,
 	type WeztermPaneInfo,
@@ -98,17 +101,26 @@ describe("buildWeztermPaneGuidance", () => {
 		// bg_bash-first default
 		expect(guidance).toContain("use bg_bash");
 		expect(guidance).toContain("bg_bash");
-		// Pane exceptions
-		expect(guidance).toContain("Interactive TTY required");
+		// Pane exceptions — exactly 2
 		expect(guidance).toContain("User explicitly requests it");
 		expect(guidance).toContain("Sensitive output");
 		// Anti-speculative clause
-		expect(guidance).toContain("Do not open a pane speculatively");
+		expect(guidance).toContain("Never open a pane speculatively");
+		// bg_bash handles everything
+		expect(guidance).toContain(
+			"bg_bash\nhandles dev servers, builds, watchers, TUI apps, progress bars"
+		);
 		// Sending commands
 		expect(guidance).toContain("appending \\n");
 		// Privacy
 		expect(guidance).toContain("Do NOT call read_text on that pane");
 		expect(guidance).toContain("LLM must not consume secrets");
+	});
+
+	it("lists exactly 2 numbered exceptions", () => {
+		const guidance = buildWeztermPaneGuidance(116);
+		const numberedLines = guidance.split("\n").filter((l) => /^\d+\.\s/.test(l));
+		expect(numberedLines.length).toBe(2);
 	});
 
 	it("does not contain removed over-permissive guidance", () => {
@@ -117,6 +129,10 @@ describe("buildWeztermPaneGuidance", () => {
 		expect(guidance).not.toContain("Process that needs a proper shell environment");
 		expect(guidance).not.toContain("ask_user_question");
 		expect(guidance).not.toContain("just create the pane and run it");
+		// Removed TTY exception
+		expect(guidance).not.toContain("Interactive TTY required");
+		expect(guidance).not.toContain("curses/TUI interface");
+		expect(guidance).not.toContain("progress bars that require a real terminal");
 	});
 });
 
@@ -392,5 +408,57 @@ describe("unescapeText", () => {
 
 	it("returns plain text unchanged", () => {
 		expect(unescapeText("no escapes here")).toBe("no escapes here");
+	});
+});
+
+describe("isPaneCreatingAction", () => {
+	it("returns true for pane-creating actions", () => {
+		expect(isPaneCreatingAction("split")).toBe(true);
+		expect(isPaneCreatingAction("spawn_tab")).toBe(true);
+		expect(isPaneCreatingAction("move_to_tab")).toBe(true);
+	});
+
+	it("returns false for non-creating actions", () => {
+		expect(isPaneCreatingAction("list")).toBe(false);
+		expect(isPaneCreatingAction("read_text")).toBe(false);
+		expect(isPaneCreatingAction("send_text")).toBe(false);
+		expect(isPaneCreatingAction("close")).toBe(false);
+		expect(isPaneCreatingAction("focus")).toBe(false);
+		expect(isPaneCreatingAction("zoom")).toBe(false);
+		expect(isPaneCreatingAction("resize")).toBe(false);
+	});
+});
+
+describe("hasExplicitPaneRequest", () => {
+	it("returns true for explicit pane/tab requests", () => {
+		expect(hasExplicitPaneRequest("open a pane for the server")).toBe(true);
+		expect(hasExplicitPaneRequest("new tab please")).toBe(true);
+		expect(hasExplicitPaneRequest("split the terminal")).toBe(true);
+		expect(hasExplicitPaneRequest("use wezterm to show logs")).toBe(true);
+		expect(hasExplicitPaneRequest("spawn a tab for this")).toBe(true);
+	});
+
+	it("returns false for non-pane prompts", () => {
+		expect(hasExplicitPaneRequest("start the dev server")).toBe(false);
+		expect(hasExplicitPaneRequest("run the build")).toBe(false);
+		expect(hasExplicitPaneRequest("left align the text")).toBe(false);
+		expect(hasExplicitPaneRequest("watch for file changes")).toBe(false);
+		expect(hasExplicitPaneRequest("open the browser")).toBe(false);
+	});
+});
+
+describe("hasSensitiveOutputMention", () => {
+	it("returns true for sensitive output mentions", () => {
+		expect(hasSensitiveOutputMention("show me the api key")).toBe(true);
+		expect(hasSensitiveOutputMention("generate a token")).toBe(true);
+		expect(hasSensitiveOutputMention("display the password")).toBe(true);
+		expect(hasSensitiveOutputMention("fetch my credentials")).toBe(true);
+		expect(hasSensitiveOutputMention("read the secret from 1password")).toBe(true);
+	});
+
+	it("returns false for non-sensitive prompts", () => {
+		expect(hasSensitiveOutputMention("start the dev server")).toBe(false);
+		expect(hasSensitiveOutputMention("run the tests")).toBe(false);
+		expect(hasSensitiveOutputMention("build the project")).toBe(false);
 	});
 });
