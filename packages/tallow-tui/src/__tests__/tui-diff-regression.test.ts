@@ -239,4 +239,96 @@ describe("TUI differential rendering shrink regression", () => {
 			expect(write).not.toContain("\x1b[3J");
 		}
 	});
+
+	test("extraLines > height in diff path triggers safety full redraw", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		// Start with 30 lines (extraLines on shrink = 25, which exceeds height = 10)
+		const component = new MutableLinesComponent(Array.from({ length: 30 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui);
+
+		// Shrink to 5 lines with changed content so we don't hit the "all deleted" path
+		component.setLines(Array.from({ length: 5 }, (_, i) => `changed ${i}`));
+		const redrawsBefore = tui.fullRedraws;
+		renderNow(tui);
+
+		// Should have triggered safety full redraw (extraLines = 25 > height = 10)
+		expect(tui.fullRedraws).toBe(redrawsBefore + 1);
+	});
+
+	test("maxLinesRendered decays after shrink without overlays", () => {
+		const width = 40;
+		const height = 20;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 15 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui);
+
+		component.setLines(Array.from({ length: 8 }, (_, i) => `short ${i}`));
+		renderNow(tui);
+
+		// maxLinesRendered should have decayed to actual content size
+		const tuiInternal = tui as unknown as { maxLinesRendered: number };
+		expect(tuiInternal.maxLinesRendered).toBe(8);
+	});
+
+	test("grow-shrink-grow does not leave ghost gap", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 25 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui); // 25 lines
+
+		component.setLines(Array.from({ length: 8 }, (_, i) => `shrunk ${i}`));
+		renderNow(tui); // Shrink to 8
+
+		component.setLines(Array.from({ length: 12 }, (_, i) => `grown ${i}`));
+		renderNow(tui); // Grow to 12
+
+		// maxLinesRendered should track actual content, not stale high-water mark
+		const tuiInternal = tui as unknown as { maxLinesRendered: number };
+		expect(tuiInternal.maxLinesRendered).toBe(12);
+
+		// Verify no blank-line ghost: writes should not contain scrollback destruction
+		const lastWrite = terminal.writes[terminal.writes.length - 1] ?? "";
+		expect(lastWrite).not.toContain("\x1b[3J");
+	});
+
+	test("viewport drift corrected on same render as shrink", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		// Start with 80 lines to establish large working area
+		const component = new MutableLinesComponent(Array.from({ length: 80 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui); // maxLinesRendered = 80
+
+		// Shrink to 30 — drift should be corrected immediately (same cycle)
+		component.setLines(Array.from({ length: 30 }, (_, i) => `shrunk ${i}`));
+		renderNow(tui);
+
+		const tuiInternal = tui as unknown as {
+			maxLinesRendered: number;
+			previousViewportTop: number;
+		};
+
+		// maxLinesRendered should have decayed to 30 (not stuck at 80)
+		expect(tuiInternal.maxLinesRendered).toBe(30);
+		// previousViewportTop should be consistent with the decayed maxLinesRendered
+		expect(tuiInternal.previousViewportTop).toBe(Math.max(0, 30 - height));
+
+		// Grow to 40 — should NOT require full redraw since drift was already corrected
+		component.setLines(Array.from({ length: 40 }, (_, i) => `grown ${i}`));
+		renderNow(tui);
+
+		// The key assertion is maxLinesRendered is correct
+		expect(tuiInternal.maxLinesRendered).toBe(40);
+	});
 });
