@@ -119,3 +119,76 @@ describe("hook subprocess hardening", () => {
 		expect(elapsedMs).toBeLessThan(1000);
 	});
 });
+
+describe("Claude-sourced hook subprocess execution", () => {
+	/**
+	 * Build a Claude-sourced command hook handler.
+	 *
+	 * @param command - Shell command executed by the hook
+	 * @param claudeEventName - Original Claude event name
+	 * @returns Claude-sourced command-type hook handler
+	 */
+	function createClaudeHandler(command: string, claudeEventName: string): HookHandler {
+		return {
+			command,
+			timeout: 5,
+			type: "command",
+			_claudeSource: true,
+			_claudeEventName: claudeEventName,
+		};
+	}
+
+	test("Claude-sourced handler translates deny output to block result", async () => {
+		const handler = createClaudeHandler(
+			`node -e "process.stdout.write(JSON.stringify({hookSpecificOutput:{permissionDecision:'deny',permissionDecisionReason:'blocked by policy'}}))"`,
+			"PreToolUse"
+		);
+		const result = await runCommandHook(handler, { tool_name: "bash" }, process.cwd());
+
+		expect(result.ok).toBe(false);
+		expect(result.decision).toBe("block");
+		expect(result.reason).toBe("blocked by policy");
+	});
+
+	test("Claude-sourced handler translates additionalContext output", async () => {
+		const handler = createClaudeHandler(
+			`node -e "process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:'remember this context'}}))"`,
+			"UserPromptSubmit"
+		);
+		const result = await runCommandHook(handler, { prompt: "hello" }, process.cwd());
+
+		expect(result.ok).toBe(true);
+		expect(result.additionalContext).toBe("remember this context");
+	});
+
+	test("Claude-sourced handler sets CLAUDE_PROJECT_DIR env var", async () => {
+		const handler = createClaudeHandler(
+			`node -e "process.stdout.write(JSON.stringify({hookSpecificOutput:{additionalContext:process.env.CLAUDE_PROJECT_DIR}}))"`,
+			"PreToolUse"
+		);
+		const testCwd = process.cwd();
+		const result = await runCommandHook(handler, { tool_name: "bash" }, testCwd);
+
+		expect(result.ok).toBe(true);
+		expect(result.additionalContext).toBe(testCwd);
+	});
+
+	test("Claude-sourced handler exit code 2 still blocks", async () => {
+		const handler = createClaudeHandler(
+			`node -e "process.stderr.write('BLOCKED: unsafe operation'); process.exit(2)"`,
+			"PreToolUse"
+		);
+		const result = await runCommandHook(handler, { tool_name: "bash" }, process.cwd());
+
+		expect(result.ok).toBe(false);
+		expect(result.decision).toBe("block");
+		expect(result.reason).toContain("BLOCKED: unsafe operation");
+	});
+
+	test("Claude-sourced handler with no output succeeds silently", async () => {
+		const handler = createClaudeHandler("true", "PreToolUse");
+		const result = await runCommandHook(handler, { tool_name: "bash" }, process.cwd());
+
+		expect(result.ok).toBe(true);
+	});
+});

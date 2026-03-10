@@ -568,15 +568,33 @@ function mergeHooks(target: HooksConfig, source: HooksConfig): void {
  * Reads hooks from a JSON file (standalone hooks.json or settings.json with hooks key).
  * Returns null if the file doesn't exist or can't be parsed.
  */
+/**
+ * Check whether a parsed object contains any Claude Code event names as top-level keys.
+ *
+ * Used to detect hooks.json files that use Claude format (PreToolUse, UserPromptSubmit, etc.)
+ * instead of native tallow format (tool_call, input, etc.).
+ *
+ * @param obj - Parsed JSON object to inspect
+ * @returns True when at least one key is a known Claude event name
+ */
+export function hasClaudeEventKeys(obj: Record<string, unknown>): boolean {
+	return Object.keys(obj).some((key) => key in CLAUDE_EVENT_MAP);
+}
+
 function readHooksFile(filePath: string): HooksConfig | null {
 	try {
 		if (!fs.existsSync(filePath)) return null;
 		const content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
 		// Standalone hooks.json has event keys at top level.
 		// settings.json wraps them under a "hooks" key.
+		// Also detect Claude event names (PreToolUse, etc.) as valid top-level keys.
 		return (
 			content.hooks ??
-			(content.tool_call || content.tool_result || content.agent_end ? content : null)
+			(content.tool_call || content.tool_result || content.agent_end
+				? content
+				: hasClaudeEventKeys(content)
+					? content
+					: null)
 		);
 	} catch {
 		return null;
@@ -596,7 +614,10 @@ function scanExtensionHooks(extensionsDir: string): HooksConfig {
 			const hooksPath = path.join(extensionsDir, entry, "hooks.json");
 			const hooks = readHooksFile(hooksPath);
 			if (hooks) {
-				mergeHooks(merged, hooks);
+				mergeHooks(
+					merged,
+					hasClaudeEventKeys(hooks) ? translateClaudeHooks(hooks, hooksPath) : hooks
+				);
 			}
 		}
 	} catch {
@@ -655,7 +676,9 @@ function getPackageHooks(settingsPath: string): HooksConfig[] {
 			const hooksFile = path.join(resolved, "hooks.json");
 			const hooks = readHooksFile(hooksFile);
 			if (hooks) {
-				results.push(hooks);
+				// Translate Claude event names if present, so packages can use
+				// either native tallow format or Claude Code format in hooks.json.
+				results.push(hasClaudeEventKeys(hooks) ? translateClaudeHooks(hooks, hooksFile) : hooks);
 			}
 		}
 	} catch {
