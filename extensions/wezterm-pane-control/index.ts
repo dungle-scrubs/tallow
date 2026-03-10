@@ -84,6 +84,71 @@ interface ToolResult {
 	isError?: boolean;
 }
 
+/**
+ * WezTerm pane actions that create new panes or tabs.
+ * These are gated by the guardrail hook — blocked unless the user's prompt
+ * explicitly requests pane/tab creation.
+ */
+export const PANE_CREATING_ACTIONS: ReadonlySet<string> = new Set([
+	"split",
+	"spawn_tab",
+	"move_to_tab",
+]);
+
+/**
+ * Patterns that indicate the user explicitly wants pane/tab creation.
+ * Only unambiguous pane vocabulary — no generic words like "window", "left", "right".
+ */
+export const EXPLICIT_PANE_REQUEST_PATTERNS: readonly RegExp[] = [
+	/\bwezterm\b/i,
+	/\bpane(?:s)?\b/i,
+	/\btab(?:s)?\b/i,
+	/\bsplit\b/i,
+	/\bspawn\b/i,
+];
+
+/**
+ * Patterns that indicate sensitive output the LLM should not see.
+ * Pane creation is allowed for these so the user can view secrets directly.
+ */
+export const SENSITIVE_OUTPUT_PATTERNS: readonly RegExp[] = [
+	/\bsecret(?:s)?\b/i,
+	/\btoken(?:s)?\b/i,
+	/\bpassword(?:s)?\b/i,
+	/\bapi[- ]?key(?:s)?\b/i,
+	/\bcredential(?:s)?\b/i,
+];
+
+/**
+ * Check whether a wezterm_pane action creates a new pane or tab.
+ *
+ * @param action - The action string from tool parameters
+ * @returns True when the action would create a pane/tab
+ */
+export function isPaneCreatingAction(action: string): boolean {
+	return PANE_CREATING_ACTIONS.has(action);
+}
+
+/**
+ * Check whether user prompt text contains an explicit pane/tab request.
+ *
+ * @param prompt - The user's prompt text
+ * @returns True when the prompt explicitly mentions panes/tabs
+ */
+export function hasExplicitPaneRequest(prompt: string): boolean {
+	return EXPLICIT_PANE_REQUEST_PATTERNS.some((pattern) => pattern.test(prompt));
+}
+
+/**
+ * Check whether user prompt text mentions sensitive output.
+ *
+ * @param prompt - The user's prompt text
+ * @returns True when the prompt mentions secrets/tokens/passwords
+ */
+export function hasSensitiveOutputMention(prompt: string): boolean {
+	return SENSITIVE_OUTPUT_PATTERNS.some((pattern) => pattern.test(prompt));
+}
+
 const ACTIONS: readonly WeztermAction[] = [
 	"list",
 	"split",
@@ -426,8 +491,8 @@ function runOrThrow(runCli: WeztermCliRunner, args: readonly string[]): string {
  *
  * Encodes a bg_bash-first policy: panes are the exception, not the default.
  * Long-running processes (dev servers, watchers, builds) should use bg_bash.
- * Panes are reserved for explicit user requests, interactive TTYs, and
- * sensitive output that the LLM must not see.
+ * Panes are reserved for explicit user requests and sensitive output that the
+ * LLM must not see.
  *
  * @param currentPaneId - Current WezTerm pane ID
  * @returns Guidance block appended to the system prompt
@@ -450,13 +515,14 @@ export function buildWeztermPaneGuidance(currentPaneId: number): string {
 		"",
 		"Open a pane or tab ONLY when one of these is true:",
 		"",
-		'1. **User explicitly requests it** — they said "open a pane", "split", "new tab", or similar.',
-		"2. **Interactive TTY required** — the process needs keystroke input, a curses/TUI interface,",
-		"   or renders progress bars that require a real terminal (not just stdout lines).",
-		"3. **Sensitive output** — the command will display secrets, tokens, or passwords that the LLM",
-		"   must not see. Spawn the pane, send the command, but do NOT read_text the output.",
+		'1. **User explicitly requests it** — they said "open a pane", "use a pane",',
+		'   "split", "new tab", or similar. Without an explicit request, do NOT open a pane.',
+		"2. **Sensitive output** — secrets, tokens, passwords the LLM must not see.",
+		"   Spawn the pane, send the command, do NOT read_text the output.",
 		"",
-		"If uncertain whether a pane is needed, use bg_bash. Do not open a pane speculatively.",
+		"If uncertain, ALWAYS use bg_bash. Never open a pane speculatively — bg_bash",
+		"handles dev servers, builds, watchers, TUI apps, progress bars, and",
+		"interactive prompts fine.",
 		"",
 		"## Sending commands",
 		"",
@@ -723,6 +789,33 @@ export default function weztermPaneControl(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", async (event) => {
 		return {
 			systemPrompt: `${event.systemPrompt}\n\n${buildWeztermPaneGuidance(currentPaneId)}`,
+		};
+	});
+
+	// Track the current turn's user prompt for the guardrail hook.
+	// Updated via "input" event which fires before agent processing.
+	let currentTurnPrompt = "";
+
+	pi.on("input", async (event) => {
+		currentTurnPrompt = event.text ?? "";
+	});
+
+	// Guardrail: block pane-creating actions unless the user explicitly asked for panes
+	// or mentioned sensitive output. This is the enforcement mechanism — prompt guidance
+	// alone has failed repeatedly (see plan 186 history).
+	pi.on("tool_call", async (event) => {
+		if (event.toolName !== "wezterm_pane") return;
+
+		const params = event.input as { action?: string } | undefined;
+		if (!params?.action || !isPaneCreatingAction(params.action)) return;
+
+		if (hasExplicitPaneRequest(currentTurnPrompt)) return;
+		if (hasSensitiveOutputMention(currentTurnPrompt)) return;
+
+		return {
+			block: true,
+			reason:
+				"Pane creation blocked — no explicit pane/tab request detected in this turn. Use bg_bash for long-running processes. The user must say 'pane', 'tab', 'split', etc. to open a WezTerm pane.",
 		};
 	});
 }
