@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
 	adaptEventDataForHook,
 	CLAUDE_EVENT_MAP,
+	hasClaudeEventKeys,
 	shouldSkipClaudeToolResultHandler,
 	translateClaudeHooks,
 	translateClaudeOutput,
@@ -242,5 +243,39 @@ describe("shouldSkipClaudeToolResultHandler", () => {
 		expect(shouldSkipClaudeToolResultHandler("tool_result", { isError: false }, handler)).toBe(
 			false
 		);
+	});
+});
+
+describe("hasClaudeEventKeys", () => {
+	it("detects PreToolUse as a Claude event key", () => {
+		expect(hasClaudeEventKeys({ PreToolUse: [] })).toBe(true);
+	});
+
+	it("detects UserPromptSubmit as a Claude event key", () => {
+		expect(hasClaudeEventKeys({ UserPromptSubmit: [] })).toBe(true);
+	});
+
+	it("detects Stop as a Claude event key", () => {
+		expect(hasClaudeEventKeys({ Stop: [] })).toBe(true);
+	});
+
+	it("detects multiple Claude event keys", () => {
+		expect(hasClaudeEventKeys({ PreToolUse: [], PostToolUse: [], Stop: [] })).toBe(true);
+	});
+
+	it("returns false for native tallow event keys", () => {
+		expect(hasClaudeEventKeys({ tool_call: [], tool_result: [], agent_end: [] })).toBe(false);
+	});
+
+	it("returns false for empty objects", () => {
+		expect(hasClaudeEventKeys({})).toBe(false);
+	});
+
+	it("returns false for unrelated keys", () => {
+		expect(hasClaudeEventKeys({ name: "test", version: "1.0" })).toBe(false);
+	});
+
+	it("detects Claude keys in a mixed config", () => {
+		expect(hasClaudeEventKeys({ tool_call: [], PreToolUse: [] })).toBe(true);
 	});
 });
