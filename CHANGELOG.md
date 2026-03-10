@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.22](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.21...tallow-v0.8.22) (2026-03-10)
+
+
+### Added
+
+* **background-task-tool:** make bg_bash always non-blocking with bottom widget ([d51c5c1](https://github.com/dungle-scrubs/tallow/commit/d51c5c14c28eb48d38cfb67d63641293a633810f))
+* **cli:** add --system-prompt and --append-system-prompt flags ([85ec58e](https://github.com/dungle-scrubs/tallow/commit/85ec58e01705d258acf303bb93e72a7cb99395df))
+* **sdk:** add sharedSkillsDirs setting for cross-app skill sharing ([dd8e451](https://github.com/dungle-scrubs/tallow/commit/dd8e451374c7fa40bd68b0a25ddf4cef3baf0427))
+
+
+### Fixed
+
+* **bash-tool-enhanced:** remove setWorkingMessage dual-rendering ([0cd3d84](https://github.com/dungle-scrubs/tallow/commit/0cd3d84cde85ff3dddde60865a335de9919e8c36))
+* **hooks:** translate Claude event names in package and extension hooks ([6966820](https://github.com/dungle-scrubs/tallow/commit/6966820b69b2e2c23c0ceb8bd155e458e9e66b32))
+* **wezterm-pane-control:** rewrite pane guidance to bg_bash-first policy ([bdd502c](https://github.com/dungle-scrubs/tallow/commit/bdd502c6b71adf657b751edf7e15de00407a1067))
+
+
+### Maintenance
+
+* **background-task-tool:** update lifecycle tests for always-async bg_bash ([f4d541c](https://github.com/dungle-scrubs/tallow/commit/f4d541c881770ba90e4ebd2b50c1f8d2b99200a6))
+* **deps:** bump pi-* dependencies ([84219ac](https://github.com/dungle-scrubs/tallow/commit/84219accc95ea78257e0dd45a32c468e9a31f04b))
+* **wezterm-pane-control:** update guidance assertions for bg_bash-first policy ([1d04d16](https://github.com/dungle-scrubs/tallow/commit/1d04d16dd370465238f82066e110b574f1c119aa))
+
 ## [Unreleased]
 
 ### Added
