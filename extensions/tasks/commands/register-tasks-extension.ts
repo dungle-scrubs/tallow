@@ -11,6 +11,7 @@ import { Key, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon, getSpinner } from "../../_icons/index.js";
 import {
+	emitInteropEvent,
 	INTEROP_EVENT_NAMES,
 	onInteropEvent,
 	requestInteropState,
@@ -106,6 +107,7 @@ export function registerTasksExtension(
 	let backgroundTasks: BgTaskView[] = [];
 	let activeTeams: TeamWidgetView[] = [];
 	let teamDashboardActive = false;
+	let lastBackgroundTaskPresenterState: boolean | null = null;
 
 	if (tasksAnimationInterval) clearInterval(tasksAnimationInterval);
 	tasksAnimationInterval = undefined;
@@ -573,9 +575,39 @@ export function registerTasksExtension(
 		);
 	}
 
+	/**
+	 * Determine whether the tasks extension currently owns background-task
+	 * widget presentation.
+	 *
+	 * The tasks widget can safely suppress the standalone background-task-tool
+	 * widget whenever this main dashboard is visible and the team dashboard is
+	 * not active.
+	 *
+	 * @returns True when the tasks widget should be the canonical presenter
+	 */
+	function shouldPresentBackgroundTasks(): boolean {
+		return !isSubagent && state.visible && !teamDashboardActive;
+	}
+
+	/**
+	 * Publish background-task presenter ownership for background-task-tool.
+	 *
+	 * @returns void
+	 */
+	function publishBackgroundTaskPresenterState(): void {
+		const nextState = shouldPresentBackgroundTasks();
+		if (lastBackgroundTaskPresenterState === nextState) return;
+		lastBackgroundTaskPresenterState = nextState;
+		emitInteropEvent(pi.events, INTEROP_EVENT_NAMES.backgroundTasksPresenterState, {
+			active: nextState,
+		});
+	}
+
 	function updateWidget(ctx: ExtensionContext): void {
 		// Subagents have no UI — skip all widget rendering
 		if (isSubagent) return;
+
+		publishBackgroundTaskPresenterState();
 
 		// If every task is completed and the 2s completion window has passed,
 		// clear the list. This covers extension reloads where the original
@@ -1891,6 +1923,7 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		backgroundTasks = [];
 		activeTeams = [];
 		teamDashboardActive = false;
+		lastBackgroundTaskPresenterState = null;
 		lastBgCount = 0;
 		lastBgTaskCount = 0;
 
@@ -1990,11 +2023,15 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 					updateWidget(ctx);
 				}
 			);
+			const unsubStateRequest = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.stateRequest, () => {
+				publishBackgroundTaskPresenterState();
+			});
 			interopEventsCleanup = () => {
 				unsubSubagents();
 				unsubBackgroundTasks();
 				unsubTeams();
 				unsubDashboardState();
+				unsubStateRequest();
 			};
 
 			legacyInteropBridgeCleanup?.();
@@ -2098,6 +2135,10 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 
 	// Cleanup on session end
 	pi.on("session_shutdown", async () => {
+		emitInteropEvent(pi.events, INTEROP_EVENT_NAMES.backgroundTasksPresenterState, {
+			active: false,
+		});
+		lastBackgroundTaskPresenterState = false;
 		if (tasksAnimationInterval) {
 			clearInterval(tasksAnimationInterval);
 			tasksAnimationInterval = undefined;

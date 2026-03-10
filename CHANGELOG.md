@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **background-task-tool,tasks:** suppress the duplicate live background-task
+  widget when the shared tasks dashboard is active, keeping `Background Tasks`
+  as the single surface and stopping above-editor row jitter
 - **tui:** fix streaming ghost empty spaces caused by stale `maxLinesRendered`
   high-water mark, missing `extraLines > height` safety guard in the diff
   cleanup path, and viewport drift correction firing one render cycle late

@@ -101,9 +101,13 @@ to match the agent's identity in the task widget.
 ### [background-tasks](/extensions/background-task-tool/)
 
 Running background bash commands appear in the same widget,
-below the background subagent section. Each shows the truncated
-command string and elapsed duration. The widget caps at 5 visible
-background tasks with an overflow indicator.
+below the background subagent section. When the tasks widget is
+visible, it is the canonical background-task surface and
+background-task-tool suppresses its separate live tail widget.
+Each row shows the truncated command string and elapsed duration.
+The widget caps at 5 visible background tasks with an overflow
+indicator. Use `task_output(...)` when you want the full inline
+output for a specific task.
 
 ### [custom-footer](/extensions/custom-footer/)
 

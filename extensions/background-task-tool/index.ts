@@ -8,7 +8,7 @@
  * - `task_output` tool: Retrieve output from a background task
  * - `task_status` tool: Check if a task is running or completed
  * - `/bg` command: List and manage background tasks
- * - Status widget shows running background tasks
+ * - Live widget shows running background tasks when the tasks extension is not presenting them
  *
  * Usage:
  *   Ask the agent to "run npm test in the background"
@@ -41,6 +41,7 @@ import {
 	INTEROP_EVENT_NAMES,
 	type InteropBackgroundTaskView,
 	onInteropEvent,
+	requestInteropState,
 } from "../_shared/interop-events.js";
 import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import {
@@ -132,6 +133,8 @@ let tuiRef: TUI | null = null;
 // In-memory task registry (published via typed interop events)
 const tasks = new Map<string, BackgroundTask>();
 let taskCounter = 0;
+let backgroundTaskPresenterActive = false;
+let interopPresenterStateCleanup: (() => void) | undefined;
 let interopStateRequestCleanup: (() => void) | undefined;
 
 /** Shared mutable state for live-updating anchor components during consecutive polls. */
@@ -546,6 +549,21 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	/** Maximum tail lines per task in the widget. */
 	const WIDGET_TAIL_LINES = 3;
 
+	/** Most recent UI context used for widget/status updates. */
+	let lastWidgetContext: ExtensionContext | null = null;
+
+	/**
+	 * Whether the tasks extension currently owns background-task presentation.
+	 *
+	 * When true, background-task-tool suppresses its duplicate live widget and
+	 * lets the tasks widget render the canonical summary row.
+	 *
+	 * @returns True when the tasks widget should be the only presenter
+	 */
+	function shouldSuppressTaskWidget(): boolean {
+		return backgroundTaskPresenterActive;
+	}
+
 	/**
 	 * Updates the status bar indicator for running background tasks.
 	 *
@@ -576,7 +594,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 		const running = [...tasks.values()].filter((t) => t.status === "running");
 
-		if (running.length === 0) {
+		if (running.length === 0 || shouldSuppressTaskWidget()) {
 			ctx.ui.setWidget("bg-tasks", undefined);
 			return;
 		}
@@ -624,10 +642,24 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 	 * @returns void
 	 */
 	function syncTaskState(ctx: ExtensionContext): void {
+		lastWidgetContext = ctx;
 		updateStatusBar(ctx);
 		updateTaskWidget(ctx);
 		publishBackgroundTaskSnapshot(pi.events);
 	}
+
+	interopPresenterStateCleanup?.();
+	interopPresenterStateCleanup = onInteropEvent(
+		pi.events,
+		INTEROP_EVENT_NAMES.backgroundTasksPresenterState,
+		(payload) => {
+			backgroundTaskPresenterActive = payload.active;
+			const currentContext = lastWidgetContext;
+			if (currentContext?.ui) {
+				updateTaskWidget(currentContext);
+			}
+		}
+	);
 
 	interopStateRequestCleanup?.();
 	interopStateRequestCleanup = onInteropEvent(pi.events, INTEROP_EVENT_NAMES.stateRequest, () => {
@@ -663,7 +695,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		name: "bg_bash",
 		label: "bg_bash",
 		description:
-			"Run a bash command in the background. Returns immediately without blocking. Output streams to a bottom widget visible to the user.\n\nWHEN TO USE:\n- Starting daemons or servers\n- Long-running builds or tests\n- Any process you want to run independently\n\nThe command runs asynchronously. Use task_status/task_output to check results.\n\nWARNING: Never use bash tool with & to background processes - it will hang. Use bg_bash instead.",
+			"Run a bash command in the background. Returns immediately without blocking. When the tasks extension is active, progress appears in the Background Tasks widget; otherwise background-task-tool shows its own live widget.\n\nWHEN TO USE:\n- Starting daemons or servers\n- Long-running builds or tests\n- Any process you want to run independently\n\nThe command runs asynchronously. Use task_status/task_output to check results.\n\nWARNING: Never use bash tool with & to background processes - it will hang. Use bg_bash instead.",
 		parameters: Type.Object({
 			command: Type.String({
 				description: "Bash command to run in background",
@@ -1687,13 +1719,19 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 		promotedAbortControllers.clear();
 		pollStates.clear();
 		lastCompletedPoll = null;
+		backgroundTaskPresenterActive = false;
+		lastWidgetContext = null;
 		publishBackgroundTaskSnapshot(pi.events);
+		interopPresenterStateCleanup?.();
+		interopPresenterStateCleanup = undefined;
 		interopStateRequestCleanup?.();
 		interopStateRequestCleanup = undefined;
 	});
 
 	// Capture TUI reference and initialize on session start
 	pi.on("session_start", async (_event, ctx) => {
+		backgroundTaskPresenterActive = false;
+
 		// Capture TUI via a throwaway widget for requestRender access
 		ctx.ui.setWidget("bg-tasks-tui-capture", (tui, _theme) => {
 			tuiRef = tui;
@@ -1703,6 +1741,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 		ctx.ui.setStatus("bg-tasks", undefined);
 		syncTaskState(ctx);
+		requestInteropState(pi.events, "background-task-tool");
 	});
 
 	// Register Ctrl+Shift+B shortcut for background tasks
