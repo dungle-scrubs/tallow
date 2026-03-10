@@ -185,15 +185,6 @@ function handleBashError(err: unknown): AgentToolResult<BashToolDetails | undefi
 	throw err;
 }
 
-/** Maximum number of output tail lines shown in the working message. */
-const PROGRESS_TAIL_LINES = 3;
-
-/** Maximum character width per progress line before truncation. */
-const PROGRESS_LINE_WIDTH = 60;
-
-/** Minimum interval between working message updates (milliseconds). */
-const PROGRESS_DEBOUNCE_MS = 100;
-
 /** Visual prefix for output lines in the progress message. */
 const PROGRESS_LINE_PREFIX = "│ ";
 
@@ -380,75 +371,14 @@ export default function bashLive(pi: ExtensionAPI): void {
 			}
 
 			const cmd = params.command ?? "";
-			const firstLine = cmd.split("\n")[0];
-			const preview = firstLine.length > 60 ? `${firstLine.slice(0, 57)}...` : firstLine;
-			ctx.ui.setWorkingMessage(`Bash: ${preview}`);
-
-			// Progress: surface output tail in the working message area
-			let lastProgressTime = 0;
-			let progressTimeout: ReturnType<typeof setTimeout> | null = null;
-
-			/**
-			 * Debounced update of the working message with the latest output tail.
-			 *
-			 * @param text - Full output text so far
-			 */
-			const updateProgress = (text: string): void => {
-				const now = Date.now();
-				const doUpdate = (): void => {
-					lastProgressTime = Date.now();
-					const tail = extractTailLines(text, PROGRESS_TAIL_LINES);
-					ctx.ui.setWorkingMessage(formatProgressMessage(preview, tail, PROGRESS_LINE_WIDTH));
-				};
-				if (now - lastProgressTime >= PROGRESS_DEBOUNCE_MS) {
-					if (progressTimeout) {
-						clearTimeout(progressTimeout);
-						progressTimeout = null;
-					}
-					doUpdate();
-				} else if (!progressTimeout) {
-					progressTimeout = setTimeout(
-						() => {
-							progressTimeout = null;
-							doUpdate();
-						},
-						PROGRESS_DEBOUNCE_MS - (now - lastProgressTime)
-					);
-				}
-			};
-
-			/** Clear any pending progress update timeout. */
-			const clearProgressTimeout = (): void => {
-				if (progressTimeout) {
-					clearTimeout(progressTimeout);
-					progressTimeout = null;
-				}
-			};
-
-			/**
-			 * Wraps onUpdate to surface output progress in the working message.
-			 *
-			 * @param partialResult - Partial tool result from bash execution
-			 */
-			const progressOnUpdate: typeof onUpdate = (partialResult) => {
-				onUpdate?.(partialResult);
-				const text = partialResult?.content?.find((c: { type: string }) => c.type === "text") as
-					| { text: string }
-					| undefined;
-				if (text?.text) updateProgress(text.text);
-			};
-
 			const autoTimeout = readAutoBackgroundTimeout();
 
 			// Fast path: auto-background disabled or user-provided timeout shorter
 			if (autoTimeout <= 0 || (params.timeout && params.timeout * 1000 <= autoTimeout)) {
 				try {
-					return await scopedBashTool.execute(toolCallId, params, signal, progressOnUpdate);
+					return await scopedBashTool.execute(toolCallId, params, signal, onUpdate);
 				} catch (err) {
 					return handleBashError(err);
-				} finally {
-					clearProgressTimeout();
-					ctx.ui.setWorkingMessage();
 				}
 			}
 
@@ -481,8 +411,6 @@ export default function bashLive(pi: ExtensionAPI): void {
 					if (text?.text) promotedHandle.replaceOutput(text.text);
 				} else {
 					onUpdate?.(partialResult);
-					// Update progress message while still in foreground
-					if (text?.text) updateProgress(text.text);
 				}
 			};
 
@@ -503,8 +431,6 @@ export default function bashLive(pi: ExtensionAPI): void {
 			});
 
 			const winner = await Promise.race([bashPromise, timeoutPromise]);
-			clearProgressTimeout();
-			ctx.ui.setWorkingMessage();
 
 			if (winner.type === "completed") {
 				return winner.result;
