@@ -10,8 +10,10 @@ without blocking the agent conversation. The `bg_bash` tool
 returns a task ID immediately. Check output with `task_output`
 and status with `task_status` at any time.
 
-A status widget shows running background tasks. The `/bg` command
-lists and manages all active tasks.
+When the tasks extension is not active, background-task-tool shows
+its own live widget for running commands. When tasks is active,
+running commands move into the shared `Background Tasks` section
+there instead. The `/bg` command lists and manages all active tasks.
 
 <Gallery images={[
   { src: "/screenshots/extensions/background-tasks/single-task.png", alt: "Single background task with status widget" },
@@ -23,14 +25,18 @@ lists and manages all active tasks.
 ### [tasks](/extensions/tasks/)
 
 Background bash tasks appear in the [tasks](/extensions/tasks/)
-widget alongside the task board and running agents. Each
+widget alongside the task board and running agents. When that
+shared widget is active, it becomes the canonical background-task
+surface and background-task-tool suppresses its standalone live
+widget to avoid duplicate rows and reorder jitter. Each
 background task shows the truncated command string and elapsed
 duration, capped at 5 visible entries with overflow.
 
 In the combined widget, background tasks render below agents
 with a spacer line. On wide terminals they share the right
-column; on narrow terminals they stack at the bottom. See
-[tasks, responsive layout](/extensions/tasks/#responsive-layout)
+column; on narrow terminals they stack at the bottom. Use
+`task_output(...)` when you want the full inline output for a
+specific task. See [tasks, responsive layout](/extensions/tasks/#responsive-layout)
 for the full layout behavior.
 
 ### [subagent](/extensions/subagent-tool/)

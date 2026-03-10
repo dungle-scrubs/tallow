@@ -7,6 +7,7 @@ export const INTEROP_EVENT_SCHEMA_VERSION = 1 as const;
 
 /** Event channels used for typed cross-extension state synchronization. */
 export const INTEROP_EVENT_NAMES = {
+	backgroundTasksPresenterState: "interop.v1.background-tasks.presenter-state",
 	backgroundTasksSnapshot: "interop.v1.background-tasks.snapshot",
 	stateRequest: "interop.v1.state.request",
 	subagentsSnapshot: "interop.v1.subagents.snapshot",
@@ -117,6 +118,10 @@ const InteropTeamViewSchema = Type.Object({
 });
 
 const InteropEventSchemas = {
+	[INTEROP_EVENT_NAMES.backgroundTasksPresenterState]: Type.Object({
+		active: Type.Boolean(),
+		schemaVersion: Type.Literal(INTEROP_EVENT_SCHEMA_VERSION),
+	}),
 	[INTEROP_EVENT_NAMES.backgroundTasksSnapshot]: Type.Object({
 		schemaVersion: Type.Literal(INTEROP_EVENT_SCHEMA_VERSION),
 		tasks: Type.Array(InteropBackgroundTaskViewSchema),
