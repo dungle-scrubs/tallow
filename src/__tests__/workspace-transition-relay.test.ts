@@ -7,10 +7,13 @@ import {
 	type WorkspaceTransitionUI,
 } from "../workspace-transition.js";
 import {
+	buildTransitionRelaySocketPath,
 	createTransitionRelayServer,
 	getRelaySocketPath,
+	isFilesystemRelaySocketPath,
 	requestTransitionViaRelay,
 	TRANSITION_RELAY_SOCKET_ENV,
+	tryCreateTransitionRelayServer,
 } from "../workspace-transition-relay.js";
 
 let originalEnv: string | undefined;
@@ -30,6 +33,19 @@ function createFakeUI(): WorkspaceTransitionUI {
 		},
 		setWorkingMessage: () => {},
 	};
+}
+
+/**
+ * Build a definitely-missing relay endpoint for the current platform.
+ *
+ * @returns Missing IPC endpoint path
+ */
+function buildMissingRelaySocketPath(): string {
+	if (process.platform === "win32") {
+		return `\\\\.\\pipe\\nonexistent-tallow-relay-${Date.now()}`;
+	}
+
+	return `/tmp/nonexistent-tallow-relay-${Date.now()}.sock`;
 }
 
 beforeEach(() => {
@@ -54,6 +70,41 @@ afterEach(() => {
 });
 
 describe("workspace transition relay", () => {
+	test("builds a Windows named-pipe endpoint on win32", () => {
+		expect(buildTransitionRelaySocketPath("win32", 42)).toBe("\\\\.\\pipe\\tallow-relay-42");
+	});
+
+	test("builds a Unix socket path on non-Windows platforms", () => {
+		expect(buildTransitionRelaySocketPath("darwin", 42, "/tmp/test-relay")).toBe(
+			"/tmp/test-relay/tallow-relay-42.sock"
+		);
+	});
+
+	test("distinguishes filesystem sockets from named pipes", () => {
+		expect(isFilesystemRelaySocketPath("/tmp/tallow-relay-42.sock")).toBe(true);
+		expect(isFilesystemRelaySocketPath("\\\\.\\pipe\\tallow-relay-42")).toBe(false);
+	});
+
+	test("relay startup helper returns null and clears env on startup failure", () => {
+		process.env[TRANSITION_RELAY_SOCKET_ENV] = "stale";
+		const reportedErrors: Error[] = [];
+
+		const relay = tryCreateTransitionRelayServer(
+			createFakeUI,
+			(error) => {
+				reportedErrors.push(error);
+			},
+			() => {
+				throw new Error("boom");
+			}
+		);
+
+		expect(relay).toBeNull();
+		expect(process.env[TRANSITION_RELAY_SOCKET_ENV]).toBeUndefined();
+		expect(reportedErrors).toHaveLength(1);
+		expect(reportedErrors[0]?.message).toBe("boom");
+	});
+
 	test("server accepts connection and delegates to host", async () => {
 		const { socketPath, cleanup } = createTransitionRelayServer(createFakeUI);
 		try {
@@ -72,7 +123,9 @@ describe("workspace transition relay", () => {
 		const { socketPath, cleanup } = createTransitionRelayServer(createFakeUI);
 		try {
 			expect(getRelaySocketPath()).toBe(socketPath);
-			expect(existsSync(socketPath)).toBe(true);
+			if (isFilesystemRelaySocketPath(socketPath)) {
+				expect(existsSync(socketPath)).toBe(true);
+			}
 		} finally {
 			cleanup();
 		}
@@ -81,7 +134,7 @@ describe("workspace transition relay", () => {
 
 	test("client returns unavailable on connection error", async () => {
 		const result = await requestTransitionViaRelay(
-			"/tmp/nonexistent-tallow-relay.sock",
+			buildMissingRelaySocketPath(),
 			"/a",
 			"/b",
 			"tool"
