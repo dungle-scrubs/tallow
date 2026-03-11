@@ -1,13 +1,18 @@
 /**
  * Unit tests for the loop extension's pure helpers.
  *
- * Tests interval parsing, countdown formatting, and argument parsing.
- * Integration tests for the full loop lifecycle live in
- * `extensions/__integration__/loop.test.ts`.
+ * Tests interval parsing, countdown formatting, argument parsing,
+ * max iterations, and until-condition extraction.
  */
 
 import { describe, expect, test } from "bun:test";
-import { formatCountdown, parseInterval, parseLoopArgs } from "../index.js";
+import {
+	extractUntilCondition,
+	formatCountdown,
+	parseInterval,
+	parseLoopArgs,
+	parseMaxIterations,
+} from "../index.js";
 
 describe("parseInterval", () => {
 	test("parses seconds", () => {
@@ -49,6 +54,69 @@ describe("parseInterval", () => {
 	test("rejects zero", () => {
 		expect(parseInterval("0s")).toBeNull();
 		expect(parseInterval("0m")).toBeNull();
+	});
+});
+
+describe("parseMaxIterations", () => {
+	test("parses x<N> format", () => {
+		expect(parseMaxIterations("x100")).toBe(100);
+		expect(parseMaxIterations("x1")).toBe(1);
+		expect(parseMaxIterations("x10")).toBe(10);
+	});
+
+	test("rejects zero", () => {
+		expect(parseMaxIterations("x0")).toBeNull();
+	});
+
+	test("rejects non-x formats", () => {
+		expect(parseMaxIterations("100")).toBeNull();
+		expect(parseMaxIterations("100x")).toBeNull();
+		expect(parseMaxIterations("abc")).toBeNull();
+		expect(parseMaxIterations("")).toBeNull();
+	});
+});
+
+describe("extractUntilCondition", () => {
+	test("extracts double-quoted condition", () => {
+		const result = extractUntilCondition(["until", '"build', "is", 'done"', "check", "status"]);
+		expect(result.condition).toBe("build is done");
+		expect(result.remaining).toEqual(["check", "status"]);
+	});
+
+	test("extracts single-quoted condition", () => {
+		const result = extractUntilCondition(["until", "'tests", "pass'", "run", "tests"]);
+		expect(result.condition).toBe("tests pass");
+		expect(result.remaining).toEqual(["run", "tests"]);
+	});
+
+	test("extracts single-word quoted condition", () => {
+		const result = extractUntilCondition(["until", '"done"', "check"]);
+		expect(result.condition).toBe("done");
+		expect(result.remaining).toEqual(["check"]);
+	});
+
+	test("extracts unquoted single-word condition", () => {
+		const result = extractUntilCondition(["until", "done", "check", "status"]);
+		expect(result.condition).toBe("done");
+		expect(result.remaining).toEqual(["check", "status"]);
+	});
+
+	test("returns null when no until keyword", () => {
+		const result = extractUntilCondition(["check", "deploy", "status"]);
+		expect(result.condition).toBeNull();
+		expect(result.remaining).toEqual(["check", "deploy", "status"]);
+	});
+
+	test("preserves tokens before until", () => {
+		const result = extractUntilCondition(["x10", "until", '"done"', "check"]);
+		expect(result.condition).toBe("done");
+		expect(result.remaining).toEqual(["x10", "check"]);
+	});
+
+	test("handles until at end with no condition", () => {
+		const result = extractUntilCondition(["check", "until"]);
+		expect(result.condition).toBeNull();
+		expect(result.remaining).toEqual(["check", "until"]);
 	});
 });
 
@@ -111,6 +179,8 @@ describe("parseLoopArgs", () => {
 			intervalMs: 300_000,
 			intervalLabel: "5m",
 			prompt: "check deploy",
+			maxIterations: null,
+			untilCondition: null,
 		});
 	});
 
@@ -121,6 +191,8 @@ describe("parseLoopArgs", () => {
 			intervalMs: 30_000,
 			intervalLabel: "30s",
 			prompt: "/stats",
+			maxIterations: null,
+			untilCondition: null,
 		});
 	});
 
@@ -155,6 +227,98 @@ describe("parseLoopArgs", () => {
 			intervalMs: 3_600_000,
 			intervalLabel: "1h",
 			prompt: "summarize git log --oneline -20",
+			maxIterations: null,
+			untilCondition: null,
+		});
+	});
+
+	// ── Max iterations ───────────────────────────────────────────────
+
+	test("parses x<N> max iterations", () => {
+		const result = parseLoopArgs("1m x100 run tests");
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 60_000,
+			intervalLabel: "1m",
+			prompt: "run tests",
+			maxIterations: 100,
+			untilCondition: null,
+		});
+	});
+
+	test("x<N> works with single iteration", () => {
+		const result = parseLoopArgs("5s x1 check once");
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 5_000,
+			intervalLabel: "5s",
+			prompt: "check once",
+			maxIterations: 1,
+			untilCondition: null,
+		});
+	});
+
+	// ── Until condition ──────────────────────────────────────────────
+
+	test("parses until condition with double quotes", () => {
+		const result = parseLoopArgs('2m until "build is done" check fuse index');
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 120_000,
+			intervalLabel: "2m",
+			prompt: "check fuse index",
+			maxIterations: null,
+			untilCondition: "build is done",
+		});
+	});
+
+	test("parses until condition with single quotes", () => {
+		const result = parseLoopArgs("1m until 'tests pass' run test suite");
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 60_000,
+			intervalLabel: "1m",
+			prompt: "run test suite",
+			maxIterations: null,
+			untilCondition: "tests pass",
+		});
+	});
+
+	test("parses unquoted until condition", () => {
+		const result = parseLoopArgs("5m until done check status");
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 300_000,
+			intervalLabel: "5m",
+			prompt: "check status",
+			maxIterations: null,
+			untilCondition: "done",
+		});
+	});
+
+	// ── Combined x<N> + until ────────────────────────────────────────
+
+	test("parses both x<N> and until condition", () => {
+		const result = parseLoopArgs('1m x50 until "tests pass" run the test suite');
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 60_000,
+			intervalLabel: "1m",
+			prompt: "run the test suite",
+			maxIterations: 50,
+			untilCondition: "tests pass",
+		});
+	});
+
+	test("until before x<N> also works", () => {
+		const result = parseLoopArgs('1m until "deployed" x10 check deploy status');
+		expect(result).toEqual({
+			action: "start",
+			intervalMs: 60_000,
+			intervalLabel: "1m",
+			prompt: "check deploy status",
+			maxIterations: 10,
+			untilCondition: "deployed",
 		});
 	});
 });
