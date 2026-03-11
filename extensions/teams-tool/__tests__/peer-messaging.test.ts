@@ -79,11 +79,12 @@ describe("peer-to-peer teammate messaging", () => {
 		// Alice sends a message to bob
 		const result = await messageTool.execute("call-1", { to: "bob", content: "I found 42 files" });
 
-		// Message was stored
-		const unread = getUnread(team, "bob");
-		expect(unread.length).toBe(1);
-		expect(unread[0].from).toBe("alice");
-		expect(unread[0].content).toBe("I found 42 files");
+		// Message was stored and marked as read (forwarded via wakeTeammate)
+		expect(team.messages.length).toBe(1);
+		expect(team.messages[0].from).toBe("alice");
+		expect(team.messages[0].content).toBe("I found 42 files");
+		expect(team.messages[0].readBy.has("bob")).toBe(true);
+		expect(getUnread(team, "bob").length).toBe(0);
 
 		// Bob was auto-woken: wakeTeammate called prompt() which resolves
 		// instantly with our mock, so status cycles working → idle.
@@ -132,24 +133,25 @@ describe("peer-to-peer teammate messaging", () => {
 
 		await messageTool.execute("call-4", { to: "all", content: "Step 1 done" });
 
-		// Both bob and carol receive the message
-		expect(getUnread(team, "bob").length).toBe(1);
-		expect(getUnread(team, "carol").length).toBe(1);
-
-		// Both were woken (they were idle)
+		// Both bob and carol were woken (they were idle)
 		expect(bobPrompts.length).toBe(1);
 		expect(carolPrompts.length).toBe(1);
 
-		// Alice doesn't get her own broadcast in unread (she sent it)
-		// Note: the broadcast IS stored with to="all", but alice wouldn't
-		// read her own messages in practice
-		expect(getUnread(team, "alice").length).toBe(1); // to="all" includes sender
+		// Messages marked as read for recipients who were forwarded the content
+		expect(getUnread(team, "bob").length).toBe(0);
+		expect(getUnread(team, "carol").length).toBe(0);
+
+		// Alice doesn't get her own broadcast forwarded (she sent it),
+		// but to="all" includes sender in the store
+		expect(getUnread(team, "alice").length).toBe(1);
 	});
 
-	it("message to working teammate is stored but doesn't re-prompt", async () => {
+	it("message to working teammate is queued as followUp", async () => {
 		const team = freshTeam();
 		const { mate: alice } = mockTeammate("alice");
 		const { mate: bob, prompts: bobPrompts } = mockTeammate("bob", "working");
+		// Mark bob's session as streaming so wakeTeammate queues a followUp
+		(bob.session as unknown as { isStreaming: boolean }).isStreaming = true;
 		team.teammates.set("alice", alice);
 		team.teammates.set("bob", bob);
 
@@ -158,12 +160,13 @@ describe("peer-to-peer teammate messaging", () => {
 
 		await messageTool.execute("call-5", { to: "bob", content: "update for you" });
 
-		// Message stored
-		expect(getUnread(team, "bob").length).toBe(1);
+		// Message stored and marked as read (forwarded via followUp)
+		expect(team.messages.length).toBe(1);
+		expect(team.messages[0].readBy.has("bob")).toBe(true);
 
-		// Bob not re-woken (already working, wakeTeammate skips idle check in tool)
-		// The tool only wakes idle recipients
-		expect(bobPrompts.length).toBe(0);
+		// Bob received the message as a followUp (mock records both prompt and followUp)
+		expect(bobPrompts.length).toBe(1);
+		expect(bobPrompts[0]).toContain("update for you");
 	});
 
 	it("message to nonexistent teammate still stores message", async () => {
@@ -194,15 +197,17 @@ describe("peer-to-peer teammate messaging", () => {
 		const aliceMsg = findTool(aliceTools, "team_message");
 		const bobMsg = findTool(bobTools, "team_message");
 
-		// Alice → Bob
+		// Alice → Bob (bob is idle, gets woken)
 		await aliceMsg.execute("c1", { to: "bob", content: "Found 42 files" });
 		expect(bobPrompts.length).toBe(1);
 
-		// Simulate bob processing and responding
-		bob.status = "working"; // bob is now working from the wake
+		// After wakeTeammate resolves (mock is instant), bob goes idle.
+		// Simulate bob being in working state for the next message.
+		bob.status = "working";
+		(bob.session as unknown as { isStreaming: boolean }).isStreaming = true;
 		alice.status = "idle"; // alice finished her task
 
-		// Bob → Alice
+		// Bob → Alice (alice is idle, gets woken)
 		await bobMsg.execute("c2", { to: "alice", content: "Thanks, I need the list" });
 		expect(alicePrompts.length).toBe(1);
 
