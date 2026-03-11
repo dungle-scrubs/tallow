@@ -158,14 +158,18 @@ export function createTeammateTools(
 		}),
 		// biome-ignore lint/suspicious/noExplicitAny: ToolDefinition params inferred from TypeBox schema
 		execute: async (_toolCallId: string, params: any) => {
-			addTeamMessage(team, myName, params.to, params.content);
+			const msg = addTeamMessage(team, myName, params.to, params.content);
 			appendDashboardFeedEvent(team.name, myName, params.to, params.content);
 
-			// Auto-wake idle recipients
+			// Wake recipients — wakeTeammate handles all states:
+			// idle → prompt(), working/streaming → followUp(), shutdown/error → no-op
+			// Mark as read after forwarding: content was delivered via prompt/followUp,
+			// so the idle-transition drain won't re-deliver it.
 			if (params.to === "all") {
 				for (const [name, mate] of team.teammates) {
-					if (name !== myName && mate.status === "idle") {
+					if (name !== myName) {
 						wakeTeammate(mate, `Broadcast from ${myName}: ${params.content}`, team.name, piEvents);
+						msg.readBy.add(name);
 					}
 				}
 			} else {
@@ -182,9 +186,8 @@ export function createTeammateTools(
 						details: {},
 					};
 				}
-				if (recipient.status === "idle") {
-					wakeTeammate(recipient, `Message from ${myName}: ${params.content}`, team.name, piEvents);
-				}
+				wakeTeammate(recipient, `Message from ${myName}: ${params.content}`, team.name, piEvents);
+				msg.readBy.add(params.to);
 			}
 
 			refreshTeamView(team as Team<Teammate>);
