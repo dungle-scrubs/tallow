@@ -12,7 +12,7 @@ import {
 } from "../dashboard/state.js";
 import { getRuntimeTeam } from "../state/team-view.js";
 import type { Teammate } from "../state/types.js";
-import { getReadyTasks, getTeammatesByStatus, type Team } from "../store.js";
+import { getReadyTasks, getTeammatesByStatus, getUnread, markRead, type Team } from "../store.js";
 
 /**
  * Check for ready (unblocked, unclaimed) tasks and idle teammates,
@@ -106,6 +106,23 @@ export function wakeTeammate(
 				if (team) {
 					refreshTeamView(team);
 					autoDispatch(team, piEvents);
+
+					// Drain unread messages that arrived while working.
+					// team_message now queues follow-ups for working teammates,
+					// but messages can still slip through during status transitions.
+					if (mate.status === "idle") {
+						const unread = getUnread(team, mate.name);
+						if (unread.length > 0) {
+							markRead(team, mate.name);
+							const digest = unread.map((m) => `[${m.from}] ${m.content}`).join("\n\n");
+							wakeTeammate(
+								mate,
+								`You have ${unread.length} unread message(s) that arrived while you were busy:\n\n${digest}`,
+								teamName,
+								piEvents
+							);
+						}
+					}
 				}
 			}
 		})
