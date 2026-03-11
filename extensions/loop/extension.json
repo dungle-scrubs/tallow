@@ -1,10 +1,11 @@
 {
 	"name": "loop",
-	"version": "0.1.0",
-	"description": "Run a prompt on a recurring interval (/loop 5m check deploy)",
-	"whenToUse": "Use /loop to run a prompt or slash command repeatedly at a fixed interval.",
+	"version": "0.2.0",
+	"description": "Run a prompt on a recurring interval with optional limits and stop conditions (/loop 5m check deploy)",
+	"whenToUse": "Use /loop to run a prompt or slash command repeatedly at a fixed interval. Supports max iterations (x<N>) and model-evaluated stop conditions (until \"condition\").",
 	"capabilities": {
-		"commands": ["loop"]
+		"commands": ["loop"],
+		"tools": ["loop_stop"]
 	},
 	"permissionSurface": {
 		"filesystem": "none",
@@ -13,7 +14,7 @@
 		"subprocess": false
 	},
 	"category": "automation",
-	"tags": ["loop", "recurring", "interval", "automation"],
+	"tags": ["loop", "recurring", "interval", "automation", "until", "condition"],
 	"files": ["index.ts"],
 	"relationships": [],
 	"npmDependencies": {}

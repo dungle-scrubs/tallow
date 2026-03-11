@@ -5,14 +5,23 @@
  * current session. The interval timer starts after the previous iteration
  * completes (post-completion delay), preventing overlapping runs.
  *
+ * Supports optional limits and stop conditions:
+ *   - `x<N>` — stop after N iterations
+ *   - `until "<condition>"` — the model evaluates the condition each
+ *     iteration and calls the `loop_stop` tool when it's met
+ *
  * Usage:
  *   /loop 5m check the deploy status
+ *   /loop 1m x10 run the test suite
+ *   /loop 2m until "build is done" check fuse index progress
+ *   /loop 1m x100 until "tests pass" run tests
  *   /loop 30s /stats
  *   /loop stop
  *   /loop status
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { type Static, Type } from "@sinclair/typebox";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -28,8 +37,10 @@ const RESET = "\x1b[0m";
 
 /** Mutable state for an active loop. */
 interface LoopState {
-	/** The prompt text sent each iteration. */
+	/** The base prompt text (without condition suffix). */
 	prompt: string;
+	/** The full prompt sent each iteration (includes condition instruction). */
+	fullPrompt: string;
 	/** Interval in milliseconds between iterations. */
 	intervalMs: number;
 	/** Original interval string (e.g. "5m") for display. */
@@ -44,6 +55,10 @@ interface LoopState {
 	awaitingCompletion: boolean;
 	/** Number of completed iterations. */
 	iterationCount: number;
+	/** Maximum iterations before auto-stop, or null for unlimited. */
+	maxIterations: number | null;
+	/** Stop condition for the model to evaluate, or null for none. */
+	untilCondition: string | null;
 }
 
 // ── Module State ─────────────────────────────────────────────────────────────
@@ -79,6 +94,86 @@ export function parseInterval(s: string): number | null {
 	return value * multiplier;
 }
 
+/**
+ * Parse an iteration count from a string like "x100" or "x5".
+ *
+ * @param s - Token to parse
+ * @returns Positive integer count, or null if not a count token
+ */
+export function parseMaxIterations(s: string): number | null {
+	const match = s.match(/^x(\d+)$/);
+	if (!match) return null;
+	const value = parseInt(match[1], 10);
+	return value > 0 ? value : null;
+}
+
+/**
+ * Extract an `until "..."` condition from a token array.
+ *
+ * Looks for the word "until" followed by a quoted string. Supports
+ * both single and double quotes. Returns the condition text and the
+ * remaining tokens with the `until "..."` portion removed.
+ *
+ * @param tokens - Array of whitespace-split tokens
+ * @returns Object with condition (or null) and remaining tokens
+ */
+export function extractUntilCondition(tokens: string[]): {
+	condition: string | null;
+	remaining: string[];
+} {
+	const untilIdx = tokens.findIndex((t) => t.toLowerCase() === "until");
+	if (untilIdx === -1) {
+		return { condition: null, remaining: tokens };
+	}
+
+	// Everything after "until" is the condition + prompt
+	const afterUntil = tokens.slice(untilIdx + 1);
+	const beforeUntil = tokens.slice(0, untilIdx);
+
+	if (afterUntil.length === 0) {
+		return { condition: null, remaining: tokens };
+	}
+
+	// Check if the condition is quoted
+	const first = afterUntil[0];
+	const quoteChar = first[0] === '"' || first[0] === "'" ? first[0] : null;
+
+	if (quoteChar) {
+		// Find the closing quote
+		const conditionTokens: string[] = [];
+		let closingIdx = -1;
+
+		for (let i = 0; i < afterUntil.length; i++) {
+			conditionTokens.push(afterUntil[i]);
+			if (i > 0 && afterUntil[i].endsWith(quoteChar)) {
+				closingIdx = i;
+				break;
+			}
+			if (i === 0 && afterUntil[i].length > 1 && afterUntil[i].endsWith(quoteChar)) {
+				closingIdx = i;
+				break;
+			}
+		}
+
+		if (closingIdx === -1) {
+			// No closing quote — treat everything as condition
+			const raw = conditionTokens.join(" ");
+			const condition = raw.slice(1); // strip opening quote
+			return { condition, remaining: beforeUntil };
+		}
+
+		const raw = conditionTokens.join(" ");
+		const condition = raw.slice(1, -1); // strip both quotes
+		const afterCondition = afterUntil.slice(closingIdx + 1);
+		return { condition, remaining: [...beforeUntil, ...afterCondition] };
+	}
+
+	// No quotes — single word is the condition
+	const condition = first;
+	const afterCondition = afterUntil.slice(1);
+	return { condition, remaining: [...beforeUntil, ...afterCondition] };
+}
+
 // ── Countdown Formatting ─────────────────────────────────────────────────────
 
 /**
@@ -107,10 +202,19 @@ export function formatCountdown(ms: number): string {
 export type LoopArgs =
 	| { action: "status" }
 	| { action: "stop" }
-	| { action: "start"; intervalMs: number; intervalLabel: string; prompt: string };
+	| {
+			action: "start";
+			intervalMs: number;
+			intervalLabel: string;
+			prompt: string;
+			maxIterations: number | null;
+			untilCondition: string | null;
+	  };
 
 /**
  * Parse the argument string passed to `/loop`.
+ *
+ * Syntax: /loop <interval> [x<N>] [until "<condition>"] <prompt...>
  *
  * @param args - Raw argument text (everything after `/loop `)
  * @returns Parsed action with relevant parameters
@@ -130,20 +234,10 @@ export function parseLoopArgs(args: string): LoopArgs | { action: "error"; messa
 		return { action: "status" };
 	}
 
-	// Expect: <interval> <prompt...>
-	const spaceIdx = trimmed.indexOf(" ");
-	if (spaceIdx === -1) {
-		// Could be just an interval with no prompt
-		const ms = parseInterval(trimmed);
-		if (ms !== null) {
-			return { action: "error", message: "Missing prompt. Usage: /loop 5m <prompt>" };
-		}
-		return { action: "error", message: `Invalid interval "${trimmed}". Use format: 30s, 5m, 1h` };
-	}
+	const tokens = trimmed.split(/\s+/);
 
-	const intervalStr = trimmed.slice(0, spaceIdx);
-	const prompt = trimmed.slice(spaceIdx + 1).trim();
-
+	// First token must be the interval
+	const intervalStr = tokens[0];
 	const ms = parseInterval(intervalStr);
 	if (ms === null) {
 		return {
@@ -152,14 +246,55 @@ export function parseLoopArgs(args: string): LoopArgs | { action: "error"; messa
 		};
 	}
 
+	let rest = tokens.slice(1);
+	if (rest.length === 0) {
+		return { action: "error", message: "Missing prompt. Usage: /loop 5m <prompt>" };
+	}
+
+	// Check for x<N> max iterations (can appear anywhere before the prompt)
+	let maxIterations: number | null = null;
+	const maxIdx = rest.findIndex((t) => parseMaxIterations(t) !== null);
+	if (maxIdx !== -1) {
+		maxIterations = parseMaxIterations(rest[maxIdx]);
+		rest = [...rest.slice(0, maxIdx), ...rest.slice(maxIdx + 1)];
+	}
+
+	// Check for until "condition"
+	const { condition, remaining } = extractUntilCondition(rest);
+
+	const prompt = remaining.join(" ").trim();
 	if (!prompt) {
 		return { action: "error", message: "Missing prompt. Usage: /loop 5m <prompt>" };
 	}
 
-	return { action: "start", intervalMs: ms, intervalLabel: intervalStr, prompt };
+	return {
+		action: "start",
+		intervalMs: ms,
+		intervalLabel: intervalStr,
+		prompt,
+		maxIterations,
+		untilCondition: condition,
+	};
 }
 
 // ── Loop Lifecycle ───────────────────────────────────────────────────────────
+
+/**
+ * Build a display label summarizing the loop configuration.
+ *
+ * @param loop - Active loop state
+ * @returns Human-readable summary like "every 5m x10 until 'build done'"
+ */
+function buildLabel(loop: LoopState): string {
+	let label = `every ${loop.intervalLabel}`;
+	if (loop.maxIterations !== null) {
+		label += ` x${loop.maxIterations}`;
+	}
+	if (loop.untilCondition) {
+		label += ` until "${loop.untilCondition}"`;
+	}
+	return label;
+}
 
 /**
  * Update the status bar with the current loop state.
@@ -178,9 +313,17 @@ function updateStatus(ctx: ExtensionContext): void {
 	const promptPreview =
 		activeLoop.prompt.length > 30 ? `${activeLoop.prompt.slice(0, 27)}...` : activeLoop.prompt;
 
+	const iterInfo =
+		activeLoop.maxIterations !== null
+			? ` ${activeLoop.iterationCount}/${activeLoop.maxIterations}`
+			: ` #${activeLoop.iterationCount}`;
+
 	if (activeLoop.awaitingCompletion) {
 		const iter = activeLoop.iterationCount + 1;
-		ctx.ui.setStatus(STATUS_SLOT, `${FG_CYAN}🔄 running: "${promptPreview}" (#${iter})${RESET}`);
+		ctx.ui.setStatus(
+			STATUS_SLOT,
+			`${FG_CYAN}🔄 running: "${promptPreview}" (#${iter}${activeLoop.maxIterations ? `/${activeLoop.maxIterations}` : ""})${RESET}`
+		);
 		return;
 	}
 
@@ -188,7 +331,7 @@ function updateStatus(ctx: ExtensionContext): void {
 	const countdown = formatCountdown(remaining);
 	ctx.ui.setStatus(
 		STATUS_SLOT,
-		`${FG_CYAN}🔄 ${activeLoop.intervalLabel}: ${FG_DIM}"${promptPreview}"${RESET}${FG_CYAN} (next in ${countdown})${RESET}`
+		`${FG_CYAN}🔄 ${activeLoop.intervalLabel}${iterInfo}: ${FG_DIM}"${promptPreview}"${RESET}${FG_CYAN} (next in ${countdown})${RESET}`
 	);
 }
 
@@ -254,9 +397,12 @@ function scheduleNext(pi: ExtensionAPI, ctx: ExtensionContext): void {
 
 		updateStatus(ctx);
 
-		ctx.ui.notify(`Loop iteration #${activeLoop.iterationCount + 1}: ${activeLoop.prompt}`, "info");
+		const iterLabel = activeLoop.maxIterations
+			? `#${activeLoop.iterationCount + 1}/${activeLoop.maxIterations}`
+			: `#${activeLoop.iterationCount + 1}`;
+		ctx.ui.notify(`Loop iteration ${iterLabel}: ${activeLoop.prompt}`, "info");
 
-		pi.sendUserMessage(activeLoop.prompt, { deliverAs: "followUp" });
+		pi.sendUserMessage(activeLoop.fullPrompt, { deliverAs: "followUp" });
 	}, activeLoop.intervalMs);
 }
 
@@ -278,19 +424,52 @@ function stopLoop(ctx: ExtensionContext, reason: string = "Loop stopped"): void 
 
 // ── Extension Entry Point ────────────────────────────────────────────────────
 
+/** TypeBox schema for the loop_stop tool parameters. */
+const LoopStopParams = Type.Object({
+	reason: Type.String({ description: "Why the stop condition was met" }),
+});
+
 /**
  * Loop extension factory.
  *
- * Registers the `/loop` command, `agent_end` handler for iteration
- * scheduling, and cleanup handlers for session lifecycle events.
+ * Registers the `/loop` command, `loop_stop` tool, `agent_end` handler
+ * for iteration scheduling, and cleanup handlers for session lifecycle.
  *
  * @param pi - Extension API
  */
 export default function loopExtension(pi: ExtensionAPI): void {
+	// ── loop_stop tool — lets the model stop the loop when a condition is met
+
+	pi.registerTool({
+		name: "loop_stop",
+		label: "Stop Loop",
+		description:
+			"Stop the active /loop because its stop condition has been met. " +
+			"Only call this tool when a /loop is running with an `until` condition " +
+			"and you have determined the condition is satisfied.",
+		parameters: LoopStopParams,
+		async execute(_toolCallId, params: Static<typeof LoopStopParams>, _signal, _onUpdate, ctx) {
+			if (!activeLoop) {
+				return {
+					content: [{ type: "text" as const, text: "No active loop to stop." }],
+					details: undefined,
+				};
+			}
+			const reason = `Loop stopped: condition met — ${params.reason}`;
+			stopLoop(ctx, reason);
+			return {
+				content: [{ type: "text" as const, text: `Loop stopped. Reason: ${params.reason}` }],
+				details: undefined,
+			};
+		},
+	});
+
 	// ── /loop command ────────────────────────────────────────────────────
 
 	pi.registerCommand("loop", {
-		description: "Run a prompt on a recurring interval (e.g. /loop 5m check deploy)",
+		description:
+			"Run a prompt on a recurring interval. " +
+			'Syntax: /loop <interval> [x<N>] [until "<condition>"] <prompt>',
 		handler: async (args, ctx) => {
 			const parsed = parseLoopArgs(args);
 
@@ -309,7 +488,10 @@ export default function loopExtension(pi: ExtensionAPI): void {
 
 				case "status":
 					if (!activeLoop) {
-						ctx.ui.notify("No active loop. Usage: /loop 5m <prompt>", "info");
+						ctx.ui.notify(
+							'No active loop. Usage: /loop 5m <prompt>\n  Options: x<N> (max iterations), until "<condition>" (auto-stop)',
+							"info"
+						);
 						return;
 					}
 					{
@@ -317,10 +499,11 @@ export default function loopExtension(pi: ExtensionAPI): void {
 						const state = activeLoop.awaitingCompletion
 							? `running iteration #${activeLoop.iterationCount + 1}`
 							: `next in ${formatCountdown(remaining)}`;
-						ctx.ui.notify(
-							`Loop: every ${activeLoop.intervalLabel} → "${activeLoop.prompt}" | ${state} | ${activeLoop.iterationCount} completed`,
-							"info"
-						);
+						let info = `Loop: ${buildLabel(activeLoop)} → "${activeLoop.prompt}" | ${state} | ${activeLoop.iterationCount} completed`;
+						if (activeLoop.maxIterations) {
+							info += ` of ${activeLoop.maxIterations}`;
+						}
+						ctx.ui.notify(info, "info");
 					}
 					return;
 
@@ -329,13 +512,24 @@ export default function loopExtension(pi: ExtensionAPI): void {
 					if (activeLoop) {
 						clearTimers();
 						ctx.ui.notify(
-							`Replacing active loop (was: ${activeLoop.intervalLabel} → "${activeLoop.prompt}")`,
+							`Replacing active loop (was: ${buildLabel(activeLoop)} → "${activeLoop.prompt}")`,
 							"info"
 						);
 					}
 
+					// Build the full prompt with condition instruction
+					let fullPrompt = parsed.prompt;
+					if (parsed.untilCondition) {
+						fullPrompt +=
+							`\n\n---\nLoop stop condition: "${parsed.untilCondition}"\n` +
+							`After completing the task above, evaluate whether this condition is now met. ` +
+							`If it IS met, call the loop_stop tool with the reason. ` +
+							`If it is NOT yet met, do nothing — the loop will continue automatically.`;
+					}
+
 					activeLoop = {
 						prompt: parsed.prompt,
+						fullPrompt,
 						intervalMs: parsed.intervalMs,
 						intervalLabel: parsed.intervalLabel,
 						timer: null,
@@ -343,9 +537,11 @@ export default function loopExtension(pi: ExtensionAPI): void {
 						nextRunAt: 0,
 						awaitingCompletion: false,
 						iterationCount: 0,
+						maxIterations: parsed.maxIterations,
+						untilCondition: parsed.untilCondition,
 					};
 
-					ctx.ui.notify(`Loop started: every ${parsed.intervalLabel} → "${parsed.prompt}"`, "info");
+					ctx.ui.notify(`Loop started: ${buildLabel(activeLoop)} → "${parsed.prompt}"`, "info");
 
 					scheduleNext(pi, ctx);
 					return;
@@ -366,7 +562,22 @@ export default function loopExtension(pi: ExtensionAPI): void {
 		activeLoop.awaitingCompletion = false;
 		activeLoop.iterationCount++;
 
-		ctx.ui.notify(`Loop iteration #${activeLoop.iterationCount} complete`, "info");
+		// Check max iterations limit
+		if (
+			activeLoop.maxIterations !== null &&
+			activeLoop.iterationCount >= activeLoop.maxIterations
+		) {
+			stopLoop(
+				ctx,
+				`Loop complete: ${activeLoop.iterationCount}/${activeLoop.maxIterations} iterations`
+			);
+			return;
+		}
+
+		const iterLabel = activeLoop.maxIterations
+			? `${activeLoop.iterationCount}/${activeLoop.maxIterations}`
+			: `${activeLoop.iterationCount}`;
+		ctx.ui.notify(`Loop iteration ${iterLabel} complete`, "info");
 
 		scheduleNext(pi, ctx);
 	});
