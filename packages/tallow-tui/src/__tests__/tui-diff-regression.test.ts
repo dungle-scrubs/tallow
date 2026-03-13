@@ -331,4 +331,124 @@ describe("TUI differential rendering shrink regression", () => {
 		// The key assertion is maxLinesRendered is correct
 		expect(tuiInternal.maxLinesRendered).toBe(40);
 	});
+
+	test("large shrink (>5 lines) triggers full redraw to prevent ghosting", () => {
+		const width = 40;
+		const height = 20;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		// Start with 18 lines
+		const component = new MutableLinesComponent(Array.from({ length: 18 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui); // First render (fullRedraw #1)
+
+		// Shrink by 6 lines (above the 5-line threshold) — should trigger full redraw
+		component.setLines(Array.from({ length: 12 }, (_, i) => `shrunk ${i}`));
+		const redrawsBefore = tui.fullRedraws;
+		renderNow(tui);
+
+		expect(tui.fullRedraws).toBe(redrawsBefore + 1);
+		const tuiInternal = tui as unknown as { maxLinesRendered: number };
+		expect(tuiInternal.maxLinesRendered).toBe(12);
+	});
+
+	test("small shrink (<=5 lines) uses partial diff, not full redraw", () => {
+		const width = 40;
+		const height = 20;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		// Start with 12 lines
+		const component = new MutableLinesComponent(Array.from({ length: 12 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui); // First render (fullRedraw #1)
+
+		// Shrink by exactly 5 lines (at threshold, NOT over) — should NOT trigger
+		// the large-shrink full redraw path
+		component.setLines(Array.from({ length: 7 }, (_, i) => `shrunk ${i}`));
+		const redrawsBefore = tui.fullRedraws;
+		renderNow(tui);
+
+		// Should use partial diff (no increase in fullRedraws)
+		expect(tui.fullRedraws).toBe(redrawsBefore);
+		const tuiInternal = tui as unknown as { maxLinesRendered: number };
+		expect(tuiInternal.maxLinesRendered).toBe(7);
+	});
+
+	test("rapid grow-shrink-grow cycles don't accumulate ghost state", () => {
+		const width = 40;
+		const height = 15;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(
+			Array.from({ length: 10 }, (_, i) => `initial ${i}`)
+		);
+		tui.addChild(component);
+		renderNow(tui);
+
+		const tuiInternal = tui as unknown as {
+			maxLinesRendered: number;
+			previousViewportTop: number;
+		};
+
+		// Simulate 5 rapid grow-shrink cycles (like streaming tool output + collapse)
+		for (let cycle = 0; cycle < 5; cycle++) {
+			// Grow: simulate streaming output
+			component.setLines(Array.from({ length: 40 }, (_, i) => `stream-${cycle}-${i}`));
+			renderNow(tui);
+
+			// Shrink: simulate tool result collapse
+			component.setLines(Array.from({ length: 8 }, (_, i) => `result-${cycle}-${i}`));
+			renderNow(tui);
+		}
+
+		// After all cycles, maxLinesRendered should match actual content (8), not
+		// any stale high-water mark from the streaming phases
+		expect(tuiInternal.maxLinesRendered).toBe(8);
+		expect(tuiInternal.previousViewportTop).toBe(0); // 8 < height(15), so 0
+
+		// A subsequent update should work correctly via partial diff
+		component.setLines(Array.from({ length: 8 }, (_, i) => `final ${i}`));
+		const redrawsBefore = tui.fullRedraws;
+		renderNow(tui);
+
+		// No full redraw needed — content didn't shrink
+		expect(tui.fullRedraws).toBe(redrawsBefore);
+	});
+
+	test("drift correction uses newLines.length, not previousLines.length", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+
+		// Use an overlay to keep maxLinesRendered inflated (overlay padding).
+		// With overlays, maxLinesRendered = Math.max(old, new) — only grows.
+		const component = new MutableLinesComponent(Array.from({ length: 50 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+
+		const overlayComponent: Component = {
+			render: () => ["overlay line"],
+			invalidate: () => {},
+		};
+		tui.showOverlay(overlayComponent);
+		renderNow(tui); // maxLinesRendered >= 50 (padded by overlay)
+
+		// Remove overlay and shrink content simultaneously — maxLinesRendered is
+		// still inflated from overlay padding, but newLines.length will be much
+		// smaller. The large-shrink guard (>5 lines) triggers a full redraw,
+		// which correctly resets maxLinesRendered to newLines.length.
+		tui.hideOverlay();
+		component.setLines(Array.from({ length: 20 }, (_, i) => `shrunk ${i}`));
+		renderNow(tui);
+
+		const tuiInternal = tui as unknown as {
+			maxLinesRendered: number;
+			previousViewportTop: number;
+		};
+
+		// maxLinesRendered should be 20 (newLines.length), not whatever
+		// previousLines.length was (which includes overlay padding)
+		expect(tuiInternal.maxLinesRendered).toBe(20);
+		expect(tuiInternal.previousViewportTop).toBe(Math.max(0, 20 - height));
+	});
 });
