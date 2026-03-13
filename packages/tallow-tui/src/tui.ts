@@ -1004,6 +1004,17 @@ export class TUI extends Container {
 			return;
 		}
 
+		// Large content shrinks (e.g., tool output collapse) are hard to partially redraw
+		// correctly — cursor positions drift when many lines disappear at once, causing
+		// ghost copies of previous frames. Force a full redraw when the shrink exceeds a
+		// threshold. More targeted than clearOnShrink (which fires on ANY shrink).
+		const shrinkDelta = this.previousLines.length - newLines.length;
+		if (shrinkDelta > 5 && this.overlayStack.length === 0) {
+			logRedraw(`large shrink (${shrinkDelta} lines)`);
+			fullRender(true);
+			return;
+		}
+
 		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
 		// Detect viewport basis drift: maxLinesRendered exceeds actual content,
 		// causing viewportTop to be computed from a stale high-water mark.
@@ -1019,8 +1030,11 @@ export class TUI extends Container {
 		// than current content. Instead of a destructive full redraw (which clears the screen and
 		// disrupts scrollback), realign the working-area coordinates so the partial-redraw path
 		// can operate on a consistent viewport basis.
+		// Use newLines.length (not previousLines.length) so the correction is exact for the
+		// current frame — previousLines.length can still exceed newLines.length, leaving
+		// residual drift for one more cycle and causing ghost lines.
 		if (hasViewportBasisDrift) {
-			this.maxLinesRendered = this.previousLines.length;
+			this.maxLinesRendered = newLines.length;
 			viewportTop = Math.max(0, this.maxLinesRendered - height);
 			prevViewportTop = viewportTop;
 			this.previousViewportTop = viewportTop;
