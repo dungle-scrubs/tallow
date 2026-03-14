@@ -34,7 +34,7 @@ import {
 	type AgentRunnerCandidate,
 	formatMissingAgentRunnerError,
 	resolveAgentRunnerCandidates,
-} from "../../src/agent-runner.js";
+} from "../../dist/agent-runner.js";
 import { isProjectTrusted } from "../_shared/project-trust.js";
 import { evaluateCommand } from "../_shared/shell-policy.js";
 import { getTallowHomeDir, getTallowPath } from "../_shared/tallow-paths.js";
