@@ -12,8 +12,11 @@ import * as path from "node:path";
 import type { AgentToolResult } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { DEFAULT_AGENT_RUNNER_ENV, spawnWithResolvedAgentRunner } from "../../dist/agent-runner.js";
-import { injectTraceContextToEnv, type TelemetryHandle } from "../../dist/otel.js";
+import {
+	DEFAULT_AGENT_RUNNER_ENV,
+	spawnWithResolvedAgentRunner,
+} from "../../runtime/agent-runner.js";
+import { injectTraceContextToEnv, type TelemetryHandle } from "../../runtime/otel.js";
 import { extractPreview, isInlineResultsEnabled } from "../_shared/inline-preview.js";
 import {
 	emitWorktreeLifecycleEvent,

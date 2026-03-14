@@ -3,4 +3,4 @@
  *
  * Extensions should import from here rather than reaching into `src/`.
  */
-export { atomicWriteFileSync, restoreFromBackup } from "../../dist/atomic-write.js";
+export { atomicWriteFileSync, restoreFromBackup } from "../../runtime/atomic-write.js";

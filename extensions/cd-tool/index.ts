@@ -14,11 +14,11 @@ import type {
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { getWorkspaceTransitionHost } from "../../dist/workspace-transition.js";
+import { getWorkspaceTransitionHost } from "../../runtime/workspace-transition.js";
 import {
 	getRelaySocketPath,
 	requestTransitionViaRelay,
-} from "../../dist/workspace-transition-relay.js";
+} from "../../runtime/workspace-transition-relay.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 /** Details returned from the cd tool. */

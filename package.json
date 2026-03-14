@@ -26,6 +26,7 @@
 		"dist",
 		"extensions",
 		"packages/tallow-tui",
+		"runtime",
 		"schemas",
 		"skills",
 		"templates",
