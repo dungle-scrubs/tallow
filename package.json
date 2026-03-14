@@ -25,6 +25,7 @@
 	"files": [
 		"dist",
 		"extensions",
+		"packages/tallow-tui",
 		"schemas",
 		"skills",
 		"templates",
@@ -101,8 +102,10 @@
 		"url": "https://github.com/dungle-scrubs/tallow/issues"
 	},
 	"overrides": {
+		"@mariozechner/pi-coding-agent": {
+			"@mariozechner/pi-tui": "workspace:*"
+		},
 		"@mariozechner/pi-tui": "workspace:*",
-		"@mariozechner/pi-coding-agent>@mariozechner/pi-tui": "workspace:*",
 		"ajv": "8.18.0",
 		"basic-ftp": "5.2.0",
 		"fast-xml-parser": "5.3.6",
