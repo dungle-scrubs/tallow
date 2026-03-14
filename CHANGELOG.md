@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **packaging:** make the published tarball self-contained by switching
+  bundled extensions off repo-only `src/` imports, including the local
+  `packages/tallow-tui` workspace in the packlist, and degrading prompt
+  suggestions safely when ghost-text editor support is unavailable
 - **slash-command-bridge:** move model-invoked `/compact` deferral to the
   proven post-response `turn_end` boundary, add deterministic lifecycle
   regression coverage, and stop stale `agent_end` races from dropping
