@@ -26,6 +26,8 @@ interface FakeEvent {
 class FakeInteractiveMode {
 	defaultEditor: { onEscape?: () => void } = {};
 	escapeCalls = 0;
+	executeCompactionCalls = 0;
+	executeCompactionResult: unknown = { summary: "ok" };
 	flushCalls = 0;
 	handleBashCommandCalls = 0;
 	handleEventCalls = 0;
@@ -37,7 +39,10 @@ class FakeInteractiveMode {
 	pendingBashComponents: unknown[] = [];
 	pendingWorkingMessage: unknown = "stale";
 	renderRequests = 0;
-	session = { isStreaming: false };
+	session = {
+		extensionRunner: { compactFn: undefined as ((options?: unknown) => void) | undefined },
+		isStreaming: false,
+	};
 	statusClears = 0;
 	updateCalls = 0;
 	ui = {
@@ -86,6 +91,37 @@ class FakeInteractiveMode {
 		this.defaultEditor.onEscape = () => {
 			this.escapeCalls++;
 		};
+	}
+
+	/**
+	 * Base initExtensions implementation used by the patch wrapper.
+	 *
+	 * @returns Promise resolved after recording the lifecycle step
+	 */
+	async initExtensions(): Promise<void> {
+		this.lifecycleCalls.push("initExtensions");
+	}
+
+	/**
+	 * Base reload implementation used by the patch wrapper.
+	 *
+	 * @returns Promise resolved after recording the lifecycle step
+	 */
+	async handleReloadCommand(): Promise<void> {
+		this.lifecycleCalls.push("handleReloadCommand");
+	}
+
+	/**
+	 * Base executeCompaction implementation used by the patch wrapper.
+	 *
+	 * @param _customInstructions - Optional compaction instructions
+	 * @param _isAuto - Whether the compaction is automatic
+	 * @returns Configured mock compaction result
+	 */
+	async executeCompaction(_customInstructions?: string, _isAuto = false): Promise<unknown> {
+		this.executeCompactionCalls++;
+		this.lifecycleCalls.push("executeCompaction");
+		return this.executeCompactionResult;
 	}
 
 	/**
@@ -501,6 +537,76 @@ describe("patchInteractiveModePrototype", () => {
 			| (() => boolean)
 			| undefined;
 		expect(hasQueued?.()).toBe(false);
+	});
+
+	it("rebinds extension compact to InteractiveMode compaction on init and reload", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		let completed = 0;
+
+		await mode.initExtensions();
+		expect(typeof mode.session.extensionRunner.compactFn).toBe("function");
+
+		mode.session.extensionRunner.compactFn?.({
+			onComplete: () => {
+				completed++;
+			},
+		});
+		await Promise.resolve();
+
+		expect(mode.executeCompactionCalls).toBe(1);
+		expect(completed).toBe(1);
+
+		await mode.handleReloadCommand();
+		mode.session.extensionRunner.compactFn?.({
+			onComplete: () => {
+				completed++;
+			},
+		});
+		await Promise.resolve();
+
+		expect(mode.executeCompactionCalls).toBe(2);
+		expect(completed).toBe(2);
+	});
+
+	it("defers extension compact until agent_end when the session is still streaming", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		let completed = 0;
+
+		await mode.initExtensions();
+		mode.session.isStreaming = true;
+		mode.session.extensionRunner.compactFn?.({
+			onComplete: () => {
+				completed++;
+			},
+		});
+
+		expect(mode.executeCompactionCalls).toBe(0);
+
+		mode.session.isStreaming = false;
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.executeCompactionCalls).toBe(1);
+		expect(completed).toBe(1);
+	});
+
+	it("treats undefined InteractiveMode compaction results as cleanup-worthy errors", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.executeCompactionResult = undefined;
+		let errorMessage: string | undefined;
+
+		await mode.initExtensions();
+		mode.session.extensionRunner.compactFn?.({
+			onError: (error: Error) => {
+				errorMessage = error.message;
+			},
+		});
+		await Promise.resolve();
+
+		expect(mode.executeCompactionCalls).toBe(1);
+		expect(errorMessage).toBe("Compaction did not complete");
 	});
 
 	// ── message_update coalescing (plan 176) ──────────────────────────────

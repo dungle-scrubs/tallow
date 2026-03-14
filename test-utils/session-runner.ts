@@ -26,6 +26,8 @@ export interface SessionRunnerOptions {
 	extensionFactories?: ExtensionFactory[];
 	/** Working directory (default: temp dir). */
 	cwd?: string;
+	/** Session settings overrides applied during creation. */
+	settings?: Record<string, unknown>;
 }
 
 /** Result from running a prompt through the session. */
@@ -77,6 +79,7 @@ export class SessionRunner {
 				noBundledExtensions: true,
 				noBundledSkills: true,
 				extensionFactories: options.extensionFactories,
+				settings: options.settings,
 			});
 		});
 

@@ -25,11 +25,17 @@ run_slash_command({ command: "context" })
 → "Context Usage: 45,000 / 200,000 tokens (22.5%)"
 
 run_slash_command({ command: "compact" })
-→ "Session compaction triggered."
+→ "Session compaction will begin after this response completes."
 ```
 
 If usage is unknown (`tokens: null`), `context` returns the same no-data error
 path as `/context` for parity.
+
+Model-invoked `compact` is deferred until the assistant finishes its current
+post-tool response. Once compaction actually completes, the bridge schedules a
+hidden continuation turn only if the session is still idle, which avoids the
+old dead-end where `/compact` returned successfully but no compaction or resume
+happened.
 
 ## Design
 

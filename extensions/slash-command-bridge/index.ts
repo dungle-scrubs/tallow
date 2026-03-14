@@ -9,15 +9,20 @@
  * registration, with auto-generated tool schemas and full command handler access.
  */
 
-import type { ContextUsage, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type {
+	ContextUsage,
+	ExtensionAPI,
+	ExtensionContext,
+	TurnEndEvent,
+} from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 /**
- * Deferred compact request — set by the tool handler, consumed by the
- * `agent_end` hook. Deferring avoids the spinner-hang bug where
- * `ctx.compact()` aborts the agent mid-tool-call, orphaning the tool
- * execution UI component. See plans 95 and 98 for full analysis.
+ * Deferred compact request — set by the tool handler, consumed on the first
+ * safe assistant `turn_end` after the tool result. Deferring avoids the
+ * spinner-hang bug where `ctx.compact()` aborts the agent mid-tool-call,
+ * orphaning the tool execution UI component. See plans 95, 98, and 191.
  */
 let pendingCompact: { customInstructions?: string } | null = null;
 
@@ -35,7 +40,7 @@ let resumingAfterCompact = false;
  * `flushCompactionQueue` or user input already prompted the agent), or
  * on session switch. See plan 159, bug 1.
  */
-let continuationTimer: ReturnType<typeof setTimeout> | null = null;
+let continuationTimer: SchedulerHandle | null = null;
 
 /** Spinner frames for compact progress status updates. */
 const COMPACT_PROGRESS_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -43,9 +48,39 @@ const COMPACT_PROGRESS_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦"
 /** Interval cadence for compact progress status updates. */
 const COMPACT_PROGRESS_INTERVAL_MS = 1000;
 
+type SchedulerHandle = unknown;
+
+/** Timer scheduler used by compact UI and continuation timers. */
+export interface SlashCommandBridgeTimerScheduler {
+	readonly now: () => number;
+	readonly setInterval: (callback: () => void, intervalMs: number) => SchedulerHandle;
+	readonly clearInterval: (handle: SchedulerHandle | null) => void;
+	readonly setTimeout: (callback: () => void, delayMs: number) => SchedulerHandle;
+	readonly clearTimeout: (handle: SchedulerHandle | null) => void;
+}
+
+/** Default runtime timer scheduler. */
+const DEFAULT_TIMER_SCHEDULER: SlashCommandBridgeTimerScheduler = {
+	now: () => Date.now(),
+	setInterval: (callback, intervalMs) => setInterval(callback, intervalMs),
+	clearInterval: (handle) => {
+		if (handle) {
+			clearInterval(handle as ReturnType<typeof setInterval>);
+		}
+	},
+	setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+	clearTimeout: (handle) => {
+		if (handle) {
+			clearTimeout(handle as ReturnType<typeof setTimeout>);
+		}
+	},
+};
+
+let timerScheduler: SlashCommandBridgeTimerScheduler = DEFAULT_TIMER_SCHEDULER;
+
 /** Module-level heartbeat state for deferred compact UI updates. */
 const compactProgressState: {
-	interval: ReturnType<typeof setInterval> | null;
+	interval: SchedulerHandle | null;
 	spinnerIndex: number;
 	startedAt: number;
 } = {
@@ -70,11 +105,13 @@ function startCompactProgress(ctx: ExtensionContext): void {
 		return;
 	}
 
-	compactProgressState.startedAt = Date.now();
+	compactProgressState.startedAt = timerScheduler.now();
 	compactProgressState.spinnerIndex = 0;
 
 	const renderStatus = () => {
-		const elapsedSeconds = Math.floor((Date.now() - compactProgressState.startedAt) / 1000);
+		const elapsedSeconds = Math.floor(
+			(timerScheduler.now() - compactProgressState.startedAt) / 1000
+		);
 		const frame =
 			COMPACT_PROGRESS_FRAMES[compactProgressState.spinnerIndex] ?? COMPACT_PROGRESS_FRAMES[0];
 		ctx.ui?.setStatus?.("compact", `🧹 ${frame} compacting · ${elapsedSeconds}s`);
@@ -83,7 +120,10 @@ function startCompactProgress(ctx: ExtensionContext): void {
 	};
 
 	renderStatus();
-	compactProgressState.interval = setInterval(renderStatus, COMPACT_PROGRESS_INTERVAL_MS);
+	compactProgressState.interval = timerScheduler.setInterval(
+		renderStatus,
+		COMPACT_PROGRESS_INTERVAL_MS
+	);
 }
 
 /**
@@ -93,12 +133,61 @@ function startCompactProgress(ctx: ExtensionContext): void {
  */
 function stopCompactProgress(): void {
 	if (compactProgressState.interval) {
-		clearInterval(compactProgressState.interval);
+		timerScheduler.clearInterval(compactProgressState.interval);
 		compactProgressState.interval = null;
 	}
 
 	compactProgressState.startedAt = 0;
 	compactProgressState.spinnerIndex = 0;
+}
+
+/**
+ * Cancels the pending continuation timer, if one exists.
+ *
+ * @returns Nothing
+ */
+function clearContinuationTimer(): void {
+	if (!continuationTimer) {
+		return;
+	}
+
+	timerScheduler.clearTimeout(continuationTimer);
+	continuationTimer = null;
+}
+
+/**
+ * Resets module-level compact state between runs or tests.
+ *
+ * @returns Nothing
+ */
+function clearCompactRuntimeState(): void {
+	pendingCompact = null;
+	resumingAfterCompact = false;
+	stopCompactProgress();
+	clearContinuationTimer();
+}
+
+/**
+ * Installs a deterministic timer scheduler for tests.
+ *
+ * @param scheduler - Test scheduler implementation
+ * @returns Nothing
+ */
+export function setSlashCommandBridgeSchedulerForTests(
+	scheduler: SlashCommandBridgeTimerScheduler
+): void {
+	clearCompactRuntimeState();
+	timerScheduler = scheduler;
+}
+
+/**
+ * Resets test scheduler/state overrides back to runtime defaults.
+ *
+ * @returns Nothing
+ */
+export function resetSlashCommandBridgeStateForTests(): void {
+	clearCompactRuntimeState();
+	timerScheduler = DEFAULT_TIMER_SCHEDULER;
 }
 
 /**
@@ -175,6 +264,102 @@ function formatContextUsage(usage: KnownContextUsage): string {
 	];
 
 	return lines.join("\n");
+}
+
+/**
+ * Returns true when the current turn_end is the first safe compaction boundary.
+ *
+ * The compact tool always finishes on a `toolUse` turn first. The model then
+ * gets one more assistant turn to finish its response after seeing the tool
+ * result. Consuming the request on `agent_end` is too late: `session.prompt()`
+ * returns before prior `agent_end` extension work fully drains, so a stale
+ * `agent_end` from the previous run can steal a newer compact request. The
+ * first assistant `turn_end` whose stop reason is not `toolUse` is the proven
+ * boundary for starting deferred compaction exactly once.
+ *
+ * @param event - Turn lifecycle event
+ * @returns True when deferred compaction should start now
+ */
+function shouldStartDeferredCompactOnTurnEnd(event: TurnEndEvent): boolean {
+	return event.message.role === "assistant" && event.message.stopReason !== "toolUse";
+}
+
+/**
+ * Starts the deferred compact flow and wires continuation/error cleanup.
+ *
+ * @param pi - Extension API used to enqueue the hidden continuation message
+ * @param ctx - Extension context with compact/UI capabilities
+ * @param options - Deferred compact request options
+ * @returns Nothing
+ */
+function startDeferredCompact(
+	pi: ExtensionAPI,
+	ctx: ExtensionContext,
+	options: { customInstructions?: string }
+): void {
+	// Show explicit UI feedback while compaction runs. Without this,
+	// users only see the deferred tool message and no live progress signal.
+	ctx.ui?.setWorkingMessage?.("Compacting session…");
+	startCompactProgress(ctx);
+
+	ctx.compact({
+		customInstructions: options.customInstructions,
+		onComplete: () => {
+			stopCompactProgress();
+
+			// Transition from compaction indicators to resuming indicators.
+			// setWorkingMessage queues as pendingWorkingMessage (no loader
+			// exists after executeCompaction stops it). Applied automatically
+			// when agent_start creates the loader. Footer status is visible
+			// immediately — covers the brief gap before the loader appears.
+			resumingAfterCompact = true;
+			ctx.ui?.setWorkingMessage?.("Resuming task…");
+			ctx.ui?.setStatus?.("compact", "⏳ resuming");
+
+			// Always schedule continuation. Safety nets prevent duplicate prompts:
+			// 1. turn_start listener cancels if flushCompactionQueue already started a turn
+			// 2. isIdle() check at timer expiry skips if agent is streaming
+			// 3. sendCustomMessage queues as steering if agent started mid-delay
+			//
+			// Previously gated on hasCompactionQueuedMessages(), but that method
+			// checked both the compaction queue AND session steering — causing a
+			// false positive when steering messages were queued before compact.
+			// flushCompactionQueue only processes compactionQueuedMessages, so
+			// session steering messages were orphaned. See plan 160.
+			//
+			// 200ms gives session.prompt()'s async setup (API key resolution,
+			// compaction check) time to settle. The turn_start listener cancels
+			// this timer if a turn starts before it fires (defense-in-depth).
+			continuationTimer = timerScheduler.setTimeout(() => {
+				continuationTimer = null;
+				if (ctx.isIdle()) {
+					pi.sendMessage(
+						{
+							customType: "compact-continue",
+							content:
+								"Session compaction is complete. Continue with the task " +
+								"you were working on before compaction was triggered.",
+							display: false,
+						},
+						{ triggerTurn: true }
+					);
+				} else {
+					// User sent a message during compaction — their turn is
+					// handling things, clean up our indicators.
+					resumingAfterCompact = false;
+					ctx.ui?.setStatus?.("compact", undefined);
+					ctx.ui?.setWorkingMessage?.();
+				}
+			}, 200);
+		},
+		onError: () => {
+			stopCompactProgress();
+			ctx.ui?.setWorkingMessage?.();
+			ctx.ui?.setStatus?.("compact", undefined);
+			// Framework's executeCompaction handles error/cancel
+			// display. No continuation on failure — user decides.
+		},
+	});
 }
 
 /**
@@ -299,8 +484,8 @@ WHEN NOT TO USE:
 
 				case "compact": {
 					// Don't call ctx.compact() here — it aborts the agent mid-tool-call,
-					// orphaning the tool execution spinner (plan 95/98). Defer to the
-					// agent_end hook so the tool completes normally first.
+					// orphaning the tool execution spinner (plan 95/98). Defer to a
+					// proven turn_end boundary so the tool completes normally first.
 					pendingCompact = { customInstructions: undefined };
 
 					return {
@@ -350,93 +535,23 @@ WHEN NOT TO USE:
 	// ── Deferred compact ─────────────────────────────────────────
 
 	/**
-	 * Fires compact after the agent finishes its turn. This avoids the
-	 * spinner-hang caused by aborting the agent mid-tool-execution.
-	 * The tool sets `pendingCompact`, then agent_end picks it up.
+	 * Fires compact on the first safe assistant `turn_end` after the compact tool
+	 * returns. The immediate `toolUse` turn is too early because the model has not
+	 * finished its post-tool response yet, while `agent_end` is too late because a
+	 * stale `agent_end` from the previous run can steal a newer pending request.
 	 *
-	 * After compaction completes, checks whether the agent is idle. When the
-	 * model triggered compaction (vs. the user typing during it), the
-	 * framework's `flushCompactionQueue` finds no queued messages and the
-	 * agent sits at the input prompt — even though the model promised to
-	 * continue. We fix this by sending a hidden continuation message via
-	 * `pi.sendMessage()` with `triggerTurn: true` to re-prompt the agent.
-	 *
-	 * A short `setTimeout` allows `flushCompactionQueue`'s fire-and-forget
-	 * async path to settle first, so we don't conflict with user-queued
-	 * messages that already restarted the agent.
-	 *
-	 * @see Plan 98 — deferred compact to agent_end (introduced idle-after-compact)
+	 * @see Plan 98 — deferred compact moved out of the tool handler
 	 * @see Plan 157 — auto-continue after model-triggered compaction
+	 * @see Plan 191 — stale prior agent_end could consume a later compact request
 	 */
-	pi.on("agent_end", (_event, ctx) => {
-		if (!pendingCompact) return;
+	pi.on("turn_end", (event, ctx) => {
+		if (!pendingCompact || !shouldStartDeferredCompactOnTurnEnd(event)) {
+			return;
+		}
 
 		const options = pendingCompact;
 		pendingCompact = null;
-
-		// Show explicit UI feedback while compaction runs. Without this,
-		// users only see the deferred tool message and no live progress signal.
-		ctx.ui?.setWorkingMessage?.("Compacting session…");
-		startCompactProgress(ctx);
-
-		ctx.compact({
-			customInstructions: options.customInstructions,
-			onComplete: () => {
-				stopCompactProgress();
-
-				// Transition from compaction indicators to resuming indicators.
-				// setWorkingMessage queues as pendingWorkingMessage (no loader
-				// exists after executeCompaction stops it). Applied automatically
-				// when agent_start creates the loader. Footer status is visible
-				// immediately — covers the brief gap before the loader appears.
-				resumingAfterCompact = true;
-				ctx.ui?.setWorkingMessage?.("Resuming task…");
-				ctx.ui?.setStatus?.("compact", "⏳ resuming");
-
-				// Always schedule continuation. Safety nets prevent duplicate prompts:
-				// 1. turn_start listener cancels if flushCompactionQueue already started a turn
-				// 2. isIdle() check at timer expiry skips if agent is streaming
-				// 3. sendCustomMessage queues as steering if agent started mid-delay
-				//
-				// Previously gated on hasCompactionQueuedMessages(), but that method
-				// checked both the compaction queue AND session steering — causing a
-				// false positive when steering messages were queued before compact.
-				// flushCompactionQueue only processes compactionQueuedMessages, so
-				// session steering messages were orphaned. See plan 160.
-				//
-				// 200ms gives session.prompt()'s async setup (API key resolution,
-				// compaction check) time to settle. The turn_start listener cancels
-				// this timer if a turn starts before it fires (defense-in-depth).
-				continuationTimer = setTimeout(() => {
-					continuationTimer = null;
-					if (ctx.isIdle()) {
-						pi.sendMessage(
-							{
-								customType: "compact-continue",
-								content:
-									"Session compaction is complete. Continue with the task " +
-									"you were working on before compaction was triggered.",
-								display: false,
-							},
-							{ triggerTurn: true }
-						);
-					} else {
-						// User sent a message during compaction — their turn is
-						// handling things, clean up our indicators.
-						resumingAfterCompact = false;
-						ctx.ui?.setStatus?.("compact", undefined);
-						ctx.ui?.setWorkingMessage?.();
-					}
-				}, 200);
-			},
-			onError: () => {
-				stopCompactProgress();
-				ctx.ui?.setWorkingMessage?.();
-				ctx.ui?.setStatus?.("compact", undefined);
-				// Framework's executeCompaction handles error/cancel
-				// display. No continuation on failure — user decides.
-			},
-		});
+		startDeferredCompact(pi, ctx, options);
 	});
 
 	/**
@@ -450,10 +565,7 @@ WHEN NOT TO USE:
 	 * now active and showing the pending working message ("Resuming task…").
 	 */
 	pi.on("turn_start", (_event, ctx) => {
-		if (continuationTimer) {
-			clearTimeout(continuationTimer);
-			continuationTimer = null;
-		}
+		clearContinuationTimer();
 		if (!resumingAfterCompact) return;
 		resumingAfterCompact = false;
 		ctx.ui?.setStatus?.("compact", undefined);
@@ -464,13 +576,8 @@ WHEN NOT TO USE:
 	 * session switches before the turn ends.
 	 */
 	pi.on("session_before_switch", (_event, ctx) => {
-		pendingCompact = null;
-		resumingAfterCompact = false;
-		stopCompactProgress();
-		if (continuationTimer) {
-			clearTimeout(continuationTimer);
-			continuationTimer = null;
-		}
+		clearCompactRuntimeState();
 		ctx.ui?.setStatus?.("compact", undefined);
+		ctx.ui?.setWorkingMessage?.();
 	});
 }
