@@ -15,7 +15,7 @@ import type {
 	Theme,
 } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { resolveRuntimeProvenance } from "../../dist/runtime-provenance.js";
+import { resolveRuntimeProvenance } from "../../runtime/runtime-provenance.js";
 import { renderBorderedBox } from "../_shared/bordered-box.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 

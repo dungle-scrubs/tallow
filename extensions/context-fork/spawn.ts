@@ -9,7 +9,10 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { DEFAULT_AGENT_RUNNER_ENV, spawnWithResolvedAgentRunner } from "../../dist/agent-runner.js";
+import {
+	DEFAULT_AGENT_RUNNER_ENV,
+	spawnWithResolvedAgentRunner,
+} from "../../runtime/agent-runner.js";
 import { expandFileReferences } from "../file-reference/index.js";
 
 /** Configuration for spawning a forked subprocess. */

@@ -143,11 +143,11 @@ export default function (pi: ExtensionAPI) {
 		publishSubagentSnapshot(pi.events);
 
 		// Request telemetry handle for subprocess trace context injection.
-		const { TELEMETRY_API_CHANNELS } = await import("../../src/otel.js");
+		const { TELEMETRY_API_CHANNELS } = await import("../../runtime/otel.js");
 		const onTelemetryApi = (payload: unknown): void => {
 			if (payload && typeof payload === "object" && "handle" in payload) {
 				setTelemetryHandle(
-					(payload as { handle: import("../../src/otel.js").TelemetryHandle }).handle
+					(payload as { handle: import("../../runtime/otel.js").TelemetryHandle }).handle
 				);
 			}
 		};

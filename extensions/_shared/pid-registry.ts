@@ -15,7 +15,7 @@ import { dirname, join } from "node:path";
 import {
 	createRuntimePathProvider,
 	type RuntimePathProvider,
-} from "../../dist/runtime-path-provider.js";
+} from "../../runtime/runtime-path-provider.js";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { acquireFileLock } from "./file-lock.js";
 
