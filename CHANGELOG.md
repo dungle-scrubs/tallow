@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **slash-command-bridge:** move model-invoked `/compact` deferral to the
+  proven post-response `turn_end` boundary, add deterministic lifecycle
+  regression coverage, and stop stale `agent_end` races from dropping
+  compaction or resumption
 - **background-task-tool,tasks:** suppress the duplicate live background-task
   widget when the shared tasks dashboard is active, keeping `Background Tasks`
   as the single surface and stopping above-editor row jitter

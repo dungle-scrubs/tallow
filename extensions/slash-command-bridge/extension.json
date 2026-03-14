@@ -5,7 +5,7 @@
 	"whenToUse": "Use when the model should invoke slash commands through a tool.",
 	"capabilities": {
 		"tools": ["run_slash_command"],
-		"events": ["agent_end", "before_agent_start", "session_before_switch"]
+		"events": ["before_agent_start", "session_before_switch", "turn_end", "turn_start"]
 	},
 	"permissionSurface": {
 		"filesystem": "none",

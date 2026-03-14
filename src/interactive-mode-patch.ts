@@ -8,8 +8,19 @@ interface QueuedMessagesLike {
 	steering?: unknown[];
 }
 
+interface CompactOptionsLike {
+	customInstructions?: string;
+	onComplete?: ((result: unknown) => void) | undefined;
+	onError?: ((error: Error) => void) | undefined;
+}
+
+interface ExtensionRunnerLike {
+	compactFn?: ((options?: CompactOptionsLike) => void) | undefined;
+}
+
 interface SessionLike {
 	autoCompactionEnabled?: boolean;
+	extensionRunner?: ExtensionRunnerLike;
 	isStreaming?: boolean;
 }
 
@@ -19,8 +30,13 @@ interface InteractiveModeInstanceLike {
 		| ((...args: unknown[]) => { notify?: ((...args: unknown[]) => unknown) | undefined })
 		| undefined;
 	defaultEditor?: { onEscape?: (() => void) | undefined };
+	executeCompaction?:
+		| ((customInstructions?: string, isAuto?: boolean) => Promise<unknown>)
+		| undefined;
 	flushPendingBashComponents?: (() => void) | undefined;
 	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
+	handleReloadCommand?: (() => Promise<unknown>) | undefined;
+	initExtensions?: (() => Promise<unknown>) | undefined;
 	loadingAnimation?: unknown;
 	pendingWorkingMessage?: unknown;
 	restoreQueuedMessagesToEditor?: ((options?: { abort?: boolean }) => unknown) | undefined;
@@ -53,6 +69,8 @@ interface InteractiveModePrototypeLike {
 		| ((command: string, excludeFromContext?: boolean) => Promise<unknown>)
 		| undefined;
 	handleEvent?: ((event: InteractiveModeEventLike) => Promise<unknown>) | undefined;
+	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
+	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
 }
 
@@ -137,6 +155,11 @@ const CONTINUATION_SIGNAL_EVENT_TYPES = new Set([
 const compactionRetryWatchdogTimers = new WeakMap<
 	InteractiveModeInstanceLike,
 	ReturnType<typeof setTimeout>
+>();
+
+const pendingInteractiveExtensionCompact = new WeakMap<
+	InteractiveModeInstanceLike,
+	CompactOptionsLike
 >();
 
 /**
@@ -278,6 +301,74 @@ function notifyFromInteractiveMode(
 }
 
 /**
+ * Runs InteractiveMode compaction and forwards completion/cleanup callbacks.
+ *
+ * @param mode - Interactive mode instance
+ * @param options - Extension compact options
+ * @returns Nothing
+ */
+function runInteractiveExtensionCompact(
+	mode: InteractiveModeInstanceLike,
+	options?: CompactOptionsLike
+): void {
+	const executeCompaction = mode.executeCompaction;
+	if (typeof executeCompaction !== "function") {
+		return;
+	}
+
+	void (async () => {
+		try {
+			const result = await executeCompaction.call(mode, options?.customInstructions, false);
+			if (result !== undefined) {
+				options?.onComplete?.(result);
+				return;
+			}
+
+			options?.onError?.(new Error("Compaction did not complete"));
+		} catch (error) {
+			const err = error instanceof Error ? error : new Error(String(error));
+			options?.onError?.(err);
+		}
+	})();
+}
+
+/**
+ * Rebinds extension `ctx.compact()` to InteractiveMode's compaction path.
+ *
+ * AgentSession binds extension contexts to raw `session.compact()`, which skips
+ * InteractiveMode's UI rebuild, compaction summary rendering, and queued-input
+ * flush. In the TUI that leaves model-invoked compact stuck on extension-owned
+ * status text instead of running the same path as `/compact` or extension
+ * shortcuts. Rebinding here makes extension-driven compaction use
+ * `executeCompaction()` while preserving extension callbacks for completion and
+ * cleanup.
+ *
+ * When compaction is requested while the current agent run is still streaming,
+ * the actual `executeCompaction()` call must wait until the following
+ * `agent_end`. Triggering it earlier recreates the original abort/disconnect
+ * race, because `executeCompaction()` aborts the session before InteractiveMode
+ * has finished its own `agent_end` cleanup.
+ *
+ * @param mode - Interactive mode instance whose extension runner should be rebound
+ * @returns Nothing
+ */
+function bindInteractiveExtensionCompact(mode: InteractiveModeInstanceLike): void {
+	const extensionRunner = mode.session?.extensionRunner;
+	if (!extensionRunner) {
+		return;
+	}
+
+	extensionRunner.compactFn = (options?: CompactOptionsLike) => {
+		if (mode.session?.isStreaming) {
+			pendingInteractiveExtensionCompact.set(mode, options ?? {});
+			return;
+		}
+
+		runInteractiveExtensionCompact(mode, options);
+	};
+}
+
+/**
  * Clears the liveness watchdog timer for an interactive mode instance.
  *
  * @param mode - Interactive mode instance
@@ -398,6 +489,30 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 	if (prototype.__tallow_stale_ui_patch_applied__) return;
 	prototype.__tallow_stale_ui_patch_applied__ = true;
 
+	const originalInitExtensions = prototype.initExtensions;
+	if (typeof originalInitExtensions === "function") {
+		prototype.initExtensions = async function (
+			this: InteractiveModeInstanceLike,
+			...args: unknown[]
+		) {
+			const result = await originalInitExtensions.call(this, ...args);
+			bindInteractiveExtensionCompact(this);
+			return result;
+		};
+	}
+
+	const originalHandleReloadCommand = prototype.handleReloadCommand;
+	if (typeof originalHandleReloadCommand === "function") {
+		prototype.handleReloadCommand = async function (
+			this: InteractiveModeInstanceLike,
+			...args: unknown[]
+		) {
+			const result = await originalHandleReloadCommand.call(this, ...args);
+			bindInteractiveExtensionCompact(this);
+			return result;
+		};
+	}
+
 	const originalHandleEvent = prototype.handleEvent;
 	if (typeof originalHandleEvent === "function") {
 		prototype.handleEvent = async function (
@@ -472,6 +587,12 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 				this.flushPendingBashComponents?.();
 				this.updatePendingMessagesDisplay?.();
 				this.ui?.requestRender?.();
+
+				const deferredCompact = pendingInteractiveExtensionCompact.get(this);
+				if (deferredCompact) {
+					pendingInteractiveExtensionCompact.delete(this);
+					runInteractiveExtensionCompact(this, deferredCompact);
+				}
 			}
 			return result;
 		};
