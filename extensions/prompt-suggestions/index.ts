@@ -46,6 +46,31 @@ const DEFAULT_DEBOUNCE_MS = 600;
 /** Max autocomplete calls per session (cost guardrail). */
 const MAX_CALLS_PER_SESSION = 200;
 
+interface PromptSuggestionEditor {
+	addChangeListener(fn: (text: string) => void): void;
+	getText(): string;
+	setGhostText(text: string | null): void;
+}
+
+/**
+ * Resolve the subset of editor APIs required by prompt suggestions.
+ *
+ * Published installs may resolve upstream `@mariozechner/pi-tui`, whose
+ * editor does not implement ghost-text helpers. In that case, the
+ * extension should degrade safely instead of crashing.
+ *
+ * @param editor - Candidate editor instance
+ * @returns Prompt-suggestion editor surface, or null when unavailable
+ */
+export function resolvePromptSuggestionEditor(editor: unknown): PromptSuggestionEditor | null {
+	if (!editor || typeof editor !== "object") return null;
+	const candidate = editor as Partial<PromptSuggestionEditor>;
+	if (typeof candidate.getText !== "function") return null;
+	if (typeof candidate.setGhostText !== "function") return null;
+	if (typeof candidate.addChangeListener !== "function") return null;
+	return candidate as PromptSuggestionEditor;
+}
+
 // ─── Idle suggestions ────────────────────────────────────────────────────────
 
 /**
@@ -214,7 +239,7 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 	const modelSetting = readSetting("prompt-suggestions.model", DEFAULT_AUTOCOMPLETE_MODEL);
 
 	/** Reference to the editor instance for ghost text control. */
-	let editorRef: CustomEditor | null = null;
+	let editorRef: PromptSuggestionEditor | null = null;
 
 	/** Autocomplete engine instance, created after editor is available. */
 	let engine: AutocompleteEngine | null = null;
@@ -275,8 +300,18 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 
 		ctx.ui.setEditorComponent((tui, editorTheme: EditorTheme, keybindings) => {
 			const editor = new CustomEditor(tui, editorTheme, keybindings);
-			editorRef = editor;
+			const promptEditor = resolvePromptSuggestionEditor(editor);
+			if (!promptEditor) {
+				engine = null;
+				editorRef = null;
+				ctx.ui.notify(
+					"Prompt suggestions disabled: current editor runtime lacks ghost-text support.",
+					"warning"
+				);
+				return editor;
+			}
 
+			editorRef = promptEditor;
 			engine = new AutocompleteEngine(
 				{
 					enabled: autocompleteEnabled,
@@ -286,12 +321,12 @@ export default function promptSuggestions(pi: ExtensionAPI): void {
 				},
 				ctx.modelRegistry,
 				getCompletion,
-				(text) => editor.setGhostText(text),
-				() => editor.getText(),
+				(text) => promptEditor.setGhostText(text),
+				() => promptEditor.getText(),
 				() => (sessionManagerRef ? buildConversationContext(sessionManagerRef) : null)
 			);
 
-			editor.addChangeListener((newText: string) => {
+			promptEditor.addChangeListener((newText: string) => {
 				clearIdleTimer();
 
 				if (newText.length === 0 && !engine?.busy) {

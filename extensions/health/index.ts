@@ -14,8 +14,9 @@ import type {
 	ExtensionContext,
 	Theme,
 } from "@mariozechner/pi-coding-agent";
-import { BorderedBox, ROUNDED, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { resolveRuntimeProvenance } from "../../src/runtime-provenance.js";
+import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import { resolveRuntimeProvenance } from "../../dist/runtime-provenance.js";
+import { renderBorderedBox } from "../_shared/bordered-box.js";
 import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -662,13 +663,12 @@ export default function healthExtension(pi: ExtensionAPI): void {
 			render(width: number): string[] {
 				const innerWidth = width - 4; // 2 borders + 2 padding
 				const contentLines = renderHealth(details, theme, innerWidth);
-				const box = new BorderedBox(contentLines, {
-					borderStyle: ROUNDED,
-					title: "Health",
+				return renderBorderedBox(contentLines, width, {
 					borderColorFn: (s) => theme.fg("muted", s),
+					style: "rounded",
+					title: "Health",
 					titleColorFn: (s) => theme.fg("accent", s),
 				});
-				return box.render(width);
 			},
 			invalidate() {},
 		};

@@ -1,7 +1,6 @@
 import type { KeybindingsManager, Theme } from "@mariozechner/pi-coding-agent";
 import { CustomEditor } from "@mariozechner/pi-coding-agent";
 import {
-	BorderedBox,
 	type EditorTheme,
 	Key,
 	matchesKey,
@@ -10,6 +9,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { getIcon, getSpinner } from "../_icons/index.js";
+import { renderBorderedBox } from "../_shared/bordered-box.js";
 import {
 	formatIdentityText,
 	formatPresentationText,
@@ -927,11 +927,10 @@ export class TeamDashboardEditor extends CustomEditor {
 	): string[] {
 		if (width <= 0) return [];
 		if (team.teammates.length === 0) {
-			const empty = new BorderedBox(["No teammates yet."], {
+			return renderBorderedBox(["No teammates yet."], width, {
 				borderColorFn: (str) => this.colorTheme.fg("borderMuted", str),
 				title: "empty",
 			});
-			return empty.render(width);
 		}
 
 		const columns = calculateDashboardGridColumns(width);
@@ -1013,14 +1012,13 @@ export class TeamDashboardEditor extends CustomEditor {
 			...outputLines.map((line) => `  ${formatDashboardRole(t, "process_output", line)}`),
 		];
 
-		const box = new BorderedBox(body, {
+		return renderBorderedBox(body, width, {
 			borderColorFn: selected
 				? (str) => colorMemberText(str, teammate.name, true)
 				: (str) => t.fg("borderMuted", str),
 			title: `@${teammate.name}`,
 			titleColorFn: (str) => colorMemberText(str, teammate.name, selected),
 		});
-		return box.render(width);
 	}
 
 	/**
