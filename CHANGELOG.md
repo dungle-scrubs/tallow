@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.23](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.22...tallow-v0.8.23) (2026-03-15)
+
+
+### Added
+
+* **loop:** add max iterations (x&lt;N&gt;) and stop conditions (until) ([d56866e](https://github.com/dungle-scrubs/tallow/commit/d56866ebb3822b8b8791e7ecbe4c3e24b4738753))
+* **plan-mode:** render plan steps in bordered widget ([64b9ad9](https://github.com/dungle-scrubs/tallow/commit/64b9ad90ce319b3a43595ac14f450d390ed3034a))
+* **slash-command-bridge:** show compact progress as inline widget instead of footer status ([d43ec56](https://github.com/dungle-scrubs/tallow/commit/d43ec56743136a2b7cccc9c0a7322b9f48ec56f3))
+
+
+### Fixed
+
+* **extensions:** harden packaged ui runtime ([a319a87](https://github.com/dungle-scrubs/tallow/commit/a319a87052847e6c8cad22ca15938bfae6d8e806))
+* **packaging:** add publish-safe runtime bridges ([3346f75](https://github.com/dungle-scrubs/tallow/commit/3346f7550cc9d2c659b36fcc907cd92d66ccf423))
+* **packaging:** ship published runtime dependencies ([966e218](https://github.com/dungle-scrubs/tallow/commit/966e218618b0e51a603e99452cb2b6669baff389))
+* **plan-mode:** show action menu when execution ends with incomplete steps ([55b3820](https://github.com/dungle-scrubs/tallow/commit/55b3820a7ddd2c2a837753d3ce46f76570dd4335))
+* **slash-command-bridge:** repair model-invoked compact lifecycle ([e93923e](https://github.com/dungle-scrubs/tallow/commit/e93923e99dc4dfe2887bbe59bdad10e2cc787d73))
+* **tasks:** suppress duplicate background task widget ([28609d4](https://github.com/dungle-scrubs/tallow/commit/28609d40d212d9436f410dc1b416c28f461c79c7))
+* **teams:** deliver messages to working teammates via followUp ([1215bb5](https://github.com/dungle-scrubs/tallow/commit/1215bb5a257b4a2720ce31ca1466843bd28acbd7))
+* **tui:** prevent differential rendering ghosting on content shrink ([87b7529](https://github.com/dungle-scrubs/tallow/commit/87b7529ce4ee667adaaf1c9e79fedbc45721b700))
+* **tui:** resolve streaming ghost empty spaces between content and bottom UI ([5c0ec0b](https://github.com/dungle-scrubs/tallow/commit/5c0ec0bb22add9782850124a66bb92204c9f0247))
+* **wezterm:** remove TTY exception and add tool_call guardrail hook ([7fde09d](https://github.com/dungle-scrubs/tallow/commit/7fde09d7aa0de47ddb1f56069fe84806f51fce45))
+* **workspace-transition:** support Windows relay pipes ([bfcf25f](https://github.com/dungle-scrubs/tallow/commit/bfcf25f94103a773927a996a916681afa749b63e))
+
+
+### Documentation
+
+* add changelog entry for streaming ghost gap fix ([cb69101](https://github.com/dungle-scrubs/tallow/commit/cb69101d67a29842e8a4075aa71de5a68a711831))
+
+
+### Maintenance
+
+* **cli:** relax spawned process timeouts ([50b7cab](https://github.com/dungle-scrubs/tallow/commit/50b7cab31546bfb68ee9761351afa6e35bf3d1b1))
+* **deps:** bump pi-* dependencies ([34af276](https://github.com/dungle-scrubs/tallow/commit/34af27670fce4e50aa6d65ade08ee19600337daa))
+* **packaging:** cover packed tarball runtime ([c508157](https://github.com/dungle-scrubs/tallow/commit/c508157502455caea201cdd61444227095cd9eae))
+* **slash-command-bridge:** update compact tests for widget-based progress ([c884e35](https://github.com/dungle-scrubs/tallow/commit/c884e355c4e09eeefcdeb72b29bbc68015b92c39))
+* **teams:** update peer-messaging tests for working-teammate delivery ([717e465](https://github.com/dungle-scrubs/tallow/commit/717e465e1130250864a391ad8a2ed4c8d23e32f4))
+* **tui:** add regression tests for shrink ghosting fixes ([93ffc90](https://github.com/dungle-scrubs/tallow/commit/93ffc9013c143ce32a135e36b429414340e3ccda))
+* **tui:** add regression tests for streaming ghost gap fixes ([9c65b20](https://github.com/dungle-scrubs/tallow/commit/9c65b20449128091462cd5a97cd69ae3fc8a3f7d))
+* **wezterm:** add guardrail helper unit tests ([cf03acb](https://github.com/dungle-scrubs/tallow/commit/cf03acb5b3908cb8a58bc1407616e4819ace8d93))
+
 ## [Unreleased]
 
 ### Added
