@@ -5,6 +5,88 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **sdk:** `sharedSkillsDirs` global setting — load skills from cross-app
+  directories (e.g. `~/.skills`) shared between tallow and other tools.
+  Paths must be absolute or `~/`-prefixed; project settings cannot override.
+  Non-existent directories are silently skipped
+- **otel:** opt-in OpenTelemetry distributed tracing via `telemetry` option
+  in `TallowSessionOptions`. Emits `tallow.*` spans for session lifecycle,
+  prompt turns, tool calls, and model invocations. All span attributes are
+  metadata-only — no prompt text, tool payloads, or secrets are captured.
+  Zero-cost no-op when disabled
+- **otel:** W3C `traceparent`/`tracestate` propagation through CLI env and
+  subagent child processes for cross-process trace continuity
+- **otel:** safe attribute builders (`sessionAttributes`, `promptAttributes`,
+  `modelAttributes`, `toolAttributes`, `subagentAttributes`,
+  `teammateAttributes`) with CWD hashing and redaction guarantees
+- **otel:** event bus telemetry handle sharing so extensions can access trace
+  context without direct coupling
+- **loop:** `/loop` command — run a prompt or slash command on a recurring
+  interval (e.g. `/loop 5m check deploy`). Uses post-completion delay to
+  prevent overlapping runs, with live countdown in the status bar
+- **shell-policy:** "Always Allow" option for high-risk shell command
+  confirmations — persists `Bash(pattern)` rules to
+  `~/.tallow/settings.json` so matching commands skip confirmation in
+  future sessions
+
+### Changed
+
+- **install:** use `@dungle-scrubs/tallow` as the canonical published package
+  name in installer guidance and upgrade commands
+- **tui:** global select cursor changed from → to ↗
+
+### Fixed
+
+- **hooks:** don't block input when workspace directory is renamed or deleted
+  externally — infrastructure errors (missing cwd, spawn failures) are now
+  distinguished from policy blocks and never freeze the session
+- **packaging:** make the published tarball self-contained by switching
+  bundled extensions off repo-only `src/` imports, including the local
+  `packages/tallow-tui` workspace in the packlist, and degrading prompt
+  suggestions safely when ghost-text editor support is unavailable
+- **slash-command-bridge:** move model-invoked `/compact` deferral to the
+  proven post-response `turn_end` boundary, add deterministic lifecycle
+  regression coverage, and stop stale `agent_end` races from dropping
+  compaction or resumption
+- **background-task-tool,tasks:** suppress the duplicate live background-task
+  widget when the shared tasks dashboard is active, keeping `Background Tasks`
+  as the single surface and stopping above-editor row jitter
+- **tui:** fix streaming ghost empty spaces caused by stale `maxLinesRendered`
+  high-water mark, missing `extraLines > height` safety guard in the diff
+  cleanup path, and viewport drift correction firing one render cycle late
+- **rewind:** windowed turn selector using `ctx.ui.custom()` — `/rewind`
+  with 35+ turns no longer overflows the terminal viewport. The list is
+  now windowed with scroll indicators and keyboard navigation wrapping
+- **health:** show runtime provenance for the active CLI, including
+  install mode, build freshness, executable path, and resolved package
+  path
+- **startup:** auto-rebuild stale linked/source-checkout `dist/` output on
+  CLI launch before restarting into the fresh build
+- **trust:** migrate legacy project trust entries so previously trusted
+  folders do not false-positive as stale after trust fingerprint upgrades
+- **workspace-transition:** use Windows named pipes for the child-process relay
+  and degrade gracefully when relay startup is unavailable
+- **subagent:** use `--model` instead of `--models` for forked subprocesses
+- **teams-tool:** use tallow auth and model config in team spawns
+
+### Documentation
+
+- **docs:** align README/docs agent-template counts, bundled template lists,
+  and `/agent:<name>` invocation examples with shipped templates
+- **docs:** rename the homepage extension section to featured extensions and
+  refresh docs metadata counts
+- **context-fork:** document the correct `--model` subprocess flag
+
+### Maintenance
+
+- **deps:** bump pi-* dependencies
+- **tests:** exclude `_defaults.md` from agent-template drift counts and verify
+  scoped package links plus key docs metadata
+
 ## [0.8.23](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.22...tallow-v0.8.23) (2026-03-15)
 
 
@@ -45,93 +127,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **tui:** add regression tests for shrink ghosting fixes ([93ffc90](https://github.com/dungle-scrubs/tallow/commit/93ffc9013c143ce32a135e36b429414340e3ccda))
 * **tui:** add regression tests for streaming ghost gap fixes ([9c65b20](https://github.com/dungle-scrubs/tallow/commit/9c65b20449128091462cd5a97cd69ae3fc8a3f7d))
 * **wezterm:** add guardrail helper unit tests ([cf03acb](https://github.com/dungle-scrubs/tallow/commit/cf03acb5b3908cb8a58bc1407616e4819ace8d93))
-
-## [Unreleased]
-
-### Added
-
-- **sdk:** `sharedSkillsDirs` global setting — load skills from cross-app
-  directories (e.g. `~/.skills`) shared between tallow and other tools.
-  Paths must be absolute or `~/`-prefixed; project settings cannot override.
-  Non-existent directories are silently skipped
-- **otel:** opt-in OpenTelemetry distributed tracing via `telemetry` option
-  in `TallowSessionOptions`. Emits `tallow.*` spans for session lifecycle,
-  prompt turns, tool calls, and model invocations. All span attributes are
-  metadata-only — no prompt text, tool payloads, or secrets are captured.
-  Zero-cost no-op when disabled
-- **otel:** W3C `traceparent`/`tracestate` propagation through CLI env and
-  subagent child processes for cross-process trace continuity
-- **otel:** safe attribute builders (`sessionAttributes`, `promptAttributes`,
-  `modelAttributes`, `toolAttributes`, `subagentAttributes`,
-  `teammateAttributes`) with CWD hashing and redaction guarantees
-- **otel:** event bus telemetry handle sharing so extensions can access trace
-  context without direct coupling
-
-### Fixed
-
-- **packaging:** make the published tarball self-contained by switching
-  bundled extensions off repo-only `src/` imports, including the local
-  `packages/tallow-tui` workspace in the packlist, and degrading prompt
-  suggestions safely when ghost-text editor support is unavailable
-- **slash-command-bridge:** move model-invoked `/compact` deferral to the
-  proven post-response `turn_end` boundary, add deterministic lifecycle
-  regression coverage, and stop stale `agent_end` races from dropping
-  compaction or resumption
-- **background-task-tool,tasks:** suppress the duplicate live background-task
-  widget when the shared tasks dashboard is active, keeping `Background Tasks`
-  as the single surface and stopping above-editor row jitter
-- **tui:** fix streaming ghost empty spaces caused by stale `maxLinesRendered`
-  high-water mark, missing `extraLines > height` safety guard in the diff
-  cleanup path, and viewport drift correction firing one render cycle late
-- **rewind:** windowed turn selector using `ctx.ui.custom()` — `/rewind`
-  with 35+ turns no longer overflows the terminal viewport. The list is
-  now windowed with scroll indicators and keyboard navigation wrapping
-- **health:** show runtime provenance for the active CLI, including
-  install mode, build freshness, executable path, and resolved package
-  path
-- **startup:** auto-rebuild stale linked/source-checkout `dist/` output on
-  CLI launch before restarting into the fresh build
-- **trust:** migrate legacy project trust entries so previously trusted
-  folders do not false-positive as stale after trust fingerprint upgrades
-- **workspace-transition:** use Windows named pipes for the child-process relay
-  and degrade gracefully when relay startup is unavailable
-
-### Added
-
-- **loop:** `/loop` command — run a prompt or slash command on a recurring
-  interval (e.g. `/loop 5m check deploy`). Uses post-completion delay to
-  prevent overlapping runs, with live countdown in the status bar
-- **shell-policy:** "Always Allow" option for high-risk shell command
-  confirmations — persists `Bash(pattern)` rules to
-  `~/.tallow/settings.json` so matching commands skip confirmation in
-  future sessions
-
-### Changed
-
-- **install:** use `@dungle-scrubs/tallow` as the canonical published package
-  name in installer guidance and upgrade commands
-- **tui:** global select cursor changed from → to ↗
-
-### Fixed
-
-- **subagent:** use `--model` instead of `--models` for forked subprocesses
-- **teams-tool:** use tallow auth and model config in team spawns
-
-### Documentation
-
-- **docs:** align README/docs agent-template counts, bundled template lists,
-  and `/agent:<name>` invocation examples with shipped templates
-- **docs:** rename the homepage extension section to featured extensions and
-  refresh docs metadata counts
-- **context-fork:** document the correct `--model` subprocess flag
-
-### Maintenance
-
-- **deps:** bump pi-* dependencies
-- **tests:** exclude `_defaults.md` from agent-template drift counts and verify
-  scoped package links plus key docs metadata
-
-
 
 ## [0.8.22](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.21...tallow-v0.8.22) (2026-03-10)
 
