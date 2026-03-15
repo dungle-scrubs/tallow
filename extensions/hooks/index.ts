@@ -75,6 +75,8 @@ export interface HookResult {
 	reason?: string;
 	additionalContext?: string;
 	decision?: "block" | "allow";
+	/** True when the hook failed due to infrastructure (missing cwd, spawn error), not a policy decision. */
+	infrastructureError?: boolean;
 }
 
 // Events that support blocking via hook decisions.
@@ -831,6 +833,16 @@ export async function runCommandHook(
 		};
 	}
 
+	// Pre-spawn guard: bail early if the working directory no longer exists.
+	// This catches the common case of a workspace rename/delete while the session is active.
+	if (!fs.existsSync(cwd)) {
+		return {
+			ok: false,
+			reason: `Hook cwd no longer exists: ${cwd}`,
+			infrastructureError: true,
+		};
+	}
+
 	const timeoutMs = (handler.timeout ?? 600) * 1000;
 	const maxBufferBytes = getHookOutputMaxBufferBytes();
 	const hookEventJson = JSON.stringify(eventData);
@@ -894,7 +906,18 @@ export async function runCommandHook(
 		}
 
 		proc.once("error", (error) => {
-			settle({ ok: false, reason: error.message || "Hook command failed to start" });
+			const spawnError = error as NodeJS.ErrnoException;
+			// Belt-and-suspenders: if the cwd was deleted between the pre-spawn
+			// check and the actual spawn(), detect it here via ENOENT.
+			const isCwdMissing = spawnError.code === "ENOENT" && !fs.existsSync(cwd);
+			const reason = isCwdMissing
+				? `Hook cwd no longer exists: ${cwd}`
+				: error.message || "Hook command failed to start";
+			settle({
+				ok: false,
+				reason,
+				infrastructureError: isCwdMissing || spawnError.code === "ENOENT",
+			});
 		});
 
 		proc.once("close", (code) => {
@@ -962,6 +985,15 @@ export async function runAgentHook(
 	agentsDir: string,
 	signal?: AbortSignal
 ): Promise<HookResult> {
+	// Pre-spawn guard: bail early if the working directory no longer exists.
+	if (!fs.existsSync(cwd)) {
+		return {
+			ok: false,
+			reason: `Hook cwd no longer exists: ${cwd}`,
+			infrastructureError: true,
+		};
+	}
+
 	const timeoutMs = (handler.timeout ?? 60) * 1000;
 	const maxBufferBytes = getHookOutputMaxBufferBytes();
 
@@ -1135,6 +1167,9 @@ export default function (pi: ExtensionAPI) {
 	let currentCwd = "";
 	let ctx: ExtensionContext | null = null;
 	let stateManager: HookStateManager | null = null;
+
+	/** Tracks whether the stale-cwd warning has been shown this session. */
+	let staleCwdWarningShown = false;
 
 	// Pending async hook results to deliver on next turn
 	const pendingAsyncResults: Array<{ event: string; result: HookResult }> = [];
@@ -1426,7 +1461,22 @@ export default function (pi: ExtensionAPI) {
 					additionalContext = `${(additionalContext || "") + result.additionalContext}\n`;
 				}
 
-				if (!result.ok && canBlock) {
+				// Surface a user-visible warning once per session when hooks are
+				// skipped due to infrastructure errors (e.g. workspace renamed).
+				if (result.infrastructureError && !staleCwdWarningShown) {
+					staleCwdWarningShown = true;
+					ctx?.ui?.notify(
+						`⚠️ Hook skipped: workspace directory no longer exists (${currentCwd}). ` +
+							`Use /cd to switch to the new location.`,
+						"warning"
+					);
+				}
+
+				// Block only on deliberate policy decisions (decision: "block" or
+				// exit code 2), never on infrastructure errors (missing cwd, spawn
+				// failure). Infrastructure errors still produce ok: false so callers
+				// know the hook didn't succeed, but they must not freeze the session.
+				if (!result.ok && canBlock && !result.infrastructureError) {
 					shouldBlock = true;
 					blockReason = result.reason;
 					break; // First blocking hook wins
