@@ -24,6 +24,7 @@ import {
 import {
 	type EditorTheme,
 	Key,
+	Loader,
 	type TUI,
 	truncateToWidth,
 	visibleWidth,
@@ -204,14 +205,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	 * @param ctx - The extension context
 	 */
 	function updateStatus(ctx: ExtensionContext): void {
-		// Footer status
-		if (executionMode && todoItems.length > 0) {
-			const completed = todoItems.filter((t) => t.completed).length;
-			ctx.ui.setStatus(
-				"plan-mode",
-				ctx.ui.theme.fg("accent", `${getIcon("task_list")} ${completed}/${todoItems.length}`)
-			);
-		} else if (planModeEnabled) {
+		// Footer status — plan mode only; execution mode defers to tasks extension
+		if (planModeEnabled) {
 			ctx.ui.setStatus(
 				"plan-mode",
 				ctx.ui.theme.fg("warning", `${getIcon("plan_mode")} PLAN MODE — read-only`)
@@ -229,14 +224,15 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			ctx.ui.setEditorComponent(undefined);
 		}
 
-		// Full-width banner above editor using existing theme background tokens
-		if (planModeEnabled || executionMode) {
+		// Full-width banner above editor — plan mode only.
+		// Execution mode does not show a banner; the tasks extension owns progress tracking.
+		if (planModeEnabled) {
 			ctx.ui.setWidget("plan-banner", (_tui, theme) => {
-				const label = planModeEnabled ? " PLAN MODE — READ ONLY " : " EXECUTING PLAN ";
-				const bg = planModeEnabled ? "customMessageBg" : "toolSuccessBg";
-				const fg = planModeEnabled ? "customMessageLabel" : "success";
+				const label = " PLAN MODE — READ ONLY ";
 				return {
-					render: (width: number) => [theme.bg(bg, theme.fg(fg, label.padEnd(width)))],
+					render: (width: number) => [
+						theme.bg("customMessageBg", theme.fg("customMessageLabel", label.padEnd(width))),
+					],
 					invalidate() {},
 				};
 			});
@@ -244,21 +240,8 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 			ctx.ui.setWidget("plan-banner", undefined);
 		}
 
-		// Widget showing todo list
-		if (executionMode && todoItems.length > 0) {
-			const lines = todoItems.map((item) => {
-				if (item.completed) {
-					return (
-						ctx.ui.theme.fg("success", "☑ ") +
-						ctx.ui.theme.fg("muted", ctx.ui.theme.strikethrough(item.text))
-					);
-				}
-				return `${ctx.ui.theme.fg("muted", `${getIcon("pending")} `)}${item.text}`;
-			});
-			ctx.ui.setWidget("plan-todos", lines);
-		} else {
-			ctx.ui.setWidget("plan-todos", undefined);
-		}
+		// Todo list widget — plan mode only (execution delegates to tasks extension)
+		ctx.ui.setWidget("plan-todos", undefined);
 	}
 
 	/**
@@ -636,7 +619,77 @@ If you receive [PLAN GUIDANCE — Step n: ...], treat it as user steering for th
 				currentStepIndex = null;
 				restoreNormalModeTools();
 				updateStatus(ctx);
-				persistState(); // Save cleared state so resume doesn't restore old execution mode
+				persistState();
+			} else if (ctx.hasUI) {
+				// Agent finished its turn but not all steps are marked complete.
+				// Show progress summary and prompt for next action.
+				const completed = todoItems.filter((t) => t.completed);
+
+				updateStatus(ctx);
+				ctx.ui.setWorkingMessage(Loader.HIDE);
+
+				const choice = await ctx.ui.select(
+					`Plan execution paused (${completed.length}/${todoItems.length} done)`,
+					["Continue execution", "Provide guidance", "Mark plan as done", "Abort plan"]
+				);
+
+				if (choice === "Continue execution") {
+					const nextStep = getCurrentStep();
+					const continueMessage =
+						nextStep !== null
+							? `Continue executing the plan. Next: step ${nextStep.step}: ${nextStep.text}`
+							: "Continue executing the remaining plan steps.";
+					pi.sendMessage(
+						{ customType: "plan-mode-execute", content: continueMessage, display: true },
+						{ triggerTurn: true }
+					);
+				} else if (choice === "Provide guidance") {
+					const nextStep = getCurrentStep();
+					const stepLabel = nextStep ? `step ${nextStep.step} (${nextStep.text})` : "next step";
+					const guidance = await ctx.ui.editor(`Guidance for ${stepLabel}:`, "");
+					const trimmedGuidance = guidance?.trim();
+					if (trimmedGuidance && nextStep) {
+						pi.sendUserMessage(
+							[
+								`[PLAN GUIDANCE — Step ${nextStep.step}: ${nextStep.text}]`,
+								"",
+								"User guidance:",
+								trimmedGuidance,
+							].join("\n")
+						);
+					} else if (trimmedGuidance) {
+						pi.sendUserMessage(trimmedGuidance);
+					} else {
+						ctx.ui.notify("No guidance provided. Plan unchanged.", "info");
+					}
+				} else if (choice === "Mark plan as done") {
+					const completedList = todoItems
+						.map((t) => (t.completed ? `~~${t.text}~~` : t.text))
+						.join("\n");
+					pi.sendMessage(
+						{
+							customType: "plan-complete",
+							content: `**Plan Complete!** ${getIcon("success")}\n\n${completedList}`,
+							display: true,
+						},
+						{ triggerTurn: false }
+					);
+					executionMode = false;
+					todoItems = [];
+					currentStepIndex = null;
+					restoreNormalModeTools();
+					updateStatus(ctx);
+					persistState();
+				} else {
+					// Abort plan (or dismissed/escaped the select)
+					executionMode = false;
+					todoItems = [];
+					currentStepIndex = null;
+					restoreNormalModeTools();
+					updateStatus(ctx);
+					persistState();
+					ctx.ui.notify("Plan aborted.", "info");
+				}
 			}
 			return;
 		}
@@ -666,6 +719,8 @@ If you receive [PLAN GUIDANCE — Step n: ...], treat it as user steering for th
 				{ triggerTurn: false }
 			);
 		}
+
+		ctx.ui.setWorkingMessage(Loader.HIDE);
 
 		const choice = await ctx.ui.select("Plan mode - what next?", [
 			todoItems.length > 0 ? "Execute the plan (track progress)" : "Execute the plan",
