@@ -90,51 +90,59 @@ const compactProgressState: {
 };
 
 /**
- * Starts compact progress heartbeat updates in the footer status.
+ * Starts compact progress heartbeat updates as an inline widget above the editor.
  *
  * This helper is idempotent: it always clears any previous heartbeat before
  * starting a new one, preventing duplicate intervals after retries.
  *
- * @param ctx - Extension context used to update footer status
+ * @param ctx - Extension context used to render the compact progress widget
  * @returns Nothing
  */
 function startCompactProgress(ctx: ExtensionContext): void {
-	stopCompactProgress();
+	stopCompactProgress(ctx);
 
-	if (!ctx.ui?.setStatus) {
+	if (!ctx.ui?.setWidget) {
 		return;
 	}
 
 	compactProgressState.startedAt = timerScheduler.now();
 	compactProgressState.spinnerIndex = 0;
 
-	const renderStatus = () => {
+	const renderWidget = () => {
 		const elapsedSeconds = Math.floor(
 			(timerScheduler.now() - compactProgressState.startedAt) / 1000
 		);
 		const frame =
 			COMPACT_PROGRESS_FRAMES[compactProgressState.spinnerIndex] ?? COMPACT_PROGRESS_FRAMES[0];
-		ctx.ui?.setStatus?.("compact", `🧹 ${frame} compacting · ${elapsedSeconds}s`);
+		ctx.ui?.setWidget?.("compact-progress", [
+			`🧹 ${frame} Compacting session · ${elapsedSeconds}s`,
+		]);
 		compactProgressState.spinnerIndex =
 			(compactProgressState.spinnerIndex + 1) % COMPACT_PROGRESS_FRAMES.length;
 	};
 
-	renderStatus();
+	renderWidget();
 	compactProgressState.interval = timerScheduler.setInterval(
-		renderStatus,
+		renderWidget,
 		COMPACT_PROGRESS_INTERVAL_MS
 	);
 }
 
 /**
- * Stops compact progress heartbeat updates and resets module-level state.
+ * Stops compact progress heartbeat updates, clears the inline widget, and
+ * resets module-level state.
  *
+ * @param ctx - Extension context used to clear the widget (optional for test/cleanup paths)
  * @returns Nothing
  */
-function stopCompactProgress(): void {
+function stopCompactProgress(ctx?: ExtensionContext): void {
 	if (compactProgressState.interval) {
 		timerScheduler.clearInterval(compactProgressState.interval);
 		compactProgressState.interval = null;
+		// Only clear the widget when a heartbeat was actually running.
+		// Avoids a spurious undefined update when startCompactProgress
+		// calls this as an idempotent reset before starting fresh.
+		ctx?.ui?.setWidget?.("compact-progress", undefined);
 	}
 
 	compactProgressState.startedAt = 0;
@@ -305,16 +313,16 @@ function startDeferredCompact(
 	ctx.compact({
 		customInstructions: options.customInstructions,
 		onComplete: () => {
-			stopCompactProgress();
+			stopCompactProgress(ctx);
 
 			// Transition from compaction indicators to resuming indicators.
 			// setWorkingMessage queues as pendingWorkingMessage (no loader
 			// exists after executeCompaction stops it). Applied automatically
-			// when agent_start creates the loader. Footer status is visible
-			// immediately — covers the brief gap before the loader appears.
+			// when agent_start creates the loader. The inline widget covers
+			// the brief gap before the loader appears.
 			resumingAfterCompact = true;
 			ctx.ui?.setWorkingMessage?.("Resuming task…");
-			ctx.ui?.setStatus?.("compact", "⏳ resuming");
+			ctx.ui?.setWidget?.("compact-progress", ["⏳ Resuming after compaction…"]);
 
 			// Always schedule continuation. Safety nets prevent duplicate prompts:
 			// 1. turn_start listener cancels if flushCompactionQueue already started a turn
@@ -347,15 +355,14 @@ function startDeferredCompact(
 					// User sent a message during compaction — their turn is
 					// handling things, clean up our indicators.
 					resumingAfterCompact = false;
-					ctx.ui?.setStatus?.("compact", undefined);
+					ctx.ui?.setWidget?.("compact-progress", undefined);
 					ctx.ui?.setWorkingMessage?.();
 				}
 			}, 200);
 		},
 		onError: () => {
-			stopCompactProgress();
+			stopCompactProgress(ctx);
 			ctx.ui?.setWorkingMessage?.();
-			ctx.ui?.setStatus?.("compact", undefined);
 			// Framework's executeCompaction handles error/cancel
 			// display. No continuation on failure — user decides.
 		},
@@ -568,7 +575,7 @@ WHEN NOT TO USE:
 		clearContinuationTimer();
 		if (!resumingAfterCompact) return;
 		resumingAfterCompact = false;
-		ctx.ui?.setStatus?.("compact", undefined);
+		ctx.ui?.setWidget?.("compact-progress", undefined);
 	});
 
 	/**
@@ -577,7 +584,7 @@ WHEN NOT TO USE:
 	 */
 	pi.on("session_before_switch", (_event, ctx) => {
 		clearCompactRuntimeState();
-		ctx.ui?.setStatus?.("compact", undefined);
+		ctx.ui?.setWidget?.("compact-progress", undefined);
 		ctx.ui?.setWorkingMessage?.();
 	});
 }
