@@ -266,13 +266,13 @@ describe("compact", () => {
 
 	test("drives heartbeat and continuation timers deterministically", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
-		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const widgetUpdates: Array<{ key: string; content: string[] | undefined }> = [];
 		const workingMessages: Array<string | undefined> = [];
 		const ctx = buildContext({
 			hasUI: true,
 			ui: {
-				setStatus: (key: string, text?: string) => {
-					statusUpdates.push({ key, text });
+				setWidget: (key: string, content?: string[]) => {
+					widgetUpdates.push({ key, content });
 				},
 				setWorkingMessage: (message?: string) => {
 					workingMessages.push(message);
@@ -289,14 +289,23 @@ describe("compact", () => {
 		await harness.fireEvent("turn_end", buildAssistantTurnEnd("stop"), ctx);
 
 		expect(workingMessages[0]).toBe("Compacting session…");
-		expect(statusUpdates[0]).toEqual({ key: "compact", text: "🧹 ⠋ compacting · 0s" });
+		expect(widgetUpdates[0]).toEqual({
+			key: "compact-progress",
+			content: ["🧹 ⠋ Compacting session · 0s"],
+		});
 
 		scheduler.advanceBy(1000);
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "🧹 ⠙ compacting · 1s" });
+		expect(widgetUpdates.at(-1)).toEqual({
+			key: "compact-progress",
+			content: ["🧹 ⠙ Compacting session · 1s"],
+		});
 
 		compactOptions?.onComplete?.();
 		expect(workingMessages.at(-1)).toBe("Resuming task…");
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: "⏳ resuming" });
+		expect(widgetUpdates.at(-1)).toEqual({
+			key: "compact-progress",
+			content: ["⏳ Resuming after compaction…"],
+		});
 
 		scheduler.advanceBy(199);
 		expect(harness.sentMessages).toHaveLength(0);
@@ -310,14 +319,14 @@ describe("compact", () => {
 		expect(continuation?.content).toContain("compaction is complete");
 	});
 
-	test("turn_start cancels the delayed continuation and clears the footer status", async () => {
+	test("turn_start cancels the delayed continuation and clears the inline widget", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
-		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const widgetUpdates: Array<{ key: string; content: string[] | undefined }> = [];
 		const ctx = buildContext({
 			hasUI: true,
 			ui: {
-				setStatus: (key: string, text?: string) => {
-					statusUpdates.push({ key, text });
+				setWidget: (key: string, content?: string[]) => {
+					widgetUpdates.push({ key, content });
 				},
 				setWorkingMessage: () => {},
 			} as ExtensionUIContext,
@@ -336,18 +345,18 @@ describe("compact", () => {
 		scheduler.advanceBy(200);
 
 		expect(harness.sentMessages).toHaveLength(0);
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 	});
 
 	test("skips continuation and clears indicators when the session is no longer idle", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
-		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const widgetUpdates: Array<{ key: string; content: string[] | undefined }> = [];
 		const workingMessages: Array<string | undefined> = [];
 		const ctx = buildContext({
 			hasUI: true,
 			ui: {
-				setStatus: (key: string, text?: string) => {
-					statusUpdates.push({ key, text });
+				setWidget: (key: string, content?: string[]) => {
+					widgetUpdates.push({ key, content });
 				},
 				setWorkingMessage: (message?: string) => {
 					workingMessages.push(message);
@@ -366,19 +375,19 @@ describe("compact", () => {
 		scheduler.advanceBy(200);
 
 		expect(harness.sentMessages).toHaveLength(0);
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 		expect(workingMessages.at(-1)).toBeUndefined();
 	});
 
 	test("onError clears compact UI and sends no continuation", async () => {
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
-		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const widgetUpdates: Array<{ key: string; content: string[] | undefined }> = [];
 		const workingMessages: Array<string | undefined> = [];
 		const ctx = buildContext({
 			hasUI: true,
 			ui: {
-				setStatus: (key: string, text?: string) => {
-					statusUpdates.push({ key, text });
+				setWidget: (key: string, content?: string[]) => {
+					widgetUpdates.push({ key, content });
 				},
 				setWorkingMessage: (message?: string) => {
 					workingMessages.push(message);
@@ -398,20 +407,20 @@ describe("compact", () => {
 		scheduler.advanceBy(200);
 
 		expect(harness.sentMessages).toHaveLength(0);
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 		expect(workingMessages.at(-1)).toBeUndefined();
 	});
 
 	test("session_before_switch clears pending compact, timers, and UI state", async () => {
 		let compactCalls = 0;
 		let compactOptions: Parameters<ExtensionContext["compact"]>[0];
-		const statusUpdates: Array<{ key: string; text: string | undefined }> = [];
+		const widgetUpdates: Array<{ key: string; content: string[] | undefined }> = [];
 		const workingMessages: Array<string | undefined> = [];
 		const ctx = buildContext({
 			hasUI: true,
 			ui: {
-				setStatus: (key: string, text?: string) => {
-					statusUpdates.push({ key, text });
+				setWidget: (key: string, content?: string[]) => {
+					widgetUpdates.push({ key, content });
 				},
 				setWorkingMessage: (message?: string) => {
 					workingMessages.push(message);
@@ -446,7 +455,7 @@ describe("compact", () => {
 		scheduler.advanceBy(200);
 
 		expect(harness.sentMessages).toHaveLength(0);
-		expect(statusUpdates.at(-1)).toEqual({ key: "compact", text: undefined });
+		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 		expect(workingMessages.at(-1)).toBeUndefined();
 	});
 });
