@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.24](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.23...tallow-v0.8.24) (2026-03-15)
+
+
+### Fixed
+
+* **hooks:** don't block input when cwd is renamed or deleted ([feba24d](https://github.com/dungle-scrubs/tallow/commit/feba24d9987ed7c30afd3a520176761ebc7d2a52))
+
+
+### Documentation
+
+* move [Unreleased] above latest release, add hooks fix entry ([cf95d36](https://github.com/dungle-scrubs/tallow/commit/cf95d364153879095787587175ff137745760439))
+
+
+### Maintenance
+
+* **hooks:** add stale-cwd unit tests ([6aef56d](https://github.com/dungle-scrubs/tallow/commit/6aef56d64af954644ef392de8e6c8e18a9eb03c8))
+
 ## [Unreleased]
 
 ### Added
