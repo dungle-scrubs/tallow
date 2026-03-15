@@ -31,6 +31,7 @@ import {
 } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { renderBorderedBox } from "../_shared/bordered-box.js";
 import {
 	detectPlanIntent,
 	extractTodoItems,
@@ -705,19 +706,22 @@ If you receive [PLAN GUIDANCE — Step n: ...], treat it as user steering for th
 			}
 		}
 
-		// Show plan steps and prompt for next action
+		// Show plan steps in a bordered widget above the editor
 		if (todoItems.length > 0) {
-			const todoListText = todoItems
-				.map((t, i) => `${i + 1}. ${getIcon("pending")} ${t.text}`)
-				.join("\n");
-			pi.sendMessage(
-				{
-					customType: "plan-todo-list",
-					content: `**Plan Steps (${todoItems.length}):**\n\n${todoListText}`,
-					display: true,
+			ctx.ui.setWidget("plan-steps", (_tui, theme) => ({
+				render(width: number): string[] {
+					const stepLines = todoItems.map(
+						(t) => `${theme.fg("muted", `${getIcon("pending")} `)}${t.text}`
+					);
+					return renderBorderedBox(stepLines, width, {
+						title: `PLAN (${todoItems.length} steps)`,
+						style: "rounded",
+						borderColorFn: (s: string) => theme.fg("warning", s),
+						titleColorFn: (s: string) => theme.fg("warning", s),
+					});
 				},
-				{ triggerTurn: false }
-			);
+				invalidate() {},
+			}));
 		}
 
 		ctx.ui.setWorkingMessage(Loader.HIDE);
@@ -727,6 +731,9 @@ If you receive [PLAN GUIDANCE — Step n: ...], treat it as user steering for th
 			"Stay in plan mode",
 			"Refine the plan",
 		]);
+
+		// Clear the plan steps widget after user makes a choice
+		ctx.ui.setWidget("plan-steps", undefined);
 
 		if (choice?.startsWith("Execute")) {
 			planModeEnabled = false;

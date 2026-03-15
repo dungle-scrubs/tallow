@@ -92,6 +92,7 @@ function createUIContext(
 			setStatus() {},
 			setEditorComponent() {},
 			setWidget() {},
+			setWorkingMessage() {},
 			async select(title: string, options: string[]) {
 				selectCalls.push({ title, options });
 				return selectReturn;
@@ -135,6 +136,7 @@ function createHeadlessContext(entries: unknown[] = []): ExtensionContext {
 			setStatus() {},
 			setEditorComponent() {},
 			setWidget() {},
+			setWorkingMessage() {},
 			theme: {
 				fg(_token: string, value: string) {
 					return value;
