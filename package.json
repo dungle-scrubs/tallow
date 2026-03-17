@@ -72,7 +72,7 @@
 	"dependencies": {
 		"@clack/prompts": "^1.1.0",
 		"@dungle-scrubs/synapse": "0.1.6",
-		"@mariozechner/pi-coding-agent": "^0.58.3",
+		"@mariozechner/pi-coding-agent": "^0.58.4",
 		"@opentelemetry/api": "^1.9.0",
 		"@sinclair/typebox": "0.34.48",
 		"ai": "^6.0.116",
@@ -82,8 +82,8 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.2",
-		"@mariozechner/pi-agent-core": "^0.58.3",
-		"@mariozechner/pi-ai": "^0.58.3",
+		"@mariozechner/pi-agent-core": "^0.58.4",
+		"@mariozechner/pi-ai": "^0.58.4",
 		"@mariozechner/pi-tui": "workspace:*",
 		"@types/node": "25.2.3",
 		"husky": "^9.1.7",
