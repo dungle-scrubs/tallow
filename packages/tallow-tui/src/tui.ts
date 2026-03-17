@@ -221,6 +221,7 @@ export class TUI extends Container {
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
 	private fullRedrawCount = 0;
 	private stopped = false;
+	private pendingScrollbackClear = false; // Clear scrollback on next full render (session breaks)
 
 	// Overlay stack for modal components rendered on top of base content
 	private overlayStack: {
@@ -266,6 +267,21 @@ export class TUI extends Container {
 	 */
 	setClearOnShrink(enabled: boolean): void {
 		this.clearOnShrink = enabled;
+	}
+
+	/**
+	 * Request that the next full render clears the terminal scrollback buffer.
+	 *
+	 * Use when the session content is being replaced wholesale (workspace
+	 * transitions, new sessions, session switches) so stale scrollback
+	 * doesn't visually flow into the new content.
+	 *
+	 * Has no effect on partial (differential) redraws — the flag is consumed
+	 * only when a full render is triggered by content shrink, width change,
+	 * or forced invalidation.
+	 */
+	requestScrollbackClear(): void {
+		this.pendingScrollbackClear = true;
 	}
 
 	setFocus(component: Component | null): void {
@@ -944,11 +960,16 @@ export class TUI extends Container {
 		// Width changed - need full re-render (line wrapping changes)
 		const widthChanged = this.previousWidth !== 0 && this.previousWidth !== width;
 
-		// Helper to clear scrollback and viewport and render all new lines
+		// Helper to clear viewport (and optionally scrollback) and render all new lines
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
-			if (clear) buffer += "\x1b[2J\x1b[H"; // Clear screen and home (preserve scrollback)
+			if (clear && this.pendingScrollbackClear) {
+				buffer += "\x1b[3J\x1b[2J\x1b[H"; // Clear scrollback, screen, and home
+				this.pendingScrollbackClear = false;
+			} else if (clear) {
+				buffer += "\x1b[2J\x1b[H"; // Clear screen and home (preserve scrollback)
+			}
 			for (let i = 0; i < newLines.length; i++) {
 				if (i > 0) buffer += "\r\n";
 				buffer += newLines[i];
