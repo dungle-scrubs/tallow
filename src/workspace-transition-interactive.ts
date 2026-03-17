@@ -28,7 +28,7 @@ interface InteractiveModeLike {
 	streamingComponent?: unknown;
 	streamingMessage?: unknown;
 	subscribeToAgent(): void;
-	ui: { requestRender(force?: boolean): void };
+	ui: { requestRender(force?: boolean): void; requestScrollbackClear?(): void };
 	unsubscribe?: (() => void) | undefined;
 	updateTerminalTitle(): void;
 	initExtensions(): Promise<void>;
@@ -199,6 +199,10 @@ function resetInteractiveModeState(mode: InteractiveModeLike): void {
 	mode.resetExtensionUI();
 	mode.unsubscribe?.();
 	mode.unsubscribe = undefined;
+
+	// Clear terminal scrollback so stale content from the previous session
+	// doesn't visually flow into the new session's startup output.
+	mode.ui.requestScrollbackClear?.();
 }
 
 /**
