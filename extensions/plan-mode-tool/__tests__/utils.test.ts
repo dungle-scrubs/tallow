@@ -2,14 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
 	cleanStepText,
 	detectPlanIntent,
-	extractDoneSteps,
 	extractTodoItems,
 	isPlanModeToolAllowed,
 	isSafeCommand,
-	markCompletedSteps,
 	PLAN_MODE_ALLOWED_TOOLS,
 	stripPlanIntent,
-	type TodoItem,
 } from "../utils.js";
 
 describe("isPlanModeToolAllowed", () => {
@@ -202,60 +199,6 @@ Let me know if this works.`;
 
 		const items = extractTodoItems(message);
 		expect(items.map((i) => i.step)).toEqual([1, 2, 3]);
-	});
-});
-
-describe("extractDoneSteps", () => {
-	test("extracts single done marker", () => {
-		expect(extractDoneSteps("I completed the task [DONE:1]")).toEqual([1]);
-	});
-
-	test("extracts multiple done markers", () => {
-		expect(extractDoneSteps("[DONE:1] and [DONE:3] are complete")).toEqual([1, 3]);
-	});
-
-	test("is case-insensitive", () => {
-		expect(extractDoneSteps("[done:2] finished")).toEqual([2]);
-		expect(extractDoneSteps("[Done:5] finished")).toEqual([5]);
-	});
-
-	test("returns empty for no markers", () => {
-		expect(extractDoneSteps("No completion markers here")).toEqual([]);
-	});
-});
-
-describe("markCompletedSteps", () => {
-	test("marks matching steps as completed", () => {
-		const items: TodoItem[] = [
-			{ step: 1, text: "First", completed: false },
-			{ step: 2, text: "Second", completed: false },
-			{ step: 3, text: "Third", completed: false },
-		];
-
-		const count = markCompletedSteps("[DONE:1] [DONE:3]", items);
-		expect(count).toBe(2);
-		expect(items[0].completed).toBe(true);
-		expect(items[1].completed).toBe(false);
-		expect(items[2].completed).toBe(true);
-	});
-
-	test("returns 0 when no markers match", () => {
-		const items: TodoItem[] = [{ step: 1, text: "First", completed: false }];
-		expect(markCompletedSteps("No markers", items)).toBe(0);
-		expect(items[0].completed).toBe(false);
-	});
-
-	test("ignores markers for non-existent steps", () => {
-		const items: TodoItem[] = [{ step: 1, text: "First", completed: false }];
-		const count = markCompletedSteps("[DONE:99]", items);
-		expect(count).toBe(1); // extractDoneSteps found 1 marker
-		expect(items[0].completed).toBe(false); // but step 1 wasn't marked
-	});
-
-	test("does not un-complete already completed steps", () => {
-		const items: TodoItem[] = [{ step: 1, text: "First", completed: true }];
-		markCompletedSteps("No new markers", items);
-		expect(items[0].completed).toBe(true);
 	});
 });
 

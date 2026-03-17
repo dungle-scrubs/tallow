@@ -255,32 +255,3 @@ export function extractTodoItems(message: string): TodoItem[] {
 	}
 	return items;
 }
-
-/**
- * Extracts [DONE:n] step markers from a message.
- * @param message - The message text to search
- * @returns Array of step numbers that were marked as done
- */
-export function extractDoneSteps(message: string): number[] {
-	const steps: number[] = [];
-	for (const match of message.matchAll(/\[DONE:(\d+)\]/gi)) {
-		const step = Number(match[1]);
-		if (Number.isFinite(step)) steps.push(step);
-	}
-	return steps;
-}
-
-/**
- * Marks todo items as completed based on [DONE:n] markers in text.
- * @param text - The text containing [DONE:n] markers
- * @param items - The todo items to update
- * @returns The number of items that were marked as completed
- */
-export function markCompletedSteps(text: string, items: TodoItem[]): number {
-	const doneSteps = extractDoneSteps(text);
-	for (const step of doneSteps) {
-		const item = items.find((t) => t.step === step);
-		if (item) item.completed = true;
-	}
-	return doneSteps.length;
-}
