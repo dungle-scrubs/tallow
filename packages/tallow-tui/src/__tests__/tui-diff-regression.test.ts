@@ -451,4 +451,56 @@ describe("TUI differential rendering shrink regression", () => {
 		expect(tuiInternal.maxLinesRendered).toBe(20);
 		expect(tuiInternal.previousViewportTop).toBe(Math.max(0, 20 - height));
 	});
+
+	test("requestScrollbackClear includes \\x1b[3J only on next full render", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 20 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+
+		// Initial render — no scrollback clear
+		renderNow(tui);
+		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(false);
+
+		// Request scrollback clear, then shrink content to trigger fullRender(true)
+		tui.requestScrollbackClear();
+		component.setLines(Array.from({ length: 5 }, (_, i) => `new ${i}`));
+		renderNow(tui);
+
+		// The large shrink (20→5) triggers fullRender(true) which should include \x1b[3J
+		const clearWrite = terminal.writes.find((w) => w.includes("\x1b[3J"));
+		expect(clearWrite).toBeDefined();
+
+		// Subsequent renders should NOT include \x1b[3J (flag consumed)
+		terminal.writes.length = 0;
+		component.setLines(Array.from({ length: 3 }, (_, i) => `final ${i}`));
+		renderNow(tui);
+		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(false);
+	});
+
+	test("requestScrollbackClear has no effect on partial (differential) renders", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 8 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui);
+
+		// Request scrollback clear but only change one line (small diff, no fullRender)
+		tui.requestScrollbackClear();
+		component.setLines(Array.from({ length: 8 }, (_, i) => (i === 3 ? "CHANGED" : `line ${i}`)));
+		renderNow(tui);
+
+		// Partial render path — no \x1b[3J emitted, flag stays pending
+		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(false);
+
+		// Now trigger a large shrink to fire fullRender(true) — flag should still be pending
+		terminal.writes.length = 0;
+		component.setLines(["single line"]);
+		renderNow(tui);
+		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(true);
+	});
 });
