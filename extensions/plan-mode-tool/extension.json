@@ -6,16 +6,7 @@
 	"capabilities": {
 		"tools": ["plan_mode"],
 		"commands": ["plan-mode", "todos"],
-		"events": [
-			"agent_end",
-			"before_agent_start",
-			"context",
-			"input",
-			"session_start",
-			"tool_call",
-			"tool_result",
-			"turn_end"
-		]
+		"events": ["agent_end", "before_agent_start", "context", "input", "session_start", "tool_call"]
 	},
 	"permissionSurface": {
 		"filesystem": "none",

@@ -160,7 +160,6 @@ describe("plan-mode strict readonly enforcement", () => {
 				customType: "plan-mode",
 				data: {
 					enabled: true,
-					executing: false,
 					normalTools: [...BASELINE_TOOLS],
 					todos: [],
 				},
