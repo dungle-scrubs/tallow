@@ -125,24 +125,81 @@ function disableBuiltinSkillCommands(): void {
 	}
 }
 
+/**
+ * Resolve shared skill directories from global settings.
+ *
+ * Reads `sharedSkillsDirs`, tilde-expands each entry, and validates
+ * that it exists and is a directory. Mirrors the logic in `sdk.ts`
+ * so slash-command registration sees the same skills as the system prompt.
+ *
+ * @param settingsPath - Path to global settings.json
+ * @returns Array of validated, resolved directory paths
+ */
+export function resolveSharedSkillsDirsFromSettings(settingsPath: string): string[] {
+	if (!fs.existsSync(settingsPath)) return [];
+	let settings: Record<string, unknown>;
+	try {
+		settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+	} catch {
+		return [];
+	}
+	const raw = settings.sharedSkillsDirs;
+	if (!Array.isArray(raw)) return [];
+
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? "~";
+	const resolved: string[] = [];
+
+	for (const entry of raw) {
+		if (typeof entry !== "string" || !entry.trim()) continue;
+		const trimmed = entry.trim();
+		let expanded: string;
+		if (trimmed === "~") {
+			expanded = home;
+		} else if (trimmed.startsWith("~/")) {
+			expanded = join(home, trimmed.slice(2));
+		} else if (trimmed.startsWith("/")) {
+			expanded = trimmed;
+		} else {
+			continue;
+		}
+		try {
+			const stats = fs.statSync(expanded);
+			if (stats.isDirectory()) resolved.push(expanded);
+		} catch {
+			// statSync failed — skip this entry
+		}
+	}
+	return resolved;
+}
+
 export default function (pi: ExtensionAPI) {
 	disableBuiltinSkillCommands();
 
+	const agentDir =
+		process.env.PI_CODING_AGENT_DIR ??
+		join(process.env.HOME ?? process.env.USERPROFILE ?? "~", ".tallow");
+	const settingsPath = join(agentDir, "settings.json");
+
+	// Shared skill directories from global settings (e.g. ~/dev/skills)
+	const sharedSkillsDirs = resolveSharedSkillsDirsFromSettings(settingsPath);
+
 	// Include .claude/skills/ directories for Claude Code compatibility
-	const claudeSkillPaths: string[] = [];
+	const extraSkillPaths: string[] = [...sharedSkillsDirs];
 	const userClaudeSkills = join(
 		process.env.HOME ?? process.env.USERPROFILE ?? "~",
 		".claude",
 		"skills"
 	);
 	const projectClaudeSkills = join(process.cwd(), ".claude", "skills");
-	if (fs.existsSync(userClaudeSkills)) claudeSkillPaths.push(userClaudeSkills);
+	if (fs.existsSync(userClaudeSkills)) extraSkillPaths.push(userClaudeSkills);
 	if (isProjectTrusted(process.cwd()) && fs.existsSync(projectClaudeSkills)) {
-		claudeSkillPaths.push(projectClaudeSkills);
+		extraSkillPaths.push(projectClaudeSkills);
 	}
 
-	// Load skills synchronously during extension init for autocomplete to work
-	const { skills } = loadSkills({ skillPaths: claudeSkillPaths });
+	// Load skills synchronously during extension init for autocomplete to work.
+	// includeDefaults: true picks up ~/.tallow/skills/ and ./skills/ (project).
+	// extraSkillPaths adds shared dirs + Claude bridge paths.
+	const { skills } = loadSkills({ agentDir, skillPaths: extraSkillPaths });
 
 	for (const skill of skills) {
 		// Validate name before registration — invalid names produce broken commands
