@@ -17,6 +17,7 @@ import {
 	isHighRisk,
 	isNonInteractiveBypassEnabled,
 	isShellInterpolationEnabled,
+	isYoloMode,
 	reloadPermissions,
 	resetPermissionCache,
 	runCommandSync,
@@ -32,6 +33,7 @@ setDefaultTimeout(15_000);
 const ORIG_ENABLE = process.env.TALLOW_ENABLE_SHELL_INTERPOLATION;
 const ORIG_LEGACY_ENABLE = process.env.TALLOW_SHELL_INTERPOLATION;
 const ORIG_BYPASS = process.env.TALLOW_ALLOW_UNSAFE_SHELL;
+const ORIG_YOLO = process.env.TALLOW_YOLO;
 const ORIG_TRUST_CWD = process.env.TALLOW_PROJECT_TRUST_CWD;
 const ORIG_TRUST_STATUS = process.env.TALLOW_PROJECT_TRUST_STATUS;
 
@@ -57,6 +59,12 @@ function restoreEnv(): void {
 		delete process.env.TALLOW_ALLOW_UNSAFE_SHELL;
 	} else {
 		process.env.TALLOW_ALLOW_UNSAFE_SHELL = ORIG_BYPASS;
+	}
+
+	if (ORIG_YOLO === undefined) {
+		delete process.env.TALLOW_YOLO;
+	} else {
+		process.env.TALLOW_YOLO = ORIG_YOLO;
 	}
 
 	if (ORIG_TRUST_CWD === undefined) {
@@ -733,5 +741,194 @@ describe("always-allow flow in enforceExplicitPolicy", () => {
 		);
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toContain("denied");
+	});
+});
+
+// ── Yolo mode ────────────────────────────────────────────────────────────────
+
+describe("isYoloMode", () => {
+	test("returns false when env var is not set", () => {
+		delete process.env.TALLOW_YOLO;
+		expect(isYoloMode()).toBe(false);
+	});
+
+	test("returns true when TALLOW_YOLO=1", () => {
+		process.env.TALLOW_YOLO = "1";
+		expect(isYoloMode()).toBe(true);
+	});
+
+	test("returns false for other values", () => {
+		process.env.TALLOW_YOLO = "0";
+		expect(isYoloMode()).toBe(false);
+		process.env.TALLOW_YOLO = "true";
+		expect(isYoloMode()).toBe(false);
+	});
+});
+
+describe("yolo mode: enforceExplicitPolicy", () => {
+	beforeEach(() => {
+		process.env.TALLOW_YOLO = "1";
+	});
+
+	test("auto-approves high-risk commands without calling confirmFn", async () => {
+		let confirmCalled = false;
+		const result = await enforceExplicitPolicy(
+			"sudo apt install jq",
+			"bash",
+			process.cwd(),
+			true,
+			async () => {
+				confirmCalled = true;
+				return "yes";
+			}
+		);
+		expect(result).toBeUndefined();
+		expect(confirmCalled).toBe(false);
+	});
+
+	test("auto-approves git reset --hard without calling confirmFn", async () => {
+		let confirmCalled = false;
+		const result = await enforceExplicitPolicy(
+			"git reset --hard HEAD~1",
+			"bash",
+			process.cwd(),
+			true,
+			async () => {
+				confirmCalled = true;
+				return "yes";
+			}
+		);
+		expect(result).toBeUndefined();
+		expect(confirmCalled).toBe(false);
+	});
+
+	test("still blocks hard-denied commands (fork bomb)", async () => {
+		const result = await enforceExplicitPolicy(
+			":(){ :|:& };:",
+			"bash",
+			process.cwd(),
+			true,
+			async () => "yes"
+		);
+		expect(result?.block).toBe(true);
+	});
+
+	test("still blocks rm -rf /", async () => {
+		const result = await enforceExplicitPolicy(
+			"rm -rf /",
+			"bash",
+			process.cwd(),
+			true,
+			async () => "yes"
+		);
+		expect(result?.block).toBe(true);
+	});
+
+	test("still blocks mkfs", async () => {
+		const result = await enforceExplicitPolicy(
+			"mkfs.ext4 /dev/sda1",
+			"bash",
+			process.cwd(),
+			true,
+			async () => "yes"
+		);
+		expect(result?.block).toBe(true);
+	});
+
+	test("records bypassed outcome in audit trail", async () => {
+		await enforceExplicitPolicy(
+			"sudo systemctl restart nginx",
+			"bash",
+			process.cwd(),
+			true,
+			async () => "yes"
+		);
+		const trail = getAuditTrail();
+		const entry = trail.find((e) => e.command.includes("sudo systemctl"));
+		expect(entry?.outcome).toBe("bypassed");
+		expect(entry?.reason).toBe("yolo mode");
+	});
+
+	test("allows normal commands without confirmation (passthrough)", async () => {
+		const result = await enforceExplicitPolicy(
+			"echo hello",
+			"bash",
+			process.cwd(),
+			true,
+			async () => "yes"
+		);
+		expect(result).toBeUndefined();
+	});
+
+	test("auto-approves user-configured ask-tier permission rules", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "tallow-yolo-ask-"));
+		try {
+			mkdirSync(join(cwd, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".tallow", "settings.json"),
+				JSON.stringify({ permissions: { ask: ["Bash(docker *)"] } })
+			);
+			process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+			resetPermissionCache();
+
+			let confirmCalled = false;
+			const result = await enforceExplicitPolicy(
+				"docker compose up",
+				"bash",
+				cwd,
+				true,
+				async () => {
+					confirmCalled = true;
+					return "yes";
+				}
+			);
+			expect(result).toBeUndefined();
+			expect(confirmCalled).toBe(false);
+		} finally {
+			delete process.env.TALLOW_PROJECT_TRUST_CWD;
+			delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("still blocks user-configured deny rules", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "tallow-yolo-deny-"));
+		try {
+			mkdirSync(join(cwd, ".tallow"), { recursive: true });
+			writeFileSync(
+				join(cwd, ".tallow", "settings.json"),
+				JSON.stringify({ permissions: { deny: ["Bash(rm *)"] } })
+			);
+			process.env.TALLOW_PROJECT_TRUST_CWD = cwd;
+			process.env.TALLOW_PROJECT_TRUST_STATUS = "trusted";
+			resetPermissionCache();
+
+			const result = await enforceExplicitPolicy(
+				"rm -rf node_modules",
+				"bash",
+				cwd,
+				true,
+				async () => "yes"
+			);
+			expect(result?.block).toBe(true);
+		} finally {
+			delete process.env.TALLOW_PROJECT_TRUST_CWD;
+			delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	test("works in non-interactive mode (bypasses non-interactive block)", async () => {
+		const result = await enforceExplicitPolicy(
+			"sudo apt install jq",
+			"bash",
+			process.cwd(),
+			false, // non-interactive
+			async () => "yes"
+		);
+		// Without yolo, non-interactive + high-risk = blocked.
+		// With yolo, auto-approved before the interactive check.
+		expect(result).toBeUndefined();
 	});
 });
