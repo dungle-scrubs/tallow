@@ -76,6 +76,10 @@ program
 	.option("-m, --model <model>", "Model to use (provider/model-id)")
 	.option("--provider <provider>", "Provider to use (anthropic, openai, google, etc.)")
 	.option("-w, --worktree", "Run this session in a temporary detached git worktree")
+	.option(
+		"--yolo",
+		"Auto-approve all tool confirmations (high-risk commands, permission ask-tier rules). Hard denies (fork bombs, rm -rf /, etc.) remain blocked."
+	)
 	// --api-key removed: leaks secrets in `ps` output. Use TALLOW_API_KEY/TALLOW_API_KEY_REF.
 	.option("--mode <mode>", "Run mode: interactive, rpc, json", "interactive")
 	.option("--thinking <level>", "Thinking level: off, minimal, low, medium, high, xhigh")
@@ -222,10 +226,16 @@ async function run(opts: {
 	thinking?: string;
 	tools?: string;
 	worktree?: boolean;
+	yolo?: boolean;
 }): Promise<void> {
 	// Demo mode (set early — before --list and other output commands)
 	if (opts.demo) {
 		process.env.IS_DEMO = "1";
+	}
+
+	// Yolo mode — auto-approve confirmations (env var consumed by shell-policy + permissions)
+	if (opts.yolo) {
+		process.env.TALLOW_YOLO = "1";
 	}
 
 	// Quick info commands

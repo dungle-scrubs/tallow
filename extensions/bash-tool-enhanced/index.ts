@@ -30,6 +30,7 @@ import { INTEROP_API_CHANNELS } from "../_shared/interop-events.js";
 import {
 	enforceExplicitPolicy,
 	evaluateCommand,
+	isYoloMode,
 	recordAudit,
 	type ShellConfirmResponse,
 } from "../_shared/shell-policy.js";
@@ -628,7 +629,7 @@ export default function bashLive(pi: ExtensionAPI): void {
 			return blocked;
 		}
 
-		if (ctx.hasUI && verdict.allowed && verdict.requiresConfirmation) {
+		if (ctx.hasUI && verdict.allowed && verdict.requiresConfirmation && !isYoloMode()) {
 			ctx.ui.notify("✅ Shell action approved — running command", "info");
 		}
 	});

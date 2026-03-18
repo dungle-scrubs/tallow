@@ -609,6 +609,19 @@ export function isNonInteractiveBypassEnabled(): boolean {
 }
 
 /**
+ * Check whether yolo mode is active.
+ *
+ * Yolo mode auto-approves all confirmation prompts (high-risk commands,
+ * ask-tier permission rules) but keeps hard denies (fork bombs, rm -rf /,
+ * mkfs, etc.) intact.
+ *
+ * @returns True when TALLOW_YOLO=1
+ */
+export function isYoloMode(): boolean {
+	return process.env.TALLOW_YOLO === "1";
+}
+
+/**
  * Evaluate command against centralized policy rules.
  *
  * @param command - Raw command text
@@ -845,6 +858,20 @@ export async function enforceExplicitPolicy(
 			trustLevel: verdict.trustLevel,
 			cwd,
 			outcome: "allowed",
+		});
+		return undefined;
+	}
+
+	// Yolo mode: auto-approve confirmation prompts (hard denies already blocked above)
+	if (isYoloMode()) {
+		recordAudit({
+			timestamp: Date.now(),
+			command: verdict.normalizedCommand,
+			source,
+			trustLevel: verdict.trustLevel,
+			cwd,
+			outcome: "bypassed",
+			reason: "yolo mode",
 		});
 		return undefined;
 	}

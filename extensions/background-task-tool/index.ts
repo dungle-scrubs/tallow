@@ -47,6 +47,7 @@ import { registerPid, unregisterPid } from "../_shared/pid-registry.js";
 import {
 	enforceExplicitPolicy,
 	evaluateCommand,
+	isYoloMode,
 	recordAudit,
 	type ShellConfirmResponse,
 } from "../_shared/shell-policy.js";
@@ -1803,7 +1804,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 			return blocked;
 		}
 
-		if (ctx.hasUI && verdict.allowed && verdict.requiresConfirmation) {
+		if (ctx.hasUI && verdict.allowed && verdict.requiresConfirmation && !isYoloMode()) {
 			ctx.ui.notify("✅ Shell action approved — starting background task", "info");
 		}
 	});
