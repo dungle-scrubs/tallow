@@ -181,11 +181,15 @@ describe("policy evaluation", () => {
 		expect(verdict.trustLevel).toBe("explicit");
 	});
 
-	test("rm -rf in home directory is high-risk but not denylisted", () => {
+	test("rm -rf of non-root targets is allowed without confirmation", () => {
 		const verdict = evaluateCommand("rm -rf ~/tmp/demo", "bash", process.cwd());
 		expect(verdict.allowed).toBe(true);
-		expect(verdict.requiresConfirmation).toBe(true);
-		expect(verdict.reason).toContain("high-risk");
+		expect(verdict.requiresConfirmation).toBe(false);
+	});
+
+	test("rm -rf / is still hard-denied", () => {
+		const verdict = evaluateCommand("rm -rf /", "bash", process.cwd());
+		expect(verdict.allowed).toBe(false);
 	});
 
 	test("implicit commands are blocked while disabled", () => {
@@ -447,8 +451,8 @@ describe("process wrappers", () => {
 });
 
 describe("deriveAllowPattern", () => {
-	test("rm -rf → exact command", () => {
-		expect(deriveAllowPattern("rm -rf ./dist")).toBe("Bash(rm -rf ./dist)");
+	test("rm -rf → null (not high-risk, guarded by denylist and hooks)", () => {
+		expect(deriveAllowPattern("rm -rf ./dist")).toBeNull();
 	});
 
 	test("sudo → exact command", () => {
@@ -494,21 +498,20 @@ describe("deriveAllowPattern", () => {
 		expect(deriveAllowPattern("ls -la")).toBeNull();
 	});
 
-	test("uses first match but returns exact command regardless", () => {
-		// "sudo rm -rf" matches rm -rf first (it appears first in pattern list)
+	test("sudo rm -rf matches sudo pattern", () => {
 		const pattern = deriveAllowPattern("sudo rm -rf /tmp/test");
 		expect(pattern).toBe("Bash(sudo rm -rf /tmp/test)");
 	});
 
 	test("trims whitespace from command", () => {
-		expect(deriveAllowPattern("  rm -rf ./cache  ")).toBe("Bash(rm -rf ./cache)");
+		expect(deriveAllowPattern("  sudo apt upgrade  ")).toBe("Bash(sudo apt upgrade)");
 	});
 
-	test("different paths produce different patterns", () => {
-		const pattern1 = deriveAllowPattern("rm -rf apps/foo/.cache");
-		const pattern2 = deriveAllowPattern("rm -rf apps/bar/.cache");
-		expect(pattern1).toBe("Bash(rm -rf apps/foo/.cache)");
-		expect(pattern2).toBe("Bash(rm -rf apps/bar/.cache)");
+	test("different args produce different patterns", () => {
+		const pattern1 = deriveAllowPattern("sudo apt install foo");
+		const pattern2 = deriveAllowPattern("sudo apt install bar");
+		expect(pattern1).toBe("Bash(sudo apt install foo)");
+		expect(pattern2).toBe("Bash(sudo apt install bar)");
 		expect(pattern1).not.toBe(pattern2);
 	});
 });
