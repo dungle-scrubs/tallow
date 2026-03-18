@@ -47,8 +47,38 @@ jobs:
 
       - run: bun run build
 
-      - name: Strip bun workspace overrides before npm publish
-        run: node -e "const p=require('./package.json'); delete p.overrides; require('fs').writeFileSync('package.json', JSON.stringify(p, null, '\t') + '\n')"
+      - name: Resolve workspace references and strip overrides before npm publish
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = require('./package.json');
+            delete p.overrides;
+            // Replace workspace:* references with published versions
+            for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
+              if (!p[section]) continue;
+              for (const [name, version] of Object.entries(p[section])) {
+                if (typeof version === 'string' && version.startsWith('workspace:')) {
+                  const dirs = fs.readdirSync('packages');
+                  let resolved = false;
+                  for (const dir of dirs) {
+                    try {
+                      const wp = JSON.parse(fs.readFileSync('packages/' + dir + '/package.json', 'utf8'));
+                      if (wp.name === name) {
+                        p[section][name] = '^' + wp.version;
+                        console.log('Resolved ' + name + ': workspace:* -> ^' + wp.version);
+                        resolved = true;
+                        break;
+                      }
+                    } catch {}
+                  }
+                  if (!resolved) {
+                    console.warn('WARNING: Could not resolve workspace dep ' + name);
+                  }
+                }
+              }
+            }
+            fs.writeFileSync('package.json', JSON.stringify(p, null, '\t') + '\n');
+          "
 
       - name: Publish with OIDC provenance
         run: npm publish --access public

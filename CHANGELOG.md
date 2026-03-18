@@ -5,38 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.24](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.23...tallow-v0.8.24) (2026-03-18)
-
-
-### Added
-
-* **tui:** add requestScrollbackClear() for session-level resets ([ecf4559](https://github.com/dungle-scrubs/tallow/commit/ecf4559f9b66abe24f9575a33344097eb0c4fe36))
-
-
-### Fixed
-
-* **hooks:** don't block input when cwd is renamed or deleted ([feba24d](https://github.com/dungle-scrubs/tallow/commit/feba24d9987ed7c30afd3a520176761ebc7d2a52))
-* **packaging:** bundle forked pi-tui for npm consumers ([64a996c](https://github.com/dungle-scrubs/tallow/commit/64a996cdd804104f09879b6fd0ee5f011531b8c0))
-* **plan-mode:** remove execution tracking that caused infinite loop ([d3cccad](https://github.com/dungle-scrubs/tallow/commit/d3cccad23a6ab3bb4833e7b1d46de6618db44b18))
-* **shell-policy:** remove rm -r from high-risk confirmation prompts ([40c3e01](https://github.com/dungle-scrubs/tallow/commit/40c3e016c859f5bc5091c2d1b206678ddced02ce))
-* **workspace-transition:** clear scrollback on session swap ([19560f7](https://github.com/dungle-scrubs/tallow/commit/19560f741c4c7743efe9f9ec7ea4523ad700406f))
-
-
-### Changed
-
-* bump pi framework to 0.58.3, update transitive deps ([3d65c7d](https://github.com/dungle-scrubs/tallow/commit/3d65c7dd93ad0ad4c7a2a66cd38eb71f561214d6))
-
-
-### Documentation
-
-* move [Unreleased] above latest release, add hooks fix entry ([cf95d36](https://github.com/dungle-scrubs/tallow/commit/cf95d364153879095787587175ff137745760439))
-
-
-### Maintenance
-
-* **deps:** bump pi-* dependencies ([26cb037](https://github.com/dungle-scrubs/tallow/commit/26cb03780fb4cf3e3b3977bacfb65a08e1c21e08))
-* **hooks:** add stale-cwd unit tests ([6aef56d](https://github.com/dungle-scrubs/tallow/commit/6aef56d64af954644ef392de8e6c8e18a9eb03c8))
-
 ## [Unreleased]
 
 ### Added
@@ -125,6 +93,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **deps:** bump pi-* dependencies
 - **tests:** exclude `_defaults.md` from agent-template drift counts and verify
   scoped package links plus key docs metadata
+
+## [0.8.24](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.23...tallow-v0.8.24) (2026-03-18)
+
+
+### Added
+
+* **tui:** add requestScrollbackClear() for session-level resets ([ecf4559](https://github.com/dungle-scrubs/tallow/commit/ecf4559f9b66abe24f9575a33344097eb0c4fe36))
+
+
+### Fixed
+
+* **hooks:** don't block input when cwd is renamed or deleted ([feba24d](https://github.com/dungle-scrubs/tallow/commit/feba24d9987ed7c30afd3a520176761ebc7d2a52))
+* **packaging:** bundle forked pi-tui for npm consumers ([64a996c](https://github.com/dungle-scrubs/tallow/commit/64a996cdd804104f09879b6fd0ee5f011531b8c0))
+* **plan-mode:** remove execution tracking that caused infinite loop ([d3cccad](https://github.com/dungle-scrubs/tallow/commit/d3cccad23a6ab3bb4833e7b1d46de6618db44b18))
+* **shell-policy:** remove rm -r from high-risk confirmation prompts ([40c3e01](https://github.com/dungle-scrubs/tallow/commit/40c3e016c859f5bc5091c2d1b206678ddced02ce))
+* **workspace-transition:** clear scrollback on session swap ([19560f7](https://github.com/dungle-scrubs/tallow/commit/19560f741c4c7743efe9f9ec7ea4523ad700406f))
+
+
+### Changed
+
+* bump pi framework to 0.58.3, update transitive deps ([3d65c7d](https://github.com/dungle-scrubs/tallow/commit/3d65c7dd93ad0ad4c7a2a66cd38eb71f561214d6))
+
+
+### Documentation
+
+* move [Unreleased] above latest release, add hooks fix entry ([cf95d36](https://github.com/dungle-scrubs/tallow/commit/cf95d364153879095787587175ff137745760439))
+
+
+### Maintenance
+
+* **deps:** bump pi-* dependencies ([26cb037](https://github.com/dungle-scrubs/tallow/commit/26cb03780fb4cf3e3b3977bacfb65a08e1c21e08))
+* **hooks:** add stale-cwd unit tests ([6aef56d](https://github.com/dungle-scrubs/tallow/commit/6aef56d64af954644ef392de8e6c8e18a9eb03c8))
 
 ## [0.8.23](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.22...tallow-v0.8.23) (2026-03-15)
 
