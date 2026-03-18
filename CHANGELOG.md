@@ -67,12 +67,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **tui:** sync forked pi-tui to upstream v0.60.0 — adds tmux xterm
+  `modifyOtherKeys` matching for Backspace, Escape, and Space, and
+  resolves raw `\x08` backspace ambiguity with Windows Terminal heuristic
 - **install:** use `@dungle-scrubs/tallow` as the canonical published package
   name in installer guidance and upgrade commands
 - **tui:** global select cursor changed from → to ↗
 
 ### Fixed
 
+- **skill-commands:** register `/slash-commands` for skills loaded from
+  `sharedSkillsDirs` (e.g. `~/dev/skills`). Previously only `.claude/skills/`
+  paths were scanned, so shared skills appeared in the system prompt but had
+  no corresponding slash command
 - **hooks:** don't block input when workspace directory is renamed or deleted
   externally — infrastructure errors (missing cwd, spawn failures) are now
   distinguished from policy blocks and never freeze the session
