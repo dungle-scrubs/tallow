@@ -25,10 +25,13 @@ interface FakeEvent {
 
 class FakeInteractiveMode {
 	defaultEditor: { onEscape?: () => void } = {};
+	editor: { getText: () => string; setText: (text: string) => void };
+	editorText = "";
 	escapeCalls = 0;
 	executeCompactionCalls = 0;
 	executeCompactionResult: unknown = { summary: "ok" };
 	flushCalls = 0;
+	followUpQueue: string[] = [];
 	handleBashCommandCalls = 0;
 	handleEventCalls = 0;
 	lastHandledEvent: FakeEvent | undefined;
@@ -39,10 +42,14 @@ class FakeInteractiveMode {
 	pendingBashComponents: unknown[] = [];
 	pendingWorkingMessage: unknown = "stale";
 	renderRequests = 0;
-	session = {
-		extensionRunner: { compactFn: undefined as ((options?: unknown) => void) | undefined },
-		isStreaming: false,
+	session: {
+		clearQueue: () => { followUp: string[]; steering: string[] };
+		extensionRunner: { compactFn: ((options?: unknown) => void) | undefined };
+		getFollowUpMessages: () => string[];
+		getSteeringMessages: () => string[];
+		isStreaming: boolean;
 	};
+	steeringQueue: string[] = [];
 	statusClears = 0;
 	updateCalls = 0;
 	ui = {
@@ -51,6 +58,28 @@ class FakeInteractiveMode {
 			this.renderRequests++;
 		},
 	};
+
+	constructor() {
+		this.editor = {
+			getText: () => this.editorText,
+			setText: (text: string) => {
+				this.editorText = text;
+			},
+		};
+		this.session = {
+			clearQueue: () => {
+				const steering = [...this.steeringQueue];
+				const followUp = [...this.followUpQueue];
+				this.steeringQueue = [];
+				this.followUpQueue = [];
+				return { followUp, steering };
+			},
+			extensionRunner: { compactFn: undefined },
+			getFollowUpMessages: () => this.followUpQueue,
+			getSteeringMessages: () => this.steeringQueue,
+			isStreaming: false,
+		};
+	}
 
 	/**
 	 * Base handleEvent implementation used by the patch wrapper.
@@ -711,5 +740,67 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.handleEventCalls).toBe(2);
 		// agent_end cleanup should still run
 		expect(mode.pendingWorkingMessage).toBeUndefined();
+	});
+
+	// ── orphaned steering/follow-up drain at agent_end ────────────────────
+
+	it("drains orphaned steering messages to the editor at agent_end", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.steeringQueue.push("what is metal toolchain for?", "do I need it on my machine?");
+
+		await mode.handleEvent({ type: "agent_end" });
+
+		// Steering queue should be drained
+		expect(mode.steeringQueue).toEqual([]);
+		// Messages should be restored to the editor
+		expect(mode.editorText).toBe("what is metal toolchain for?\n\ndo I need it on my machine?");
+		// Pending messages display should be updated (zombies cleared)
+		expect(mode.updateCalls).toBeGreaterThanOrEqual(1);
+	});
+
+	it("drains orphaned follow-up messages to the editor at agent_end", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.followUpQueue.push("also check the ansible playbook");
+
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.followUpQueue).toEqual([]);
+		expect(mode.editorText).toBe("also check the ansible playbook");
+	});
+
+	it("combines orphaned messages with existing editor text", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.steeringQueue.push("stale steering");
+		mode.editorText = "new message in progress";
+
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.editorText).toBe("stale steering\n\nnew message in progress");
+	});
+
+	it("does not touch the editor when no orphaned messages exist", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.editorText = "user is typing";
+
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.editorText).toBe("user is typing");
+	});
+
+	it("drains both steering and follow-up in correct order", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.steeringQueue.push("steer1", "steer2");
+		mode.followUpQueue.push("follow1");
+
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.steeringQueue).toEqual([]);
+		expect(mode.followUpQueue).toEqual([]);
+		expect(mode.editorText).toBe("steer1\n\nsteer2\n\nfollow1");
 	});
 });
