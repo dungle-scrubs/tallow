@@ -86,6 +86,24 @@ jobs:
             console.log(piDeps.join(" "));
           ' | xargs bun add
 
+          # Sync forked pi-tui version with upstream so it satisfies
+          # pi-coding-agent's semver range (the fork is bundled, not
+          # published, but its version must match the expected range)
+          upstream_tui_ver=$(npm view @mariozechner/pi-tui version 2>/dev/null || echo "")
+          if [ -n "$upstream_tui_ver" ]; then
+            fork_ver=$(bun -e 'console.log(require("./packages/tallow-tui/package.json").version)')
+            if [ "$fork_ver" != "$upstream_tui_ver" ]; then
+              echo "📦 Syncing forked pi-tui version: $fork_ver → $upstream_tui_ver"
+              bun -e "
+                const fs = require('fs');
+                const path = './packages/tallow-tui/package.json';
+                const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+                pkg.version = '$upstream_tui_ver';
+                fs.writeFileSync(path, JSON.stringify(pkg, null, '\t') + '\n');
+              "
+            fi
+          fi
+
           # Verify it builds
           bun run build
 
