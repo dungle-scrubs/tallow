@@ -20,7 +20,10 @@ interface ExtensionRunnerLike {
 
 interface SessionLike {
 	autoCompactionEnabled?: boolean;
+	clearQueue?: (() => { followUp: string[]; steering: string[] }) | undefined;
 	extensionRunner?: ExtensionRunnerLike;
+	getFollowUpMessages?: (() => string[]) | undefined;
+	getSteeringMessages?: (() => string[]) | undefined;
 	isStreaming?: boolean;
 }
 
@@ -30,6 +33,10 @@ interface InteractiveModeInstanceLike {
 		| ((...args: unknown[]) => { notify?: ((...args: unknown[]) => unknown) | undefined })
 		| undefined;
 	defaultEditor?: { onEscape?: (() => void) | undefined };
+	editor?: {
+		getText?: (() => string) | undefined;
+		setText?: ((text: string) => void) | undefined;
+	};
 	executeCompaction?:
 		| ((customInstructions?: string, isAuto?: boolean) => Promise<unknown>)
 		| undefined;
@@ -408,6 +415,40 @@ function isCompactionContinuationSignal(event: InteractiveModeEventLike): boolea
 }
 
 /**
+ * Drains orphaned session steering/follow-up messages to the editor.
+ *
+ * Called at agent_end to clear zombie "Steering: ..." / "Follow-up: ..." lines
+ * that the agent never consumed. Uses `session.clearQueue()` which also clears
+ * the agent-level queues, preventing stale injection on the next turn.
+ *
+ * Only touches session-level queues — compactionQueuedMessages is unaffected
+ * and handled separately by flushCompactionQueue.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function drainOrphanedSessionMessages(mode: InteractiveModeInstanceLike): void {
+	const session = mode.session;
+	if (!session || typeof session.clearQueue !== "function") return;
+
+	const steeringMsgs = session.getSteeringMessages?.() ?? [];
+	const followUpMsgs = session.getFollowUpMessages?.() ?? [];
+	if (steeringMsgs.length === 0 && followUpMsgs.length === 0) return;
+
+	const { steering, followUp } = session.clearQueue();
+	const orphaned = [...steering, ...followUp];
+	if (orphaned.length === 0) return;
+
+	const editor = mode.editor;
+	if (typeof editor?.getText === "function" && typeof editor?.setText === "function") {
+		const currentText = (editor.getText() ?? "").trim();
+		const orphanedText = orphaned.join("\n\n");
+		const combined = [orphanedText, currentText].filter((t) => t.trim()).join("\n\n");
+		editor.setText(combined);
+	}
+}
+
+/**
  * Returns whether auto_compaction_end finished without result, abort, or error.
  *
  * @param event - Interactive mode event
@@ -585,6 +626,16 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 				// clearing it strips the compacting loader that extensions add during
 				// model-triggered compaction (plan 159, bug 2).
 				this.flushPendingBashComponents?.();
+
+				// Drain orphaned session steering/follow-up messages to the editor.
+				// Steering messages are injected mid-turn; if the turn ends without
+				// the agent consuming them, they persist as zombie "Steering: ..."
+				// lines in the UI forever. Follow-ups are similarly stale if the
+				// agent never started them. Restoring to editor makes the messages
+				// visible and re-sendable — same behavior as pressing the dequeue
+				// key, but triggered automatically at turn end.
+				drainOrphanedSessionMessages(this);
+
 				this.updatePendingMessagesDisplay?.();
 				this.ui?.requestRender?.();
 
