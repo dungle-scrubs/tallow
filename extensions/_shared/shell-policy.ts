@@ -133,9 +133,15 @@ const ALWAYS_BLOCK_PATTERNS: readonly RegExp[] = [
 	),
 ];
 
-/** High-risk patterns: explicit sources require confirmation. */
+/** High-risk patterns: explicit sources require confirmation.
+ *
+ * NOTE: `rm -r` is intentionally absent. Catastrophic rm targets (/, ~, ., ..)
+ * are hard-denied by ALWAYS_BLOCK_PATTERNS above. Non-catastrophic recursive
+ * deletes (build dirs, caches, project subdirs) are normal dev workflow and
+ * should not prompt. Additional rm guardrails live in tallow-plugins hooks
+ * (rm_protection.py) which do proper token-parsed analysis.
+ */
 const HIGH_RISK_PATTERNS: readonly RegExp[] = [
-	new RegExp(`${COMMAND_SEGMENT_PREFIX}rm\\s+-\\w*r\\w*`, "i"),
 	new RegExp(`${COMMAND_SEGMENT_PREFIX}sudo\\b`, "i"),
 	new RegExp(`${COMMAND_SEGMENT_PREFIX}curl\\b[^\\n|]*\\|\\s*(?:ba)?sh\\b`, "i"),
 	new RegExp(`${COMMAND_SEGMENT_PREFIX}wget\\b[^\\n|]*\\|\\s*(?:ba)?sh\\b`, "i"),
@@ -184,7 +190,6 @@ const auditTrail: ShellAuditEntry[] =
  * rather than a wildcard pattern.
  */
 const HIGH_RISK_ALLOW_PATTERNS: readonly RegExp[] = [
-	/\brm\s+-\w*r\w*/i,
 	/\bsudo\b/i,
 	/\bcurl\b[^\n|]*\|\s*(?:ba)?sh\b/i,
 	/\bwget\b[^\n|]*\|\s*(?:ba)?sh\b/i,
