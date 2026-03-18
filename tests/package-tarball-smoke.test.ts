@@ -7,7 +7,7 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -27,19 +27,13 @@ function createTempDir(prefix: string): string {
 	return dir;
 }
 
-interface PackedArtifact {
-	readonly packageRoot: string;
-	readonly tarballPath: string;
-}
-
 /**
- * Pack the current repository and extract the tarball into a temp directory.
+ * Pack the current repository into a tarball.
  *
- * @returns Extracted package root and tarball path
+ * @returns Path to the packed tarball
  */
-function packArtifact(): PackedArtifact {
+function packTarball(): string {
 	const packDir = createTempDir("tallow-pack-");
-	const unpackDir = createTempDir("tallow-unpack-");
 	const output = execFileSync(
 		"bun",
 		["pm", "pack", "--destination", packDir, "--ignore-scripts", "--quiet"],
@@ -55,97 +49,109 @@ function packArtifact(): PackedArtifact {
 	if (!tarballPath) {
 		throw new Error("bun pm pack did not return a tarball path");
 	}
+	return tarballPath;
+}
 
+/**
+ * Extract a tarball into a temp directory for inspection.
+ *
+ * @param tarballPath - Path to the tarball
+ * @returns Extracted package root
+ */
+function extractTarball(tarballPath: string): string {
+	const unpackDir = createTempDir("tallow-unpack-");
 	execFileSync("tar", ["-xzf", tarballPath, "-C", unpackDir], {
-		cwd: PROJECT_ROOT,
 		stdio: "pipe",
 		timeout: 30_000,
 	});
-
-	return {
-		packageRoot: join(unpackDir, "package"),
-		tarballPath,
-	};
+	return join(unpackDir, "package");
 }
 
 /**
- * Install production dependencies for an unpacked tarball.
+ * Install the tarball as a dependency in a simulated consumer project,
+ * mimicking what `bun add @dungle-scrubs/tallow` does in a real project.
  *
- * @param packageRoot - Extracted tarball package root
- * @returns Nothing
+ * @param tarballPath - Path to the tarball
+ * @returns Root of the consumer project (tallow installed in node_modules)
  */
-function installPackedArtifact(packageRoot: string): void {
-	execFileSync("bun", ["install", "--production", "--ignore-scripts"], {
-		cwd: packageRoot,
+function installAsConsumer(tarballPath: string): string {
+	const consumerDir = createTempDir("tallow-consumer-");
+	writeFileSync(
+		join(consumerDir, "package.json"),
+		JSON.stringify({ name: "test-consumer", version: "1.0.0", type: "module" })
+	);
+	execFileSync("bun", ["add", "--ignore-scripts", tarballPath], {
+		cwd: consumerDir,
 		stdio: "pipe",
 		timeout: 120_000,
 	});
+	return consumerDir;
 }
 
 /**
- * Jiti-import representative bundled extensions from an unpacked artifact.
+ * Resolve the installed tallow package root within a consumer project.
  *
- * @param packageRoot - Extracted tarball package root with dependencies installed
- * @returns Nothing
+ * @param consumerDir - Root of the consumer project
+ * @returns Absolute path to the installed tallow package
  */
-/**
- * Resolve a module entry from Bun's content-addressed store.
- *
- * @param packageRoot - Extracted tarball package root
- * @param prefix - `.bun` directory prefix to match
- * @param subpath - Relative file path inside the matched store directory
- * @returns Absolute file path to the requested module entry
- */
-function resolveBunStoreModule(packageRoot: string, prefix: string, subpath: string): string {
-	const bunDir = join(packageRoot, "node_modules", ".bun");
-	const entry = readdirSync(bunDir).find((name) => name.startsWith(prefix));
-	if (!entry) {
-		throw new Error(`Could not find Bun store entry for ${prefix}`);
-	}
-	return join(bunDir, entry, subpath);
+function resolveInstalledTallow(consumerDir: string): string {
+	return join(consumerDir, "node_modules", "@dungle-scrubs", "tallow");
 }
 
 /**
- * Import representative bundled extensions using the same alias strategy the
- * runtime applies when loading source-based bundled extensions.
+ * Resolve a scoped module path from a consumer project's node_modules.
  *
- * @param packageRoot - Extracted tarball package root with dependencies installed
+ * @param consumerDir - Consumer project root
+ * @param scope - npm scope (e.g. "@mariozechner")
+ * @param name - Package name (e.g. "pi-agent-core")
+ * @param entry - Entry point relative to package root (e.g. "dist/index.js")
+ * @returns Absolute path to the module entry
+ */
+function resolveModule(consumerDir: string, scope: string, name: string, entry: string): string {
+	return join(consumerDir, "node_modules", scope, name, entry);
+}
+
+/**
+ * Import representative bundled extensions via jiti using the same alias
+ * strategy the runtime applies when loading source-based bundled extensions.
+ * Runs against a real consumer install to validate bundled deps are resolved.
+ *
+ * @param consumerDir - Root of the consumer project with tallow installed
  * @returns Nothing
  */
-function importBundledExtensions(packageRoot: string): void {
+function importBundledExtensions(consumerDir: string): void {
+	const tallowRoot = resolveInstalledTallow(consumerDir);
+
 	const jitiPath = pathToFileURL(
-		resolveBunStoreModule(
-			packageRoot,
-			"@mariozechner+jiti@",
-			"node_modules/@mariozechner/jiti/lib/jiti.mjs"
-		)
+		resolveModule(consumerDir, "@mariozechner", "jiti", "lib/jiti.mjs")
 	).href;
+
+	// pi-tui resolves from tallow's nested node_modules (bundled fork)
+	const piTuiPath = join(tallowRoot, "node_modules", "@mariozechner", "pi-tui", "dist", "index.js");
+
 	const aliases = {
-		"@mariozechner/pi-agent-core": resolveBunStoreModule(
-			packageRoot,
-			"@mariozechner+pi-agent-core@",
-			"node_modules/@mariozechner/pi-agent-core/dist/index.js"
+		"@mariozechner/pi-agent-core": resolveModule(
+			consumerDir,
+			"@mariozechner",
+			"pi-agent-core",
+			"dist/index.js"
 		),
-		"@mariozechner/pi-ai": resolveBunStoreModule(
-			packageRoot,
-			"@mariozechner+pi-ai@",
-			"node_modules/@mariozechner/pi-ai/dist/index.js"
-		),
-		"@mariozechner/pi-coding-agent": join(
-			packageRoot,
-			"node_modules",
+		"@mariozechner/pi-ai": resolveModule(consumerDir, "@mariozechner", "pi-ai", "dist/index.js"),
+		"@mariozechner/pi-coding-agent": resolveModule(
+			consumerDir,
 			"@mariozechner",
 			"pi-coding-agent",
-			"dist",
-			"index.js"
+			"dist/index.js"
 		),
-		"@mariozechner/pi-tui": join(packageRoot, "packages", "tallow-tui", "dist", "index.js"),
+		"@mariozechner/pi-tui": piTuiPath,
 	};
+
 	const specifiers = [
-		pathToFileURL(join(packageRoot, "extensions", "_shared", "atomic-write.ts")).href,
-		pathToFileURL(join(packageRoot, "extensions", "health", "index.ts")).href,
-		pathToFileURL(join(packageRoot, "extensions", "prompt-suggestions", "index.ts")).href,
+		pathToFileURL(join(tallowRoot, "extensions", "_shared", "atomic-write.ts")).href,
+		pathToFileURL(join(tallowRoot, "extensions", "health", "index.ts")).href,
+		pathToFileURL(join(tallowRoot, "extensions", "prompt-suggestions", "index.ts")).href,
 	];
+
 	const script = [
 		`import { createJiti } from ${JSON.stringify(jitiPath)};`,
 		`const jiti = createJiti(import.meta.url, { moduleCache: false, alias: ${JSON.stringify(aliases)} });`,
@@ -155,7 +161,7 @@ function importBundledExtensions(packageRoot: string): void {
 	].join("\n");
 
 	execFileSync("node", ["--input-type=module", "-e", script], {
-		cwd: packageRoot,
+		cwd: consumerDir,
 		stdio: "pipe",
 		timeout: 60_000,
 	});
@@ -173,21 +179,47 @@ afterEach(() => {
 });
 
 describe("Published tarball smoke test", () => {
-	it("includes the workspace package needed by the published manifest", () => {
-		const { packageRoot } = packArtifact();
+	it("bundles the forked pi-tui as a bundled dependency", () => {
+		const tarballPath = packTarball();
+		const packageRoot = extractTarball(tarballPath);
 		const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf-8")) as {
-			files?: string[];
-			overrides?: Record<string, unknown>;
+			dependencies?: Record<string, string>;
+			bundledDependencies?: string[];
 		};
 
-		expect(packageJson.files).toContain("packages/tallow-tui");
-		expect(existsSync(join(packageRoot, "packages", "tallow-tui", "package.json"))).toBe(true);
-		expect(packageJson.overrides?.["@mariozechner/pi-coding-agent"]).toBeObject();
+		// Fork is shipped via bundledDependencies, not files
+		expect(packageJson.bundledDependencies).toContain("@mariozechner/pi-tui");
+		expect(
+			existsSync(join(packageRoot, "node_modules", "@mariozechner", "pi-tui", "package.json"))
+		).toBe(true);
+
+		// Bundled copy is the fork, not upstream
+		const bundledPkg = JSON.parse(
+			readFileSync(
+				join(packageRoot, "node_modules", "@mariozechner", "pi-tui", "package.json"),
+				"utf-8"
+			)
+		) as { description?: string };
+		expect(bundledPkg.description).toContain("fork");
+
+		// pi-tui is a production dependency (runtime code imports it)
+		expect(packageJson.dependencies?.["@mariozechner/pi-tui"]).toBeDefined();
 	});
 
 	it("installs and loads representative bundled extensions from the packed artifact", () => {
-		const { packageRoot } = packArtifact();
-		installPackedArtifact(packageRoot);
-		importBundledExtensions(packageRoot);
+		const tarballPath = packTarball();
+		const consumerDir = installAsConsumer(tarballPath);
+
+		// Verify the bundled fork is preserved (not replaced by upstream)
+		const tallowRoot = resolveInstalledTallow(consumerDir);
+		const piTuiPkg = JSON.parse(
+			readFileSync(
+				join(tallowRoot, "node_modules", "@mariozechner", "pi-tui", "package.json"),
+				"utf-8"
+			)
+		) as { description?: string };
+		expect(piTuiPkg.description).toContain("fork");
+
+		importBundledExtensions(consumerDir);
 	});
 });

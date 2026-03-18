@@ -8,6 +8,7 @@
         "@clack/prompts": "^1.1.0",
         "@dungle-scrubs/synapse": "0.1.6",
         "@mariozechner/pi-coding-agent": "^0.58.4",
+        "@mariozechner/pi-tui": "workspace:*",
         "@opentelemetry/api": "^1.9.0",
         "@sinclair/typebox": "0.34.48",
         "ai": "^6.0.116",
@@ -19,7 +20,6 @@
         "@biomejs/biome": "2.4.2",
         "@mariozechner/pi-agent-core": "^0.58.4",
         "@mariozechner/pi-ai": "^0.58.4",
-        "@mariozechner/pi-tui": "workspace:*",
         "@types/node": "25.2.3",
         "husky": "^9.1.7",
         "lint-staged": "^16.4.0",
@@ -29,7 +29,7 @@
     },
     "packages/tallow-tui": {
       "name": "@mariozechner/pi-tui",
-      "version": "0.52.12",
+      "version": "0.58.4",
       "dependencies": {
         "@types/mime-types": "^2.1.4",
         "chalk": "^5.5.0",
@@ -40,7 +40,6 @@
     },
   },
   "overrides": {
-    "@mariozechner/pi-tui": "workspace:*",
     "ajv": "8.18.0",
     "basic-ftp": "5.2.0",
     "fast-xml-parser": "5.3.6",
