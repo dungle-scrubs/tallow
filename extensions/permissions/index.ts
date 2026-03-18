@@ -25,7 +25,12 @@ import {
 	type PermissionVerdict,
 	redactSensitiveReasonText,
 } from "../_shared/permissions.js";
-import { getPermissions, recordAudit, reloadPermissions } from "../_shared/shell-policy.js";
+import {
+	getPermissions,
+	isYoloMode,
+	recordAudit,
+	reloadPermissions,
+} from "../_shared/shell-policy.js";
 
 // ── Helper: build expansion vars ─────────────────────────────────────────────
 
@@ -68,6 +73,14 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		currentCwd = ctx.cwd;
+
+		// Yolo mode banner
+		if (isYoloMode()) {
+			ctx.ui?.notify(
+				"⚡ YOLO mode — auto-approving tool confirmations. Hard denies still enforced.",
+				"warning"
+			);
+		}
 
 		// Eagerly load permissions to surface any config warnings at startup
 		const permissions = getPermissions(currentCwd);
@@ -119,6 +132,10 @@ export default function (pi: ExtensionAPI): void {
 					return { block: true, reason: buildBlockReason(verdict) };
 				}
 				if (verdict.action === "ask") {
+					if (isYoloMode()) {
+						recordPermissionAudit(event.toolName, cwd, "confirmed", verdict);
+						continue;
+					}
 					const confirmed = await confirmPermission(ctx, event.toolName, agent, verdict);
 					if (!confirmed) {
 						recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
@@ -142,16 +159,20 @@ export default function (pi: ExtensionAPI): void {
 		}
 
 		if (verdict.action === "ask") {
-			const specifier = getSpecifierDisplay(toolName, input, cwd);
-			const confirmed = await confirmPermission(ctx, event.toolName, specifier, verdict);
-			if (!confirmed) {
-				recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
-				return {
-					block: true,
-					reason: `Permission request denied: ${buildBlockReason(verdict)}`,
-				};
+			if (isYoloMode()) {
+				recordPermissionAudit(event.toolName, cwd, "confirmed", verdict);
+			} else {
+				const specifier = getSpecifierDisplay(toolName, input, cwd);
+				const confirmed = await confirmPermission(ctx, event.toolName, specifier, verdict);
+				if (!confirmed) {
+					recordPermissionAudit(event.toolName, cwd, "blocked", verdict);
+					return {
+						block: true,
+						reason: `Permission request denied: ${buildBlockReason(verdict)}`,
+					};
+				}
+				recordPermissionAudit(event.toolName, cwd, "confirmed", verdict);
 			}
-			recordPermissionAudit(event.toolName, cwd, "confirmed", verdict);
 		}
 
 		if (verdict.action === "allow") {
