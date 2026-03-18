@@ -1,7 +1,7 @@
 {
 	"name": "@tallow/docs",
 	"type": "module",
-	"version": "0.8.23",
+	"version": "0.8.24",
 	"private": true,
 	"scripts": {
 		"predev": "node scripts/sync-changelog.mjs",
