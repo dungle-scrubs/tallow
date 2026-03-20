@@ -35,12 +35,19 @@ describe("applyKnownModelMetadataOverrides", () => {
 		const copilot = cloneBuiltInModel("github-copilot", "gpt-5.4");
 		const registry = createRegistry([openai, codex, copilot]);
 
+		// Upstream may already ship the correct 1M value in newer pi-ai
+		// releases. The patch is idempotent — it only rewrites entries
+		// that still carry the known stale 272k value.
+		const staleCount = [openai, codex].filter((m) => m.contextWindow === 272_000).length;
+
 		const applied = applyKnownModelMetadataOverrides(registry);
 
-		expect(applied).toBe(2);
+		expect(applied).toBe(staleCount);
 		expect(openai.contextWindow).toBe(1_000_000);
 		expect(codex.contextWindow).toBe(1_000_000);
-		expect(copilot.contextWindow).toBe(400_000);
+		// Copilot is a different provider — never patched by this override
+		const originalCopilotWindow = cloneBuiltInModel("github-copilot", "gpt-5.4").contextWindow;
+		expect(copilot.contextWindow).toBe(originalCopilotWindow);
 	});
 
 	it("does not clobber explicit user overrides", () => {
