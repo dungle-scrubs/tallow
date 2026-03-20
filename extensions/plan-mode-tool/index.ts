@@ -378,10 +378,15 @@ Use action "enable" to enter plan mode, "disable" to exit, or "status" to check 
 		}
 	});
 
-	// Auto-enable plan mode when user expresses planning intent in natural language
+	// Auto-enable plan mode when a human interactive session explicitly signals planning intent.
 	pi.on("input", async (event, ctx) => {
 		// No-op if already in plan mode
 		if (planModeEnabled) {
+			return { action: "continue" as const };
+		}
+
+		// Headless/orchestrated prompts should never toggle workflow modes via string matching.
+		if (!ctx.hasUI || event.source !== "interactive") {
 			return { action: "continue" as const };
 		}
 
