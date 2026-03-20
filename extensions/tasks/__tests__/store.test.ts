@@ -3,9 +3,9 @@
  * corruption tolerance, and session-only mode.
  */
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Task, TaskListStore } from "../state/index.js";
+import { LEGACY_TEAMS_DIR, TASK_GROUPS_DIR, type Task, TaskListStore } from "../state/index.js";
 
 /**
  * Create a minimal task for store tests.
@@ -119,6 +119,30 @@ describe("TaskListStore file-backed mode", () => {
 
 		expect(ctx.store.isShared).toBe(true);
 		expect(existsSync(ctx.dir)).toBe(true);
+		expect(ctx.dir.startsWith(TASK_GROUPS_DIR)).toBe(true);
+	});
+
+	it("migrates a legacy ~/.tallow/teams task directory into task-groups", () => {
+		const teamName = `legacy-${Date.now()}`;
+		const legacyDir = join(LEGACY_TEAMS_DIR, teamName, "tasks");
+		const nextDir = join(TASK_GROUPS_DIR, teamName, "tasks");
+		mkdirSync(legacyDir, { recursive: true });
+		writeFileSync(join(legacyDir, "1.json"), JSON.stringify(makeTask("1", "From legacy")), "utf-8");
+
+		const store = new TaskListStore(teamName);
+		stores.push({
+			cleanup: () => {
+				store.deleteAll();
+				store.close();
+				rmSync(join(nextDir, ".."), { recursive: true, force: true });
+				rmSync(join(legacyDir, ".."), { recursive: true, force: true });
+			},
+		});
+
+		expect(store.path).toBe(nextDir);
+		expect(existsSync(join(nextDir, "1.json"))).toBe(true);
+		expect(existsSync(join(legacyDir, "1.json"))).toBe(false);
+		expect(store.loadAll()?.[0].subject).toBe("From legacy");
 	});
 
 	it("saveTask persists and loadAll retrieves", () => {

@@ -1093,7 +1093,7 @@ export function registerTasksExtension(
 					case "team": {
 						const current = store.isShared ? process.env.PI_TEAM_NAME : "(none — session-only)";
 						const teamPath = store.path ?? "N/A";
-						ctx.ui.notify(`Team: ${current}\nPath: ${teamPath}`, "info");
+						ctx.ui.notify(`Shared task group: ${current}\nPath: ${teamPath}`, "info");
 						break;
 					}
 
@@ -1122,7 +1122,7 @@ export function registerTasksExtension(
 								"  delete <n>    - Delete task n\n" +
 								"  clear         - Clear all tasks\n" +
 								"  toggle        - Show/hide task widget\n" +
-								"  team          - Show current team name and path",
+								"  team          - Show current shared task group and path",
 							"info"
 						);
 				}
