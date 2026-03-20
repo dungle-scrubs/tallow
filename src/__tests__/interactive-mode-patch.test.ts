@@ -269,11 +269,10 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.flushCalls).toBe(1);
 		expect(mode.pendingBashComponents).toEqual([]);
 		expect(mode.pendingWorkingMessage).toBeUndefined();
-		// statusContainer is NOT cleared here — the original framework guards
-		// this behind `if (this.loadingAnimation)`. Unconditionally clearing
-		// strips the compacting loader during model-triggered compaction
-		// (plan 159, bug 2).
-		expect(mode.statusClears).toBe(0);
+		// statusContainer IS cleared on a normal agent_end (no active compaction).
+		// During compaction, the flag prevents clearing the compacting loader
+		// (plan 159, bug 2). For normal turns we must clear to avoid a stale spinner.
+		expect(mode.statusClears).toBe(1);
 		expect(mode.updateCalls).toBe(1);
 		expect(mode.renderRequests).toBe(1);
 
@@ -802,5 +801,71 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.steeringQueue).toEqual([]);
 		expect(mode.followUpQueue).toEqual([]);
 		expect(mode.editorText).toBe("steer1\n\nsteer2\n\nfollow1");
+	});
+
+	// ── spinner clearing on agent_end ─────────────────────────────────────
+
+	it("does NOT clear statusContainer on agent_end when auto-compaction is active", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		// Start auto-compaction flow
+		await mode.handleEvent({ type: "auto_compaction_start" });
+		// agent_end arrives while compaction is still running
+		await mode.handleEvent({ type: "agent_end" });
+
+		// Compaction loader must not be stripped
+		expect(mode.statusClears).toBe(0);
+	});
+
+	it("clears statusContainer on agent_end after auto-compaction fully completes", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		// Full compaction cycle completes (willRetry=false)
+		await mode.handleEvent({ type: "auto_compaction_start" });
+		await mode.handleEvent({
+			type: "auto_compaction_end",
+			willRetry: false,
+			result: { summary: "ok" },
+		});
+		// Next agent_end is a normal turn — spinner should clear
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.statusClears).toBe(1);
+	});
+
+	it("does NOT clear statusContainer on agent_end when compaction retry is still in flight", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleEvent({ type: "auto_compaction_start" });
+		// willRetry=true means the loader must survive until continuation actually starts
+		await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.statusClears).toBe(0);
+	});
+
+	it("clears statusContainer on agent_end after retry continuation starts", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleEvent({ type: "auto_compaction_start" });
+		await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+		await mode.handleEvent({ type: "message_start" });
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.statusClears).toBe(1);
+	});
+
+	it("does not latch compaction status from ordinary continuation signals", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleEvent({ type: "agent_start" });
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(mode.statusClears).toBe(1);
 	});
 });
