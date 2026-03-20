@@ -24,19 +24,19 @@
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
 import { atomicWriteFileSync, restoreFromBackup } from "./atomic-write.js";
 import { persistProviderApiKey } from "./auth-hardening.js";
+import { getRuntimeTallowHome } from "./config.js";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const __filename_ = fileURLToPath(import.meta.url);
 const __dirname_ = join(__filename_, "..");
 const PACKAGE_DIR = resolve(__dirname_, "..");
-const TALLOW_HOME = join(homedir(), ".tallow");
+const TALLOW_HOME = getRuntimeTallowHome();
 const AUTH_PATH = join(TALLOW_HOME, "auth.json");
 const SETTINGS_PATH = join(TALLOW_HOME, "settings.json");
 const TEMPLATES_DIR = join(PACKAGE_DIR, "templates");
