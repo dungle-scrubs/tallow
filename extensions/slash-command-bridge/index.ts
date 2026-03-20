@@ -395,7 +395,8 @@ WHEN TO USE:
 
 WHEN NOT TO USE:
 - The user already ran the command themselves
-- You want to start a new session (suggest the user run /clear instead)`,
+- You want to start a new session (suggest the user run /clear instead)
+- Context usage is below 80% — there is no need to compact proactively. Do NOT compact between tasks "just in case". Compaction destroys conversation history and should only happen when the context window is nearly full.`,
 		parameters: Type.Object({
 			command: Type.String({
 				description:
@@ -490,6 +491,34 @@ WHEN NOT TO USE:
 				}
 
 				case "compact": {
+					// Guard: reject model-initiated compact when context usage is low.
+					// The model frequently compacts proactively at 15-30% usage, wasting
+					// context and losing valuable conversation history. Only allow
+					// programmatic compact when usage exceeds 80% of the context window.
+					const compactUsage = ctx.getContextUsage?.();
+					if (
+						compactUsage &&
+						compactUsage.tokens !== null &&
+						compactUsage.tokens > 0 &&
+						compactUsage.contextWindow > 0
+					) {
+						const usagePercent = (compactUsage.tokens / compactUsage.contextWindow) * 100;
+						if (usagePercent < 80) {
+							return {
+								content: [
+									{
+										type: "text",
+										text:
+											`Context usage is only ${Math.round(usagePercent)}% — compaction is not needed yet. ` +
+											"The session has plenty of context space remaining. " +
+											"Continue working normally; compaction will happen automatically when needed.",
+									},
+								],
+								details: { command, rejected: true, usagePercent },
+							};
+						}
+					}
+
 					// Don't call ctx.compact() here — it aborts the agent mid-tool-call,
 					// orphaning the tool execution spinner (plan 95/98). Defer to a
 					// proven turn_end boundary so the tool completes normally first.
