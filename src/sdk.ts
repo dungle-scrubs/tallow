@@ -38,6 +38,7 @@ import {
 	TALLOW_VERSION,
 } from "./config.js";
 import { applyInteractiveModeStaleUiPatch } from "./interactive-mode-patch.js";
+import { applyKnownModelMetadataOverrides } from "./model-metadata-overrides.js";
 import {
 	createTelemetryHandle,
 	extractTraceContextFromEnv,
@@ -1553,6 +1554,7 @@ export async function createTallowSession(
 		);
 	}
 	const modelRegistry = new ModelRegistry(authStorage, join(tallowHome, "models.json"));
+	applyKnownModelMetadataOverrides(modelRegistry);
 
 	// ── Runtime API key (not persisted) ──────────────────────────────────────
 	// Accepts programmatic SDK `apiKey` option or env overrides:

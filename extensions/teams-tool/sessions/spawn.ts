@@ -15,6 +15,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
+import { applyKnownModelMetadataOverrides } from "../../../src/model-metadata-overrides.js";
 import { getTallowPath } from "../../_shared/tallow-paths.js";
 import { type RoutingHints, routeModel } from "../../subagent-tool/model-router.js";
 import { resolveStandardTools } from "../state/team-view.js";
@@ -64,6 +65,7 @@ export async function spawnTeammateSession(
 	// API keys and custom model definitions from the main session.
 	const authStorage = AuthStorage.create(getTallowPath("auth.json"));
 	const modelRegistry = new ModelRegistry(authStorage, getTallowPath("models.json"));
+	applyKnownModelMetadataOverrides(modelRegistry);
 
 	const model = modelRegistry.find(resolved.provider, resolved.id);
 	if (!model) {
