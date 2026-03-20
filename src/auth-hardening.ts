@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { platform } from "node:os";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import {
 	type ApiKeyCredential,
 	type AuthCredential,
@@ -16,6 +16,21 @@ const AUTH_DIRECTORY_MODE = 0o700;
 const KEYCHAIN_ACCOUNT = "tallow";
 const KEYCHAIN_SERVICE_PREFIX = "tallow.api-key";
 const ENV_REFERENCE_PATTERN = /^[A-Z][A-Z0-9]*_[A-Z0-9_]*$/;
+
+/**
+ * Derive a Keychain namespace from the auth.json path so that each
+ * TALLOW_HOME gets its own isolated Keychain entries.
+ *
+ * Examples:
+ *   ~/.tallow/auth.json      → "tallow"
+ *   ~/.tallow-fuse/auth.json → "tallow-fuse"
+ *
+ * @param authPath - Absolute auth.json path
+ * @returns Namespace string for Keychain service names
+ */
+export function deriveKeychainNamespace(authPath: string): string {
+	return basename(dirname(authPath)).replace(/^\./, "");
+}
 
 /** Result of the plaintext migration run. */
 export interface MigrationResult {
@@ -143,7 +158,7 @@ export function createSecureAuthStorage(
 	authPath: string,
 	options: SecureAuthStorageOptions = {}
 ): SecureAuthStorageResult {
-	const secretStore = options.secretStore ?? createApiKeySecretStore();
+	const secretStore = options.secretStore ?? createApiKeySecretStore(authPath);
 
 	assertSecureAuthFilePermissions(authPath);
 	const migration = migratePlaintextApiKeys(authPath, secretStore);
@@ -186,7 +201,7 @@ export function persistProviderApiKey(
 	authPath: string,
 	provider: string,
 	apiKeyInput: string,
-	secretStore: ApiKeySecretStore = createApiKeySecretStore()
+	secretStore: ApiKeySecretStore = createApiKeySecretStore(authPath)
 ): PersistedKeyMode {
 	const data = readAuthData(authPath);
 	const normalizedKey = normalizeApiKeyValue(provider, apiKeyInput, secretStore);
@@ -204,7 +219,7 @@ export function persistProviderApiKey(
  */
 export function migratePlaintextApiKeys(
 	authPath: string,
-	secretStore: ApiKeySecretStore = createApiKeySecretStore()
+	secretStore: ApiKeySecretStore = createApiKeySecretStore(authPath)
 ): MigrationResult {
 	if (!existsSync(authPath)) {
 		return { migratedProviders: [] };
@@ -258,11 +273,12 @@ export function resolveRuntimeApiKeyFromEnv(): string | undefined {
 /**
  * Create an API key secret store for the current platform.
  *
+ * @param authPath - Absolute auth.json path (used to derive Keychain namespace)
  * @returns Platform-specific secret store
  */
-function createApiKeySecretStore(): ApiKeySecretStore {
+function createApiKeySecretStore(authPath: string): ApiKeySecretStore {
 	if (platform() === "darwin") {
-		return new MacOsKeychainStore();
+		return new MacOsKeychainStore(deriveKeychainNamespace(authPath));
 	}
 	return new UnsupportedSecretStore();
 }
@@ -462,6 +478,15 @@ function isKeychainCommandReference(value: string): boolean {
  * macOS keychain-backed secret store.
  */
 class MacOsKeychainStore implements ApiKeySecretStore {
+	private readonly namespace: string;
+
+	/**
+	 * @param namespace - Keychain namespace derived from TALLOW_HOME (e.g. "tallow", "tallow-fuse")
+	 */
+	constructor(namespace: string) {
+		this.namespace = namespace;
+	}
+
 	/**
 	 * Store a key in macOS keychain and return a command ref.
 	 *
@@ -470,7 +495,7 @@ class MacOsKeychainStore implements ApiKeySecretStore {
 	 * @returns Command ref that resolves keychain value
 	 */
 	store(provider: string, apiKey: string): string {
-		const service = `${KEYCHAIN_SERVICE_PREFIX}.${provider}`;
+		const service = `${KEYCHAIN_SERVICE_PREFIX}.${this.namespace}.${provider}`;
 		execFileSync(
 			"security",
 			["add-generic-password", "-U", "-a", KEYCHAIN_ACCOUNT, "-s", service, "-w", apiKey],
