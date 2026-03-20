@@ -32,10 +32,17 @@ until all finish. Results appear inline.
 Foreground workers now have a liveness watchdog so one stuck worker
 cannot pin a full parallel run indefinitely.
 
-- startup timeout and inactivity timeout detect non-responsive workers
+- startup timeout detects workers that never begin producing activity
+- inactivity timeout covers quiet periods between model/tool events
+- tool-execution timeout widens the window while a tool call is still running
+- `message_update`, `message_end`, and tool execution events count as heartbeats
 - stalled workers are marked `stalled` and terminated with SIGTERM,
   then SIGKILL after a grace period when needed
 - parallel summaries show separate completed/failed/stalled counts
+
+Stalls are not always deadlocks. Common causes include slow provider startup,
+very long tool execution with no emitted progress, or an interactive confirmation
+path that cannot complete inside JSON-mode subagents.
 
 When stalled workers happen with partial completion:
 
@@ -74,6 +81,10 @@ Completed background subagents are compacted to keep memory bounded:
 | `TALLOW_SUBAGENT_KEEP_FULL_HISTORY` | unset | set to `1` to keep full message histories (debug mode) |
 | `TALLOW_SUBAGENT_HISTORY_TAIL_MESSAGES` | `24` | number of recent messages to retain after compaction |
 | `TALLOW_SUBAGENT_COMPLETED_RETENTION_MINUTES` | `30` | how long completed/failed background records remain in memory |
+| `TALLOW_SUBAGENT_STARTUP_TIMEOUT_MS` | `60000` | foreground startup timeout before a worker is marked stalled |
+| `TALLOW_SUBAGENT_INACTIVITY_TIMEOUT_MS` | `180000` | foreground inactivity timeout when no tool call is active |
+| `TALLOW_SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS` | `600000` | foreground timeout while a tool call is still running |
+| `TALLOW_SUBAGENT_WATCHDOG_KILL_GRACE_MS` | `5000` | SIGTERM grace window before watchdog escalation to SIGKILL |
 
 ## Foreground vs background agents
 

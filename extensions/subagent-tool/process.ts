@@ -448,10 +448,12 @@ export interface ForegroundWatchdogThresholds {
 	readonly inactivityTimeoutMs: number;
 	readonly killGraceMs: number;
 	readonly startupTimeoutMs: number;
+	readonly toolExecutionTimeoutMs: number;
 }
 
 /** Heartbeat state tracked by the foreground subagent liveness watchdog. */
 export interface WatchdogHeartbeatState {
+	readonly activeToolCalls: number;
 	readonly lastHeartbeatAtMs: number | null;
 	readonly startedAtMs: number;
 }
@@ -462,19 +464,85 @@ export type WatchdogStatus =
 	| {
 			readonly elapsedMs: number;
 			readonly kind: "stalled";
-			readonly phase: "inactivity" | "startup";
+			readonly phase: "inactivity" | "startup" | "tool_execution";
 			readonly timeoutMs: number;
 	  };
 
+/** Env var overriding the foreground startup timeout. */
+export const SUBAGENT_STARTUP_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_STARTUP_TIMEOUT_MS";
+
+/** Env var overriding the foreground inactivity timeout when no tool is active. */
+export const SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_INACTIVITY_TIMEOUT_MS";
+
+/** Env var overriding the foreground timeout while a tool call is still running. */
+export const SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS";
+
+/** Env var overriding the SIGTERM → SIGKILL grace window for stalled workers. */
+export const SUBAGENT_WATCHDOG_KILL_GRACE_MS_ENV = "TALLOW_SUBAGENT_WATCHDOG_KILL_GRACE_MS";
+
 /** Default watchdog thresholds used by foreground subagents in runSingleAgent. */
 export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
-	inactivityTimeoutMs: 90_000,
+	inactivityTimeoutMs: 180_000,
 	killGraceMs: 5_000,
-	startupTimeoutMs: 30_000,
+	startupTimeoutMs: 60_000,
+	toolExecutionTimeoutMs: 600_000,
 };
 
 /** How often the foreground watchdog checks for stalled subagents. */
 const FOREGROUND_WATCHDOG_CHECK_INTERVAL_MS = 500;
+
+/** Foreground event types that count as liveness without changing tool-call state. */
+const WATCHDOG_HEARTBEAT_EVENT_TYPES = new Set([
+	"message_end",
+	"message_update",
+	"tool_execution_end",
+	"tool_execution_start",
+]);
+
+/**
+ * Parse a positive millisecond timeout override.
+ * @param rawValue - Raw env value
+ * @returns Parsed timeout in milliseconds, or undefined when invalid
+ */
+function parseTimeoutOverrideMs(rawValue: string | undefined): number | undefined {
+	if (!rawValue) return undefined;
+	const parsed = Number.parseInt(rawValue, 10);
+	if (Number.isNaN(parsed) || !Number.isFinite(parsed) || parsed <= 0) return undefined;
+	return parsed;
+}
+
+/**
+ * Resolve effective watchdog thresholds from env overrides.
+ * @param env - Environment lookup map
+ * @returns Watchdog thresholds used for this foreground worker
+ */
+export function resolveForegroundWatchdogThresholds(
+	env: EnvLookup = process.env
+): ForegroundWatchdogThresholds {
+	return {
+		inactivityTimeoutMs:
+			parseTimeoutOverrideMs(env[SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV]) ??
+			FOREGROUND_WATCHDOG_THRESHOLDS.inactivityTimeoutMs,
+		killGraceMs:
+			parseTimeoutOverrideMs(env[SUBAGENT_WATCHDOG_KILL_GRACE_MS_ENV]) ??
+			FOREGROUND_WATCHDOG_THRESHOLDS.killGraceMs,
+		startupTimeoutMs:
+			parseTimeoutOverrideMs(env[SUBAGENT_STARTUP_TIMEOUT_MS_ENV]) ??
+			FOREGROUND_WATCHDOG_THRESHOLDS.startupTimeoutMs,
+		toolExecutionTimeoutMs:
+			parseTimeoutOverrideMs(env[SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV]) ??
+			FOREGROUND_WATCHDOG_THRESHOLDS.toolExecutionTimeoutMs,
+	};
+}
+
+/**
+ * Return whether an event type counts as watchdog progress.
+ * @param eventType - Raw child-process event type
+ * @returns True when the event should refresh liveness
+ */
+export function isWatchdogHeartbeatEventType(eventType: string): boolean {
+	return WATCHDOG_HEARTBEAT_EVENT_TYPES.has(eventType);
+}
 
 /**
  * Create initial watchdog heartbeat state.
@@ -483,6 +551,7 @@ const FOREGROUND_WATCHDOG_CHECK_INTERVAL_MS = 500;
  */
 export function createWatchdogHeartbeatState(nowMs: number): WatchdogHeartbeatState {
 	return {
+		activeToolCalls: 0,
 		lastHeartbeatAtMs: null,
 		startedAtMs: nowMs,
 	};
@@ -501,6 +570,40 @@ export function recordWatchdogHeartbeat(
 	return {
 		...state,
 		lastHeartbeatAtMs: nowMs,
+	};
+}
+
+/**
+ * Record the start of a tool call for watchdog timeout widening.
+ * @param state - Existing watchdog heartbeat state
+ * @param nowMs - Current wall-clock timestamp in milliseconds
+ * @returns Updated heartbeat state
+ */
+export function recordWatchdogToolCallStart(
+	state: WatchdogHeartbeatState,
+	nowMs: number
+): WatchdogHeartbeatState {
+	return {
+		activeToolCalls: state.activeToolCalls + 1,
+		lastHeartbeatAtMs: nowMs,
+		startedAtMs: state.startedAtMs,
+	};
+}
+
+/**
+ * Record the completion of a tool call for watchdog timeout narrowing.
+ * @param state - Existing watchdog heartbeat state
+ * @param nowMs - Current wall-clock timestamp in milliseconds
+ * @returns Updated heartbeat state
+ */
+export function recordWatchdogToolCallEnd(
+	state: WatchdogHeartbeatState,
+	nowMs: number
+): WatchdogHeartbeatState {
+	return {
+		activeToolCalls: Math.max(0, state.activeToolCalls - 1),
+		lastHeartbeatAtMs: nowMs,
+		startedAtMs: state.startedAtMs,
 	};
 }
 
@@ -530,12 +633,14 @@ export function evaluateWatchdogStatus(
 	}
 
 	const inactivityElapsedMs = nowMs - state.lastHeartbeatAtMs;
-	if (inactivityElapsedMs >= thresholds.inactivityTimeoutMs) {
+	const timeoutMs =
+		state.activeToolCalls > 0 ? thresholds.toolExecutionTimeoutMs : thresholds.inactivityTimeoutMs;
+	if (inactivityElapsedMs >= timeoutMs) {
 		return {
 			elapsedMs: inactivityElapsedMs,
 			kind: "stalled",
-			phase: "inactivity",
-			timeoutMs: thresholds.inactivityTimeoutMs,
+			phase: state.activeToolCalls > 0 ? "tool_execution" : "inactivity",
+			timeoutMs,
 		};
 	}
 	return { kind: "healthy" };
@@ -552,9 +657,16 @@ export function createStalledSubagentErrorMessage(
 	const timeoutSeconds = Math.max(1, Math.round(stalledStatus.timeoutMs / 1000));
 	const phaseDescription =
 		stalledStatus.phase === "startup"
-			? "no startup heartbeat was received"
-			: `no heartbeat was received for ${timeoutSeconds}s`;
-	return `Subagent stalled (${phaseDescription}). Likely deadlock: waiting for an interactive confirmation path unavailable in subagent JSON mode. Action: avoid confirmation-gated steps, pre-authorize required tools, or run this step in the parent agent.`;
+			? "no startup activity was received"
+			: stalledStatus.phase === "tool_execution"
+				? `no subagent activity was received for ${timeoutSeconds}s while a tool call was running`
+				: `no subagent activity was received for ${timeoutSeconds}s`;
+	return (
+		`Subagent stalled (${phaseDescription}). Common causes: slow provider startup, long-running tool execution without progress events, ` +
+		"or an interactive confirmation path unavailable in subagent JSON mode. " +
+		"Action: narrow task scope, avoid confirmation-gated steps, run very long commands in the parent agent, " +
+		"or increase TALLOW_SUBAGENT_* timeout env vars when slow work is legitimate."
+	);
 }
 
 /**
@@ -1251,6 +1363,7 @@ export async function runSingleAgent(
 		if (!foregroundSpawn.ok) {
 			throw new Error(foregroundSpawn.reason);
 		}
+		const watchdogThresholds = resolveForegroundWatchdogThresholds();
 		const exitCode = await new Promise<number>((resolve) => {
 			const proc = foregroundSpawn.proc;
 			if (!proc.stdout || !proc.stderr) {
@@ -1292,7 +1405,7 @@ export async function runSingleAgent(
 				if (stopRequested) return;
 				stopRequested = true;
 				stopHandle = terminateProcessWithGrace(proc, {
-					killGraceMs: FOREGROUND_WATCHDOG_THRESHOLDS.killGraceMs,
+					killGraceMs: watchdogThresholds.killGraceMs,
 					onForceResolve: () => {
 						settle(1);
 					},
@@ -1309,16 +1422,14 @@ export async function runSingleAgent(
 					return;
 				}
 
-				if (
-					event.type === "message_end" ||
-					event.type === "tool_call_start" ||
-					event.type === "tool_result_end"
-				) {
-					heartbeatState = recordWatchdogHeartbeat(heartbeatState, Date.now());
+				const nowMs = Date.now();
+				if (isWatchdogHeartbeatEventType(String(event.type))) {
+					heartbeatState = recordWatchdogHeartbeat(heartbeatState, nowMs);
 				}
 
 				// Emit subagent_tool_call when tool starts
 				if (event.type === "tool_call_start") {
+					heartbeatState = recordWatchdogToolCallStart(heartbeatState, nowMs);
 					fgTurnCount++;
 					// Hard enforcement: kill after maxTurns tool calls
 					if (agent.maxTurns && fgTurnCount >= agent.maxTurns) {
@@ -1360,6 +1471,10 @@ export async function runSingleAgent(
 					emitUpdate();
 				}
 
+				if (event.type === "tool_result_end") {
+					heartbeatState = recordWatchdogToolCallEnd(heartbeatState, nowMs);
+				}
+
 				if (event.type === "tool_result_end" && event.message) {
 					currentResult.messages.push(event.message as Message);
 					// Detect permission denials vs regular errors
@@ -1385,11 +1500,7 @@ export async function runSingleAgent(
 
 			watchdogInterval = setInterval(() => {
 				if (isResolved || stopRequested) return;
-				const status = evaluateWatchdogStatus(
-					heartbeatState,
-					Date.now(),
-					FOREGROUND_WATCHDOG_THRESHOLDS
-				);
+				const status = evaluateWatchdogStatus(heartbeatState, Date.now(), watchdogThresholds);
 				if (status.kind !== "stalled") return;
 				applyStalledClassification(currentResult, status);
 				setForegroundSubagentStatus(taskId, "stalled", piEvents);
