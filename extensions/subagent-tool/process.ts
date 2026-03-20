@@ -813,9 +813,13 @@ export async function spawnBackgroundSubagent(
 	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 
+	// Build args with -p last so Commander consumes the task text as its value.
+	// Placing -p before other flags (e.g. --no-session) causes Commander to
+	// consume the next flag as -p's value, breaking both session control and
+	// task delivery.
 	const args: string[] = session
-		? ["--mode", "json", "-p", "--session", session]
-		: ["--mode", "json", "-p", "--no-session"];
+		? ["--mode", "json", "--session", session]
+		: ["--mode", "json", "--no-session"];
 	// Use provider-qualified name (e.g. "openai-codex/gpt-5.1") so the child process
 	// resolves to the exact provider the router selected, not just the first match.
 	if (agent.model) args.push("--model", routing.model.displayName);
@@ -850,7 +854,7 @@ export async function spawnBackgroundSubagent(
 		const reason = error instanceof Error ? error.message : String(error);
 		return `Failed to expand task references for ${agentName}: ${reason}`;
 	}
-	args.push(`Task: ${expandedTask}`);
+	args.push("-p", `Task: ${expandedTask}`);
 
 	const childEnv: Record<string, string> = { ...process.env, PI_IS_SUBAGENT: "1" } as Record<
 		string,
@@ -1236,9 +1240,10 @@ export async function runSingleAgent(
 		background: false,
 	} satisfies SubagentStartEvent);
 
+	// Build args with -p last — see background spawn site for rationale.
 	const args: string[] = session
-		? ["--mode", "json", "-p", "--session", session]
-		: ["--mode", "json", "-p", "--no-session"];
+		? ["--mode", "json", "--session", session]
+		: ["--mode", "json", "--no-session"];
 	// Use provider-qualified name so the child process resolves to the exact provider.
 	if (agent.model) args.push("--model", routing.model.displayName);
 	const fgEffectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
@@ -1331,7 +1336,7 @@ export async function runSingleAgent(
 		}
 
 		const expandedTask = await expandFileReferences(task, effectiveCwd);
-		args.push(`Task: ${expandedTask}`);
+		args.push("-p", `Task: ${expandedTask}`);
 		let wasAborted = false;
 
 		const fgChildEnv: Record<string, string> = {
