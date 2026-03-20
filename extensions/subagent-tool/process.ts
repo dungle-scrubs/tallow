@@ -480,6 +480,9 @@ export const SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_TOOL_EXEC
 /** Env var overriding the SIGTERM → SIGKILL grace window for stalled workers. */
 export const SUBAGENT_WATCHDOG_KILL_GRACE_MS_ENV = "TALLOW_SUBAGENT_WATCHDOG_KILL_GRACE_MS";
 
+/** Env var overriding the total wall-clock timeout for the stalled-worker retry phase. */
+export const SUBAGENT_RETRY_PHASE_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_RETRY_PHASE_TIMEOUT_MS";
+
 /** Default watchdog thresholds used by foreground subagents in runSingleAgent. */
 export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
 	inactivityTimeoutMs: 180_000,
@@ -487,6 +490,15 @@ export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
 	startupTimeoutMs: 60_000,
 	toolExecutionTimeoutMs: 600_000,
 };
+
+/**
+ * Default total wall-clock timeout for the entire stalled-worker retry phase.
+ *
+ * Without a cap, N stalled retries × per-worker watchdog timeout can block
+ * the parent for 30+ minutes. This limits the total retry phase so the
+ * parent agent can recover sooner.
+ */
+export const DEFAULT_RETRY_PHASE_TIMEOUT_MS = 300_000; // 5 minutes
 
 /** How often the foreground watchdog checks for stalled subagents. */
 const FOREGROUND_WATCHDOG_CHECK_INTERVAL_MS = 500;
@@ -533,6 +545,19 @@ export function resolveForegroundWatchdogThresholds(
 			parseTimeoutOverrideMs(env[SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV]) ??
 			FOREGROUND_WATCHDOG_THRESHOLDS.toolExecutionTimeoutMs,
 	};
+}
+
+/**
+ * Resolve the effective retry-phase wall-clock timeout from env overrides.
+ *
+ * @param env - Environment lookup map
+ * @returns Timeout in milliseconds for the entire stalled-worker retry phase
+ */
+export function resolveRetryPhaseTimeoutMs(env: EnvLookup = process.env): number {
+	return (
+		parseTimeoutOverrideMs(env[SUBAGENT_RETRY_PHASE_TIMEOUT_MS_ENV]) ??
+		DEFAULT_RETRY_PHASE_TIMEOUT_MS
+	);
 }
 
 /**

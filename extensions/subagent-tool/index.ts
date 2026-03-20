@@ -50,6 +50,7 @@ import {
 	applyBackgroundResultRetention,
 	mapWithConcurrencyLimit,
 	type OnUpdateCallback,
+	resolveRetryPhaseTimeoutMs,
 	runSingleAgent,
 	setPiRef,
 	setTelemetryHandle,
@@ -788,12 +789,34 @@ async function executeParallel(
 		const retrySummaryLines: string[] = [];
 		const totalRetries = initialStalledIndexes.length;
 
+		// Cap the entire retry phase with a wall-clock timeout so N sequential
+		// retries × per-worker watchdog timeouts don't block the parent for 30+ min.
+		const retryPhaseTimeoutMs = resolveRetryPhaseTimeoutMs();
+		const retryAbort = new AbortController();
+		const retryTimer = setTimeout(() => retryAbort.abort(), retryPhaseTimeoutMs);
+		// Propagate parent abort to the retry phase.
+		const parentAbortHandler = signal ? () => retryAbort.abort() : undefined;
+		if (signal && parentAbortHandler) {
+			if (signal.aborted) retryAbort.abort();
+			else signal.addEventListener("abort", parentAbortHandler, { once: true });
+		}
+		const retrySignal = retryAbort.signal;
+
 		try {
 			ctx.ui.setWorkingMessage(
 				`Rerunning ${totalRetries} stalled worker${totalRetries === 1 ? "" : "s"} individually`
 			);
 
 			for (let retryIndex = 0; retryIndex < initialStalledIndexes.length; retryIndex++) {
+				// Bail out if the retry phase deadline has elapsed.
+				if (retrySignal.aborted) {
+					for (let remaining = retryIndex; remaining < initialStalledIndexes.length; remaining++) {
+						const idx = initialStalledIndexes[remaining];
+						retrySummaryLines.push(`- [${tasks[idx].agent}] skipped (retry phase timeout)`);
+					}
+					break;
+				}
+
 				const stalledIndex = initialStalledIndexes[retryIndex];
 				const stalledTask = tasks[stalledIndex];
 				const priorResult = allResults[stalledIndex];
@@ -810,33 +833,49 @@ async function executeParallel(
 					`Retrying stalled worker ${retryIndex + 1}/${totalRetries}: ${stalledTask.agent}`
 				);
 
-				const retryResult = await runSingleAgent(
-					ctx.cwd,
-					agents,
-					stalledTask.agent,
-					retryTask,
-					stalledTask.cwd,
-					undefined,
-					signal,
-					(partial) => {
-						if (partial.details?.results[0]) {
-							const partialResult = {
-								...partial.details.results[0],
-								task: stalledTask.task,
-							};
-							allResults[stalledIndex] = partialResult;
-							emitParallelUpdate();
-						}
-					},
-					makeDetails("parallel"),
-					pi.events,
-					undefined,
-					explicitRetryModel,
-					parentModelId,
-					defaults,
-					retryRoutingHints,
-					stalledTask.isolation
-				);
+				let retryResult: SingleResult;
+				try {
+					retryResult = await runSingleAgent(
+						ctx.cwd,
+						agents,
+						stalledTask.agent,
+						retryTask,
+						stalledTask.cwd,
+						undefined,
+						retrySignal,
+						(partial) => {
+							if (partial.details?.results[0]) {
+								const partialResult = {
+									...partial.details.results[0],
+									task: stalledTask.task,
+								};
+								allResults[stalledIndex] = partialResult;
+								emitParallelUpdate();
+							}
+						},
+						makeDetails("parallel"),
+						pi.events,
+						undefined,
+						explicitRetryModel,
+						parentModelId,
+						defaults,
+						retryRoutingHints,
+						stalledTask.isolation
+					);
+				} catch {
+					// Retry-phase timeout aborted this worker. Mark remaining
+					// workers as skipped and exit the loop.
+					retrySummaryLines.push(`- [${stalledTask.agent}] aborted (retry phase timeout)`);
+					for (
+						let remaining = retryIndex + 1;
+						remaining < initialStalledIndexes.length;
+						remaining++
+					) {
+						const idx = initialStalledIndexes[remaining];
+						retrySummaryLines.push(`- [${tasks[idx].agent}] skipped (retry phase timeout)`);
+					}
+					break;
+				}
 
 				retryResult.task = stalledTask.task;
 				retryResult.stderr = appendStderrNote(
@@ -848,6 +887,10 @@ async function executeParallel(
 				emitParallelUpdate();
 			}
 		} finally {
+			clearTimeout(retryTimer);
+			if (signal && parentAbortHandler) {
+				signal.removeEventListener("abort", parentAbortHandler);
+			}
 			ctx.ui.setWorkingMessage();
 		}
 
