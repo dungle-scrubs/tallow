@@ -164,6 +164,10 @@ const compactionRetryWatchdogTimers = new WeakMap<
 	ReturnType<typeof setTimeout>
 >();
 
+type AutoCompactionStatus = "running" | "waiting_for_retry";
+
+const autoCompactionStatus = new WeakMap<InteractiveModeInstanceLike, AutoCompactionStatus>();
+
 const pendingInteractiveExtensionCompact = new WeakMap<
 	InteractiveModeInstanceLike,
 	CompactOptionsLike
@@ -415,6 +419,58 @@ function isCompactionContinuationSignal(event: InteractiveModeEventLike): boolea
 }
 
 /**
+ * Marks one interactive mode instance as actively auto-compacting.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function markAutoCompactionRunning(mode: InteractiveModeInstanceLike): void {
+	autoCompactionStatus.set(mode, "running");
+}
+
+/**
+ * Marks one interactive mode instance as waiting for retry continuation.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function markAutoCompactionWaitingForRetry(mode: InteractiveModeInstanceLike): void {
+	autoCompactionStatus.set(mode, "waiting_for_retry");
+}
+
+/**
+ * Clears any tracked auto-compaction status for one interactive mode instance.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function clearAutoCompactionStatus(mode: InteractiveModeInstanceLike): void {
+	autoCompactionStatus.delete(mode);
+}
+
+/**
+ * Returns whether status clearing should stay suppressed for auto-compaction.
+ *
+ * @param mode - Interactive mode instance
+ * @returns True when a compaction loader should still be preserved
+ */
+function shouldPreserveCompactionStatus(mode: InteractiveModeInstanceLike): boolean {
+	return autoCompactionStatus.has(mode);
+}
+
+/**
+ * Transitions retry-waiting compaction state back to normal once continuation starts.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function markCompactionContinuationStarted(mode: InteractiveModeInstanceLike): void {
+	if (autoCompactionStatus.get(mode) === "waiting_for_retry") {
+		clearAutoCompactionStatus(mode);
+	}
+}
+
+/**
  * Drains orphaned session steering/follow-up messages to the editor.
  *
  * Called at agent_end to clear zombie "Steering: ..." / "Follow-up: ..." lines
@@ -560,8 +616,14 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			this: InteractiveModeInstanceLike,
 			event: InteractiveModeEventLike
 		) {
-			if (event?.type === "auto_compaction_start" || isCompactionContinuationSignal(event)) {
+			if (event?.type === "auto_compaction_start") {
 				clearCompactionRetryWatchdog(this);
+				markAutoCompactionRunning(this);
+			}
+
+			if (isCompactionContinuationSignal(event)) {
+				clearCompactionRetryWatchdog(this);
+				markCompactionContinuationStarted(this);
 			}
 
 			// ── message_update coalescing (plan 176) ─────────────────────────
@@ -609,9 +671,11 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 
 			if (event?.type === "auto_compaction_end") {
 				if (event.willRetry === true) {
+					markAutoCompactionWaitingForRetry(this);
 					armCompactionRetryWatchdog(this);
 				} else {
 					clearCompactionRetryWatchdog(this);
+					clearAutoCompactionStatus(this);
 				}
 				if (isAmbiguousCompactionEndState(event)) {
 					notifyFromInteractiveMode(this, AMBIGUOUS_COMPACTION_END_WARNING_TEXT, "warning");
@@ -621,10 +685,13 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			if (event?.type === "agent_end") {
 				clearCompactionRetryWatchdog(this);
 				this.pendingWorkingMessage = undefined;
-				// NOTE: Do NOT clear statusContainer here — the original framework
-				// guards this behind `if (this.loadingAnimation)`. Unconditionally
-				// clearing it strips the compacting loader that extensions add during
-				// model-triggered compaction (plan 159, bug 2).
+				// Preserve the compaction loader only while compaction is still
+				// running or while a promised retry has not actually started yet.
+				// Once continuation begins, later agent_end events must clear the
+				// spinner like any normal turn.
+				if (!shouldPreserveCompactionStatus(this)) {
+					this.statusContainer?.clear?.();
+				}
 				this.flushPendingBashComponents?.();
 
 				// Drain orphaned session steering/follow-up messages to the editor.
