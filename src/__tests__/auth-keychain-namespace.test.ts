@@ -80,6 +80,14 @@ describe("deriveKeychainNamespace", () => {
 	test("deeply nested path uses immediate parent", () => {
 		expect(deriveKeychainNamespace("/a/b/c/.my-config/auth.json")).toBe("my-config");
 	});
+
+	test("falls back to 'tallow' for root-level path", () => {
+		expect(deriveKeychainNamespace("/auth.json")).toBe("tallow");
+	});
+
+	test("falls back to 'tallow' for relative path", () => {
+		expect(deriveKeychainNamespace("auth.json")).toBe("tallow");
+	});
 });
 
 describe("Keychain namespace isolation", () => {
