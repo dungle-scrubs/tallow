@@ -692,7 +692,19 @@ export class TeamDashboardEditor extends CustomEditor {
 		);
 
 		const footer = this.renderFooter(width);
-		return [...merged, footer];
+		const contentLines = [...merged, footer];
+
+		// Pad to fill the terminal height. On the alternate screen the TUI
+		// renders all children (header, chat history, widgets, editor, footer)
+		// and the visible viewport is the last `rows` lines. Without padding,
+		// stale conversation content bleeds through at the top of the dashboard.
+		// Prepending blank lines pushes that content off-screen.
+		const targetLines = this.tui.terminal.rows;
+		while (contentLines.length < targetLines) {
+			contentLines.unshift("");
+		}
+
+		return contentLines;
 	}
 
 	/**
