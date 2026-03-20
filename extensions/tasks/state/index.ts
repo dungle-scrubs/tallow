@@ -12,13 +12,14 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmdirSync,
 	rmSync,
 	statSync,
 	unlinkSync,
 	watch,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
 import { atomicWriteFileSync } from "../../_shared/atomic-write.js";
@@ -26,8 +27,11 @@ import { getTallowPath } from "../../_shared/tallow-paths.js";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Directory root for team-based shared task lists. */
-export const TEAMS_DIR = getTallowPath("teams");
+/** Directory root for shared task-group state used by tasks/subagents. */
+export const TASK_GROUPS_DIR = getTallowPath("task-groups");
+
+/** Legacy directory root from older builds before task groups were split from teams. */
+export const LEGACY_TEAMS_DIR = getTallowPath("teams");
 
 /** Max age for team directories before cleanup (7 days in ms). */
 export const TEAM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -120,6 +124,30 @@ export function nextTaskId(state: TasksState): string {
 	return id;
 }
 
+/**
+ * Move a legacy shared-task directory into the new task-groups root.
+ *
+ * Older builds stored shared task state under `~/.tallow/teams/`, which
+ * collided conceptually with the teams runtime. New builds use
+ * `~/.tallow/task-groups/`. Migration is best-effort and intentionally silent.
+ *
+ * @param currentDirPath - New task directory path under task-groups/
+ * @param legacyDirPath - Legacy task directory path under teams/
+ * @returns void
+ */
+function migrateLegacyTaskGroupDir(currentDirPath: string, legacyDirPath: string): void {
+	if (existsSync(currentDirPath) || !existsSync(legacyDirPath)) return;
+	const currentTeamDir = dirname(currentDirPath);
+	const legacyTeamDir = dirname(legacyDirPath);
+	mkdirSync(dirname(currentTeamDir), { recursive: true });
+	try {
+		renameSync(legacyTeamDir, currentTeamDir);
+	} catch {
+		// Best-effort migration only. If this fails, the session will recreate the
+		// new directory and continue without blocking startup.
+	}
+}
+
 // ── Message helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -150,15 +178,17 @@ export function getTextContent(message: AssistantMessage): string {
 /**
  * Persistent, file-backed task store for cross-session sharing.
  *
- * Each team gets a directory at `~/.tallow/teams/{team-name}/tasks/` containing
- * one JSON file per task.  `fs.watch` on the directory detects changes from
- * other sessions sharing the same team.
+ * Each shared task group gets a directory at
+ * `~/.tallow/task-groups/{group-name}/tasks/` containing one JSON file per
+ * task. `fs.watch` on the directory detects changes from other sessions
+ * sharing the same task group.
  *
  * Without a team name, this store is inactive and the extension falls back
  * to session-entry persistence.
  */
 export class TaskListStore {
 	private readonly dirPath: string | null;
+	private readonly legacyDirPath: string | null;
 	private watcher: FSWatcher | null = null;
 	private onChange: (() => void) | null = null;
 	/** Debounce timer to coalesce rapid file change events. */
@@ -172,10 +202,13 @@ export class TaskListStore {
 	constructor(teamName: string | null) {
 		if (teamName) {
 			const safeName = teamName.replace(/[^a-zA-Z0-9._-]/g, "_");
-			this.dirPath = join(TEAMS_DIR, safeName, "tasks");
+			this.dirPath = join(TASK_GROUPS_DIR, safeName, "tasks");
+			this.legacyDirPath = join(LEGACY_TEAMS_DIR, safeName, "tasks");
+			migrateLegacyTaskGroupDir(this.dirPath, this.legacyDirPath);
 			mkdirSync(this.dirPath, { recursive: true });
 		} else {
 			this.dirPath = null;
+			this.legacyDirPath = null;
 		}
 	}
 
@@ -196,14 +229,23 @@ export class TaskListStore {
 	 */
 	loadAll(): Task[] | null {
 		if (!this.dirPath) return null;
-		if (!existsSync(this.dirPath)) return [];
+		const hasCurrentDir = existsSync(this.dirPath);
+		const hasLegacyDir = this.legacyDirPath ? existsSync(this.legacyDirPath) : false;
+		if (!hasCurrentDir && !hasLegacyDir) return [];
 
+		const currentFiles = hasCurrentDir
+			? readdirSync(this.dirPath).filter((fileName) => fileName.endsWith(".json"))
+			: [];
+		const readDirPath =
+			currentFiles.length > 0 || !hasLegacyDir || !this.legacyDirPath
+				? this.dirPath
+				: this.legacyDirPath;
 		const tasks: Task[] = [];
 		try {
-			const files = readdirSync(this.dirPath).filter((f) => f.endsWith(".json"));
+			const files = readdirSync(readDirPath).filter((f) => f.endsWith(".json"));
 			for (const file of files) {
 				try {
-					const raw = readFileSync(join(this.dirPath, file), "utf-8");
+					const raw = readFileSync(join(readDirPath, file), "utf-8");
 					const parsed = JSON.parse(raw) as Record<string, unknown>;
 					// Migrate old schema: title → subject, dependencies → blockedBy
 					if (parsed.title && !parsed.subject) {
@@ -386,37 +428,49 @@ export class TaskListStore {
 }
 
 /**
- * Remove team directories older than {@link TEAM_MAX_AGE_MS}.
+ * Remove stale task-group directories from one root.
  *
- * Skips the current team (if any) to avoid deleting an active session.
- * Runs once per session start — errors are silently ignored.
+ * @param rootDir - Root directory containing per-group subdirectories
+ * @param currentSafeName - Sanitized active task-group name to preserve
+ * @returns void
+ */
+function cleanupStaleTaskGroupRoot(rootDir: string, currentSafeName: string | null): void {
+	if (!existsSync(rootDir)) return;
+	const now = Date.now();
+	for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
+		if (!entry.isDirectory()) continue;
+		if (entry.name === currentSafeName) continue;
+
+		const taskGroupPath = join(rootDir, entry.name);
+		try {
+			// Check tasks/ subdir mtime — that's where writes happen.
+			const tasksPath = join(taskGroupPath, "tasks");
+			const target = existsSync(tasksPath) ? tasksPath : taskGroupPath;
+			const { mtimeMs } = statSync(target);
+			if (now - mtimeMs > TEAM_MAX_AGE_MS) {
+				rmSync(taskGroupPath, { recursive: true, force: true });
+			}
+		} catch {
+			// Skip individual failures (permissions, race conditions).
+		}
+	}
+}
+
+/**
+ * Remove task-group directories older than {@link TEAM_MAX_AGE_MS}.
  *
- * @param currentTeamName - The active team name to preserve, or null
+ * Skips the current task group (if any) to avoid deleting an active session.
+ * Runs once per session start. The legacy `~/.tallow/teams/` root is also
+ * cleaned so older builds do not leave permanent clutter behind.
+ *
+ * @param currentTeamName - The active shared task-group name to preserve, or null
  */
 export function cleanupStaleTeams(currentTeamName: string | null): void {
 	try {
-		if (!existsSync(TEAMS_DIR)) return;
-		const now = Date.now();
 		const currentSafeName = currentTeamName?.replace(/[^a-zA-Z0-9._-]/g, "_") ?? null;
-
-		for (const entry of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
-			if (!entry.isDirectory()) continue;
-			if (entry.name === currentSafeName) continue;
-
-			const teamPath = join(TEAMS_DIR, entry.name);
-			try {
-				// Check tasks/ subdir mtime — that's where writes happen
-				const tasksPath = join(teamPath, "tasks");
-				const target = existsSync(tasksPath) ? tasksPath : teamPath;
-				const { mtimeMs } = statSync(target);
-				if (now - mtimeMs > TEAM_MAX_AGE_MS) {
-					rmSync(teamPath, { recursive: true, force: true });
-				}
-			} catch {
-				// Skip individual failures (permissions, race conditions)
-			}
-		}
+		cleanupStaleTaskGroupRoot(TASK_GROUPS_DIR, currentSafeName);
+		cleanupStaleTaskGroupRoot(LEGACY_TEAMS_DIR, currentSafeName);
 	} catch {
-		// TEAMS_DIR doesn't exist or isn't readable — nothing to clean
+		// Task-group roots don't exist or aren't readable — nothing to clean.
 	}
 }
