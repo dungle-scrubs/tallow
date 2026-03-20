@@ -5,25 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.25](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.24...tallow-v0.8.25) (2026-03-18)
-
-
-### Fixed
-
-* **ci:** resolve workspace:* references before npm publish ([1bc8bdb](https://github.com/dungle-scrubs/tallow/commit/1bc8bdb0ad25e2d725bec5a67ac3303e590601e8))
-* **skill-commands:** register slash commands for sharedSkillsDirs skills ([905e3b7](https://github.com/dungle-scrubs/tallow/commit/905e3b752954298198eac8d1bb5cb94aa0f8096c))
-
-
-### Documentation
-
-* changelog entries for skill-commands fix and tui sync ([999fe8e](https://github.com/dungle-scrubs/tallow/commit/999fe8e48e252ebb0e430da6dfdcf3ca0796ce09))
-
-
-### Maintenance
-
-* remove dead plan-rejection-feedback tests ([c65670f](https://github.com/dungle-scrubs/tallow/commit/c65670fd6cf17450198776be1c5c487598cfe19e))
-* **tui:** sync forked pi-tui to upstream v0.60.0 ([4f44580](https://github.com/dungle-scrubs/tallow/commit/4f445801a16a8653e92ff565283ccbca9f1c5534))
-
 ## [Unreleased]
 
 ### Added
@@ -112,6 +93,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **deps:** bump pi-* dependencies
 - **tests:** exclude `_defaults.md` from agent-template drift counts and verify
   scoped package links plus key docs metadata
+
+## [0.8.25](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.24...tallow-v0.8.25) (2026-03-18)
+
+
+### Fixed
+
+* **ci:** resolve workspace:* references before npm publish ([1bc8bdb](https://github.com/dungle-scrubs/tallow/commit/1bc8bdb0ad25e2d725bec5a67ac3303e590601e8))
+* **skill-commands:** register slash commands for sharedSkillsDirs skills ([905e3b7](https://github.com/dungle-scrubs/tallow/commit/905e3b752954298198eac8d1bb5cb94aa0f8096c))
+
+
+### Documentation
+
+* changelog entries for skill-commands fix and tui sync ([999fe8e](https://github.com/dungle-scrubs/tallow/commit/999fe8e48e252ebb0e430da6dfdcf3ca0796ce09))
+
+
+### Maintenance
+
+* remove dead plan-rejection-feedback tests ([c65670f](https://github.com/dungle-scrubs/tallow/commit/c65670fd6cf17450198776be1c5c487598cfe19e))
+* **tui:** sync forked pi-tui to upstream v0.60.0 ([4f44580](https://github.com/dungle-scrubs/tallow/commit/4f445801a16a8653e92ff565283ccbca9f1c5534))
 
 ## [0.8.24](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.23...tallow-v0.8.24) (2026-03-18)
 
