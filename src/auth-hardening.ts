@@ -29,7 +29,8 @@ const ENV_REFERENCE_PATTERN = /^[A-Z][A-Z0-9]*_[A-Z0-9_]*$/;
  * @returns Namespace string for Keychain service names
  */
 export function deriveKeychainNamespace(authPath: string): string {
-	return basename(dirname(authPath)).replace(/^\./, "");
+	const ns = basename(dirname(authPath)).replace(/^\./, "");
+	return ns || "tallow";
 }
 
 /** Result of the plaintext migration run. */
