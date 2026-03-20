@@ -53,7 +53,8 @@
 		"format:check": "biome format .",
 		"bench:startup": "bun scripts/benchmark-startup-fast-path.ts",
 		"pre-pr": "bash scripts/pre-pr.sh",
-		"prepare": "test -d .git && husky || true"
+		"prepare": "test -d .git && husky || true",
+		"postinstall": "node scripts/patch-upstream-debug.mjs"
 	},
 	"lint-staged": {
 		"*.{ts,tsx,js,jsx,json,jsonc,css}": [
