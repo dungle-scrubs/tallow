@@ -19,6 +19,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { runGitCommandSync } from "../_shared/shell-policy.js";
+import { formatContextUsageDisplay } from "./context-display.js";
 
 /** Cached git repository state for the footer display. */
 interface GitState {
@@ -204,26 +205,12 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 						}
 					}
 
-					// Get context percentage from last assistant message
-					const branch = sessionManager.getBranch();
-					const lastAssistant = branch
-						.slice()
-						.reverse()
-						.find(
-							(e) =>
-								e.type === "message" &&
-								e.message.role === "assistant" &&
-								(e.message as unknown as Record<string, string>).stopReason !== "aborted"
-						);
-
-					let contextTokens = 0;
-					if (lastAssistant?.type === "message" && lastAssistant.message.role === "assistant") {
-						const u = lastAssistant.message.usage;
-						contextTokens = u.input + u.output + u.cacheRead + u.cacheWrite;
-					}
-
-					const contextWindow = model?.contextWindow || 0;
-					const contextPercentValue = contextWindow > 0 ? (contextTokens / contextWindow) * 100 : 0;
+					const contextUsage = extensionCtx.getContextUsage();
+					const { percent: contextPercentValue, text: contextDisplay } = formatContextUsageDisplay(
+						contextUsage,
+						model?.contextWindow ?? 0,
+						autoCompactEnabled
+					);
 
 					// Build path (replace home with ~)
 					let pwd = process.cwd();
@@ -270,10 +257,10 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 					if (totalCost) statsParts.push(`$${totalCost.toFixed(3)}`);
 
 					// Context percentage with color
-					const autoIndicator = autoCompactEnabled ? " (auto)" : "";
-					const contextDisplay = `${contextPercentValue.toFixed(1)}%/${formatTokens(contextWindow)}${autoIndicator}`;
 					let contextStr: string;
-					if (contextPercentValue > 90) {
+					if (contextPercentValue === null) {
+						contextStr = theme.fg("dim", contextDisplay);
+					} else if (contextPercentValue > 90) {
 						contextStr = theme.fg("error", contextDisplay);
 					} else if (contextPercentValue > 70) {
 						contextStr = theme.fg("warning", contextDisplay);
