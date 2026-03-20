@@ -63,10 +63,10 @@ function registerMockTools(pi: ExtensionAPI): void {
  * @param entries - Session entries returned by sessionManager.getEntries
  * @returns Context object compatible with extension handlers
  */
-function createContext(entries: unknown[] = []): ExtensionContext {
+function createContext(entries: unknown[] = [], hasUI = true): ExtensionContext {
 	return {
 		cwd: process.cwd(),
-		hasUI: true,
+		hasUI,
 		ui: {
 			notify() {},
 			setStatus() {},
@@ -179,5 +179,35 @@ describe("plan-mode strict readonly enforcement", () => {
 			ctx
 		);
 		expect(blockedResult).toMatchObject({ block: true });
+	});
+
+	test("auto-enable only triggers for interactive UI input", async () => {
+		const [result] = await harness.fireEvent(
+			"input",
+			{ source: "interactive", text: "plan only fix auth" },
+			createContext([], true)
+		);
+
+		expect(result).toEqual({ action: "transform", text: "fix auth" });
+		expect(harness.api.getActiveTools()).toEqual(
+			PLAN_MODE_ALLOWED_TOOLS.filter((name) => BASELINE_TOOLS.includes(name))
+		);
+	});
+
+	test("auto-enable ignores headless or non-interactive input", async () => {
+		const [headlessResult] = await harness.fireEvent(
+			"input",
+			{ source: "interactive", text: "plan only fix auth" },
+			createContext([], false)
+		);
+		const [rpcResult] = await harness.fireEvent(
+			"input",
+			{ source: "rpc", text: "plan only fix auth" },
+			createContext([], true)
+		);
+
+		expect(headlessResult).toEqual({ action: "continue" });
+		expect(rpcResult).toEqual({ action: "continue" });
+		expect(harness.api.getActiveTools()).toEqual([...BASELINE_TOOLS]);
 	});
 });

@@ -118,6 +118,9 @@ export interface TallowSessionOptions {
 	/** Additional extension selectors (bundled IDs or filesystem paths). */
 	additionalExtensions?: string[];
 
+	/** Extension IDs to skip for this session after resource discovery. */
+	disabledExtensions?: string[];
+
 	/** Load only explicitly selected extension selectors (IDs/paths). */
 	extensionsOnly?: boolean;
 
@@ -1074,6 +1077,7 @@ interface StartupTimingLogger {
 /** Options for startup-time extension filtering policies. */
 interface ExtensionStartupPolicyOptions {
 	readonly blockProjectExtensions: boolean;
+	readonly disabledExtensionNames: ReadonlySet<string>;
 	readonly projectExtensionsDir: string;
 	readonly startupProfile: TallowStartupProfile;
 }
@@ -1380,6 +1384,21 @@ function isProjectExtensionPath(extensionPath: string, projectExtensionsDir: str
 }
 
 /**
+ * Derives a stable extension runtime ID from a discovered extension path.
+ *
+ * Directory-based extensions use the directory basename. File-based extensions
+ * drop the final extension suffix so option matching stays ergonomic.
+ *
+ * @param extensionPath - Absolute extension file or directory path
+ * @returns Stable extension identifier used by startup filters
+ */
+function getExtensionRuntimeId(extensionPath: string): string {
+	const name = basename(extensionPath);
+	const suffixIndex = name.lastIndexOf(".");
+	return suffixIndex > 0 ? name.slice(0, suffixIndex) : name;
+}
+
+/**
  * Determine whether an extension is a purely interactive UI extension in headless mode.
  *
  * Tool availability is always preserved: extensions that register tools at runtime,
@@ -1426,6 +1445,16 @@ function applyExtensionStartupPolicies(
 ): LoadExtensionsResult {
 	let filteredExtensions = base.extensions;
 	let changed = false;
+
+	if (options.disabledExtensionNames.size > 0) {
+		const allowed = filteredExtensions.filter(
+			(ext) => !options.disabledExtensionNames.has(getExtensionRuntimeId(ext.path))
+		);
+		if (allowed.length !== filteredExtensions.length) {
+			filteredExtensions = allowed;
+			changed = true;
+		}
+	}
 
 	if (options.blockProjectExtensions) {
 		const blocked = filteredExtensions.filter(
@@ -1703,8 +1732,11 @@ export async function createTallowSession(
 	}
 
 	const dedupedExtensionPaths = [...new Set(additionalExtensionPaths)];
+	const disabledExtensionNames = new Set(options.disabledExtensions ?? []);
 	const shouldApplyExtensionStartupPolicies =
-		shouldBlockProjectExtensions || startupProfile === "headless";
+		shouldBlockProjectExtensions ||
+		startupProfile === "headless" ||
+		disabledExtensionNames.size > 0;
 	const explicitToolRestrictionNames = resolveExplicitToolRestrictionNames(options);
 
 	const loader = new DefaultResourceLoader({
@@ -1734,6 +1766,7 @@ export async function createTallowSession(
 			? (base) =>
 					applyExtensionStartupPolicies(base, {
 						blockProjectExtensions: shouldBlockProjectExtensions,
+						disabledExtensionNames,
 						projectExtensionsDir,
 						startupProfile,
 					})

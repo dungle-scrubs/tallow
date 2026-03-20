@@ -40,12 +40,14 @@ function makeTempDir(prefix: string): string {
  */
 async function createProfileSession(options: {
 	readonly additionalExtensions: readonly string[];
+	readonly disabledExtensions?: readonly string[];
 	readonly startupProfile: "interactive" | "headless";
 	readonly tools?: ReturnType<typeof parseToolFlag>;
 }): Promise<TallowSession> {
 	const tallow = await createTallowSession({
 		additionalExtensions: [...options.additionalExtensions],
 		cwd: makeTempDir("tallow-startup-profile-cwd-"),
+		disabledExtensions: options.disabledExtensions ? [...options.disabledExtensions] : undefined,
 		extensionsOnly: true,
 		model: createMockModel(),
 		provider: "mock",
@@ -154,6 +156,18 @@ describe("startup profile extension loading", () => {
 
 		expect(tallow.extensions.errors).toEqual([]);
 		expect(loaded).toContain(basename(uiToolExtension));
+	});
+
+	test("disabledExtensions skips selected extensions for one session", async () => {
+		const tallow = await createProfileSession({
+			additionalExtensions: ["clear", "plan-mode-tool"],
+			disabledExtensions: ["plan-mode-tool"],
+			startupProfile: "interactive",
+		});
+
+		const loaded = getLoadedExtensionIds(tallow);
+		expect(loaded).toContain("clear");
+		expect(loaded).not.toContain("plan-mode-tool");
 	});
 });
 
