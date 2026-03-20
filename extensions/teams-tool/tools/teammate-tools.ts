@@ -9,7 +9,14 @@ import { getIcon } from "../../_icons/index.js";
 import { appendDashboardFeedEvent, refreshTeamView } from "../dashboard/state.js";
 import { autoDispatch, wakeTeammate } from "../dispatch/auto-dispatch.js";
 import type { Teammate } from "../state/types.js";
-import { addTeamMessage, getUnread, isTaskReady, markRead, type Team } from "../store.js";
+import {
+	addTeamMessage,
+	getUnread,
+	isTaskReady,
+	markRead,
+	type Team,
+	type TeamTask,
+} from "../store.js";
 
 /**
  * Create the team coordination tools for a specific teammate.
@@ -24,6 +31,23 @@ export function createTeammateTools(
 	myName: string,
 	piEvents?: ExtensionAPI["events"]
 ): ToolDefinition[] {
+	/**
+	 * Validate that the current teammate owns a claimed task before mutating it.
+	 *
+	 * @param action - Mutation being attempted (`complete` or `fail`)
+	 * @param task - Task being mutated
+	 * @returns Error text when the mutation should be rejected, otherwise null
+	 */
+	function getTaskOwnershipError(action: "complete" | "fail", task: TeamTask): string | null {
+		if (task.status !== "claimed") {
+			return `Task #${task.id} is ${task.status}. Claim it before trying to ${action} it.`;
+		}
+		if (task.assignee !== myName) {
+			return `Task #${task.id} is assigned to ${task.assignee ?? "(unassigned)"}. Only the assignee can ${action} it.`;
+		}
+		return null;
+	}
+
 	const tasksTool: ToolDefinition = {
 		name: "team_tasks",
 		label: "team_tasks",
@@ -108,6 +132,15 @@ export function createTeammateTools(
 			}
 
 			if (params.action === "complete") {
+				const ownershipError = getTaskOwnershipError("complete", task);
+				if (ownershipError) {
+					return {
+						content: [{ type: "text" as const, text: ownershipError }],
+						details: {},
+						isError: true,
+					};
+				}
+
 				task.status = "completed";
 				task.result = params.result || "(completed)";
 				piEvents?.emit("task_completed", {
@@ -129,6 +162,15 @@ export function createTeammateTools(
 			}
 
 			if (params.action === "fail") {
+				const ownershipError = getTaskOwnershipError("fail", task);
+				if (ownershipError) {
+					return {
+						content: [{ type: "text" as const, text: ownershipError }],
+						details: {},
+						isError: true,
+					};
+				}
+
 				task.status = "failed";
 				task.result = params.result || "(failed)";
 				refreshTeamView(team as Team<Teammate>);

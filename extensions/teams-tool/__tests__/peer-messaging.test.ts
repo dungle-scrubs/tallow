@@ -258,4 +258,30 @@ describe("teammate task board operations", () => {
 		expect(team.tasks[0].status).toBe("completed");
 		expect(team.tasks[0].result).toBe("Found 388 files");
 	});
+
+	it("rejects completing a task owned by another teammate", async () => {
+		const team = freshTeam();
+		const { mate: alice } = mockTeammate("alice");
+		const { mate: bob } = mockTeammate("bob");
+		team.teammates.set("alice", alice);
+		team.teammates.set("bob", bob);
+
+		const { addTaskToBoard } = await import("../store");
+		const task = addTaskToBoard(team, "Count files", "Count .ts files", []);
+		task.status = "claimed";
+		task.assignee = "alice";
+
+		const bobTools = createTeammateTools(team, "bob");
+		const tasksTool = findTool(bobTools, "team_tasks");
+		const result = await tasksTool.execute("c4", {
+			action: "complete",
+			taskId: "1",
+			result: "I should not be allowed",
+		});
+
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("Only the assignee can complete it");
+		expect(team.tasks[0].status).toBe("claimed");
+		expect(team.tasks[0].result).toBeNull();
+	});
 });
