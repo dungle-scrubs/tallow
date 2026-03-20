@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.26](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.25...tallow-v0.8.26) (2026-03-20)
+
+
+### Added
+
+* **cli:** add --yolo mode for auto-approving tool confirmations ([5f2ab31](https://github.com/dungle-scrubs/tallow/commit/5f2ab315da2fdda1568d76004c13bfa9d5273951))
+* **teams:** persist archives and reuse agent templates ([7b85b91](https://github.com/dungle-scrubs/tallow/commit/7b85b9185566876ae315b290ec5d10a4e2dd0d82))
+
+
+### Fixed
+
+* add explicit timeouts to tarball smoke tests ([32523ab](https://github.com/dungle-scrubs/tallow/commit/32523ab0bc4c1b1e129f15108e6dc21cd16cae6f))
+* **custom-footer:** respect unknown post-compaction usage ([e4f5ee0](https://github.com/dungle-scrubs/tallow/commit/e4f5ee088b1b55743ebfe9d3c406ac342e9cf353))
+* guard deriveKeychainNamespace against degenerate paths ([f7afffc](https://github.com/dungle-scrubs/tallow/commit/f7afffc1ad9078a3761c6cb7a1668c324dd16d4f))
+* installer now respects TALLOW_HOME from work-dirs ([89f41ef](https://github.com/dungle-scrubs/tallow/commit/89f41efe6dd88f947b2ca4e787f540abe1a44c3c))
+* **interactive:** clear loader synchronously on agent_end to prevent stale spinner ([4c20b8c](https://github.com/dungle-scrubs/tallow/commit/4c20b8c98707224e778af3e53ca81e98c4f65a49))
+* **interactive:** drain orphaned steering messages at agent_end ([9a5d6dd](https://github.com/dungle-scrubs/tallow/commit/9a5d6ddd20915fba810a9c8a8544cdd96e8e87bc))
+* **interactive:** stop latching compaction status ([51ec30e](https://github.com/dungle-scrubs/tallow/commit/51ec30e787691fa7f20bd14cb4eb9ece7bfb6558))
+* **models:** patch stale gpt-5.4 context metadata ([66452ab](https://github.com/dungle-scrubs/tallow/commit/66452ab7eecfdaf78280d8eaec32a2362f3796e4))
+* move [Unreleased] section above released versions in changelog ([3eab701](https://github.com/dungle-scrubs/tallow/commit/3eab701b039c80a87d7971827dcb86843e7b8755))
+* **plan-mode:** avoid headless auto-enable ([af5dc18](https://github.com/dungle-scrubs/tallow/commit/af5dc18b5dd2253266074b9d1c2bc752954e8e7f))
+* silo Keychain API key entries per TALLOW_HOME ([1274b10](https://github.com/dungle-scrubs/tallow/commit/1274b10b38225862e5656179f5fb4be65cb2f097))
+* **slash-command-bridge:** guard against model-initiated compaction at low usage ([d60ad56](https://github.com/dungle-scrubs/tallow/commit/d60ad56d5e790974e73173882c9fd411da61f943))
+* **subagents:** reduce false watchdog stalls ([134507d](https://github.com/dungle-scrubs/tallow/commit/134507de1a837f290f39e910fcccd40ffb5b8129))
+* **test:** make gpt-5.4 override test resilient to upstream fixes ([90ab19a](https://github.com/dungle-scrubs/tallow/commit/90ab19adcad123c0bb4dc3785b1134f1637ccf14))
+
+
+### Changed
+
+* **tasks:** separate shared task groups from teams ([676388a](https://github.com/dungle-scrubs/tallow/commit/676388a39e0ed105bc2113a97656774fcce4e636))
+
+
+### Maintenance
+
+* **agents:** tighten bundled worker prompts ([19797fb](https://github.com/dungle-scrubs/tallow/commit/19797fb9b587a03d4b8ca4b4a4395cb1d950fcf8))
+* **deps:** bump pi-* dependencies ([4ff4404](https://github.com/dungle-scrubs/tallow/commit/4ff4404b84b1abb9a7623c3b02270f17c325aaa7))
+* **interactive:** add orphaned steering drain coverage ([0ee0147](https://github.com/dungle-scrubs/tallow/commit/0ee0147d8a607e992de0bed804160bed22a81446))
+* **interactive:** update agent_end coalescing test for synchronous discard ([621ba58](https://github.com/dungle-scrubs/tallow/commit/621ba582d7759cf123e326e6ede08e91b7b970f7))
+* **shell-policy:** add yolo mode test coverage ([997de7b](https://github.com/dungle-scrubs/tallow/commit/997de7b7f67fd94b5e9347da364fdb168ec0e4bc))
+
 ## [Unreleased]
 
 ### Added
