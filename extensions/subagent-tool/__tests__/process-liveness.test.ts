@@ -5,7 +5,14 @@ import {
 	createWatchdogHeartbeatState,
 	evaluateWatchdogStatus,
 	type ForegroundWatchdogThresholds,
+	isWatchdogHeartbeatEventType,
 	recordWatchdogHeartbeat,
+	recordWatchdogToolCallEnd,
+	recordWatchdogToolCallStart,
+	resolveForegroundWatchdogThresholds,
+	SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV,
+	SUBAGENT_STARTUP_TIMEOUT_MS_ENV,
+	SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV,
 	terminateProcessWithGrace,
 } from "../process.js";
 
@@ -13,6 +20,7 @@ const TEST_THRESHOLDS: ForegroundWatchdogThresholds = {
 	inactivityTimeoutMs: 2_000,
 	killGraceMs: 50,
 	startupTimeoutMs: 1_000,
+	toolExecutionTimeoutMs: 8_000,
 };
 
 interface ManualTimer {
@@ -102,6 +110,38 @@ describe("foreground subagent liveness watchdog", () => {
 		expect(stalledStatus.phase).toBe("inactivity");
 	});
 
+	it("widens the timeout while a tool call is still running", () => {
+		let state = createWatchdogHeartbeatState(0);
+		state = recordWatchdogToolCallStart(state, 500);
+		expect(evaluateWatchdogStatus(state, 6_000, TEST_THRESHOLDS).kind).toBe("healthy");
+
+		const stalledStatus = evaluateWatchdogStatus(state, 8_600, TEST_THRESHOLDS);
+		expect(stalledStatus.kind).toBe("stalled");
+		if (stalledStatus.kind !== "stalled") return;
+		expect(stalledStatus.phase).toBe("tool_execution");
+
+		state = recordWatchdogToolCallEnd(state, 8_600);
+		expect(state.activeToolCalls).toBe(0);
+	});
+
+	it("treats message updates and tool execution events as heartbeats", () => {
+		expect(isWatchdogHeartbeatEventType("message_update")).toBe(true);
+		expect(isWatchdogHeartbeatEventType("tool_execution_start")).toBe(true);
+		expect(isWatchdogHeartbeatEventType("tool_execution_end")).toBe(true);
+		expect(isWatchdogHeartbeatEventType("tool_result_end")).toBe(false);
+	});
+
+	it("applies env overrides for watchdog thresholds", () => {
+		const thresholds = resolveForegroundWatchdogThresholds({
+			[SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV]: "7000",
+			[SUBAGENT_STARTUP_TIMEOUT_MS_ENV]: "3000",
+			[SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV]: "11000",
+		});
+		expect(thresholds.inactivityTimeoutMs).toBe(7_000);
+		expect(thresholds.startupTimeoutMs).toBe(3_000);
+		expect(thresholds.toolExecutionTimeoutMs).toBe(11_000);
+	});
+
 	it("stalled termination escalates and resolves without hanging", async () => {
 		const state = createWatchdogHeartbeatState(0);
 		const stalledStatus = evaluateWatchdogStatus(state, 1_001, TEST_THRESHOLDS);
@@ -134,8 +174,7 @@ describe("foreground subagent liveness watchdog", () => {
 		expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
 		expect(resolvedCode).toBe(1);
 		expect(result.stopReason).toBe("stalled");
-		expect(result.errorMessage).toContain(
-			"interactive confirmation path unavailable in subagent JSON mode"
-		);
+		expect(result.errorMessage).toContain("slow provider startup");
+		expect(result.errorMessage).toContain("TALLOW_SUBAGENT_*");
 	});
 });
