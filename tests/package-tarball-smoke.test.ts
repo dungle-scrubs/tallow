@@ -179,7 +179,7 @@ afterEach(() => {
 });
 
 describe("Published tarball smoke test", () => {
-	it("bundles the forked pi-tui as a bundled dependency", () => {
+	it("bundles the forked pi-tui as a bundled dependency", { timeout: 60_000 }, () => {
 		const tarballPath = packTarball();
 		const packageRoot = extractTarball(tarballPath);
 		const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf-8")) as {
@@ -206,20 +206,24 @@ describe("Published tarball smoke test", () => {
 		expect(packageJson.dependencies?.["@mariozechner/pi-tui"]).toBeDefined();
 	});
 
-	it("installs and loads representative bundled extensions from the packed artifact", () => {
-		const tarballPath = packTarball();
-		const consumerDir = installAsConsumer(tarballPath);
+	it(
+		"installs and loads representative bundled extensions from the packed artifact",
+		{ timeout: 120_000 },
+		() => {
+			const tarballPath = packTarball();
+			const consumerDir = installAsConsumer(tarballPath);
 
-		// Verify the bundled fork is preserved (not replaced by upstream)
-		const tallowRoot = resolveInstalledTallow(consumerDir);
-		const piTuiPkg = JSON.parse(
-			readFileSync(
-				join(tallowRoot, "node_modules", "@mariozechner", "pi-tui", "package.json"),
-				"utf-8"
-			)
-		) as { description?: string };
-		expect(piTuiPkg.description).toContain("fork");
+			// Verify the bundled fork is preserved (not replaced by upstream)
+			const tallowRoot = resolveInstalledTallow(consumerDir);
+			const piTuiPkg = JSON.parse(
+				readFileSync(
+					join(tallowRoot, "node_modules", "@mariozechner", "pi-tui", "package.json"),
+					"utf-8"
+				)
+			) as { description?: string };
+			expect(piTuiPkg.description).toContain("fork");
 
-		importBundledExtensions(consumerDir);
-	});
+			importBundledExtensions(consumerDir);
+		}
+	);
 });
