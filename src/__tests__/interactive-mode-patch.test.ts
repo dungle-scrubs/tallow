@@ -732,11 +732,13 @@ describe("patchInteractiveModePrototype", () => {
 			});
 		}
 
-		// agent_end should flush the pending update
+		// agent_end discards the pending update synchronously (no flush await)
+		// so that the loader cleanup runs within the same _emit() call and
+		// the user never sees a stale "Working..." spinner.
 		await mode.handleEvent({ type: "agent_end" });
 
-		// 1 flushed message_update + 1 agent_end
-		expect(mode.handleEventCalls).toBe(2);
+		// Only agent_end — no flushed message_update
+		expect(mode.handleEventCalls).toBe(1);
 		// agent_end cleanup should still run
 		expect(mode.pendingWorkingMessage).toBeUndefined();
 	});
