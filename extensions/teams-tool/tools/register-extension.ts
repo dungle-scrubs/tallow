@@ -232,8 +232,11 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 	 */
 	function handleDashboardEscape(ctx: ExtensionContext): void {
 		if (!dashboardEnabled) return;
+		const hasActiveTeams = (getTeams() as Map<string, unknown>).size > 0;
 		disableDashboard(ctx, false);
-		ctx.ui.notify("Team dashboard disabled. Teammates keep running.", "info");
+		if (hasActiveTeams) {
+			ctx.ui.notify("Team dashboard disabled. Teammates keep running.", "info");
+		}
 	}
 
 	/**
@@ -283,7 +286,12 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 		ctx.ui.setEditorComponent(undefined);
 		ctx.ui.setWorkingMessage();
 		ctx.ui.setStatus("team-dashboard", undefined);
-		if (notify) ctx.ui.notify("Team dashboard disabled.", "info");
+		// Only notify when there are active teams — the notification is
+		// confusing when it appears during unrelated flows (e.g. subagent
+		// parallel) because the dashboard auto-disabled as a side effect.
+		if (notify && (getTeams() as Map<string, unknown>).size > 0) {
+			ctx.ui.notify("Team dashboard disabled.", "info");
+		}
 	}
 
 	/**
