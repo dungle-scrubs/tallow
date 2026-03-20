@@ -72,6 +72,7 @@ interface InteractiveModeEventLike {
 interface InteractiveModePrototypeLike {
 	__tallow_stale_ui_patch_applied__?: boolean;
 	createExtensionUIContext?: ((...args: unknown[]) => Record<string, unknown>) | undefined;
+	getUserInput?: (() => Promise<unknown>) | undefined;
 	handleBashCommand?:
 		| ((command: string, excludeFromContext?: boolean) => Promise<unknown>)
 		| undefined;
@@ -755,6 +756,35 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			this.updatePendingMessagesDisplay?.();
 			this.ui?.requestRender?.();
 			return result;
+		};
+	}
+
+	// ── getUserInput: last-resort loader cleanup ─────────────────────────
+	//
+	// The main loop calls getUserInput() right after session.prompt() returns.
+	// At this point the agent is done, but _emit(agent_end) may not have fired
+	// yet — it runs through _agentEventQueue which is a separate microtask
+	// chain that _emitExtensionEvent must complete first. If any extension
+	// handler is slow, the loader persists because neither the upstream
+	// agent_end handler nor the tallow post-handler has run.
+	//
+	// Clearing the loader here is unconditionally safe: getUserInput means the
+	// agent is idle — there is never a legitimate "Working..." at this point.
+	const originalGetUserInput = prototype.getUserInput;
+	if (typeof originalGetUserInput === "function") {
+		prototype.getUserInput = async function (this: InteractiveModeInstanceLike) {
+			// Stop the loader interval and remove it from the container.
+			if (this.loadingAnimation) {
+				this.loadingAnimation.stop?.();
+				this.loadingAnimation = null;
+			}
+			this.pendingWorkingMessage = undefined;
+			if (!shouldPreserveCompactionStatus(this)) {
+				this.statusContainer?.clear?.();
+			}
+			this.ui?.requestRender?.(true);
+
+			return originalGetUserInput.call(this);
 		};
 	}
 
