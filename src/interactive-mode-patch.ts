@@ -44,12 +44,12 @@ interface InteractiveModeInstanceLike {
 	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
 	handleReloadCommand?: (() => Promise<unknown>) | undefined;
 	initExtensions?: (() => Promise<unknown>) | undefined;
-	loadingAnimation?: unknown;
+	loadingAnimation?: { stop?: (() => void) | undefined } | null;
 	pendingWorkingMessage?: unknown;
 	restoreQueuedMessagesToEditor?: ((options?: { abort?: boolean }) => unknown) | undefined;
 	session?: SessionLike;
 	statusContainer?: { clear?: (() => void) | undefined };
-	ui?: { requestRender?: (() => void) | undefined };
+	ui?: { requestRender?: ((force?: boolean) => void) | undefined };
 	updatePendingMessagesDisplay?: (() => void) | undefined;
 }
 
@@ -697,6 +697,17 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			if (event?.type === "agent_end") {
 				clearCompactionRetryWatchdog(this);
 				this.pendingWorkingMessage = undefined;
+
+				// Safety net: stop the loading animation if the upstream handler
+				// didn't reach its cleanup (e.g. extension agent_end handlers
+				// delayed _emit so session.prompt() resolved first). The upstream
+				// handler also clears these, but this runs in the post-await path
+				// as a second chance.
+				if (this.loadingAnimation) {
+					this.loadingAnimation.stop?.();
+					this.loadingAnimation = null;
+				}
+
 				// Preserve the compaction loader only while compaction is still
 				// running or while a promised retry has not actually started yet.
 				// Once continuation begins, later agent_end events must clear the
@@ -716,7 +727,11 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 				drainOrphanedSessionMessages(this);
 
 				this.updatePendingMessagesDisplay?.();
-				this.ui?.requestRender?.();
+
+				// Force a full re-render to guarantee stale loader text is cleared
+				// from the terminal. A non-forced requestRender() can coalesce with
+				// a stale pending render that ran before statusContainer.clear().
+				this.ui?.requestRender?.(true);
 
 				const deferredCompact = pendingInteractiveExtensionCompact.get(this);
 				if (deferredCompact) {
