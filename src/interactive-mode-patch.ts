@@ -656,9 +656,21 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 
 			// For events that depend on streaming state being current, flush
 			// any pending message_update first so the component is up-to-date.
-			if (
+			//
+			// agent_end is excluded: its loader cleanup must run synchronously
+			// within _emit() to avoid a stale "Working..." indicator. The flush
+			// await yields to the microtask queue, letting _processAgentEvent
+			// (and ultimately prompt() / getUserInput()) resolve before the
+			// loader is cleared — the user sees the editor cursor while the
+			// spinner persists. message_end already flushes the same pending
+			// state, and in abort paths the streaming component is removed
+			// regardless, so skipping the flush for agent_end is safe.
+			// Instead, discard any orphaned pending update synchronously.
+			if (event?.type === "agent_end") {
+				const coalesce = getCoalesceState(this);
+				coalesce.pendingEvent = null;
+			} else if (
 				event?.type === "message_end" ||
-				event?.type === "agent_end" ||
 				event?.type === "tool_execution_start" ||
 				event?.type === "tool_execution_end"
 			) {
