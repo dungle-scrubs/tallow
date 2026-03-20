@@ -114,6 +114,19 @@ class FakeInteractiveMode {
 		return "bash-ok";
 	}
 
+	/** Tracks getUserInput calls. */
+	getUserInputCalls = 0;
+
+	/**
+	 * Base getUserInput implementation used by the patch wrapper.
+	 *
+	 * @returns Promise resolved with marker text
+	 */
+	async getUserInput(): Promise<string> {
+		this.getUserInputCalls++;
+		return "user-input";
+	}
+
 	/**
 	 * Base setupKeyHandlers implementation that installs the default escape handler.
 	 *
@@ -303,6 +316,31 @@ describe("patchInteractiveModePrototype", () => {
 
 		expect(stopCalled).toBe(true);
 		expect(mode.loadingAnimation).toBeNull();
+	});
+
+	it("clears stale loader in getUserInput as last-resort safety net", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+
+		const mode = new FakeInteractiveMode();
+		let stopCalled = false;
+		mode.loadingAnimation = {
+			stop: () => {
+				stopCalled = true;
+			},
+		};
+		mode.pendingWorkingMessage = "stale";
+
+		// getUserInput is called by the main loop when the agent is idle.
+		// It should clear any lingering loader regardless of whether
+		// _emit(agent_end) has fired yet.
+		const result = await mode.getUserInput();
+
+		expect(result).toBe("user-input");
+		expect(stopCalled).toBe(true);
+		expect(mode.loadingAnimation).toBeNull();
+		expect(mode.pendingWorkingMessage).toBeUndefined();
+		expect(mode.statusClears).toBe(1);
+		expect(mode.forceRenderRequests).toBe(1);
 	});
 
 	it("suppresses overflow payloads while keeping a visible overflow indicator", async () => {
