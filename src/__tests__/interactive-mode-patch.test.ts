@@ -37,10 +37,12 @@ class FakeInteractiveMode {
 	lastHandledEvent: FakeEvent | undefined;
 	lastRestoredAbort: boolean | undefined;
 	lifecycleCalls: string[] = [];
-	loadingAnimation: unknown;
+	loadingAnimation: { stop?: () => void } | null = null;
+	loaderStopCalls = 0;
 	notifyCalls: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
 	pendingBashComponents: unknown[] = [];
 	pendingWorkingMessage: unknown = "stale";
+	forceRenderRequests = 0;
 	renderRequests = 0;
 	session: {
 		clearQueue: () => { followUp: string[]; steering: string[] };
@@ -53,9 +55,10 @@ class FakeInteractiveMode {
 	statusClears = 0;
 	updateCalls = 0;
 	ui = {
-		requestRender: (): void => {
+		requestRender: (force?: boolean): void => {
 			this.lifecycleCalls.push("ui.requestRender");
 			this.renderRequests++;
+			if (force) this.forceRenderRequests++;
 		},
 	};
 
@@ -274,13 +277,32 @@ describe("patchInteractiveModePrototype", () => {
 		// (plan 159, bug 2). For normal turns we must clear to avoid a stale spinner.
 		expect(mode.statusClears).toBe(1);
 		expect(mode.updateCalls).toBe(1);
+		// agent_end forces a full re-render to guarantee stale loader text is
+		// cleared even when a non-forced render coalesced with stale content.
 		expect(mode.renderRequests).toBe(1);
+		expect(mode.forceRenderRequests).toBe(1);
 
 		const flushCallIndex = mode.lifecycleCalls.indexOf("flushPendingBashComponents");
 		const updateCallIndex = mode.lifecycleCalls.indexOf("updatePendingMessagesDisplay");
 		expect(flushCallIndex).toBeGreaterThanOrEqual(0);
 		expect(updateCallIndex).toBeGreaterThanOrEqual(0);
 		expect(flushCallIndex).toBeLessThan(updateCallIndex);
+	});
+
+	it("stops loadingAnimation at agent_end as safety net", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+
+		const mode = new FakeInteractiveMode();
+		let stopCalled = false;
+		mode.loadingAnimation = {
+			stop: () => {
+				stopCalled = true;
+			},
+		};
+		await mode.handleEvent({ type: "agent_end" });
+
+		expect(stopCalled).toBe(true);
+		expect(mode.loadingAnimation).toBeNull();
 	});
 
 	it("suppresses overflow payloads while keeping a visible overflow indicator", async () => {
