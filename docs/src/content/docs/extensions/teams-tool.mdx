@@ -5,9 +5,10 @@ description: "Multi-agent teams with a live dashboard, shared tasks, and direct 
 
 import Gallery from '../../../components/Gallery.astro';
 
-Spawn persistent teammate sessions that share an in-memory task
-board and can message each other directly — no hub-and-spoke
-bottleneck through the orchestrator.
+Spawn persistent teammate sessions that share a task board and
+can message each other directly — no hub-and-spoke bottleneck
+through the orchestrator. Live teammates are in-process; archived
+teams are persisted to disk so `team_resume` survives restarts.
 
 ## Dashboard workspace
 
@@ -51,14 +52,14 @@ shown with lower visual weight.
 **Orchestrator tools** (available to you):
 - `team_create` — create a named team
 - `team_add_tasks` — add tasks with optional `blockedBy` dependencies
-- `team_spawn` — spawn a teammate with a role, model, and tool set
+- `team_spawn` — spawn a teammate with a role, model, tool set, and optional agent template
 - `team_send` — send a message (fire-and-forget or `wait` for response)
 - `team_status` — view task board, teammate states, recent messages
 - `team_shutdown` — abort all teammates and archive the team
 - `team_resume` — restore an archived team (omit name to list archives)
 
 **Teammate tools** (injected into each spawned agent):
-- `team_tasks` — list, claim, complete, or fail tasks
+- `team_tasks` — list, claim, complete, or fail tasks (only the assignee can complete/fail a claimed task)
 - `team_message` — send messages to other teammates
 - `team_inbox` — check for unread messages
 
@@ -82,10 +83,10 @@ first.
 
 ## Archive and Resume
 
-Shutting down a team — whether via `team_shutdown`, pressing
-Escape, or session end — **archives** the team instead of
-deleting it. The task board, results, and messages are
-preserved.
+Shutting down a team — whether via `team_shutdown` or session end —
+**archives** the team instead of deleting it. The task board,
+results, and messages are preserved on disk, so `team_resume`
+can restore them in a later session after a restart.
 
 Call `team_resume` to restore an archived team. The restored
 team has no teammates (their sessions are gone), so spawn
@@ -111,9 +112,11 @@ accumulate unbounded message history in memory.
 | `TALLOW_TEAMS_MESSAGE_RETENTION_LIMIT` | `256` | per-team message cap before oldest entries are evicted |
 | `TALLOW_TEAMS_KEEP_FULL_HISTORY` | unset | set to `1` to disable trimming (debug mode) |
 
-## Interrupting with Escape
+## Escape behavior
 
-Pressing Escape kills all team agents (both working and idle)
-and archives the team. Task state is preserved — use
-`team_resume` to restore and continue work. This mirrors
-[subagent](/extensions/subagent-tool/) interrupt behavior.
+Inside the dashboard, <kbd>Esc</kbd> closes the dashboard and returns
+you to chat. It does **not** kill teammates or archive teams.
+
+Use `team_shutdown` when you want to stop teammates and archive the
+team explicitly. Session shutdown still archives active teams
+automatically.

@@ -24,6 +24,11 @@ import { Key, Loader, Text, type TUI } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { INTEROP_EVENT_NAMES, onInteropEvent } from "../../_shared/interop-events.js";
 import {
+	deleteArchivedTeamFromDisk,
+	loadAllArchivedTeamsFromDisk,
+	writeArchivedTeamToDisk,
+} from "../archive-store.js";
+import {
 	appendDashboardFeedEvent,
 	bindDashboardSessionTracking,
 	buildDashboardSnapshot,
@@ -66,7 +71,6 @@ import {
 export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 	setInteropEvents(pi.events);
 	let cwd = process.cwd();
-	let dashboardCancelInFlight = false;
 	let dashboardEnabled = false;
 	let dashboardTicker: ReturnType<typeof setInterval> | undefined;
 	let dashboardTui: TUI | undefined;
@@ -154,67 +158,82 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 	}
 
 	/**
-	 * Abort all teammates that are currently streaming work.
-	 * @returns Number of teammates that received an abort request
+	 * Refresh the in-memory archived-team index from disk.
+	 *
+	 * Team archives must survive process restarts, so the on-disk view is the
+	 * source of truth. This helper keeps the legacy in-memory map synchronized
+	 * for the existing store/query helpers.
+	 *
+	 * @returns void
 	 */
-	async function abortRunningTeammates(): Promise<number> {
-		const running: Array<{ teammate: Teammate; team: Team<Teammate> }> = [];
-		for (const [, team] of getTeams() as Map<string, Team<Teammate>>) {
-			for (const [, teammate] of team.teammates) {
-				if (teammate.status !== "working" && !teammate.session.isStreaming) continue;
-				running.push({ teammate, team });
-			}
+	function refreshArchivedTeamStore(): void {
+		const archives = getArchivedTeams();
+		archives.clear();
+		for (const archived of loadAllArchivedTeamsFromDisk()) {
+			archives.set(archived.name, archived);
 		}
-		if (running.length === 0) return 0;
-
-		await Promise.all(
-			running.map(async ({ teammate }) => {
-				try {
-					await teammate.session.abort();
-				} catch {
-					// Best-effort abort.
-				}
-			})
-		);
-
-		const touchedTeams = new Set<Team<Teammate>>();
-		const dashboardActivity = getDashboardActivity();
-		for (const { teammate, team } of running) {
-			if (teammate.status === "working") teammate.status = "idle";
-			dashboardActivity.touch(team.name, teammate.name);
-			appendDashboardFeedEvent(team.name, "orchestrator", teammate.name, "Cancelled run.");
-			touchedTeams.add(team);
-		}
-		for (const team of touchedTeams) refreshTeamView(team);
-		notifyDashboardChanged();
-		return running.length;
 	}
 
 	/**
-	 * Handle Esc inside dashboard: cancel active work first, then close dashboard.
+	 * Move an active team into the archive store and persist it to disk.
+	 *
+	 * @param teamName - Active team name to archive
+	 * @returns void
+	 */
+	function archiveRuntimeTeam(teamName: string): void {
+		const archived = archiveTeam(teamName);
+		if (!archived) return;
+		try {
+			writeArchivedTeamToDisk(archived);
+			refreshArchivedTeamStore();
+		} catch (error) {
+			console.error(`Failed to persist archived team ${teamName}: ${error}`);
+		}
+	}
+
+	/**
+	 * Dispose teammate sessions for one team.
+	 *
+	 * @param team - Team whose live teammate sessions should be cleaned up
+	 * @param abortStreaming - Whether currently streaming teammates should be aborted first
+	 * @returns Number of teammates that were processed
+	 */
+	async function disposeTeamSessions(
+		team: Team<Teammate>,
+		abortStreaming: boolean
+	): Promise<number> {
+		let count = 0;
+		for (const [, mate] of team.teammates) {
+			try {
+				if (abortStreaming && mate.session.isStreaming) {
+					await mate.session.abort();
+				}
+				mate.unsubscribe?.();
+				mate.session.dispose();
+			} catch (error) {
+				console.error(`Failed to clean up teammate ${mate.name}: ${error}`);
+			} finally {
+				mate.status = "shutdown";
+				count++;
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * Handle Escape inside dashboard mode.
+	 *
+	 * The dashboard is a view, not an interrupt button. Escape should return to
+	 * chat without killing teammates; explicit teardown goes through team_shutdown
+	 * or normal session shutdown.
+	 *
 	 * @param ctx - Extension context
 	 * @returns void
 	 */
 	function handleDashboardEscape(ctx: ExtensionContext): void {
-		if (dashboardCancelInFlight) return;
-		void (async () => {
-			dashboardCancelInFlight = true;
-			try {
-				const cancelled = await abortRunningTeammates();
-				if (cancelled > 0) {
-					ctx.ui.notify(
-						`Cancelled ${cancelled} running teammate${cancelled === 1 ? "" : "s"}. Press Esc again to close dashboard.`,
-						"warning"
-					);
-					return;
-				}
-				if (!dashboardEnabled) return;
-				disableDashboard(ctx, false);
-				ctx.ui.notify("Team dashboard disabled.", "info");
-			} finally {
-				dashboardCancelInFlight = false;
-			}
-		})();
+		if (!dashboardEnabled) return;
+		disableDashboard(ctx, false);
+		ctx.ui.notify("Team dashboard disabled. Teammates keep running.", "info");
 	}
 
 	/**
@@ -256,7 +275,6 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 	 * @returns void
 	 */
 	function disableDashboard(ctx: ExtensionContext, notify = true): void {
-		dashboardCancelInFlight = false;
 		dashboardEnabled = false;
 		stopDashboardTicker();
 		setDashboardRenderCallback(undefined);
@@ -289,6 +307,7 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		cwd = ctx.cwd;
+		refreshArchivedTeamStore();
 		publishTeamSnapshots();
 		publishDashboardState();
 	});
@@ -301,20 +320,10 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 	// Archive all teams on session shutdown (preserves tasks for future recovery)
 	pi.on("session_shutdown", async () => {
 		for (const [name, team] of getTeams() as Map<string, Team<Teammate>>) {
-			for (const [, mate] of team.teammates) {
-				try {
-					if (mate.session.isStreaming) await mate.session.abort();
-					mate.unsubscribe?.();
-					mate.session.dispose();
-				} catch (err) {
-					console.error(`Failed to clean up teammate ${mate.name}: ${err}`);
-				}
-				mate.status = "shutdown";
-			}
+			await disposeTeamSessions(team, true);
 			removeTeamView(name);
-			archiveTeam(name);
+			archiveRuntimeTeam(name);
 		}
-		dashboardCancelInFlight = false;
 		dashboardEnabled = false;
 		stopDashboardTicker();
 		setDashboardRenderCallback(undefined);
@@ -334,21 +343,9 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 		for (const [name, team] of getTeams() as Map<string, Team<Teammate>>) {
 			const hasActiveWork = [...team.teammates.values()].some((m) => m.status === "working");
 			if (hasActiveWork) continue;
-
-			// All teammates finished — clean up and archive
-			for (const [, mate] of team.teammates) {
-				if (mate.status === "idle") {
-					try {
-						mate.unsubscribe?.();
-						mate.session.dispose();
-					} catch {
-						// Best-effort cleanup
-					}
-					mate.status = "shutdown";
-				}
-			}
+			await disposeTeamSessions(team, false);
 			removeTeamView(name);
-			archiveTeam(name);
+			archiveRuntimeTeam(name);
 		}
 	});
 
@@ -388,9 +385,24 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 			name: Type.String({ description: "Team name (unique)" }),
 		}),
 		async execute(_toolCallId, params) {
+			refreshArchivedTeamStore();
 			if (getTeams().has(params.name)) {
 				return {
 					content: [{ type: "text", text: `Team "${params.name}" already exists.` }],
+					details: {},
+					isError: true,
+				};
+			}
+			if (getArchivedTeams().has(params.name)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								`Team "${params.name}" already exists as an archive. ` +
+								"Use team_resume to continue it or choose a new name.",
+						},
+					],
 					details: {},
 					isError: true,
 				};
@@ -492,16 +504,27 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 		description: [
 			"Spawn a teammate with their own agent session, shared task board access, and inter-agent messaging.",
 			"They get standard coding tools plus team coordination tools.",
+			"Optionally load a named agent template for prompt/frontmatter defaults.",
 			"After spawning, use team_send to give them initial instructions.",
 		].join(" "),
 		parameters: Type.Object({
+			agent: Type.Optional(
+				Type.String({
+					description: "Optional agent template name to load from user/project agent directories.",
+				})
+			),
 			team: Type.String({ description: "Team name" }),
 			name: Type.String({ description: "Teammate name (unique within team)" }),
-			role: Type.String({ description: "Role/description (guides their behavior)" }),
+			role: Type.Optional(
+				Type.String({
+					description:
+						"Role/description (guides behavior). Optional when agent is provided; otherwise required.",
+				})
+			),
 			model: Type.Optional(
 				Type.String({
 					description:
-						"Explicit model ID (fuzzy matched). When omitted, auto-routes based on role complexity.",
+						"Explicit model ID (fuzzy matched). When omitted, auto-routes based on role complexity or agent template.",
 				})
 			),
 			modelScope: Type.Optional(
@@ -510,10 +533,16 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 						'Constrain auto-routing to a model family (e.g. "codex", "gemini"). Ignored when explicit model is set.',
 				})
 			),
+			thinkingLevel: Type.Optional(
+				Type.String({
+					description:
+						"Optional teammate thinking level: off, low, medium, or high. Defaults to the parent session when available.",
+				})
+			),
 			tools: Type.Optional(
 				Type.Array(Type.String(), {
 					description:
-						"Standard tool names: read, bash, edit, write, grep, find, ls. Default: all coding tools.",
+						"Standard tool names: read, bash, edit, write, grep, find, ls. Default: all coding tools or the agent template allowlist.",
 				})
 			),
 		}),
@@ -538,19 +567,37 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 					isError: true,
 				};
 			}
+			if (!params.role && !params.agent) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "team_spawn requires either a role or an agent template.",
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
+
+			const inheritedThinkingLevel = (
+				ctx as { getThinkingLevel?: () => string | undefined } | undefined
+			)?.getThinkingLevel?.();
 
 			try {
-				const mate = await spawnTeammateSession(
+				const mate = await spawnTeammateSession({
+					agentName: params.agent,
 					cwd,
+					hints: params.modelScope ? { modelScope: params.modelScope } : undefined,
+					modelOverride: params.model,
+					name: params.name,
+					parentModelId: ctx?.model?.id,
+					piEvents: pi.events,
+					role: params.role,
 					team,
-					params.name,
-					params.role,
-					params.model,
-					params.tools,
-					pi.events,
-					params.modelScope ? { modelScope: params.modelScope } : undefined,
-					ctx?.model?.id
-				);
+					thinkingLevel: params.thinkingLevel ?? inheritedThinkingLevel,
+					toolNames: params.tools,
+				});
 				mate.unsubscribe = bindDashboardSessionTracking(team.name, mate.name, mate.session);
 				const dashboardActivity = getDashboardActivity();
 				dashboardActivity.touch(team.name, mate.name);
@@ -801,23 +848,9 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 				};
 			}
 
-			let count = 0;
-			for (const [, mate] of team.teammates) {
-				try {
-					if (mate.session.isStreaming) await mate.session.abort();
-					mate.unsubscribe?.();
-					mate.session.dispose();
-					mate.status = "shutdown";
-					count++;
-				} catch (err) {
-					console.error(`Failed to clean up teammate ${mate.name}: ${err}`);
-					mate.status = "shutdown";
-					count++;
-				}
-			}
-
+			const count = await disposeTeamSessions(team, true);
 			removeTeamView(params.team);
-			archiveTeam(params.team);
+			archiveRuntimeTeam(params.team);
 			return {
 				content: [
 					{
@@ -857,6 +890,8 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 			),
 		}),
 		async execute(_toolCallId, params) {
+			refreshArchivedTeamStore();
+
 			// List mode — show all archived teams
 			if (!params.team) {
 				const archives = getArchivedTeams();
@@ -917,6 +952,12 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 				}
 			}
 
+			try {
+				deleteArchivedTeamFromDisk(params.team);
+			} catch (error) {
+				console.error(`Failed to delete archived team ${params.team}: ${error}`);
+			}
+			refreshArchivedTeamStore();
 			notifyDashboardChanged();
 			return {
 				content: [

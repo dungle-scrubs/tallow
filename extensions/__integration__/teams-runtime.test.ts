@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../test-utils/extension-harness.js";
+import { writeArchivedTeamToDisk } from "../teams-tool/archive-store.js";
 import type { Teammate } from "../teams-tool/state/types.js";
 import {
 	addTaskToBoard,
@@ -127,9 +131,24 @@ beforeEach(() => {
 	getArchivedTeams().clear();
 });
 
+let savedTallowDir: string | undefined;
+let tmpHome: string;
+
+beforeEach(() => {
+	savedTallowDir = process.env.TALLOW_CODING_AGENT_DIR;
+	tmpHome = mkdtempSync(join(tmpdir(), "tallow-teams-integration-"));
+	process.env.TALLOW_CODING_AGENT_DIR = tmpHome;
+});
+
 afterEach(() => {
 	getTeams().clear();
 	getArchivedTeams().clear();
+	if (savedTallowDir === undefined) {
+		delete process.env.TALLOW_CODING_AGENT_DIR;
+	} else {
+		process.env.TALLOW_CODING_AGENT_DIR = savedTallowDir;
+	}
+	rmSync(tmpHome, { force: true, recursive: true });
 });
 
 describe("Teams runtime wiring", () => {
@@ -205,7 +224,9 @@ describe("Teams runtime wiring", () => {
 		const task = addTaskToBoard(team, "Resume me", "desc", []);
 		task.status = "claimed";
 		task.assignee = "alice";
-		archiveTeam(team.name);
+		const archived = archiveTeam(team.name);
+		expect(archived).toBeDefined();
+		writeArchivedTeamToDisk(archived!);
 
 		const resume = getTool(harness, "team_resume");
 
