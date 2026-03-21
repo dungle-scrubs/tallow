@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Api, Model } from "@mariozechner/pi-ai";
 import {
+	AUTOCOMPLETE_COMMAND_PREFIXES,
 	AUTOCOMPLETE_FALLBACKS,
 	type AutocompleteConfig,
 	AutocompleteEngine,
@@ -15,6 +16,7 @@ import {
 	resolveAutocompleteModel,
 	tryResolveModel,
 } from "../autocomplete.js";
+import { buildLoopAutocompletePrompt, selectAutocompletePrompt } from "../index.js";
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -224,6 +226,24 @@ describe("AutocompleteEngine.shouldTrigger", () => {
 	test("rejects slash commands", () => {
 		const { engine } = createTestEngine({});
 		expect(engine.shouldTrigger("/help")).toBe(false);
+		expect(engine.shouldTrigger("/clear")).toBe(false);
+		expect(engine.shouldTrigger("/debug")).toBe(false);
+	});
+
+	test("allows /loop with content after prefix", () => {
+		const { engine } = createTestEngine({});
+		expect(engine.shouldTrigger("/loop check ci")).toBe(true);
+		expect(engine.shouldTrigger("/loop run tests every 30s")).toBe(true);
+	});
+
+	test("rejects bare /loop without trailing content", () => {
+		const { engine } = createTestEngine({});
+		expect(engine.shouldTrigger("/loop")).toBe(false);
+		expect(engine.shouldTrigger("/loop ")).toBe(false);
+	});
+
+	test("AUTOCOMPLETE_COMMAND_PREFIXES includes /loop", () => {
+		expect(AUTOCOMPLETE_COMMAND_PREFIXES).toContain("/loop ");
 	});
 
 	test("rejects when disabled", () => {
@@ -502,5 +522,92 @@ describe("AutocompleteEngine conversation context", () => {
 		engine.trigger("hello");
 		await waitForDebounce();
 		expect(receivedContext).toBeNull();
+	});
+});
+
+// ─── /loop autocomplete integration ─────────────────────────────────────────
+
+describe("/loop autocomplete", () => {
+	let engine: AutocompleteEngine;
+
+	afterEach(() => {
+		engine?.dispose();
+	});
+
+	test("triggers autocomplete for /loop commands", async () => {
+		const calls: string[] = [];
+		const result = createTestEngine({
+			config: { debounceMs: 5 },
+			completionFn: async (_m, _k, input) => {
+				calls.push(input);
+				return " every 2m until CI is green";
+			},
+			currentText: "/loop check ci",
+		});
+		engine = result.engine;
+
+		engine.trigger("/loop check ci");
+		await waitForDebounce();
+		expect(calls).toEqual(["/loop check ci"]);
+		expect(result.ghostTexts).toEqual([" every 2m until CI is green"]);
+	});
+
+	test("does not trigger for non-allowlisted slash commands", async () => {
+		const calls: string[] = [];
+		const result = createTestEngine({
+			config: { debounceMs: 5 },
+			completionFn: async (_m, _k, input) => {
+				calls.push(input);
+				return "completion";
+			},
+		});
+		engine = result.engine;
+
+		engine.trigger("/help something");
+		await waitForDebounce();
+		expect(calls.length).toBe(0);
+	});
+});
+
+// ─── Prompt selection ────────────────────────────────────────────────────────
+
+describe("selectAutocompletePrompt", () => {
+	test("returns loop prompt for /loop prefix", () => {
+		const prompt = selectAutocompletePrompt("/loop check ci", null);
+		expect(prompt).toContain("/loop");
+		expect(prompt).toContain("natural language");
+		expect(prompt).not.toContain("developer message");
+	});
+
+	test("returns general prompt for non-loop input", () => {
+		const prompt = selectAutocompletePrompt("refactor the auth", null);
+		expect(prompt).toContain("developer");
+		expect(prompt).not.toContain("/loop");
+	});
+
+	test("loop prompt includes conversation context when available", () => {
+		const ctx = { recentExchanges: "User: checking CI\n\nAssistant: it failed" };
+		const prompt = selectAutocompletePrompt("/loop check", ctx);
+		expect(prompt).toContain("checking CI");
+	});
+
+	test("general prompt includes conversation context when available", () => {
+		const ctx = { recentExchanges: "User: fix auth\n\nAssistant: done" };
+		const prompt = selectAutocompletePrompt("now also", ctx);
+		expect(prompt).toContain("fix auth");
+	});
+});
+
+describe("buildLoopAutocompletePrompt", () => {
+	test("includes example loop patterns", () => {
+		const prompt = buildLoopAutocompletePrompt(null);
+		expect(prompt).toContain("every 2m");
+		expect(prompt).toContain("until");
+		expect(prompt).toContain("observable");
+	});
+
+	test("warns against vague conditions", () => {
+		const prompt = buildLoopAutocompletePrompt(null);
+		expect(prompt).toContain("vague");
 	});
 });
