@@ -19,7 +19,6 @@
  * {@link registerTasksExtension}.  Domain logic lives in sibling modules.
  */
 
-import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { registerTasksExtension } from "./commands/register-tasks-extension.js";
 import { TaskListStore } from "./state/index.js";
@@ -31,7 +30,7 @@ export type { AgentIdentity } from "./agents/index.js";
 export { classifyAgent } from "./agents/index.js";
 export { _extractTasksFromText, escapeRegex, findCompletedTasks } from "./parsing/index.js";
 export type { Task, TaskComment, TaskStatus, TasksState } from "./state/index.js";
-export { shouldClearOnAgentEnd } from "./state/index.js";
+export { buildSessionTaskGroupName, shouldClearOnAgentEnd } from "./state/index.js";
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 
@@ -42,16 +41,7 @@ export { shouldClearOnAgentEnd } from "./state/index.js";
  */
 export default function tasksExtension(pi: ExtensionAPI): void {
 	const isSubagent = process.env.PI_IS_SUBAGENT === "1";
-
-	// Auto-generate a shared task-group name so subagents can coordinate via a
-	// file-backed store. PI_TEAM_NAME stays as the env var for backward compatibility.
-	const teamName =
-		process.env.PI_TEAM_NAME ?? (isSubagent ? null : `task-group-${randomUUID().slice(0, 8)}`);
-	if (teamName && !process.env.PI_TEAM_NAME) {
-		// Set on process.env so child subagents inherit it automatically
-		process.env.PI_TEAM_NAME = teamName;
-	}
-
+	const teamName = isSubagent ? (process.env.PI_TEAM_NAME ?? null) : null;
 	const store = new TaskListStore(teamName);
 	registerTasksExtension(pi, store, teamName);
 }
