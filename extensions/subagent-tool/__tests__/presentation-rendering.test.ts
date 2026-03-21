@@ -133,7 +133,7 @@ describe("subagent presentation rendering", () => {
 		expect(rendered).toContain("<dim>Implement authentication flow with retry handling</dim>");
 	});
 
-	it("keeps long parallel call previews informative without dumping the full tail", () => {
+	it("renders parallel call header without inlining task text", () => {
 		const component = tool.renderCall?.(
 			{
 				tasks: [
@@ -152,7 +152,8 @@ describe("subagent presentation rendering", () => {
 
 		const rendered = renderComponent(component);
 		expect(rendered).toContain("<accent>parallel (1 tasks)</accent>");
-		expect(rendered).toContain("KEEP_THIS_SEGMENT_VISIBLE");
+		// Parallel renderCall shows header + metadata only — no inline task preview
+		expect(rendered).not.toContain("KEEP_THIS_SEGMENT_VISIBLE");
 		expect(rendered).not.toContain("END_MARKER_SHOULD_TRUNCATE");
 	});
 
