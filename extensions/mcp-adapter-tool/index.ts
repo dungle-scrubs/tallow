@@ -1752,7 +1752,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
 		return { systemPrompt: event.systemPrompt + lines.join("\n") };
 	});
 
-	pi.on("session_shutdown" as never, async () => {
+	pi.on("session_shutdown", async () => {
 		resetRuntimeState();
 	});
 
