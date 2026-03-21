@@ -6,7 +6,7 @@
       "name": "tallow",
       "dependencies": {
         "@clack/prompts": "^1.1.0",
-        "@dungle-scrubs/synapse": "0.1.6",
+        "@dungle-scrubs/synapse": "0.1.8",
         "@mariozechner/pi-coding-agent": "0.61.1",
         "@mariozechner/pi-tui": "workspace:*",
         "@opentelemetry/api": "^1.9.0",
@@ -149,7 +149,7 @@
 
     "@clack/prompts": ["@clack/prompts@1.1.0", "", { "dependencies": { "@clack/core": "1.1.0", "sisteransi": "^1.0.5" } }, "sha512-pkqbPGtohJAvm4Dphs2M8xE29ggupihHdy1x84HNojZuMtFsHiUlRvqD24tM2+XmI+61LlfNceM3Wr7U5QES5g=="],
 
-    "@dungle-scrubs/synapse": ["@dungle-scrubs/synapse@0.1.6", "", { "peerDependencies": { "@mariozechner/pi-ai": ">=0.50.0" }, "bin": { "synapse": "dist/cli.js" } }, "sha512-gZxBNLwuWkpvl6BM5yf6GnnufbMd9vudT+IIpWkIwH5asakpmOyp2oxasdaGuta0wzMfhO/U/8M+EpgOwZOS0w=="],
+    "@dungle-scrubs/synapse": ["@dungle-scrubs/synapse@0.1.8", "", { "peerDependencies": { "@mariozechner/pi-ai": ">=0.50.0" }, "bin": { "synapse": "dist/cli.js" } }, "sha512-ihmf3TgJz9RU/Lz/eG9DpNjFslsQNn1jn4ID6rzeBpZfm0vWOhSrZ4xJqdVSSCndBaGgY9YOQB4VX10aH6C5aw=="],
 
     "@google/genai": ["@google/genai@1.40.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-fhIww8smT0QYRX78qWOiz/nIQhHMF5wXOrlXvj33HBrz3vKDBb+wibLcEmTA+L9dmPD4KmfNr7UF3LDQVTXNjA=="],
 
