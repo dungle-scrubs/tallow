@@ -185,7 +185,7 @@ export default function (pi: ExtensionAPI) {
 	// Kill all running background subagents on session shutdown (SIGTERM during user input).
 	// Unlike agent_end, this fires when the entire session is exiting — we don't need to
 	// retain results, just ensure orphaned subagent processes are terminated promptly.
-	pi.on("session_shutdown" as never, async () => {
+	pi.on("session_shutdown", async () => {
 		let mutated = false;
 		for (const [_id, bg] of backgroundSubagents) {
 			if (bg.status === "running" && bg.process && !bg.process.killed) {
@@ -694,6 +694,7 @@ async function executeParallel(
 	const allResults: SingleResult[] = new Array(tasks.length);
 
 	// Initialize placeholder results
+	const parallelStartTime = Date.now();
 	for (let i = 0; i < tasks.length; i++) {
 		allResults[i] = {
 			agent: tasks[i].agent,
@@ -712,6 +713,7 @@ async function executeParallel(
 				turns: 0,
 				denials: 0,
 			},
+			startTime: parallelStartTime,
 		};
 	}
 
@@ -1549,7 +1551,14 @@ function renderSingleResult(
 		: isError
 			? theme.fg("error", getIcon("error"))
 			: theme.fg("success", getIcon("success"));
-	const statusLabel = isRunning ? "running" : isError ? "failed" : "completed";
+	const statusLabel =
+		isRunning && r.startTime
+			? `running ${formatDuration(Date.now() - r.startTime)}`
+			: isRunning
+				? "running"
+				: isError
+					? "failed"
+					: "completed";
 	const headerLine = formatSubagentHeader(theme, statusLabel, r.agent, icon);
 	const metaLine = formatMetaLine(theme, [
 		`source:${r.agentSource}`,
@@ -1772,11 +1781,13 @@ function renderCentipedeResult(
 				stepResult?.agent ?? details.centipedeSteps?.[si]?.agent ?? `step ${stepNum}`;
 			const stepStatus = !stepResult
 				? "pending"
-				: stepResult.exitCode === -1
-					? "running"
-					: isResultError(stepResult)
-						? "failed"
-						: "completed";
+				: stepResult.exitCode === -1 && stepResult.startTime
+					? `running ${formatDuration(Date.now() - stepResult.startTime)}`
+					: stepResult.exitCode === -1
+						? "running"
+						: isResultError(stepResult)
+							? "failed"
+							: "completed";
 			const stepStatusRole = !stepResult
 				? "meta"
 				: stepResult.exitCode === -1
@@ -1877,11 +1888,13 @@ function renderCentipedeResult(
 		const stem = isLast ? "   " : `${formatPresentationText(theme, "meta", "│")}  `;
 		const stepStatus = !stepResult
 			? "pending"
-			: stepResult.exitCode === -1
-				? "running"
-				: isResultError(stepResult)
-					? "failed"
-					: "done";
+			: stepResult.exitCode === -1 && stepResult.startTime
+				? `running ${formatDuration(Date.now() - stepResult.startTime)}`
+				: stepResult.exitCode === -1
+					? "running"
+					: isResultError(stepResult)
+						? "failed"
+						: "done";
 		const statusRole = !stepResult
 			? "meta"
 			: stepResult.exitCode === -1
@@ -1964,7 +1977,12 @@ function renderParallelResult(
 
 		for (const result of details.results) {
 			const resultState = getParallelResultState(result);
-			const resultStatus = resultState === "completed" ? "completed" : resultState;
+			const resultStatus =
+				resultState === "completed"
+					? "completed"
+					: resultState === "running" && result.startTime
+						? `running ${formatDuration(Date.now() - result.startTime)}`
+						: resultState;
 			const resultStatusRole =
 				resultState === "failed"
 					? "status_error"
@@ -2063,7 +2081,12 @@ function renderParallelResult(
 		const branch = formatPresentationText(theme, "meta", isLast ? "└─" : "├─");
 		const stem = isLast ? "   " : `${formatPresentationText(theme, "meta", "│")}  `;
 		const resultState = getParallelResultState(result);
-		const resultStatus = resultState === "completed" ? "done" : resultState;
+		const resultStatus =
+			resultState === "completed"
+				? "done"
+				: resultState === "running" && result.startTime
+					? `running ${formatDuration(Date.now() - result.startTime)}`
+					: resultState;
 		const statusRole =
 			resultState === "failed"
 				? "status_error"

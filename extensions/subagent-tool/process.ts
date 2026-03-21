@@ -1347,6 +1347,7 @@ export async function runSingleAgent(
 		},
 		model: agent.model,
 		step,
+		startTime: Date.now(),
 	};
 
 	/** Timestamp of the last emitted update, used for throttling. */
