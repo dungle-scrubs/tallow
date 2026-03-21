@@ -1128,8 +1128,6 @@ interface DisplayRenderOptions {
  * Shared preview budgets for compact subagent presentation lines.
  */
 const SUBAGENT_PREVIEW_LIMITS = {
-	callCentipedeStep: 90,
-	callParallelTask: 90,
 	collapsedParallelResult: 88,
 } as const;
 
@@ -1403,25 +1401,6 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 			model ? `model:${model}` : undefined,
 		]);
 		if (metaLine) appendSection(lines, [metaLine]);
-
-		const previewLines = centipedeArr.slice(0, 3).map((step, index) => {
-			const task = step.task.replace(/\{previous\}/g, "").trim();
-			const preview = toCompactPreview(
-				task || "(uses previous output)",
-				SUBAGENT_PREVIEW_LIMITS.callCentipedeStep
-			);
-			const modelTag = formatModelTag(theme, step.model);
-			const identity = modelTag
-				? `${formatSubagentIdentity(step.agent)} ${modelTag}`
-				: formatSubagentIdentity(step.agent);
-			return `${formatPresentationText(theme, "meta", `${index + 1}.`)} ${identity} ${formatPresentationText(theme, "process_output", preview)}`;
-		});
-		if (previewLines.length > 0) appendSection(lines, previewLines, { blankBefore: true });
-		if (centipedeArr.length > 3) {
-			appendSection(lines, [
-				formatPresentationText(theme, "hint", `… +${centipedeArr.length - 3} more steps`),
-			]);
-		}
 		return new Text(lines.join("\n"), 0, 0);
 	}
 
@@ -1432,21 +1411,6 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 			model ? `model:${model}` : undefined,
 		]);
 		if (metaLine) appendSection(lines, [metaLine]);
-
-		const previewLines = tasksArr.slice(0, 2).map((task, index) => {
-			const taskPreview = toCompactPreview(task.task, SUBAGENT_PREVIEW_LIMITS.callParallelTask);
-			const modelTag = formatModelTag(theme, task.model);
-			const identity = modelTag
-				? `${formatSubagentIdentity(task.agent)} ${modelTag}`
-				: formatSubagentIdentity(task.agent);
-			return `${formatPresentationText(theme, "meta", `${index + 1}.`)} ${identity} ${formatPresentationText(theme, "process_output", taskPreview)}`;
-		});
-		if (previewLines.length > 0) appendSection(lines, previewLines, { blankBefore: true });
-		if (tasksArr.length > 2) {
-			appendSection(lines, [
-				formatPresentationText(theme, "hint", `… +${tasksArr.length - 2} more tasks`),
-			]);
-		}
 		return new Text(lines.join("\n"), 0, 0);
 	}
 
