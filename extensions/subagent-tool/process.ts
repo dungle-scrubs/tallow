@@ -1049,8 +1049,13 @@ export async function spawnBackgroundSubagent(
 		buffer = lines.pop() || "";
 		for (const line of lines) {
 			if (!line.trim()) continue;
+			// Strip leading terminal escape sequences — see foreground processLine.
+			let cleaned = line;
+			const jsonStart = cleaned.indexOf("{");
+			if (jsonStart > 0) cleaned = cleaned.slice(jsonStart);
+			else if (jsonStart < 0) continue;
 			try {
-				const event = JSON.parse(line);
+				const event = JSON.parse(cleaned);
 
 				// Emit subagent_tool_call when tool starts
 				if (event.type === "tool_call_start") {
@@ -1120,13 +1125,18 @@ export async function spawnBackgroundSubagent(
 
 	proc.on("close", (code) => {
 		if (buffer.trim()) {
-			try {
-				const event = JSON.parse(buffer);
-				if (event.type === "message_end" && event.message) {
-					result.messages.push(event.message);
+			let cleaned = buffer;
+			const jsonStart = cleaned.indexOf("{");
+			if (jsonStart > 0) cleaned = cleaned.slice(jsonStart);
+			if (jsonStart >= 0) {
+				try {
+					const event = JSON.parse(cleaned);
+					if (event.type === "message_end" && event.message) {
+						result.messages.push(event.message);
+					}
+				} catch {
+					/* ignore */
 				}
-			} catch {
-				/* ignore */
 			}
 		}
 		const finalOutput = getFinalOutput(result.messages);
@@ -1508,10 +1518,18 @@ export async function runSingleAgent(
 
 			const processLine = (line: string) => {
 				if (!line.trim()) return;
+				// Strip leading terminal escape sequences (e.g. OSC 1337 SetUserVar)
+				// that may leak into stdout when extensions write directly to
+				// process.stdout in JSON-mode child processes. Without this,
+				// JSON.parse silently fails and heartbeat events are lost.
+				let cleaned = line;
+				const jsonStart = cleaned.indexOf("{");
+				if (jsonStart > 0) cleaned = cleaned.slice(jsonStart);
+				else if (jsonStart < 0) return;
 				// biome-ignore lint/suspicious/noExplicitAny: pi subagent JSON protocol has dynamic shape
 				let event: Record<string, any>;
 				try {
-					event = JSON.parse(line);
+					event = JSON.parse(cleaned);
 				} catch {
 					return;
 				}
