@@ -261,8 +261,8 @@ describe("subagent presentation rendering", () => {
 		if (!component) throw new Error("subagent.renderResult returned undefined");
 
 		const rendered = renderComponent(component);
-		expect(rendered).toContain("<b><toolTitle>subagent</toolTitle></b>");
-		expect(rendered).toContain("<accent>parallel</accent>");
+		// Result no longer repeats the "subagent parallel" header (call header already shows it)
+		expect(rendered).not.toContain("<toolTitle>subagent</toolTitle>");
 		expect(rendered).toContain("├─");
 		expect(rendered).toContain("└─");
 		expect(rendered).toContain("<dim>(gpt-5.1)</dim>");

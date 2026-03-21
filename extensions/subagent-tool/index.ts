@@ -1758,17 +1758,25 @@ function renderCentipedeResult(
 		: failCount > 0
 			? theme.fg("error", getIcon("error"))
 			: theme.fg("success", getIcon("success"));
+	const earliestStart = details.results.reduce(
+		(min, r) => (r.startTime && r.startTime < min ? r.startTime : min),
+		Number.POSITIVE_INFINITY
+	);
+	const elapsed = Number.isFinite(earliestStart)
+		? formatDuration(Date.now() - earliestStart)
+		: undefined;
 	const summaryLine = formatMetaLine(theme, [
 		`${successCount + failCount}/${totalSteps} done`,
 		runningCount > 0 ? `${runningCount} running` : undefined,
 		failCount > 0 ? `${failCount} failed` : undefined,
+		elapsed,
 	]);
 
 	if (expanded) {
 		const container = new Container();
-		const headerLines: string[] = [formatSubagentHeader(theme, "centipede", undefined, icon)];
-		if (summaryLine) appendSection(headerLines, [summaryLine]);
-		container.addChild(new Text(headerLines.join("\n"), 0, 0));
+		const headerLines: string[] = [];
+		if (summaryLine) headerLines.push(`${icon} ${summaryLine}`);
+		if (headerLines.length > 0) container.addChild(new Text(headerLines.join("\n"), 0, 0));
 
 		for (let si = 0; si < totalSteps; si++) {
 			const stepNum = si + 1;
@@ -1872,8 +1880,8 @@ function renderCentipedeResult(
 		return container;
 	}
 
-	const lines: string[] = [formatSubagentHeader(theme, "centipede", undefined, icon)];
-	if (summaryLine) appendSection(lines, [summaryLine]);
+	const lines: string[] = [];
+	if (summaryLine) lines.push(`${icon} ${summaryLine}`);
 
 	for (let si = 0; si < totalSteps; si++) {
 		const stepNum = si + 1;
@@ -1957,19 +1965,27 @@ function renderParallelResult(
 			: counts.stalled > 0
 				? theme.fg("warning", getIcon("blocked"))
 				: theme.fg("success", getIcon("success"));
+	const earliestStart = details.results.reduce(
+		(min, r) => (r.startTime && r.startTime < min ? r.startTime : min),
+		Number.POSITIVE_INFINITY
+	);
+	const elapsed = Number.isFinite(earliestStart)
+		? formatDuration(Date.now() - earliestStart)
+		: undefined;
 	const summaryLine = formatMetaLine(theme, [
 		`${counts.finished}/${details.results.length} done`,
 		`${counts.completed} completed`,
 		counts.failed > 0 ? `${counts.failed} failed` : undefined,
 		`${counts.stalled} stalled`,
 		counts.running > 0 ? `${counts.running} running` : undefined,
+		elapsed,
 	]);
 
 	if (expanded && !isRunning) {
 		const container = new Container();
-		const headerLines = [formatSubagentHeader(theme, "parallel", undefined, icon)];
-		if (summaryLine) appendSection(headerLines, [summaryLine]);
-		container.addChild(new Text(headerLines.join("\n"), 0, 0));
+		const headerLines: string[] = [];
+		if (summaryLine) headerLines.push(`${icon} ${summaryLine}`);
+		if (headerLines.length > 0) container.addChild(new Text(headerLines.join("\n"), 0, 0));
 
 		for (const result of details.results) {
 			const resultState = getParallelResultState(result);
@@ -2068,8 +2084,8 @@ function renderParallelResult(
 		return container;
 	}
 
-	const lines: string[] = [formatSubagentHeader(theme, "parallel", undefined, icon)];
-	if (summaryLine) appendSection(lines, [summaryLine]);
+	const lines: string[] = [];
+	if (summaryLine) lines.push(`${icon} ${summaryLine}`);
 
 	for (let index = 0; index < details.results.length; index++) {
 		const result = details.results[index];
