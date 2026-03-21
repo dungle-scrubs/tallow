@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.27](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.26...tallow-v0.8.27) (2026-03-21)
+
+
+### Added
+
+* **lazy-init:** add circuit-breaker with exponential backoff ([96ce8e2](https://github.com/dungle-scrubs/tallow/commit/96ce8e235a196edf44c5be65490f7b1fd5e2db67))
+* **subagent:** add wall-clock timeout for foreground agents ([e5c92a8](https://github.com/dungle-scrubs/tallow/commit/e5c92a8de1ee27c00833607aacd81d60bbae8bba))
+* **subagent:** kill background subagents on session_shutdown ([7c367b4](https://github.com/dungle-scrubs/tallow/commit/7c367b41cfb9babbc62dac614eb341b6b101a382))
+* **subagent:** show elapsed time on running agents ([8e921f8](https://github.com/dungle-scrubs/tallow/commit/8e921f880dd9965be8cdaf28355e913940f631ad))
+
+
+### Fixed
+
+* **changelog:** move [Unreleased] above released versions ([e0aaf2f](https://github.com/dungle-scrubs/tallow/commit/e0aaf2ff018ba3f614cfe29703c2c78e70591545))
+* **core:** remove dead cwd_changed listener and session_shutdown type casts ([b0685cb](https://github.com/dungle-scrubs/tallow/commit/b0685cb2ed46d3937077dc6c204ed5218d96d258))
+* **interactive:** clear stale loader in getUserInput as last-resort safety net ([342d8d5](https://github.com/dungle-scrubs/tallow/commit/342d8d50f159123685cbfa79572667b747f6f3bf))
+* **interactive:** stop loader and force render at agent_end to clear stale spinner ([5800f4a](https://github.com/dungle-scrubs/tallow/commit/5800f4a8dff4fa17e08c87b19c99b5ff6b172e18))
+* patch out COMPACTION_DEBUG console.error in upstream dist ([66888bc](https://github.com/dungle-scrubs/tallow/commit/66888bcb6f907e11b4bf87a84deff1a934c8a2da))
+* **subagent:** cap stalled-worker retry phase with wall-clock timeout ([c7921e0](https://github.com/dungle-scrubs/tallow/commit/c7921e0b3122454f253381a042de0bacce639b88))
+* **subagent:** deduplicate parallel/centipede header and add elapsed time ([5c0ac9c](https://github.com/dungle-scrubs/tallow/commit/5c0ac9c11b4863517d45d2034f250eab183ab49d))
+* **subagent:** hide default scope:user from call meta line ([ed9c04b](https://github.com/dungle-scrubs/tallow/commit/ed9c04bb9d0ed54ccebf4a1a0a6c4bc34213d159))
+* **subagent:** place -p flag last to fix arg parsing ([86a8d26](https://github.com/dungle-scrubs/tallow/commit/86a8d26e8dab2dde4d4825181559e4fda1811ad6))
+* **subagent:** remove duplicate task list from renderCall ([fe0248a](https://github.com/dungle-scrubs/tallow/commit/fe0248ad785e48582f989d4718adfbfbd98daf56))
+* **tasks:** scope task groups to session context ([992b2e6](https://github.com/dungle-scrubs/tallow/commit/992b2e62188b78005e859e053f0a91821c1b9576))
+* **teams-tool:** prevent stale chat lines bleeding into team dashboard ([f2adbee](https://github.com/dungle-scrubs/tallow/commit/f2adbeefb2d3de16ef21099dcf7d088da9338390))
+* **teams:** suppress dashboard notification when no teams are active ([aaca53b](https://github.com/dungle-scrubs/tallow/commit/aaca53bb0c1c78915b988a031a72dbbe2223807c))
+* **test:** align subagent presentation test with current renderCall behavior ([3e045e5](https://github.com/dungle-scrubs/tallow/commit/3e045e5096977d468c361f1d8f6a5d82ce6bdf57))
+* **wezterm-notify:** keep tab active during tool execution ([afebd6a](https://github.com/dungle-scrubs/tallow/commit/afebd6a2f660b75d4d717fab3b7809d964df8f8a))
+
+
+### Changed
+
+* **pid:** extract shared PID schema into src/pid-schema.ts ([109a63d](https://github.com/dungle-scrubs/tallow/commit/109a63d4cc5f77980ab2123391b69570e25d9a1f))
+* **subagent:** extract buildSubprocessArgs from inline arg construction ([e973524](https://github.com/dungle-scrubs/tallow/commit/e973524243e438eaf299f18c8145e8bb37b26166))
+* **subagent:** reduce watchdog timeouts to limit stall duration ([a8cb972](https://github.com/dungle-scrubs/tallow/commit/a8cb972b461741a4cc837c576fa61fa67760b65a))
+
+
+### Documentation
+
+* **agents:** fix stale config, sdk, and TUI conflict surface descriptions ([179004c](https://github.com/dungle-scrubs/tallow/commit/179004cdc0ec4047a03b453aacd2d1be7f08c36d))
+
+
+### Maintenance
+
+* add .afk/ to gitignore ([42a5819](https://github.com/dungle-scrubs/tallow/commit/42a58190082bb44f0500f87ce884c247079eeaf9))
+* add unit tests for 10 previously untested extensions ([1f6ba1e](https://github.com/dungle-scrubs/tallow/commit/1f6ba1e547188f161d4f671e84a91b1f2f253edb))
+* **e2e:** add integration tests for repository audit findings ([948116e](https://github.com/dungle-scrubs/tallow/commit/948116e7a292a23269417b4a541c6b475170cc14))
+* **subagent:** add regression tests for subprocess arg ordering ([be7806c](https://github.com/dungle-scrubs/tallow/commit/be7806c7c322f384a9c04115384c7372c83402de))
+
 ## [Unreleased]
 
 ### Added

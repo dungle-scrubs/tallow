@@ -8,7 +8,7 @@ import { createRuntimePathProvider, type RuntimePathProvider } from "./runtime-p
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export const APP_NAME = "tallow";
-export const TALLOW_VERSION = "0.8.26"; // x-release-please-version
+export const TALLOW_VERSION = "0.8.27"; // x-release-please-version
 export const CONFIG_DIR = ".tallow";
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
