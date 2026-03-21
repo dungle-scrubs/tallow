@@ -8,7 +8,7 @@
  * Runs as a postinstall hook so the patch survives `bun install`.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const TARGETS = [
 	"node_modules/@mariozechner/pi-coding-agent/dist/core/agent-session.js",
