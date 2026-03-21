@@ -1414,14 +1414,16 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 
 	const agentName = (args.agent as string) || "...";
 	const task = typeof args.task === "string" ? args.task : "...";
-	appendSection(lines, [formatSubagentHeader(theme, "single", agentName)]);
+	// Single mode: skip the redundant "subagent single" header — the result
+	// renderer already shows "subagent running <duration> <agent>" with a spinner.
+	// Just show the task preview so the user sees what was requested.
 	const metaLine = formatMetaLine(theme, [scopeEntry, model ? `model:${model}` : undefined]);
 	if (metaLine) appendSection(lines, [metaLine]);
 	appendSection(
 		lines,
 		[formatPresentationText(theme, "process_output", toCompactPreview(task, 200))],
 		{
-			blankBefore: true,
+			blankBefore: false,
 		}
 	);
 	return new Text(lines.join("\n"), 0, 0);
