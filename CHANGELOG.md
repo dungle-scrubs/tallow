@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.8.27](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.26...tallow-v0.8.27) (2026-03-21)
 
 
@@ -53,8 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * add unit tests for 10 previously untested extensions ([1f6ba1e](https://github.com/dungle-scrubs/tallow/commit/1f6ba1e547188f161d4f671e84a91b1f2f253edb))
 * **e2e:** add integration tests for repository audit findings ([948116e](https://github.com/dungle-scrubs/tallow/commit/948116e7a292a23269417b4a541c6b475170cc14))
 * **subagent:** add regression tests for subprocess arg ordering ([be7806c](https://github.com/dungle-scrubs/tallow/commit/be7806c7c322f384a9c04115384c7372c83402de))
-
-## [Unreleased]
 
 ### Added
 
