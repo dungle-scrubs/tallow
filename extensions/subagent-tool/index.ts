@@ -1395,23 +1395,19 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 		args.tasks as { agent: string; model?: string; task: string }[] | string | undefined
 	);
 	const lines: string[] = [];
+	// Only show scope when non-default (user is the default)
+	const scopeEntry = scope !== "user" ? `scope:${scope}` : undefined;
 
 	if (centipedeArr && centipedeArr.length > 0) {
 		appendSection(lines, [formatSubagentHeader(theme, `centipede (${centipedeArr.length} steps)`)]);
-		const metaLine = formatMetaLine(theme, [
-			`scope:${scope}`,
-			model ? `model:${model}` : undefined,
-		]);
+		const metaLine = formatMetaLine(theme, [scopeEntry, model ? `model:${model}` : undefined]);
 		if (metaLine) appendSection(lines, [metaLine]);
 		return new Text(lines.join("\n"), 0, 0);
 	}
 
 	if (tasksArr && tasksArr.length > 0) {
 		appendSection(lines, [formatSubagentHeader(theme, `parallel (${tasksArr.length} tasks)`)]);
-		const metaLine = formatMetaLine(theme, [
-			`scope:${scope}`,
-			model ? `model:${model}` : undefined,
-		]);
+		const metaLine = formatMetaLine(theme, [scopeEntry, model ? `model:${model}` : undefined]);
 		if (metaLine) appendSection(lines, [metaLine]);
 		return new Text(lines.join("\n"), 0, 0);
 	}
@@ -1419,7 +1415,7 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 	const agentName = (args.agent as string) || "...";
 	const task = typeof args.task === "string" ? args.task : "...";
 	appendSection(lines, [formatSubagentHeader(theme, "single", agentName)]);
-	const metaLine = formatMetaLine(theme, [`scope:${scope}`, model ? `model:${model}` : undefined]);
+	const metaLine = formatMetaLine(theme, [scopeEntry, model ? `model:${model}` : undefined]);
 	if (metaLine) appendSection(lines, [metaLine]);
 	appendSection(
 		lines,
