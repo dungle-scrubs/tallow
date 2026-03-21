@@ -489,11 +489,11 @@ export const SUBAGENT_RETRY_PHASE_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_RETRY_PHASE_
 
 /** Default watchdog thresholds used by foreground subagents in runSingleAgent. */
 export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
-	inactivityTimeoutMs: 180_000,
+	inactivityTimeoutMs: 120_000, // 2 min without any heartbeat event
 	killGraceMs: 5_000,
-	startupTimeoutMs: 60_000,
-	toolExecutionTimeoutMs: 600_000,
-	wallClockTimeoutMs: 900_000, // 15 minutes
+	startupTimeoutMs: 30_000, // 30s to emit first event
+	toolExecutionTimeoutMs: 300_000, // 5 min per tool call (was 10 min)
+	wallClockTimeoutMs: 480_000, // 8 min total (was 15 min)
 };
 
 /**
@@ -503,7 +503,7 @@ export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
  * the parent for 30+ minutes. This limits the total retry phase so the
  * parent agent can recover sooner.
  */
-export const DEFAULT_RETRY_PHASE_TIMEOUT_MS = 300_000; // 5 minutes
+export const DEFAULT_RETRY_PHASE_TIMEOUT_MS = 180_000; // 3 minutes
 
 /** How often the foreground watchdog checks for stalled subagents. */
 const FOREGROUND_WATCHDOG_CHECK_INTERVAL_MS = 500;
