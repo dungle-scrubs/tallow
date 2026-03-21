@@ -113,7 +113,7 @@ describe("subagent presentation rendering", () => {
 		else process.env.PI_IS_SUBAGENT = originalSubagentFlag;
 	});
 
-	it("renders single-call hierarchy with prominent title/action/identity and muted metadata", () => {
+	it("renders single-call with task preview and metadata (no redundant header)", () => {
 		const component = tool.renderCall?.(
 			{
 				agent: "worker",
@@ -126,9 +126,9 @@ describe("subagent presentation rendering", () => {
 		if (!component) throw new Error("subagent.renderCall returned undefined");
 
 		const rendered = renderComponent(component);
-		expect(rendered).toContain("<b><toolTitle>subagent</toolTitle></b>");
-		expect(rendered).toContain("<accent>single</accent>");
-		expect(rendered).toContain("worker");
+		// Single mode no longer renders "subagent single <agent>" header —
+		// the result renderer already shows "subagent running <duration> <agent>"
+		expect(rendered).not.toContain("<accent>single</accent>");
 		expect(rendered).toContain("<muted>scope:both • model:claude-sonnet</muted>");
 		expect(rendered).toContain("<dim>Implement authentication flow with retry handling</dim>");
 	});
