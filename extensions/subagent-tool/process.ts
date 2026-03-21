@@ -449,6 +449,7 @@ export interface ForegroundWatchdogThresholds {
 	readonly killGraceMs: number;
 	readonly startupTimeoutMs: number;
 	readonly toolExecutionTimeoutMs: number;
+	readonly wallClockTimeoutMs: number;
 }
 
 /** Heartbeat state tracked by the foreground subagent liveness watchdog. */
@@ -464,7 +465,7 @@ export type WatchdogStatus =
 	| {
 			readonly elapsedMs: number;
 			readonly kind: "stalled";
-			readonly phase: "inactivity" | "startup" | "tool_execution";
+			readonly phase: "inactivity" | "startup" | "tool_execution" | "wall_clock";
 			readonly timeoutMs: number;
 	  };
 
@@ -476,6 +477,9 @@ export const SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_INACTIVITY_TI
 
 /** Env var overriding the foreground timeout while a tool call is still running. */
 export const SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS";
+
+/** Env var overriding the total wall-clock timeout per foreground subagent. */
+export const SUBAGENT_WALL_CLOCK_TIMEOUT_MS_ENV = "TALLOW_SUBAGENT_WALL_CLOCK_TIMEOUT_MS";
 
 /** Env var overriding the SIGTERM → SIGKILL grace window for stalled workers. */
 export const SUBAGENT_WATCHDOG_KILL_GRACE_MS_ENV = "TALLOW_SUBAGENT_WATCHDOG_KILL_GRACE_MS";
@@ -489,6 +493,7 @@ export const FOREGROUND_WATCHDOG_THRESHOLDS: ForegroundWatchdogThresholds = {
 	killGraceMs: 5_000,
 	startupTimeoutMs: 60_000,
 	toolExecutionTimeoutMs: 600_000,
+	wallClockTimeoutMs: 900_000, // 15 minutes
 };
 
 /**
@@ -544,6 +549,9 @@ export function resolveForegroundWatchdogThresholds(
 		toolExecutionTimeoutMs:
 			parseTimeoutOverrideMs(env[SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV]) ??
 			FOREGROUND_WATCHDOG_THRESHOLDS.toolExecutionTimeoutMs,
+		wallClockTimeoutMs:
+			parseTimeoutOverrideMs(env[SUBAGENT_WALL_CLOCK_TIMEOUT_MS_ENV]) ??
+			FOREGROUND_WATCHDOG_THRESHOLDS.wallClockTimeoutMs,
 	};
 }
 
@@ -644,6 +652,18 @@ export function evaluateWatchdogStatus(
 	nowMs: number,
 	thresholds: ForegroundWatchdogThresholds
 ): WatchdogStatus {
+	// Wall-clock timeout: hard cap on total execution time, regardless of activity.
+	// Catches "slow but active" agents that keep making tool calls without finishing.
+	const totalElapsedMs = nowMs - state.startedAtMs;
+	if (totalElapsedMs >= thresholds.wallClockTimeoutMs) {
+		return {
+			elapsedMs: totalElapsedMs,
+			kind: "stalled",
+			phase: "wall_clock",
+			timeoutMs: thresholds.wallClockTimeoutMs,
+		};
+	}
+
 	if (state.lastHeartbeatAtMs === null) {
 		const startupElapsedMs = nowMs - state.startedAtMs;
 		if (startupElapsedMs >= thresholds.startupTimeoutMs) {
@@ -680,6 +700,15 @@ export function createStalledSubagentErrorMessage(
 	stalledStatus: Extract<WatchdogStatus, { kind: "stalled" }>
 ): string {
 	const timeoutSeconds = Math.max(1, Math.round(stalledStatus.timeoutMs / 1000));
+	const timeoutMinutes = Math.round(timeoutSeconds / 60);
+	if (stalledStatus.phase === "wall_clock") {
+		return (
+			`Subagent terminated after ${timeoutMinutes}m wall-clock timeout. ` +
+			"The agent was still active but exceeded the maximum allowed execution time. " +
+			"Action: break the task into smaller pieces, or increase " +
+			"TALLOW_SUBAGENT_WALL_CLOCK_TIMEOUT_MS for legitimately long work."
+		);
+	}
 	const phaseDescription =
 		stalledStatus.phase === "startup"
 			? "no startup activity was received"

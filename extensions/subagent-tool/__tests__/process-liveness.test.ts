@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { SingleResult } from "../formatting.js";
 import {
 	applyStalledClassification,
+	createStalledSubagentErrorMessage,
 	createWatchdogHeartbeatState,
 	evaluateWatchdogStatus,
 	type ForegroundWatchdogThresholds,
@@ -13,6 +14,7 @@ import {
 	SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV,
 	SUBAGENT_STARTUP_TIMEOUT_MS_ENV,
 	SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV,
+	SUBAGENT_WALL_CLOCK_TIMEOUT_MS_ENV,
 	terminateProcessWithGrace,
 } from "../process.js";
 
@@ -21,6 +23,7 @@ const TEST_THRESHOLDS: ForegroundWatchdogThresholds = {
 	killGraceMs: 50,
 	startupTimeoutMs: 1_000,
 	toolExecutionTimeoutMs: 8_000,
+	wallClockTimeoutMs: 20_000,
 };
 
 interface ManualTimer {
@@ -124,6 +127,52 @@ describe("foreground subagent liveness watchdog", () => {
 		expect(state.activeToolCalls).toBe(0);
 	});
 
+	it("terminates active agents that exceed wall-clock timeout", () => {
+		let state = createWatchdogHeartbeatState(0);
+		// Agent is actively producing heartbeats — not stalled by liveness checks
+		state = recordWatchdogHeartbeat(state, 5_000);
+		state = recordWatchdogHeartbeat(state, 10_000);
+		state = recordWatchdogHeartbeat(state, 15_000);
+		state = recordWatchdogHeartbeat(state, 19_000);
+		expect(evaluateWatchdogStatus(state, 19_500, TEST_THRESHOLDS).kind).toBe("healthy");
+
+		// Wall-clock timeout (20s) fires even though last heartbeat was recent
+		const status = evaluateWatchdogStatus(state, 20_100, TEST_THRESHOLDS);
+		expect(status.kind).toBe("stalled");
+		if (status.kind !== "stalled") return;
+		expect(status.phase).toBe("wall_clock");
+	});
+
+	it("wall-clock timeout takes precedence over other stall phases", () => {
+		// Agent started and never sent a heartbeat — would normally be startup stall
+		const state = createWatchdogHeartbeatState(0);
+		// But wall-clock fires first when both thresholds are exceeded
+		const status = evaluateWatchdogStatus(state, 25_000, TEST_THRESHOLDS);
+		expect(status.kind).toBe("stalled");
+		if (status.kind !== "stalled") return;
+		expect(status.phase).toBe("wall_clock");
+	});
+
+	it("wall-clock error message differs from liveness stall messages", () => {
+		const wallClockMsg = createStalledSubagentErrorMessage({
+			elapsedMs: 900_000,
+			kind: "stalled",
+			phase: "wall_clock",
+			timeoutMs: 900_000,
+		});
+		expect(wallClockMsg).toContain("wall-clock timeout");
+		expect(wallClockMsg).toContain("TALLOW_SUBAGENT_WALL_CLOCK_TIMEOUT_MS");
+		expect(wallClockMsg).not.toContain("slow provider startup");
+
+		const startupMsg = createStalledSubagentErrorMessage({
+			elapsedMs: 60_000,
+			kind: "stalled",
+			phase: "startup",
+			timeoutMs: 60_000,
+		});
+		expect(startupMsg).not.toContain("wall-clock");
+	});
+
 	it("treats message updates and tool execution events as heartbeats", () => {
 		expect(isWatchdogHeartbeatEventType("message_update")).toBe(true);
 		expect(isWatchdogHeartbeatEventType("tool_execution_start")).toBe(true);
@@ -136,10 +185,12 @@ describe("foreground subagent liveness watchdog", () => {
 			[SUBAGENT_INACTIVITY_TIMEOUT_MS_ENV]: "7000",
 			[SUBAGENT_STARTUP_TIMEOUT_MS_ENV]: "3000",
 			[SUBAGENT_TOOL_EXECUTION_TIMEOUT_MS_ENV]: "11000",
+			[SUBAGENT_WALL_CLOCK_TIMEOUT_MS_ENV]: "1800000",
 		});
 		expect(thresholds.inactivityTimeoutMs).toBe(7_000);
 		expect(thresholds.startupTimeoutMs).toBe(3_000);
 		expect(thresholds.toolExecutionTimeoutMs).toBe(11_000);
+		expect(thresholds.wallClockTimeoutMs).toBe(1_800_000);
 	});
 
 	it("stalled termination escalates and resolves without hanging", async () => {
