@@ -154,7 +154,8 @@ export function buildConversationContext(
 // ─── LLM completion ──────────────────────────────────────────────────────────
 
 /**
- * Build the system prompt for autocomplete, optionally including conversation context.
+ * Build the system prompt for general autocomplete, optionally including
+ * conversation context.
  *
  * @param context - Recent conversation context, or null
  * @returns System prompt string
@@ -176,6 +177,60 @@ export function buildAutocompleteSystemPrompt(context: ConversationContext | nul
 }
 
 /**
+ * Build a system prompt for `/loop` command autocomplete.
+ *
+ * The prompt teaches the model about natural-language loop syntax so it
+ * suggests good intervals, specific conditions, and actionable tasks.
+ * The user writes in natural language; a separate NL parser converts the
+ * final command into strict `/loop` syntax.
+ *
+ * @param context - Recent conversation context, or null
+ * @returns System prompt string
+ */
+export function buildLoopAutocompletePrompt(context: ConversationContext | null): string {
+	const base =
+		"You are completing a /loop command in a coding CLI. " +
+		"The developer writes loops in natural language. The system parses it automatically.\n\n" +
+		"A loop needs: a task to perform, how often, and optionally when to stop.\n\n" +
+		"Good patterns:\n" +
+		'- "check the latest GitHub Actions run every 2m until CI is green"\n' +
+		'- "run the test suite every 30s until all tests pass"\n' +
+		'- "check deploy health every 1m until all pods are healthy"\n' +
+		'- "monitor build progress every 5m until the build completes"\n' +
+		'- "check disk usage every 10m, max 20 times"\n\n' +
+		"Reply with ONLY the completion text — the part that comes after what they typed. " +
+		"Keep suggestions specific and actionable — avoid vague conditions like 'it works' or 'it's done'. " +
+		"Suggest observable facts the agent can check. " +
+		"If they wrote a task, suggest the interval and condition. " +
+		"If they wrote an interval, suggest a clear task. " +
+		"One line only. Do not repeat what they typed. Do not add formatting or explanations.";
+
+	if (!context) return base;
+
+	return `${base}\n\nRecent conversation for context:\n\n${context.recentExchanges}`;
+}
+
+/**
+ * Select the appropriate system prompt based on the user's partial input.
+ *
+ * Commands with complex syntax (like `/loop`) get specialized prompts that
+ * understand their structure and suggest valid, high-quality completions.
+ *
+ * @param partialInput - Current editor text
+ * @param context - Recent conversation context, or null
+ * @returns System prompt string
+ */
+export function selectAutocompletePrompt(
+	partialInput: string,
+	context: ConversationContext | null
+): string {
+	if (partialInput.startsWith("/loop ")) {
+		return buildLoopAutocompletePrompt(context);
+	}
+	return buildAutocompleteSystemPrompt(context);
+}
+
+/**
  * Call the autocomplete model with the user's partial input and conversation context.
  *
  * @param model - Resolved model object
@@ -193,14 +248,18 @@ async function getCompletion(
 	context: ConversationContext | null
 ): Promise<string | null> {
 	try {
+		const userMessage = partialInput.startsWith("/loop ")
+			? `Complete this /loop command:\n${partialInput}`
+			: `Complete this developer message:\n${partialInput}`;
+
 		const result = await completeSimple(
 			model,
 			{
-				systemPrompt: buildAutocompleteSystemPrompt(context),
+				systemPrompt: selectAutocompletePrompt(partialInput, context),
 				messages: [
 					{
 						role: "user",
-						content: `Complete this developer message:\n${partialInput}`,
+						content: userMessage,
 						timestamp: Date.now(),
 					},
 				],

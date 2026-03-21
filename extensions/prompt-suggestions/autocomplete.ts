@@ -71,6 +71,15 @@ export const AUTOCOMPLETE_FALLBACKS = [
 /** Minimum characters before autocomplete triggers. */
 export const MIN_CHARS = 4;
 
+/**
+ * Command prefixes that opt into autocomplete despite starting with `/`.
+ *
+ * Most slash commands are short and syntactically rigid — autocomplete adds
+ * noise. But commands with complex, hard-to-remember syntax (like `/loop`)
+ * benefit from inline suggestions.
+ */
+export const AUTOCOMPLETE_COMMAND_PREFIXES = ["/loop "] as const;
+
 // ─── Model resolution ────────────────────────────────────────────────────────
 
 /**
@@ -196,6 +205,10 @@ export class AutocompleteEngine {
 	/**
 	 * Determine whether a partial input should trigger autocomplete.
 	 *
+	 * Most `/` prefixed input is rejected (slash commands are short and rigid).
+	 * Commands listed in {@link AUTOCOMPLETE_COMMAND_PREFIXES} are allowed
+	 * because their syntax is complex enough to benefit from inline suggestions.
+	 *
 	 * @param input - Current editor text
 	 * @returns true if autocomplete should be scheduled
 	 */
@@ -203,7 +216,12 @@ export class AutocompleteEngine {
 		if (!this.config.enabled) return false;
 		if (this._busy) return false;
 		if (this._callCount >= this.config.maxCalls) return false;
-		if (input.startsWith("/")) return false;
+		if (input.startsWith("/")) {
+			const isAllowed = AUTOCOMPLETE_COMMAND_PREFIXES.some(
+				(prefix) => input.startsWith(prefix) && input.length > prefix.length
+			);
+			if (!isAllowed) return false;
+		}
 		if (input.trim().length < MIN_CHARS) return false;
 		return true;
 	}
