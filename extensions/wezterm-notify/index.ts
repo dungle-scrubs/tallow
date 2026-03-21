@@ -175,11 +175,13 @@ export function createWeztermNotifyLifecycle(
 			enterWorking();
 		},
 		onAgentEnd: () => {
-			leaveWorking("done");
+			// Intentional no-op: tools may still be executing after the model
+			// finishes generating (e.g. subagent parallel runs). Stay "working"
+			// until the input prompt appears, which signals the turn is truly done.
 		},
 		onInput: () => {
-			if (!isWorking) {
-				leaveWorking("");
+			if (isWorking) {
+				leaveWorking("done");
 			}
 
 			return { action: "continue" as const };
