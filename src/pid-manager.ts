@@ -20,36 +20,23 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { getRuntimePathProvider } from "./config.js";
+import {
+	isPidEntry,
+	isSessionOwner,
+	type PidEntry,
+	type SessionOwner,
+	type SessionPidFile,
+	toOwnerKey,
+} from "./pid-schema.js";
 import type { RuntimePathProvider } from "./runtime-path-provider.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-/** A single tracked child process entry. */
-export interface PidEntry {
-	pid: number;
-	command: string;
-	ownerPid?: number;
-	ownerStartedAt?: string;
-	processStartedAt?: string;
-	startedAt: number;
-}
-
-/** Owner identity for a session-scoped PID file. */
-interface SessionOwner {
-	pid: number;
-	startedAt?: string;
-}
+export type { PidEntry };
 
 /** Legacy global PID file schema (version 1). */
 interface LegacyPidFile {
 	version: 1;
-	entries: PidEntry[];
-}
-
-/** Session-scoped PID file schema (version 2). */
-interface SessionPidFile {
-	version: 2;
-	owner: SessionOwner;
 	entries: PidEntry[];
 }
 
@@ -89,46 +76,6 @@ function getSessionPidDirPath(): string {
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 /**
- * Check whether a value matches the PID entry schema.
- *
- * @param value - Unknown JSON value to validate
- * @returns True when the value is a supported PID entry
- */
-function isPidEntry(value: unknown): value is PidEntry {
-	if (!value || typeof value !== "object") return false;
-	const candidate = value as Record<string, unknown>;
-	if (typeof candidate.pid !== "number") return false;
-	if (typeof candidate.command !== "string") return false;
-	if (typeof candidate.startedAt !== "number") return false;
-	if (candidate.ownerPid != null && typeof candidate.ownerPid !== "number") {
-		return false;
-	}
-	if (candidate.ownerStartedAt != null && typeof candidate.ownerStartedAt !== "string") {
-		return false;
-	}
-	if (candidate.processStartedAt != null && typeof candidate.processStartedAt !== "string") {
-		return false;
-	}
-	return true;
-}
-
-/**
- * Check whether a value matches the session-owner schema.
- *
- * @param value - Unknown JSON value to validate
- * @returns True when the value is a valid session owner
- */
-function isSessionOwner(value: unknown): value is SessionOwner {
-	if (!value || typeof value !== "object") return false;
-	const candidate = value as Record<string, unknown>;
-	if (typeof candidate.pid !== "number") return false;
-	if (candidate.startedAt != null && typeof candidate.startedAt !== "string") {
-		return false;
-	}
-	return true;
-}
-
-/**
  * Validate and normalize raw legacy PID file JSON.
  *
  * @param value - Parsed JSON value
@@ -165,21 +112,6 @@ function normalizeSessionPidFile(value: unknown): SessionPidFile | null {
 }
 
 // ─── Path helpers ────────────────────────────────────────────────────────────
-
-/**
- * Convert owner metadata into a filesystem-safe key.
- *
- * @param owner - Session owner identity
- * @returns Filename-safe owner key
- */
-function toOwnerKey(owner: SessionOwner): string {
-	const startedAtSlug = (owner.startedAt ?? "unknown")
-		.replace(/[^A-Za-z0-9._-]+/g, "-")
-		.replace(/-+/g, "-")
-		.replace(/^-+|-+$/g, "");
-	const normalizedStartedAt = startedAtSlug.length > 0 ? startedAtSlug : "unknown";
-	return `${owner.pid}-${normalizedStartedAt}`;
-}
 
 /**
  * Resolve a session PID file path for a given owner.
