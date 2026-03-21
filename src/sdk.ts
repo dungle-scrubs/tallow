@@ -2211,12 +2211,10 @@ function createProjectTrustExtension(
 		pi.events.on(PROJECT_TRUST_API_CHANNELS.apiRequest, publishTrustApi);
 		publishTrustApi();
 
-		pi.events.on("tallow:cwd_changed", (payload: unknown) => {
-			if (!payload || typeof payload !== "object") return;
-			const nextCwd = (payload as { cwd?: unknown }).cwd;
-			if (typeof nextCwd !== "string" || nextCwd.length === 0) return;
-			syncTrustContext(nextCwd);
-		});
+		// NOTE: Trust context does not need a cwd_changed event listener.
+		// The cd-tool always routes through the workspace-transition host,
+		// which recreates the entire session via createTallowSession() —
+		// trust is re-resolved from scratch in every new session.
 
 		pi.on("session_start", async (_event, ctx) => {
 			const currentTrust = syncTrustContext(currentCwd);
