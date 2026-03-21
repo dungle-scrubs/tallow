@@ -10,7 +10,7 @@
  *   - `until "<condition>"` — the model evaluates the condition each
  *     iteration and calls the `loop_stop` tool when it's met
  *
- * Usage:
+ * Usage (strict syntax):
  *   /loop 5m check the deploy status
  *   /loop 1m x10 run the test suite
  *   /loop 2m until "build is done" check fuse index progress
@@ -18,6 +18,11 @@
  *   /loop 30s /stats
  *   /loop stop
  *   /loop status
+ *
+ * Natural language (auto-parsed → prefilled for confirmation):
+ *   /loop check ci every 2 minutes until it passes
+ *   /loop run tests every 30 seconds, stop when they pass
+ *   /loop monitor deploy health every minute, max 20 tries
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
@@ -277,6 +282,201 @@ export function parseLoopArgs(args: string): LoopArgs | { action: "error"; messa
 	};
 }
 
+// ── Natural Language Parsing ──────────────────────────────────────────────────
+
+/** Map from human-readable unit names to short suffixes. */
+const UNIT_ALIASES: Readonly<Record<string, string>> = {
+	s: "s",
+	sec: "s",
+	secs: "s",
+	second: "s",
+	seconds: "s",
+	m: "m",
+	min: "m",
+	mins: "m",
+	minute: "m",
+	minutes: "m",
+	h: "h",
+	hr: "h",
+	hrs: "h",
+	hour: "h",
+	hours: "h",
+};
+
+/**
+ * Attempt to parse a natural-language loop description into structured params.
+ *
+ * Extracts interval, condition, max iterations, and prompt from free-form
+ * text using regex heuristics. Returns null if no interval can be identified.
+ *
+ * This is a best-effort parser — the result is prefilled in the editor for
+ * the user to review, not executed directly.
+ *
+ * @param text - Free-form loop description
+ * @returns Parsed start params, or null if no interval was found
+ */
+export function parseNaturalLanguageLoop(
+	text: string
+): Extract<LoopArgs, { action: "start" }> | null {
+	let work = text;
+
+	// ── Interval extraction ──────────────────────────────────────────
+
+	let intervalMs: number | null = null;
+	let intervalLabel: string | null = null;
+
+	// "every <N> <unit-word>" — e.g. "every 2 minutes", "every 30 seconds"
+	const everyLong = work.match(
+		/\bevery\s+(\d+)\s+(seconds?|secs?|sec|minutes?|mins?|min|hours?|hrs?|hr)\b/i
+	);
+	if (everyLong) {
+		const val = parseInt(everyLong[1], 10);
+		const unit = UNIT_ALIASES[everyLong[2].toLowerCase()];
+		if (unit && val > 0) {
+			intervalMs = val * UNIT_MS[unit];
+			intervalLabel = `${val}${unit}`;
+			work = work.replace(everyLong[0], " ");
+		}
+	}
+
+	// "every <unit-word>" without number → 1 unit. e.g. "every minute"
+	if (!intervalMs) {
+		const everyBare = work.match(/\bevery\s+(second|minute|hour)\b/i);
+		if (everyBare) {
+			const unit = UNIT_ALIASES[everyBare[1].toLowerCase()];
+			if (unit) {
+				intervalMs = UNIT_MS[unit];
+				intervalLabel = `1${unit}`;
+				work = work.replace(everyBare[0], " ");
+			}
+		}
+	}
+
+	// "every <N><short-unit>" — e.g. "every 2m"
+	if (!intervalMs) {
+		const everyShort = work.match(/\bevery\s+(\d+)(s|m|h)\b/i);
+		if (everyShort) {
+			const val = parseInt(everyShort[1], 10);
+			const unit = everyShort[2].toLowerCase();
+			if (val > 0) {
+				intervalMs = val * UNIT_MS[unit];
+				intervalLabel = `${val}${unit}`;
+				work = work.replace(everyShort[0], " ");
+			}
+		}
+	}
+
+	// Bare "<N><short-unit>" without "every" — e.g. "2m"
+	if (!intervalMs) {
+		const bare = work.match(/\b(\d+)(s|m|h)\b/);
+		if (bare) {
+			const val = parseInt(bare[1], 10);
+			const unit = bare[2].toLowerCase();
+			if (val > 0) {
+				intervalMs = val * UNIT_MS[unit];
+				intervalLabel = `${val}${unit}`;
+				work = work.replace(bare[0], " ");
+			}
+		}
+	}
+
+	if (!intervalMs || !intervalLabel) return null;
+
+	// ── Max iterations extraction ────────────────────────────────────
+
+	let maxIterations: number | null = null;
+
+	// "x<N>"
+	const xN = work.match(/\bx(\d+)\b/);
+	if (xN) {
+		const n = parseInt(xN[1], 10);
+		if (n > 0) {
+			maxIterations = n;
+			work = work.replace(xN[0], " ");
+		}
+	}
+
+	// "<N> times" / "max <N> [times|tries|iterations]" / "at most <N> [...]"
+	if (maxIterations === null) {
+		const alt = work.match(
+			/\b(?:(\d+)\s+times|max\s+(\d+)(?:\s+(?:times|tries|iterations))?|at\s+most\s+(\d+)(?:\s+(?:times|tries|iterations))?)\b/i
+		);
+		if (alt) {
+			const n = parseInt(alt[1] || alt[2] || alt[3], 10);
+			if (n > 0) {
+				maxIterations = n;
+				work = work.replace(alt[0], " ");
+			}
+		}
+	}
+
+	// ── Condition extraction ─────────────────────────────────────────
+	// Uses greedy match for the prompt prefix so multi-"until" text picks
+	// the last occurrence (the actual condition marker).
+
+	let untilCondition: string | null = null;
+	let promptText: string;
+
+	// Case 1: condition at end (most common) — "check ci until it passes"
+	const endMatch = work.match(/^(.*)\s*[,;]?\s*\b(until|stop\s+when)\s+(.+?)[\s,;.!]*$/i);
+
+	if (endMatch?.[1].trim()) {
+		promptText = endMatch[1];
+		untilCondition = endMatch[3].replace(/^["']|["']$/g, "");
+	} else {
+		// Case 2: condition at start with comma — "until it passes, check ci"
+		const startMatch = work.match(/^\s*\b(until|stop\s+when)\s+(.+?)\s*[,;]\s+(.+?)[\s,;.!]*$/i);
+
+		if (startMatch) {
+			untilCondition = startMatch[2].replace(/^["']|["']$/g, "");
+			promptText = startMatch[3];
+		} else {
+			// No condition marker, or condition-only with no prompt
+			promptText = work;
+		}
+	}
+
+	// ── Clean up ─────────────────────────────────────────────────────
+
+	const prompt = promptText.replace(/[,;]+/g, " ").replace(/\s+/g, " ").trim();
+
+	if (!prompt) return null;
+
+	if (untilCondition) {
+		untilCondition = untilCondition.replace(/\s+/g, " ").trim();
+		if (!untilCondition) untilCondition = null;
+	}
+
+	return {
+		action: "start",
+		intervalMs,
+		intervalLabel,
+		prompt,
+		maxIterations,
+		untilCondition,
+	};
+}
+
+/**
+ * Build a `/loop` command string from structured params.
+ *
+ * Produces valid strict syntax that `parseLoopArgs` can parse.
+ *
+ * @param params - Parsed loop start parameters
+ * @returns Command string like `/loop 2m until "it passes" check ci`
+ */
+export function buildLoopCommand(params: Extract<LoopArgs, { action: "start" }>): string {
+	let cmd = `/loop ${params.intervalLabel}`;
+	if (params.maxIterations !== null) {
+		cmd += ` x${params.maxIterations}`;
+	}
+	if (params.untilCondition) {
+		cmd += ` until "${params.untilCondition}"`;
+	}
+	cmd += ` ${params.prompt}`;
+	return cmd;
+}
+
 // ── Loop Lifecycle ───────────────────────────────────────────────────────────
 
 /**
@@ -469,14 +669,24 @@ export default function loopExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("loop", {
 		description:
 			"Run a prompt on a recurring interval. " +
-			'Syntax: /loop <interval> [x<N>] [until "<condition>"] <prompt>',
+			'Syntax: /loop <interval> [x<N>] [until "<condition>"] <prompt> — ' +
+			"or describe in natural language: /loop check ci every 2m until it passes",
 		handler: async (args, ctx) => {
 			const parsed = parseLoopArgs(args);
 
 			switch (parsed.action) {
-				case "error":
+				case "error": {
+					// Try natural-language fallback before showing the error
+					const nlResult = parseNaturalLanguageLoop(args);
+					if (nlResult) {
+						const command = buildLoopCommand(nlResult);
+						ctx.ui.setEditorText(command);
+						ctx.ui.notify("Loop command generated — review and press Enter to start", "info");
+						return;
+					}
 					ctx.ui.notify(parsed.message, "error");
 					return;
+				}
 
 				case "stop":
 					if (!activeLoop) {
