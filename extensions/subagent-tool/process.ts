@@ -743,6 +743,54 @@ export function terminateProcessWithGrace(
 /** Callback for streaming partial results during subagent execution. */
 export type OnUpdateCallback = (partial: AgentToolResult<SubagentDetails>) => void;
 
+// ── Subprocess Arg Construction ──────────────────────────────────────────────
+
+/** Options for building subprocess CLI arguments. */
+export interface SubprocessArgsOptions {
+	/** Session file path for persistent teammates (omit for --no-session). */
+	session?: string;
+	/** Provider-qualified model display name (e.g. "anthropic/claude-sonnet-4-6"). */
+	modelDisplayName?: string;
+	/** Effective tool allowlist (already filtered by denylist). */
+	tools?: string[];
+	/** Skill names to pass via --skill flags. */
+	skills?: string[];
+	/** Path to temp file containing the system prompt. */
+	systemPromptPath?: string;
+	/** Task text (will be prefixed with "Task: "). */
+	task: string;
+}
+
+/**
+ * Build the CLI argument array for a subagent child process.
+ *
+ * **Invariant:** `-p <task>` is always the last pair in the array.
+ * Commander consumes the next token after `-p` as its required `<prompt>`
+ * value. Placing `-p` before other flags (e.g. `--no-session`) causes
+ * Commander to swallow the flag as the prompt text, leaving the real
+ * task as a stray positional argument.
+ *
+ * @param opts - Subprocess argument options
+ * @returns CLI argument array safe for child_process.spawn
+ */
+export function buildSubprocessArgs(opts: SubprocessArgsOptions): string[] {
+	const args: string[] = opts.session
+		? ["--mode", "json", "--session", opts.session]
+		: ["--mode", "json", "--no-session"];
+
+	if (opts.modelDisplayName) args.push("--model", opts.modelDisplayName);
+	if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
+	if (opts.skills && opts.skills.length > 0) {
+		for (const skill of opts.skills) args.push("--skill", skill);
+	}
+	if (opts.systemPromptPath) args.push("--append-system-prompt", opts.systemPromptPath);
+
+	// CRITICAL: -p must be last — see JSDoc above.
+	args.push("-p", `Task: ${opts.task}`);
+
+	return args;
+}
+
 // ── Background Spawning ──────────────────────────────────────────────────────
 
 /**
@@ -813,22 +861,6 @@ export async function spawnBackgroundSubagent(
 	const agent = { ...resolved.agent, model: routing.model.id };
 	const agentSource = resolved.resolution === "ephemeral" ? ("ephemeral" as const) : agent.source;
 
-	// Build args with -p last so Commander consumes the task text as its value.
-	// Placing -p before other flags (e.g. --no-session) causes Commander to
-	// consume the next flag as -p's value, breaking both session control and
-	// task delivery.
-	const args: string[] = session
-		? ["--mode", "json", "--session", session]
-		: ["--mode", "json", "--no-session"];
-	// Use provider-qualified name (e.g. "openai-codex/gpt-5.1") so the child process
-	// resolves to the exact provider the router selected, not just the first match.
-	if (agent.model) args.push("--model", routing.model.displayName);
-	const effectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
-	if (effectiveTools && effectiveTools.length > 0) args.push("--tools", effectiveTools.join(","));
-	if (agent.skills && agent.skills.length > 0) {
-		for (const skill of agent.skills) args.push("--skill", skill);
-	}
-
 	let tmpPromptDir: string | undefined;
 	let tmpPromptPath: string | undefined;
 
@@ -843,7 +875,6 @@ export async function spawnBackgroundSubagent(
 		const tmp = writePromptToTempFile(agent.name, systemPrompt);
 		tmpPromptDir = tmp.dir;
 		tmpPromptPath = tmp.filePath;
-		args.push("--append-system-prompt", tmpPromptPath);
 	}
 
 	let expandedTask: string;
@@ -854,7 +885,16 @@ export async function spawnBackgroundSubagent(
 		const reason = error instanceof Error ? error.message : String(error);
 		return `Failed to expand task references for ${agentName}: ${reason}`;
 	}
-	args.push("-p", `Task: ${expandedTask}`);
+
+	const effectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
+	const args = buildSubprocessArgs({
+		session,
+		modelDisplayName: agent.model ? routing.model.displayName : undefined,
+		tools: effectiveTools && effectiveTools.length > 0 ? effectiveTools : undefined,
+		skills: agent.skills && agent.skills.length > 0 ? agent.skills : undefined,
+		systemPromptPath: tmpPromptPath,
+		task: expandedTask,
+	});
 
 	const childEnv: Record<string, string> = { ...process.env, PI_IS_SUBAGENT: "1" } as Record<
 		string,
@@ -1240,19 +1280,6 @@ export async function runSingleAgent(
 		background: false,
 	} satisfies SubagentStartEvent);
 
-	// Build args with -p last — see background spawn site for rationale.
-	const args: string[] = session
-		? ["--mode", "json", "--session", session]
-		: ["--mode", "json", "--no-session"];
-	// Use provider-qualified name so the child process resolves to the exact provider.
-	if (agent.model) args.push("--model", routing.model.displayName);
-	const fgEffectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
-	if (fgEffectiveTools && fgEffectiveTools.length > 0)
-		args.push("--tools", fgEffectiveTools.join(","));
-	if (agent.skills && agent.skills.length > 0) {
-		for (const skill of agent.skills) args.push("--skill", skill);
-	}
-
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
 
@@ -1332,11 +1359,18 @@ export async function runSingleAgent(
 			const tmp = writePromptToTempFile(agent.name, fgSystemPrompt);
 			tmpPromptDir = tmp.dir;
 			tmpPromptPath = tmp.filePath;
-			args.push("--append-system-prompt", tmpPromptPath);
 		}
 
 		const expandedTask = await expandFileReferences(task, effectiveCwd);
-		args.push("-p", `Task: ${expandedTask}`);
+		const fgEffectiveTools = computeEffectiveTools(agent.tools, agent.disallowedTools);
+		const args = buildSubprocessArgs({
+			session,
+			modelDisplayName: agent.model ? routing.model.displayName : undefined,
+			tools: fgEffectiveTools && fgEffectiveTools.length > 0 ? fgEffectiveTools : undefined,
+			skills: agent.skills && agent.skills.length > 0 ? agent.skills : undefined,
+			systemPromptPath: tmpPromptPath ?? undefined,
+			task: expandedTask,
+		});
 		let wasAborted = false;
 
 		const fgChildEnv: Record<string, string> = {
