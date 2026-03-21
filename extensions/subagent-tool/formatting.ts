@@ -37,6 +37,8 @@ export interface SingleResult {
 	stopReason?: string;
 	errorMessage?: string;
 	step?: number;
+	/** Timestamp (ms) when this subagent started executing. */
+	startTime?: number;
 	/** Tool names that were denied permission during execution. */
 	deniedTools?: string[];
 }
