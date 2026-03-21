@@ -1076,7 +1076,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
 
 						if (!expanded && truncated) {
 							lines.push(
-								formatPresentationText(theme, "hint", keyHint("expandTools", "to show more"))
+								formatPresentationText(theme, "hint", keyHint("app.tools.expand", "to show more"))
 							);
 						}
 					} else {

@@ -2825,16 +2825,16 @@ function ensureTallowHome(startupProfile: TallowStartupProfile): void {
  * Never bind anything to ctrl+m — it will intercept Enter.
  *
  * Remaps:
- *   cycleModelForward:  ctrl+p → unbound (use ctrl+l model selector instead)
- *   cycleModelBackward: shift+ctrl+p → unbound
- *   toggleSessionSort:  ctrl+s → unbound
- *   toggleSessionPath:  ctrl+p → unbound
+ *   app.model.cycleForward:  ctrl+p → unbound (use ctrl+l model selector instead)
+ *   app.model.cycleBackward: shift+ctrl+p → unbound
+ *   app.session.toggleSort:  ctrl+s → unbound
+ *   app.session.togglePath:  ctrl+p → unbound
  */
 const TALLOW_KEYBINDINGS: Record<string, string | string[]> = {
-	cycleModelForward: [],
-	cycleModelBackward: [],
-	toggleSessionSort: [],
-	toggleSessionPath: [],
+	"app.model.cycleBackward": [],
+	"app.model.cycleForward": [],
+	"app.session.togglePath": [],
+	"app.session.toggleSort": [],
 };
 
 /**

@@ -489,7 +489,11 @@ export default function readSummary(pi: ExtensionAPI): void {
 				const left =
 					formatPresentationText(theme, "identity", icon) +
 					` ${formatPresentationText(theme, "identity", `skill: ${skillName}`)}`;
-				const right = formatPresentationText(theme, "hint", keyHint("expandTools", "to expand"));
+				const right = formatPresentationText(
+					theme,
+					"hint",
+					keyHint("app.tools.expand", "to expand")
+				);
 
 				return {
 					render(width: number): string[] {

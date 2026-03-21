@@ -50,7 +50,15 @@ export {
 	type EditorKeybindingsConfig,
 	EditorKeybindingsManager,
 	getEditorKeybindings,
+	getKeybindings,
+	type Keybinding,
+	type KeybindingDefinition,
+	type Keybindings,
+	type KeybindingsConfig,
+	KeybindingsManager,
 	setEditorKeybindings,
+	setKeybindings,
+	TUI_KEYBINDINGS,
 } from "./keybindings.js";
 // Keyboard input handling
 export {
