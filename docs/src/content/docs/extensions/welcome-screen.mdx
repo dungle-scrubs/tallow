@@ -1,0 +1,41 @@
+---
+title: welcome-screen
+description: ASCII art welcome screen with version display and update notification.
+---
+
+Replaces the default pi framework startup header with a branded
+ASCII art welcome screen. Shows the tallow "T\_" mark in amber,
+the current version, and an update notification when a newer
+version is published to npm.
+
+## What it shows
+
+```
+ ▐████████████▌
+      ████
+      ████  ▐█▌
+   tallow v0.8.26
+```
+
+When a newer version is available on npm, an additional line
+appears below the version:
+
+```
+ update available: v0.8.27
+```
+
+## Version check
+
+The extension fetches the latest version from the npm registry
+on session start (non-blocking, 4-second timeout). The check is
+skipped when `PI_OFFLINE=1` is set.
+
+The header renders immediately with the current version. When the
+registry responds, the header re-renders to include the update
+notification if applicable.
+
+## Design
+
+The logo uses Unicode block characters (█, ▐, ▌) in amber/gold
+ANSI true-color (`38;2;255;191;0`), matching the tallow logo's
+retro CRT terminal aesthetic.
