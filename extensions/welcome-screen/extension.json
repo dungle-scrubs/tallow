@@ -1,0 +1,20 @@
+{
+	"name": "welcome-screen",
+	"version": "0.1.0",
+	"description": "ASCII art welcome screen with version display and update notification",
+	"whenToUse": "Replaces the default startup header with a branded ASCII art welcome screen.",
+	"capabilities": {
+		"events": ["session_start"]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": true,
+		"subprocess": false
+	},
+	"category": "ui",
+	"tags": ["welcome", "header", "startup", "branding"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
