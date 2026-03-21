@@ -151,6 +151,23 @@ export default function welcomeScreenExtension(pi: ExtensionAPI): void {
 			};
 		});
 
+		// Clear the changelog "What's New" children from the header container.
+		// setHeader only replaces the builtInHeader text component — the changelog
+		// section (DynamicBorder, "What's New" heading, Markdown body) lives as
+		// separate children in headerContainer and persists unless removed.
+		// headerContainer is the first child of the root TUI component.
+		queueMicrotask(() => {
+			if (!tuiRef) return;
+			const headerContainer = (tuiRef as unknown as Record<string, unknown>).children as
+				| { length: number }
+				| undefined;
+			if (headerContainer && headerContainer.length > 2) {
+				// Keep [0]=Spacer and [1]=custom header, drop the rest (bottom spacer + changelog)
+				headerContainer.length = 2;
+				tuiRef.requestRender();
+			}
+		});
+
 		// Fire-and-forget version check — re-renders header when resolved
 		fetchLatestVersion().then((latest) => {
 			if (latest && isNewerVersion(TALLOW_VERSION, latest)) {
