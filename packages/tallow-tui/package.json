@@ -1,6 +1,6 @@
 {
 	"name": "@mariozechner/pi-tui",
-	"version": "0.60.0",
+	"version": "0.61.1",
 	"private": true,
 	"description": "Tallow's TUI fork — customizable loader, rounded borders, which-key overlay",
 	"type": "module",

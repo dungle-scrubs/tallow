@@ -1,183 +1,473 @@
 import { type KeyId, matchesKey } from "./keys.js";
 
+/** Modern TUI keybinding identifiers. */
+export interface Keybindings {
+	"tui.editor.cursorDown": true;
+	"tui.editor.cursorLeft": true;
+	"tui.editor.cursorLineEnd": true;
+	"tui.editor.cursorLineStart": true;
+	"tui.editor.cursorRight": true;
+	"tui.editor.cursorUp": true;
+	"tui.editor.cursorWordLeft": true;
+	"tui.editor.cursorWordRight": true;
+	"tui.editor.deleteCharBackward": true;
+	"tui.editor.deleteCharForward": true;
+	"tui.editor.deleteToLineEnd": true;
+	"tui.editor.deleteToLineStart": true;
+	"tui.editor.deleteWordBackward": true;
+	"tui.editor.deleteWordForward": true;
+	"tui.editor.jumpBackward": true;
+	"tui.editor.jumpForward": true;
+	"tui.editor.pageDown": true;
+	"tui.editor.pageUp": true;
+	"tui.editor.undo": true;
+	"tui.editor.yank": true;
+	"tui.editor.yankPop": true;
+	"tui.input.copy": true;
+	"tui.input.newLine": true;
+	"tui.input.submit": true;
+	"tui.input.tab": true;
+	"tui.select.cancel": true;
+	"tui.select.confirm": true;
+	"tui.select.down": true;
+	"tui.select.pageDown": true;
+	"tui.select.pageUp": true;
+	"tui.select.up": true;
+}
+
+const LEGACY_TO_MODERN_KEYBINDINGS = {
+	copy: "tui.input.copy",
+	cursorDown: "tui.editor.cursorDown",
+	cursorLeft: "tui.editor.cursorLeft",
+	cursorLineEnd: "tui.editor.cursorLineEnd",
+	cursorLineStart: "tui.editor.cursorLineStart",
+	cursorRight: "tui.editor.cursorRight",
+	cursorUp: "tui.editor.cursorUp",
+	cursorWordLeft: "tui.editor.cursorWordLeft",
+	cursorWordRight: "tui.editor.cursorWordRight",
+	deleteCharBackward: "tui.editor.deleteCharBackward",
+	deleteCharForward: "tui.editor.deleteCharForward",
+	deleteSession: "app.session.delete",
+	deleteSessionNoninvasive: "app.session.deleteNoninvasive",
+	deleteToLineEnd: "tui.editor.deleteToLineEnd",
+	deleteToLineStart: "tui.editor.deleteToLineStart",
+	deleteWordBackward: "tui.editor.deleteWordBackward",
+	deleteWordForward: "tui.editor.deleteWordForward",
+	expandTools: "app.tools.expand",
+	jumpBackward: "tui.editor.jumpBackward",
+	jumpForward: "tui.editor.jumpForward",
+	newLine: "tui.input.newLine",
+	pageDown: "tui.editor.pageDown",
+	pageUp: "tui.editor.pageUp",
+	renameSession: "app.session.rename",
+	selectCancel: "tui.select.cancel",
+	selectConfirm: "tui.select.confirm",
+	selectDown: "tui.select.down",
+	selectPageDown: "tui.select.pageDown",
+	selectPageUp: "tui.select.pageUp",
+	selectUp: "tui.select.up",
+	submit: "tui.input.submit",
+	tab: "tui.input.tab",
+	toggleSessionPath: "app.session.togglePath",
+	toggleSessionSort: "app.session.toggleSort",
+	undo: "tui.editor.undo",
+	yank: "tui.editor.yank",
+	yankPop: "tui.editor.yankPop",
+} as const;
+
+/** Backward-compatible legacy editor actions. */
+export type EditorAction = keyof typeof LEGACY_TO_MODERN_KEYBINDINGS;
+
+/** Modern keybinding identifier. */
+export type Keybinding = keyof Keybindings | EditorAction;
+
+/** Single keybinding definition with defaults and UI help text. */
+export interface KeybindingDefinition {
+	readonly defaultKeys: KeyId | readonly KeyId[];
+	readonly description: string;
+}
+
+/** User-provided keybinding overrides. */
+export type KeybindingsConfig = Partial<Record<Keybinding, KeyId | readonly KeyId[]>>;
+
+/** Backward-compatible legacy editor config. */
+export type EditorKeybindingsConfig = Partial<Record<EditorAction, KeyId | readonly KeyId[]>>;
+
+/** Default legacy editor keybindings preserved for compatibility. */
+export const DEFAULT_EDITOR_KEYBINDINGS: Required<Record<EditorAction, KeyId | readonly KeyId[]>> =
+	{
+		copy: "ctrl+shift+c",
+		cursorDown: "down",
+		cursorLeft: ["left", "ctrl+b"],
+		cursorLineEnd: ["end", "ctrl+e"],
+		cursorLineStart: ["home", "ctrl+a"],
+		cursorRight: ["right", "ctrl+f"],
+		cursorUp: "up",
+		cursorWordLeft: ["alt+left", "ctrl+left", "alt+b"],
+		cursorWordRight: ["alt+right", "ctrl+right", "alt+f"],
+		deleteCharBackward: "backspace",
+		deleteCharForward: ["delete", "ctrl+d"],
+		deleteSession: "ctrl+d",
+		deleteSessionNoninvasive: "ctrl+backspace",
+		deleteToLineEnd: "ctrl+k",
+		deleteToLineStart: "ctrl+u",
+		deleteWordBackward: ["ctrl+w", "alt+backspace"],
+		deleteWordForward: ["alt+d", "alt+delete"],
+		expandTools: "ctrl+o",
+		jumpBackward: "ctrl+alt+]",
+		jumpForward: "ctrl+]",
+		newLine: "shift+enter",
+		pageDown: "pageDown",
+		pageUp: "pageUp",
+		renameSession: "ctrl+r",
+		selectCancel: ["escape", "ctrl+c"],
+		selectConfirm: "enter",
+		selectDown: "down",
+		selectPageDown: "pageDown",
+		selectPageUp: "pageUp",
+		selectUp: "up",
+		submit: "enter",
+		tab: "tab",
+		toggleSessionPath: "ctrl+p",
+		toggleSessionSort: "ctrl+s",
+		undo: "ctrl+-",
+		yank: "ctrl+y",
+		yankPop: "alt+y",
+	};
+
+/** Modern TUI keybinding definitions consumed by pi-coding-agent 0.61+. */
+export const TUI_KEYBINDINGS = {
+	"tui.editor.cursorDown": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorDown,
+		description: "Move cursor down",
+	},
+	"tui.editor.cursorLeft": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorLeft,
+		description: "Move cursor left",
+	},
+	"tui.editor.cursorLineEnd": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorLineEnd,
+		description: "Move to line end",
+	},
+	"tui.editor.cursorLineStart": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorLineStart,
+		description: "Move to line start",
+	},
+	"tui.editor.cursorRight": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorRight,
+		description: "Move cursor right",
+	},
+	"tui.editor.cursorUp": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorUp,
+		description: "Move cursor up",
+	},
+	"tui.editor.cursorWordLeft": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorWordLeft,
+		description: "Move cursor word left",
+	},
+	"tui.editor.cursorWordRight": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.cursorWordRight,
+		description: "Move cursor word right",
+	},
+	"tui.editor.deleteCharBackward": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.deleteCharBackward,
+		description: "Delete character backward",
+	},
+	"tui.editor.deleteCharForward": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.deleteCharForward,
+		description: "Delete character forward",
+	},
+	"tui.editor.deleteToLineEnd": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.deleteToLineEnd,
+		description: "Delete to line end",
+	},
+	"tui.editor.deleteToLineStart": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.deleteToLineStart,
+		description: "Delete to line start",
+	},
+	"tui.editor.deleteWordBackward": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.deleteWordBackward,
+		description: "Delete word backward",
+	},
+	"tui.editor.deleteWordForward": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.deleteWordForward,
+		description: "Delete word forward",
+	},
+	"tui.editor.jumpBackward": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.jumpBackward,
+		description: "Jump backward to character",
+	},
+	"tui.editor.jumpForward": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.jumpForward,
+		description: "Jump forward to character",
+	},
+	"tui.editor.pageDown": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.pageDown,
+		description: "Page down",
+	},
+	"tui.editor.pageUp": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.pageUp,
+		description: "Page up",
+	},
+	"tui.editor.undo": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.undo,
+		description: "Undo",
+	},
+	"tui.editor.yank": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.yank,
+		description: "Yank",
+	},
+	"tui.editor.yankPop": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.yankPop,
+		description: "Yank pop",
+	},
+	"tui.input.copy": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.copy,
+		description: "Copy selection",
+	},
+	"tui.input.newLine": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.newLine,
+		description: "Insert newline",
+	},
+	"tui.input.submit": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.submit,
+		description: "Submit input",
+	},
+	"tui.input.tab": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.tab,
+		description: "Tab / autocomplete",
+	},
+	"tui.select.cancel": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.selectCancel,
+		description: "Cancel selection",
+	},
+	"tui.select.confirm": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.selectConfirm,
+		description: "Confirm selection",
+	},
+	"tui.select.down": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.selectDown,
+		description: "Move selection down",
+	},
+	"tui.select.pageDown": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.selectPageDown,
+		description: "Selection page down",
+	},
+	"tui.select.pageUp": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.selectPageUp,
+		description: "Selection page up",
+	},
+	"tui.select.up": {
+		defaultKeys: DEFAULT_EDITOR_KEYBINDINGS.selectUp,
+		description: "Move selection up",
+	},
+} as const satisfies Record<keyof Keybindings, KeybindingDefinition>;
+
+type ModernKeybinding = keyof Keybindings;
+
+type NormalizedKeybindingsConfig = Partial<Record<ModernKeybinding, readonly KeyId[]>>;
+
 /**
- * Editor actions that can be bound to keys.
+ * Check whether a keybinding name is a supported modern identifier.
+ *
+ * @param {string} keybinding - Candidate keybinding name.
+ * @returns {keybinding is ModernKeybinding} True when the keybinding exists.
  */
-export type EditorAction =
-	// Cursor movement
-	| "cursorUp"
-	| "cursorDown"
-	| "cursorLeft"
-	| "cursorRight"
-	| "cursorWordLeft"
-	| "cursorWordRight"
-	| "cursorLineStart"
-	| "cursorLineEnd"
-	| "jumpForward"
-	| "jumpBackward"
-	| "pageUp"
-	| "pageDown"
-	// Deletion
-	| "deleteCharBackward"
-	| "deleteCharForward"
-	| "deleteWordBackward"
-	| "deleteWordForward"
-	| "deleteToLineStart"
-	| "deleteToLineEnd"
-	// Text input
-	| "newLine"
-	| "submit"
-	| "tab"
-	// Selection/autocomplete
-	| "selectUp"
-	| "selectDown"
-	| "selectPageUp"
-	| "selectPageDown"
-	| "selectConfirm"
-	| "selectCancel"
-	// Clipboard
-	| "copy"
-	// Kill ring
-	| "yank"
-	| "yankPop"
-	// Undo
-	| "undo"
-	// Tool output
-	| "expandTools"
-	// Session
-	| "toggleSessionPath"
-	| "toggleSessionSort"
-	| "renameSession"
-	| "deleteSession"
-	| "deleteSessionNoninvasive";
-
-// Re-export KeyId from keys.ts
-export type { KeyId };
+function isModernKeybinding(keybinding: string): keybinding is ModernKeybinding {
+	return keybinding in TUI_KEYBINDINGS;
+}
 
 /**
- * Editor keybindings configuration.
+ * Normalize a legacy or modern keybinding identifier to the modern name.
+ *
+ * @param {Keybinding} keybinding - Keybinding identifier to normalize.
+ * @returns {ModernKeybinding | null} Modern keybinding or null when unsupported.
  */
-export type EditorKeybindingsConfig = {
-	[K in EditorAction]?: KeyId | KeyId[];
-};
-
-/**
- * Default editor keybindings.
- */
-export const DEFAULT_EDITOR_KEYBINDINGS: Required<EditorKeybindingsConfig> = {
-	// Cursor movement
-	cursorUp: "up",
-	cursorDown: "down",
-	cursorLeft: ["left", "ctrl+b"],
-	cursorRight: ["right", "ctrl+f"],
-	cursorWordLeft: ["alt+left", "ctrl+left", "alt+b"],
-	cursorWordRight: ["alt+right", "ctrl+right", "alt+f"],
-	cursorLineStart: ["home", "ctrl+a"],
-	cursorLineEnd: ["end", "ctrl+e"],
-	jumpForward: "ctrl+]",
-	jumpBackward: "ctrl+alt+]",
-	pageUp: "pageUp",
-	pageDown: "pageDown",
-	// Deletion
-	deleteCharBackward: "backspace",
-	deleteCharForward: ["delete", "ctrl+d"],
-	deleteWordBackward: ["ctrl+w", "alt+backspace"],
-	deleteWordForward: ["alt+d", "alt+delete"],
-	deleteToLineStart: "ctrl+u",
-	deleteToLineEnd: "ctrl+k",
-	// Text input
-	newLine: "shift+enter",
-	submit: "enter",
-	tab: "tab",
-	// Selection/autocomplete
-	selectUp: "up",
-	selectDown: "down",
-	selectPageUp: "pageUp",
-	selectPageDown: "pageDown",
-	selectConfirm: "enter",
-	selectCancel: ["escape", "ctrl+c"],
-	// Clipboard (ctrl+c in editor is handled as selectCancel/interrupt, not copy)
-	copy: "ctrl+shift+c",
-	// Kill ring
-	yank: "ctrl+y",
-	yankPop: "alt+y",
-	// Undo
-	undo: "ctrl+-",
-	// Tool output
-	expandTools: "ctrl+o",
-	// Session
-	toggleSessionPath: "ctrl+p",
-	toggleSessionSort: "ctrl+s",
-	renameSession: "ctrl+r",
-	deleteSession: "ctrl+d",
-	deleteSessionNoninvasive: "ctrl+backspace",
-};
-
-/**
- * Manages keybindings for the editor.
- */
-export class EditorKeybindingsManager {
-	private actionToKeys: Map<EditorAction, KeyId[]>;
-
-	constructor(config: EditorKeybindingsConfig = {}) {
-		this.actionToKeys = new Map();
-		this.buildMaps(config);
+function normalizeKeybinding(keybinding: Keybinding): ModernKeybinding | null {
+	if (isModernKeybinding(keybinding)) {
+		return keybinding;
 	}
 
-	private buildMaps(config: EditorKeybindingsConfig): void {
-		this.actionToKeys.clear();
+	const normalized = LEGACY_TO_MODERN_KEYBINDINGS[keybinding as EditorAction];
+	return normalized && isModernKeybinding(normalized) ? normalized : null;
+}
 
-		// Start with defaults
-		for (const [action, keys] of Object.entries(DEFAULT_EDITOR_KEYBINDINGS)) {
-			const keyArray = Array.isArray(keys) ? keys : [keys];
-			this.actionToKeys.set(action as EditorAction, [...keyArray]);
-		}
+/**
+ * Convert a raw keybinding value into an array form.
+ *
+ * @param {KeyId | readonly KeyId[]} value - Raw keybinding value.
+ * @returns {readonly KeyId[]} Normalized key array.
+ */
+function normalizeKeyArray(value: KeyId | readonly KeyId[]): readonly KeyId[] {
+	return Array.isArray(value) ? [...value] : [value as KeyId];
+}
 
-		// Override with user config
-		for (const [action, keys] of Object.entries(config)) {
-			if (keys === undefined) continue;
-			const keyArray = Array.isArray(keys) ? keys : [keys];
-			this.actionToKeys.set(action as EditorAction, keyArray);
+/**
+ * Normalize user bindings to modern identifiers and array values.
+ *
+ * @param {KeybindingsConfig} userBindings - Raw user bindings.
+ * @returns {NormalizedKeybindingsConfig} Normalized modern binding map.
+ */
+function normalizeUserBindings(userBindings: KeybindingsConfig): NormalizedKeybindingsConfig {
+	const normalized: NormalizedKeybindingsConfig = {};
+
+	for (const [rawKey, rawValue] of Object.entries(userBindings)) {
+		if (rawValue === undefined) continue;
+
+		const key = rawKey as Keybinding;
+		const modernKey = normalizeKeybinding(key);
+		if (!modernKey) continue;
+		if (key !== modernKey && userBindings[modernKey] !== undefined) continue;
+
+		normalized[modernKey] = [...normalizeKeyArray(rawValue)];
+	}
+
+	return normalized;
+}
+
+/**
+ * Keybinding manager compatible with pi-tui 0.61+ while preserving legacy names.
+ */
+export class KeybindingsManager {
+	private readonly definitions: Readonly<Record<ModernKeybinding, KeybindingDefinition>>;
+	private readonly resolvedKeys = new Map<ModernKeybinding, KeyId[]>();
+	private userBindings: NormalizedKeybindingsConfig;
+
+	/**
+	 * Create a keybindings manager.
+	 *
+	 * @param {Readonly<Record<ModernKeybinding, KeybindingDefinition>>} definitions - Keybinding definitions.
+	 * @param {KeybindingsConfig} userBindings - Optional user overrides.
+	 */
+	constructor(
+		definitions: Readonly<Record<ModernKeybinding, KeybindingDefinition>> = TUI_KEYBINDINGS,
+		userBindings: KeybindingsConfig = {}
+	) {
+		this.definitions = definitions;
+		this.userBindings = normalizeUserBindings(userBindings);
+		this.rebuild();
+	}
+
+	/**
+	 * Rebuild resolved bindings from defaults plus user overrides.
+	 *
+	 * @returns {void} Nothing.
+	 */
+	private rebuild(): void {
+		this.resolvedKeys.clear();
+
+		for (const [keybinding, definition] of Object.entries(this.definitions)) {
+			const modernKey = keybinding as ModernKeybinding;
+			const override = this.userBindings[modernKey];
+			const keys = override ?? normalizeKeyArray(definition.defaultKeys);
+			this.resolvedKeys.set(modernKey, [...keys]);
 		}
 	}
 
 	/**
-	 * Check if input matches a specific action.
+	 * Check whether input matches a keybinding.
+	 *
+	 * @param {string} data - Raw terminal input.
+	 * @param {Keybinding} keybinding - Keybinding identifier.
+	 * @returns {boolean} True when the input matches.
 	 */
-	matches(data: string, action: EditorAction): boolean {
-		const keys = this.actionToKeys.get(action);
-		if (!keys) return false;
-		for (const key of keys) {
+	matches(data: string, keybinding: Keybinding): boolean {
+		const modernKey = normalizeKeybinding(keybinding);
+		if (!modernKey) return false;
+
+		for (const key of this.resolvedKeys.get(modernKey) ?? []) {
 			if (matchesKey(data, key)) return true;
 		}
 		return false;
 	}
 
 	/**
-	 * Get keys bound to an action.
+	 * Get the keys currently bound to a keybinding.
+	 *
+	 * @param {Keybinding} keybinding - Keybinding identifier.
+	 * @returns {KeyId[]} Resolved key list.
 	 */
-	getKeys(action: EditorAction): KeyId[] {
-		return this.actionToKeys.get(action) ?? [];
+	getKeys(keybinding: Keybinding): KeyId[] {
+		const modernKey = normalizeKeybinding(keybinding);
+		return modernKey ? [...(this.resolvedKeys.get(modernKey) ?? [])] : [];
 	}
 
 	/**
-	 * Update configuration.
+	 * Replace user bindings and rebuild the resolved map.
+	 *
+	 * @param {KeybindingsConfig} userBindings - New user bindings.
+	 * @returns {void} Nothing.
 	 */
-	setConfig(config: EditorKeybindingsConfig): void {
-		this.buildMaps(config);
+	setUserBindings(userBindings: KeybindingsConfig): void {
+		this.userBindings = normalizeUserBindings(userBindings);
+		this.rebuild();
+	}
+
+	/**
+	 * Get the fully resolved modern keybinding config.
+	 *
+	 * @returns {NormalizedKeybindingsConfig} Resolved keybinding config.
+	 */
+	getResolvedBindings(): NormalizedKeybindingsConfig {
+		const resolved: NormalizedKeybindingsConfig = {};
+		for (const [keybinding, keys] of this.resolvedKeys.entries()) {
+			resolved[keybinding] = [...keys];
+		}
+		return resolved;
 	}
 }
 
-// Global instance
-let globalEditorKeybindings: EditorKeybindingsManager | null = null;
+/** Backward-compatible alias for legacy callers. */
+export class EditorKeybindingsManager extends KeybindingsManager {
+	/**
+	 * Create a legacy editor keybindings manager.
+	 *
+	 * @param {EditorKeybindingsConfig} config - Legacy editor keybinding overrides.
+	 */
+	constructor(config: EditorKeybindingsConfig = {}) {
+		super(TUI_KEYBINDINGS, config);
+	}
+}
 
+let globalKeybindings: KeybindingsManager | null = null;
+
+/**
+ * Get the shared keybindings manager.
+ *
+ * @returns {KeybindingsManager} Shared keybindings manager.
+ */
+export function getKeybindings(): KeybindingsManager {
+	if (!globalKeybindings) {
+		globalKeybindings = new EditorKeybindingsManager();
+	}
+	return globalKeybindings;
+}
+
+/**
+ * Replace the shared keybindings manager.
+ *
+ * @param {KeybindingsManager} manager - Keybindings manager to install.
+ * @returns {void} Nothing.
+ */
+export function setKeybindings(manager: KeybindingsManager): void {
+	globalKeybindings = manager;
+}
+
+/**
+ * Get the shared legacy editor keybindings manager.
+ *
+ * @returns {EditorKeybindingsManager} Shared legacy-compatible manager.
+ */
 export function getEditorKeybindings(): EditorKeybindingsManager {
-	if (!globalEditorKeybindings) {
-		globalEditorKeybindings = new EditorKeybindingsManager();
-	}
-	return globalEditorKeybindings;
+	return getKeybindings() as EditorKeybindingsManager;
 }
 
+/**
+ * Replace the shared legacy editor keybindings manager.
+ *
+ * @param {EditorKeybindingsManager} manager - Legacy keybindings manager.
+ * @returns {void} Nothing.
+ */
 export function setEditorKeybindings(manager: EditorKeybindingsManager): void {
-	globalEditorKeybindings = manager;
+	setKeybindings(manager);
 }
