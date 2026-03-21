@@ -182,6 +182,25 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	// Kill all running background subagents on session shutdown (SIGTERM during user input).
+	// Unlike agent_end, this fires when the entire session is exiting — we don't need to
+	// retain results, just ensure orphaned subagent processes are terminated promptly.
+	pi.on("session_shutdown" as never, async () => {
+		let mutated = false;
+		for (const [_id, bg] of backgroundSubagents) {
+			if (bg.status === "running" && bg.process && !bg.process.killed) {
+				bg.process.kill("SIGTERM");
+				bg.completedAt = Date.now();
+				bg.status = "failed";
+				bg.result.stopReason = "shutdown";
+				mutated = true;
+			}
+		}
+		if (mutated) {
+			publishSubagentSnapshot(pi.events);
+		}
+	});
+
 	pi.registerTool({
 		name: "subagent",
 		label: "subagent",
