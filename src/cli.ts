@@ -494,6 +494,10 @@ async function run(opts: {
 						initialMessage,
 					});
 					emitSessionId(tallow.sessionId);
+					// Force exit — extensions (timers, MCP connections, heartbeat
+					// intervals) hold the event loop open indefinitely. pi's own
+					// main.js does the same after runPrintMode.
+					process.exit(0);
 				} else if (!process.stdin.isTTY) {
 					// Stdin is piped/redirected but empty — can't start a TUI without a real TTY.
 					console.error(
@@ -589,7 +593,9 @@ async function run(opts: {
 					initialMessage: jsonMessage,
 				});
 				emitSessionId(tallow.sessionId);
-				break;
+				// Force exit — see interactive print-mode comment above.
+				process.exit(0);
+				break; // unreachable — satisfies biome noFallthroughSwitchClause
 			}
 
 			default:
