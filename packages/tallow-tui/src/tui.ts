@@ -220,6 +220,7 @@ export class TUI extends Container {
 	private maxLinesRendered = 0; // Track terminal's working area (max lines ever rendered)
 	private previousViewportTop = 0; // Track previous viewport top for resize-aware cursor moves
 	private fullRedrawCount = 0;
+	private rollingShrinkPeak = 0; // Recent peak line count for gradual shrink detection
 	private stopped = false;
 	private pendingScrollbackClear = false; // Clear scrollback on next full render (session breaks)
 
@@ -442,6 +443,7 @@ export class TUI extends Container {
 			this.hardwareCursorRow = 0;
 			this.maxLinesRendered = 0;
 			this.previousViewportTop = 0;
+			this.rollingShrinkPeak = 0;
 		}
 		if (this.renderRequested) return;
 		this.scheduleRender();
@@ -985,6 +987,7 @@ export class TUI extends Container {
 				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 			}
 			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.rollingShrinkPeak = newLines.length;
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
 			this.previousWidth = width;
@@ -1032,6 +1035,21 @@ export class TUI extends Container {
 		const shrinkDelta = this.previousLines.length - newLines.length;
 		if (shrinkDelta > 5 && this.overlayStack.length === 0) {
 			logRedraw(`large shrink (${shrinkDelta} lines)`);
+			fullRender(true);
+			return;
+		}
+
+		// Rolling shrink detection: catches gradual shrinks where each individual
+		// frame-to-frame delta is ≤5 lines (below the large-shrink threshold) but the
+		// accumulated shrink from a recent peak exceeds it. This happens when
+		// pollStates.clear() collapses tool-result anchors across multiple render
+		// cycles while animations (loader, widget spinners) keep triggering renders.
+		if (newLines.length >= this.rollingShrinkPeak) {
+			this.rollingShrinkPeak = newLines.length;
+		} else if (this.overlayStack.length === 0 && this.rollingShrinkPeak - newLines.length > 5) {
+			logRedraw(
+				`rolling shrink (peak=${this.rollingShrinkPeak}, now=${newLines.length}, delta=${this.rollingShrinkPeak - newLines.length})`
+			);
 			fullRender(true);
 			return;
 		}
@@ -1306,6 +1324,9 @@ export class TUI extends Container {
 			this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 		}
 		this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+		// Update rolling peak for gradual shrink detection (partial path only —
+		// fullRender paths reset it inside the fullRender closure).
+		this.rollingShrinkPeak = Math.max(this.rollingShrinkPeak, newLines.length);
 
 		// Position hardware cursor for IME
 		this.positionHardwareCursor(cursorPos, newLines.length);
