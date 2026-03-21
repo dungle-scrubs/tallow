@@ -130,6 +130,10 @@ function buildWelcomeLines(width: number, updateVersion: string | null): string[
  */
 export default function welcomeScreenExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
+		// Skip for resumed/continued sessions — only show on fresh instances
+		const entries = ctx.sessionManager.getEntries();
+		if (entries.length > 0) return;
+
 		let updateVersion: string | null = null;
 		let tuiRef: TUI | null = null;
 
