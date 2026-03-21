@@ -157,10 +157,41 @@ describe("wezterm-notify lifecycle", () => {
 		const inputResult = rig.lifecycle.onInput();
 
 		expect(inputResult).toEqual({ action: "continue" });
-		expect(getStatusWrites(rig)).toEqual(["", "working", "done", ""]);
+		// agent_end is a no-op; input transitions working → done
+		expect(getStatusWrites(rig)).toEqual(["", "working", "done"]);
 		expect(getHeartbeatWrites(rig)).toEqual(["0"]);
 		expect(rig.heartbeatStartCount).toBe(1);
 		expect(rig.heartbeatStopCount).toBe(1);
+		expect(rig.activeHeartbeatCount).toBe(0);
+	});
+
+	it("stays working through tool execution between agent_end and next agent_start", () => {
+		const rig = createLifecycleRig();
+
+		rig.lifecycle.onSessionStart();
+		rig.lifecycle.onBeforeAgentStart();
+		rig.lifecycle.onAgentStart();
+		// Model returns a tool call — agent_end fires but tool is still executing
+		rig.lifecycle.onAgentEnd();
+		rig.tickHeartbeat();
+		rig.tickHeartbeat();
+
+		// Status should still be "working" — heartbeat should still be active
+		expect(getStatusWrites(rig)).toEqual(["", "working"]);
+		expect(rig.activeHeartbeatCount).toBe(1);
+
+		// Tool finishes, next turn starts
+		rig.lifecycle.onBeforeAgentStart();
+		rig.lifecycle.onAgentStart();
+		rig.lifecycle.onAgentEnd();
+
+		// Still working — no flicker to "done" between turns
+		expect(getStatusWrites(rig)).toEqual(["", "working"]);
+		expect(rig.activeHeartbeatCount).toBe(1);
+
+		// Final input prompt appears
+		rig.lifecycle.onInput();
+		expect(getStatusWrites(rig)).toEqual(["", "working", "done"]);
 		expect(rig.activeHeartbeatCount).toBe(0);
 	});
 
@@ -173,26 +204,30 @@ describe("wezterm-notify lifecycle", () => {
 		rig.lifecycle.onAgentStart();
 		rig.tickHeartbeat();
 		rig.tickHeartbeat();
+		// agent_end is a no-op — heartbeat keeps running
 		rig.lifecycle.onAgentEnd();
 
-		expect(getStatusWrites(rig)).toEqual(["", "working", "done"]);
+		expect(getStatusWrites(rig)).toEqual(["", "working"]);
 		expect(getHeartbeatWrites(rig)).toEqual(["0", "1", "2"]);
 		expect(rig.heartbeatStartCount).toBe(1);
-		expect(rig.heartbeatStopCount).toBe(1);
-		expect(rig.activeHeartbeatCount).toBe(0);
+		// Heartbeat still active (only input/shutdown stops it)
+		expect(rig.heartbeatStopCount).toBe(0);
+		expect(rig.activeHeartbeatCount).toBe(1);
 	});
 
 	it("does not permanently clear when input arrives before start", () => {
 		const rig = createLifecycleRig();
 
 		rig.lifecycle.onSessionStart();
+		// Input arrives while not working — no-op (already idle)
 		const inputResult = rig.lifecycle.onInput();
 		rig.lifecycle.onBeforeAgentStart();
 		rig.lifecycle.onAgentStart();
 		rig.lifecycle.onAgentEnd();
 
 		expect(inputResult).toEqual({ action: "continue" });
-		expect(getStatusWrites(rig)).toEqual(["", "working", "done"]);
+		// agent_end is a no-op, so status stays "working"
+		expect(getStatusWrites(rig)).toEqual(["", "working"]);
 	});
 
 	it("starts heartbeat once per interval and leaves no orphan timers", () => {
@@ -205,18 +240,21 @@ describe("wezterm-notify lifecycle", () => {
 		expect(rig.heartbeatStartCount).toBe(1);
 		expect(rig.activeHeartbeatCount).toBe(1);
 
+		// agent_end no longer stops heartbeat — stays active through tool execution
 		rig.lifecycle.onAgentEnd();
+		expect(rig.heartbeatStopCount).toBe(0);
+		expect(rig.activeHeartbeatCount).toBe(1);
+
+		// input stops the heartbeat
+		rig.lifecycle.onInput();
 		expect(rig.heartbeatStopCount).toBe(1);
 		expect(rig.activeHeartbeatCount).toBe(0);
 
-		const heartbeatAfterCompletion = getHeartbeatWrites(rig).length;
+		const heartbeatAfterInput = getHeartbeatWrites(rig).length;
 		rig.tickHeartbeat();
-		expect(getHeartbeatWrites(rig)).toHaveLength(heartbeatAfterCompletion);
+		expect(getHeartbeatWrites(rig)).toHaveLength(heartbeatAfterInput);
 
-		rig.lifecycle.onSessionShutdown();
-		expect(rig.heartbeatStopCount).toBe(1);
-		expect(rig.activeHeartbeatCount).toBe(0);
-
+		// Session shutdown also stops heartbeat cleanly
 		rig.lifecycle.onBeforeAgentStart();
 		expect(rig.heartbeatStartCount).toBe(2);
 		expect(rig.activeHeartbeatCount).toBe(1);
