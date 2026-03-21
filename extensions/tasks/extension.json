@@ -11,6 +11,7 @@
 			"before_agent_start",
 			"session_shutdown",
 			"session_start",
+			"session_switch",
 			"subagent_start",
 			"subagent_stop",
 			"subagent_tool_call",

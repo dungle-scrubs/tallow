@@ -1,18 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionContext, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../test-utils/extension-harness.js";
 import { registerTasksExtension } from "../tasks/commands/register-tasks-extension.js";
-import { TaskListStore } from "../tasks/state/index.js";
+import { buildSessionTaskGroupName, TASK_GROUPS_DIR, TaskListStore } from "../tasks/state/index.js";
 
 const ORIGINAL_PI_IS_SUBAGENT = process.env.PI_IS_SUBAGENT;
 const ORIGINAL_PI_TEAM_NAME = process.env.PI_TEAM_NAME;
+const TEST_TASK_GROUPS = new Set<string>();
 
 /**
  * Build a minimal extension context for direct tool execution in tests.
  *
+ * @param options - Optional session/cwd overrides
  * @returns Stub extension context
  */
-function createContext(): ExtensionContext {
+function createContext(options?: {
+	cwd?: string;
+	entries?: Array<{ type: string; customType?: string; data?: unknown }>;
+	sessionId?: string;
+}): ExtensionContext {
 	return {
 		ui: {
 			async select() {
@@ -61,10 +69,11 @@ function createContext(): ExtensionContext {
 			setToolsExpanded() {},
 		} as ExtensionContext["ui"],
 		hasUI: false,
-		cwd: process.cwd(),
+		cwd: options?.cwd ?? process.cwd(),
 		sessionManager: {
-			getEntries: () => [],
+			getEntries: () => options?.entries ?? [],
 			appendEntry: () => {},
+			getSessionId: () => options?.sessionId ?? "test-session",
 		} as never,
 		modelRegistry: {
 			getApiKeyForProvider: async () => undefined,
@@ -110,19 +119,18 @@ function getTool(harness: ExtensionHarness, name: string): ToolDefinition {
  *
  * @param tool - Registered manage_tasks tool
  * @param params - Tool parameters
+ * @param ctx - Optional extension context override
  * @returns Tool execution result
  */
 async function execManage(
 	tool: ToolDefinition,
-	params: Record<string, unknown>
+	params: Record<string, unknown>,
+	ctx = createContext()
 ): Promise<{ content: Array<{ type: string; text?: string }>; details: unknown }> {
-	return (await tool.execute(
-		"test-tool-call",
-		params as never,
-		undefined,
-		undefined,
-		createContext()
-	)) as { content: Array<{ type: string; text?: string }>; details: unknown };
+	return (await tool.execute("test-tool-call", params as never, undefined, undefined, ctx)) as {
+		content: Array<{ type: string; text?: string }>;
+		details: unknown;
+	};
 }
 
 beforeEach(() => {
@@ -131,6 +139,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	for (const groupName of TEST_TASK_GROUPS) {
+		rmSync(join(TASK_GROUPS_DIR, groupName), { force: true, recursive: true });
+	}
+	TEST_TASK_GROUPS.clear();
 	if (ORIGINAL_PI_IS_SUBAGENT === undefined) delete process.env.PI_IS_SUBAGENT;
 	else process.env.PI_IS_SUBAGENT = ORIGINAL_PI_IS_SUBAGENT;
 	if (ORIGINAL_PI_TEAM_NAME === undefined) delete process.env.PI_TEAM_NAME;
@@ -203,6 +215,45 @@ describe("Tasks runtime wiring", () => {
 		const listText = firstText(list);
 		expect(listText).toContain("1. [completed] Analyze outage");
 		expect(listText).toContain("2. [in_progress] Deploy fix");
+	});
+
+	it("isolates file-backed task groups per session and reloads them on session_switch", async () => {
+		process.env.PI_IS_SUBAGENT = "0";
+		process.env.PI_TEAM_NAME = "foreign-shared-group";
+		const harness = ExtensionHarness.create();
+		registerTasksExtension(harness.api, new TaskListStore(null), null);
+		const manage = getTool(harness, "manage_tasks");
+		const ctxA = createContext({
+			cwd: "/tmp/workspace-a",
+			sessionId: "session-a",
+		});
+		const ctxB = createContext({
+			cwd: "/tmp/workspace-b",
+			sessionId: "session-b",
+		});
+		const groupA = buildSessionTaskGroupName("session-a", "/tmp/workspace-a");
+		const groupB = buildSessionTaskGroupName("session-b", "/tmp/workspace-b");
+		TEST_TASK_GROUPS.add(groupA);
+		TEST_TASK_GROUPS.add(groupB);
+
+		await harness.fireEvent("session_start", {}, ctxA);
+		expect(process.env.PI_TEAM_NAME).toBe(groupA);
+		await execManage(manage, { action: "add", task: "Task from session A" }, ctxA);
+		await execManage(manage, { action: "update", index: 1, status: "pending" }, ctxA);
+		expect(firstText(await execManage(manage, { action: "list" }, ctxA))).toContain(
+			"Task from session A"
+		);
+
+		await harness.fireEvent("session_switch", {}, ctxB);
+		expect(process.env.PI_TEAM_NAME).toBe(groupB);
+		expect(firstText(await execManage(manage, { action: "list" }, ctxB))).toBe("No tasks.");
+		await execManage(manage, { action: "add", task: "Task from session B" }, ctxB);
+		await execManage(manage, { action: "update", index: 1, status: "pending" }, ctxB);
+
+		await harness.fireEvent("session_switch", {}, ctxA);
+		const listA = firstText(await execManage(manage, { action: "list" }, ctxA));
+		expect(listA).toContain("Task from session A");
+		expect(listA).not.toContain("Task from session B");
 	});
 
 	it("injects active-task context before agent start and clears orphaned in-progress tasks on agent_end", async () => {

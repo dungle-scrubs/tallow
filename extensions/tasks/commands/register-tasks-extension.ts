@@ -32,6 +32,7 @@ import {
 import { findCompletedTasks } from "../parsing/index.js";
 import {
 	type BgTaskView,
+	buildSessionTaskGroupName,
 	cleanupStaleTeams,
 	getTextContent,
 	isAssistantMessage,
@@ -41,7 +42,7 @@ import {
 	shouldClearOnAgentEnd,
 	type Task,
 	type TaskComment,
-	type TaskListStore,
+	TaskListStore,
 	type TaskStatus,
 	type TasksState,
 	type TeamWidgetView,
@@ -75,15 +76,17 @@ const agentIdentities = new Map<string, AgentIdentity>();
  * Registers task management tools, commands, and widget.
  *
  * @param pi - Extension API for registering tools, commands, and event handlers
- * @param store - Pre-constructed {@link TaskListStore} for file persistence
- * @param teamName - Active team name (or null for session-only mode)
+ * @param initialStore - Initial {@link TaskListStore} for file persistence
+ * @param initialTeamName - Active team name (or null for session-only mode)
  */
 export function registerTasksExtension(
 	pi: ExtensionAPI,
-	store: TaskListStore,
-	teamName: string | null
+	initialStore: TaskListStore,
+	initialTeamName: string | null
 ): void {
 	const isSubagent = process.env.PI_IS_SUBAGENT === "1";
+	let store = initialStore;
+	let teamName = initialTeamName;
 	const state: TasksState = {
 		tasks: [],
 		visible: true,
@@ -1023,9 +1026,7 @@ export function registerTasksExtension(
 								return `${t.id}. ${icon} ${t.subject}${blocked}${comments}`;
 							})
 							.join("\n");
-						const mode = store.isShared
-							? ` [team: ${process.env.PI_TEAM_NAME}]`
-							: " [session-only]";
+						const mode = store.isShared ? ` [team: ${teamName}]` : " [session-only]";
 						ctx.ui.notify(`Tasks${mode}:\n${list}`, "info");
 						break;
 					}
@@ -1091,7 +1092,7 @@ export function registerTasksExtension(
 					}
 
 					case "team": {
-						const current = store.isShared ? process.env.PI_TEAM_NAME : "(none — session-only)";
+						const current = store.isShared ? teamName : "(none — session-only)";
 						const teamPath = store.path ?? "N/A";
 						ctx.ui.notify(`Shared task group: ${current}\nPath: ${teamPath}`, "info");
 						break;
@@ -1916,8 +1917,37 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 	let lastBgCount = 0;
 	let lastBgTaskCount = 0;
 
-	// Restore state on session start
-	pi.on("session_start", async (_event, ctx) => {
+	/** Resolve the shared task-group name for the current session context.
+	 * @param ctx - Active extension context
+	 * @returns Shared task-group name, or null for session-only mode
+	 */
+	function resolveTaskGroupName(ctx: ExtensionContext): string | null {
+		if (isSubagent) return process.env.PI_TEAM_NAME ?? teamName;
+		const sessionId = ctx.sessionManager.getSessionId?.();
+		if (!sessionId) return null;
+		return buildSessionTaskGroupName(sessionId, ctx.cwd);
+	}
+	/** Rebind the file-backed task store for the current session.
+	 * @param ctx - Active extension context
+	 * @returns Nothing
+	 */
+	function syncTaskGroupStore(ctx: ExtensionContext): void {
+		const nextTeamName = resolveTaskGroupName(ctx);
+		store.close();
+		if (nextTeamName !== teamName) {
+			store = new TaskListStore(nextTeamName);
+			teamName = nextTeamName;
+		}
+		if (!isSubagent) {
+			if (teamName) process.env.PI_TEAM_NAME = teamName;
+			else delete process.env.PI_TEAM_NAME;
+		}
+	}
+
+	/** Reset runtime widget/session state before loading a different session.
+	 * @returns Nothing
+	 */
+	function resetSessionState(): void {
 		foregroundSubagents = [];
 		backgroundSubagents = [];
 		backgroundTasks = [];
@@ -1926,7 +1956,21 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		lastBackgroundTaskPresenterState = null;
 		lastBgCount = 0;
 		lastBgTaskCount = 0;
+		agentActivity.clear();
+		agentIdentities.clear();
+		state.tasks = [];
+		state.visible = true;
+		state.nextId = 1;
+		state.activeTaskId = null;
+	}
 
+	/** Restore tasks/widget state for the current session or switched session.
+	 * @param ctx - Active extension context
+	 * @returns Nothing
+	 */
+	function restoreSessionState(ctx: ExtensionContext): void {
+		resetSessionState();
+		syncTaskGroupStore(ctx);
 		// Restore meta state (visibility, nextId) from session entries
 		const entries = ctx.sessionManager.getEntries();
 		const stateEntry = entries
@@ -1947,14 +1991,11 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		// Load tasks: prefer file store (shared mode), fall back to session entries
 		if (store.isShared) {
 			loadFromStore();
-
-			// Start watching for cross-session changes
 			store.watch(() => {
 				loadFromStore();
 				updateWidget(ctx);
 			});
 		} else if (stateEntry?.data?.tasks) {
-			// Session-only mode: restore from entries, migrating old schema
 			state.tasks = stateEntry.data.tasks.map((t) => ({
 				id: (t.id as string) ?? String(state.nextId++),
 				subject: (t.subject as string) ?? (t.title as string) ?? "Untitled",
@@ -1969,15 +2010,10 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 				createdAt: (t.createdAt as number) ?? Date.now(),
 				completedAt: t.completedAt as number | undefined,
 			}));
-			// Recalculate nextId
 			const maxId = state.tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0);
 			state.nextId = Math.max(state.nextId, maxId + 1);
 		}
 
-		// Clear orphaned tasks on startup: at session_start no agents are running,
-		// so any in_progress tasks are leftovers from a dead session.
-		// Also clear if all tasks are already completed — the 2s auto-clear timer
-		// from a previous turn may have been killed by an extension reload.
 		if (state.tasks.length > 0) {
 			const orphaned = state.tasks.filter((t) => t.status === "in_progress");
 			const allCompleted = state.tasks.every((t) => t.status === "completed");
@@ -1986,7 +2022,6 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 			}
 		}
 
-		// Clean up team directories older than 7 days
 		cleanupStaleTeams(teamName);
 
 		if (!isSubagent) {
@@ -2131,6 +2166,14 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 
 		updateWidget(ctx);
 		updateAgentBar(ctx);
+	}
+
+	pi.on("session_start", async (_event, ctx) => {
+		restoreSessionState(ctx);
+	});
+
+	pi.on("session_switch", async (_event, ctx) => {
+		restoreSessionState(ctx);
 	});
 
 	// Cleanup on session end
@@ -2150,6 +2193,7 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		legacyInteropBridgeCleanup?.();
 		legacyInteropBridgeCleanup = undefined;
 		store.close();
+		if (!isSubagent) delete process.env.PI_TEAM_NAME;
 		persistState();
 	});
 }

@@ -6,6 +6,7 @@
  * locking and `fs.watch`, and pure predicates that operate on task arrays.
  */
 
+import { createHash } from "node:crypto";
 import type { FSWatcher } from "node:fs";
 import {
 	existsSync,
@@ -38,6 +39,31 @@ export const TEAM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Minimum width for side-by-side layout (tasks left, subagents right). */
 export const MIN_SIDE_BY_SIDE_WIDTH = 120;
+
+/** Prefix used for session-scoped shared task-group directories. */
+const SESSION_TASK_GROUP_PREFIX = "task-group";
+
+/**
+ * Build a stable task-group name for a session/cwd pair.
+ *
+ * Main sessions use this to isolate task boards per session while keeping the
+ * same group name when the user reopens the same session later. Subagents
+ * inherit the resolved name via `PI_TEAM_NAME`.
+ *
+ * @param sessionId - Current session identifier
+ * @param cwd - Current working directory for the session
+ * @returns Stable, filesystem-safe task-group name
+ */
+export function buildSessionTaskGroupName(sessionId: string, cwd: string): string {
+	const safeSessionId =
+		sessionId
+			.replace(/[^a-zA-Z0-9._-]/g, "_")
+			.replace(/_+/g, "_")
+			.replace(/^_+|_+$/g, "")
+			.slice(0, 24) || "session";
+	const digest = createHash("sha256").update(`${sessionId}:${cwd}`).digest("hex").slice(0, 12);
+	return `${SESSION_TASK_GROUP_PREFIX}-${safeSessionId}-${digest}`;
+}
 
 // ── Task Types ───────────────────────────────────────────────────────────────
 
