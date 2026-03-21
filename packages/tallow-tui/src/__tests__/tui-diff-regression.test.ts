@@ -480,6 +480,53 @@ describe("TUI differential rendering shrink regression", () => {
 		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(false);
 	});
 
+	test("gradual shrink across multiple frames triggers full redraw", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 20 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui); // Establish peak at 20 lines
+
+		const redraws = () => tui.fullRedraws;
+
+		// Shrink by 2 lines per frame — each frame delta is ≤5 (not caught by
+		// single-frame guard). The rolling peak should catch the accumulated drop.
+		const base = redraws();
+		component.setLines(Array.from({ length: 18 }, (_, i) => `line ${i}`)); // -2
+		renderNow(tui);
+		component.setLines(Array.from({ length: 16 }, (_, i) => `line ${i}`)); // -4 total
+		renderNow(tui);
+		// Still within threshold — partial redraws only
+		expect(redraws() - base).toBe(0);
+
+		component.setLines(Array.from({ length: 14 }, (_, i) => `line ${i}`)); // -6 total from peak
+		renderNow(tui);
+		// Accumulated shrink exceeds threshold — should have triggered full redraw
+		expect(redraws() - base).toBeGreaterThanOrEqual(1);
+	});
+
+	test("rolling shrink peak resets after full redraw", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 20 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui); // Peak = 20
+
+		// Trigger rolling shrink detection
+		component.setLines(Array.from({ length: 13 }, (_, i) => `line ${i}`)); // -7
+		renderNow(tui);
+		const afterFirstRedraw = tui.fullRedraws;
+
+		// Now shrink by only 2 from the new peak (13) — should NOT trigger
+		component.setLines(Array.from({ length: 11 }, (_, i) => `line ${i}`)); // -2 from reset peak
+		renderNow(tui);
+		expect(tui.fullRedraws).toBe(afterFirstRedraw);
+	});
+
 	test("requestScrollbackClear has no effect on partial (differential) renders", () => {
 		const width = 40;
 		const height = 10;
