@@ -158,9 +158,11 @@ export default function welcomeScreenExtension(pi: ExtensionAPI): void {
 		// headerContainer is the first child of the root TUI component.
 		queueMicrotask(() => {
 			if (!tuiRef) return;
-			const headerContainer = (tuiRef as unknown as Record<string, unknown>).children as
-				| { length: number }
+			const tuiChildren = (tuiRef as unknown as Record<string, unknown>).children as
+				| Array<Record<string, unknown>>
 				| undefined;
+			// headerContainer is the first child of the TUI root
+			const headerContainer = tuiChildren?.[0]?.children as { length: number } | undefined;
 			if (headerContainer && headerContainer.length > 2) {
 				// Keep [0]=Spacer and [1]=custom header, drop the rest (bottom spacer + changelog)
 				headerContainer.length = 2;
