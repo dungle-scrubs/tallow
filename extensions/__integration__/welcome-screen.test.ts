@@ -207,4 +207,34 @@ describe("welcome-screen E2E", () => {
 		// setHeader MUST be called even though metadata entries exist
 		expect(capture.setHeaderCalled).toBe(true);
 	}, 30_000);
+
+	it("defaults quietStartup to true so resource listing is suppressed", async () => {
+		tmpDir = mkdtempSync(join(tmpdir(), "tallow-welcome-e2e-"));
+		session = await createWelcomeSession(tmpDir);
+
+		// The settingsManager should have quietStartup=true by default,
+		// which suppresses the keybinding hints and [Context]/[Skills] listing.
+		const quiet = session.session.settingsManager.getQuietStartup();
+		expect(quiet).toBe(true);
+	}, 30_000);
+
+	it("respects explicit quietStartup=false override", async () => {
+		tmpDir = mkdtempSync(join(tmpdir(), "tallow-welcome-e2e-"));
+		session = await withExclusiveTallowHome(tmpDir, () =>
+			createTallowSession({
+				cwd: tmpDir ?? tmpdir(),
+				provider: "anthropic",
+				apiKey: "test-key",
+				session: { type: "memory" },
+				noBundledExtensions: true,
+				noBundledSkills: true,
+				extensionFactories: [welcomeScreenExtension],
+				settings: { quietStartup: false },
+			})
+		);
+
+		// User explicitly opted out — resource listing should be visible
+		const quiet = session.session.settingsManager.getQuietStartup();
+		expect(quiet).toBe(false);
+	}, 30_000);
 });
