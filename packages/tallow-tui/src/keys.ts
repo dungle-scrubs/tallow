@@ -819,7 +819,10 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 			if (modifier === 0) {
 				return data === "\t" || matchesKittySequence(data, CODEPOINTS.tab, 0);
 			}
-			return matchesKittySequence(data, CODEPOINTS.tab, modifier);
+			return (
+				matchesKittySequence(data, CODEPOINTS.tab, modifier) ||
+				matchesModifyOtherKeys(data, CODEPOINTS.tab, modifier)
+			);
 
 		case "enter":
 		case "return":
@@ -873,7 +876,8 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 			}
 			return (
 				matchesKittySequence(data, CODEPOINTS.enter, modifier) ||
-				matchesKittySequence(data, CODEPOINTS.kpEnter, modifier)
+				matchesKittySequence(data, CODEPOINTS.kpEnter, modifier) ||
+				matchesModifyOtherKeys(data, CODEPOINTS.enter, modifier)
 			);
 
 		case "backspace":
@@ -1108,21 +1112,33 @@ export function matchesKey(data: string, keyId: KeyId): boolean {
 		if (ctrl && !shift && !alt) {
 			// Legacy: ctrl+key sends the control character
 			if (rawCtrl && data === rawCtrl) return true;
-			return matchesKittySequence(data, codepoint, MODIFIERS.ctrl);
+			return (
+				matchesKittySequence(data, codepoint, MODIFIERS.ctrl) ||
+				matchesModifyOtherKeys(data, codepoint, MODIFIERS.ctrl)
+			);
 		}
 
 		if (ctrl && shift && !alt) {
-			return matchesKittySequence(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl);
+			return (
+				matchesKittySequence(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl) ||
+				matchesModifyOtherKeys(data, codepoint, MODIFIERS.shift + MODIFIERS.ctrl)
+			);
 		}
 
 		if (shift && !ctrl && !alt) {
 			// Legacy: shift+letter produces uppercase
 			if (data === key.toUpperCase()) return true;
-			return matchesKittySequence(data, codepoint, MODIFIERS.shift);
+			return (
+				matchesKittySequence(data, codepoint, MODIFIERS.shift) ||
+				matchesModifyOtherKeys(data, codepoint, MODIFIERS.shift)
+			);
 		}
 
 		if (modifier !== 0) {
-			return matchesKittySequence(data, codepoint, modifier);
+			return (
+				matchesKittySequence(data, codepoint, modifier) ||
+				matchesModifyOtherKeys(data, codepoint, modifier)
+			);
 		}
 
 		// Check both raw char and Kitty sequence (needed for release events)

@@ -30,6 +30,9 @@ export interface Terminal {
 	// Whether Kitty keyboard protocol is active
 	get kittyProtocolActive(): boolean;
 
+	// Whether running inside tmux (using modifyOtherKeys instead of Kitty protocol)
+	get isTmux(): boolean;
+
 	// Cursor positioning (relative to current position)
 	moveBy(lines: number): void; // Move cursor up (negative) or down (positive) by N lines
 
@@ -72,6 +75,10 @@ export class ProcessTerminal implements Terminal {
 		return this._kittyProtocolActive;
 	}
 
+	get isTmux(): boolean {
+		return !!process.env.TMUX;
+	}
+
 	start(onInput: (data: string) => void, onResize: () => void): void {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
@@ -97,10 +104,17 @@ export class ProcessTerminal implements Terminal {
 			process.kill(process.pid, "SIGWINCH");
 		}
 
-		// Query and enable Kitty keyboard protocol
-		// The query handler intercepts input temporarily, then installs the user's handler
-		// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
-		this.queryAndEnableKittyProtocol();
+		// Enable keyboard protocol for modified key detection.
+		// tmux doesn't support the Kitty keyboard protocol but does support xterm's
+		// modifyOtherKeys. Detect tmux and use the appropriate protocol.
+		if (process.env.TMUX) {
+			this.setupTmuxInput();
+		} else {
+			// Query and enable Kitty keyboard protocol
+			// The query handler intercepts input temporarily, then installs the user's handler
+			// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+			this.queryAndEnableKittyProtocol();
+		}
 	}
 
 	/**
@@ -152,6 +166,22 @@ export class ProcessTerminal implements Terminal {
 		this.stdinDataHandler = (data: string) => {
 			this.stdinBuffer?.process(data);
 		};
+	}
+
+	/**
+	 * Set up stdin handling for tmux without Kitty keyboard protocol.
+	 *
+	 * tmux doesn't support the Kitty keyboard protocol. Escape and Ctrl+C
+	 * arrive as raw bytes (\x1b and \x03) which the key matching handles natively.
+	 *
+	 * For Shift+Enter, tmux needs `extended-keys` and `extended-keys-format csi-u`
+	 * in tmux.conf. When configured, tmux sends CSI-u sequences for modified keys
+	 * that matchesKittySequence already parses. Without that config, Shift+Enter
+	 * is indistinguishable from Enter — use backslash+Enter (\↵) as a workaround.
+	 */
+	private setupTmuxInput(): void {
+		this.setupStdinBuffer();
+		process.stdin.on("data", this.stdinDataHandler!);
 	}
 
 	/**
