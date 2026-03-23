@@ -174,10 +174,10 @@ export class ProcessTerminal implements Terminal {
 	 * tmux doesn't support the Kitty keyboard protocol. Escape and Ctrl+C
 	 * arrive as raw bytes (\x1b and \x03) which the key matching handles natively.
 	 *
-	 * For Shift+Enter, tmux needs `extended-keys` and `extended-keys-format csi-u`
-	 * in tmux.conf. When configured, tmux sends CSI-u sequences for modified keys
-	 * that matchesKittySequence already parses. Without that config, Shift+Enter
-	 * is indistinguishable from Enter — use backslash+Enter (\↵) as a workaround.
+	 * For Shift+Enter, tmux needs `extended-keys on` and `extended-keys-format csi-u`
+	 * in tmux.conf. With that config, we request modifyOtherKeys mode 1 so tmux
+	 * encodes modified keys (Shift+Enter → CSI 13;2 u) while leaving standard
+	 * keys (Escape, Ctrl+C, regular typing) as raw bytes.
 	 */
 	private setupTmuxInput(): void {
 		this.setupStdinBuffer();

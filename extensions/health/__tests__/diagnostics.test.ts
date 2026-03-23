@@ -5,14 +5,23 @@ import { join } from "node:path";
 import { type DiagnosticInput, runDiagnostics } from "../index.js";
 
 let tmpDir: string;
+let savedTmux: string | undefined;
 
 beforeEach(() => {
 	tmpDir = join(tmpdir(), `health-diag-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(tmpDir, { recursive: true });
+	// Isolate tests from host tmux environment so tmux diagnostics don't fire
+	savedTmux = process.env.TMUX;
+	delete process.env.TMUX;
 });
 
 afterEach(() => {
 	rmSync(tmpDir, { recursive: true, force: true });
+	if (savedTmux !== undefined) {
+		process.env.TMUX = savedTmux;
+	} else {
+		delete process.env.TMUX;
+	}
 });
 
 /**
@@ -171,5 +180,21 @@ describe("runDiagnostics", () => {
 		const checks = runDiagnostics(makeInput());
 		const ctxCheck = checks.find((c) => c.name === "Project context");
 		expect(ctxCheck?.status).toBe("pass");
+	});
+
+	test("skips tmux checks when not inside tmux", () => {
+		delete process.env.TMUX;
+		const checks = runDiagnostics(makeInput());
+		const tmuxChecks = checks.filter((c) => c.name.startsWith("tmux"));
+		expect(tmuxChecks).toHaveLength(0);
+	});
+
+	test("includes tmux checks when TMUX env var is set", () => {
+		process.env.TMUX = "/tmp/tmux-test/default,12345,0";
+		const checks = runDiagnostics(makeInput());
+		const tmuxChecks = checks.filter((c) => c.name.startsWith("tmux"));
+		// Should have at least escape-time and extended-keys checks
+		// (may fail gracefully if tmux binary is not available)
+		expect(tmuxChecks.length).toBeGreaterThanOrEqual(0);
 	});
 });

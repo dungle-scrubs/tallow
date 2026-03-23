@@ -623,6 +623,67 @@ export function runDiagnostics(input: DiagnosticInput): DiagnosticCheck[] {
 		});
 	}
 
+	// 9. tmux compatibility (keyboard protocol)
+	if (process.env.TMUX) {
+		const tmuxChecks = checkTmuxSettings();
+		checks.push(...tmuxChecks);
+	}
+
+	return checks;
+}
+
+/**
+ * Check tmux settings that affect keyboard handling.
+ * Only called when running inside tmux ($TMUX is set).
+ *
+ * @returns Array of diagnostic check results for tmux configuration
+ */
+function checkTmuxSettings(): DiagnosticCheck[] {
+	const checks: DiagnosticCheck[] = [];
+
+	try {
+		const { execSync } = require("node:child_process");
+		const opts = execSync("tmux show-options -g", { encoding: "utf-8", timeout: 2000 });
+
+		// Check escape-time (should be 0 or very low for responsive Escape key)
+		const escapeTimeMatch = opts.match(/^escape-time\s+(\d+)/m);
+		const escapeTime = escapeTimeMatch ? parseInt(escapeTimeMatch[1], 10) : 500;
+		if (escapeTime > 50) {
+			checks.push({
+				name: "tmux escape-time",
+				status: "warn",
+				message: `${escapeTime}ms delay before Escape is forwarded`,
+				suggestion: "Add `set -g escape-time 0` to tmux.conf",
+			});
+		} else {
+			checks.push({
+				name: "tmux escape-time",
+				status: "pass",
+				message: `${escapeTime}ms`,
+			});
+		}
+
+		// Check extended-keys (needed for Shift+Enter and modified key detection)
+		const extKeysMatch = opts.match(/^extended-keys\s+(\S+)/m);
+		const extKeys = extKeysMatch ? extKeysMatch[1] : "off";
+		if (extKeys === "off") {
+			checks.push({
+				name: "tmux extended-keys",
+				status: "warn",
+				message: "Shift+Enter and other modified keys won't work",
+				suggestion: "Add `set -g extended-keys on` to tmux.conf",
+			});
+		} else {
+			checks.push({
+				name: "tmux extended-keys",
+				status: "pass",
+				message: extKeys,
+			});
+		}
+	} catch {
+		// tmux command failed — skip these checks silently
+	}
+
 	return checks;
 }
 
