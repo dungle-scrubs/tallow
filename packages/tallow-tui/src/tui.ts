@@ -406,6 +406,12 @@ export class TUI extends Container {
 		if (!getCapabilities().images) {
 			return;
 		}
+		// Skip cell size query inside tmux — tmux doesn't forward CSI 16 t responses,
+		// so cellSizeQueryPending would stay true and parseCellSizeResponse would eat
+		// bare \x1b (Escape key) as a "partial response", breaking Escape handling.
+		if (process.env.TMUX) {
+			return;
+		}
 		// Query terminal for cell size in pixels: CSI 16 t
 		// Response format: CSI 6 ; height ; width t
 		this.cellSizeQueryPending = true;
