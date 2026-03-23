@@ -1576,6 +1576,19 @@ export async function createTallowSession(
 	// ── Settings ─────────────────────────────────────────────────────────────
 
 	const settingsManager = SettingsManager.create(cwd, tallowHome);
+
+	// Default to quiet startup — the welcome-screen extension provides the branded
+	// header, so the built-in keybinding list and resource listing are redundant.
+	// Only apply when the user/project settings haven't explicitly set the value.
+	{
+		const global = settingsManager.getGlobalSettings() as Record<string, unknown>;
+		const project = settingsManager.getProjectSettings() as Record<string, unknown>;
+		if (global.quietStartup === undefined && project.quietStartup === undefined) {
+			settingsManager.applyOverrides({ quietStartup: true });
+		}
+	}
+
+	// Runtime overrides from options.settings come last so they win.
 	if (options.settings) {
 		settingsManager.applyOverrides(options.settings);
 	}
