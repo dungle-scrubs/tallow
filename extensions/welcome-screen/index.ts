@@ -130,9 +130,17 @@ function buildWelcomeLines(width: number, updateVersion: string | null): string[
  */
 export default function welcomeScreenExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
-		// Skip for resumed/continued sessions — only show on fresh instances
-		const entries = ctx.sessionManager.getEntries();
-		if (entries.length > 0) return;
+		// Skip for resumed/continued sessions — only show on fresh instances.
+		// Filter to message entries only — metadata entries like model_change and
+		// thinking_level_change are injected during session setup and exist even
+		// on a brand-new session. The role lives on entry.message, not the entry itself.
+		const hasConversation = ctx.sessionManager.getEntries().some((e) => {
+			const msg = (e as unknown as Record<string, unknown>).message as
+				| { role?: string }
+				| undefined;
+			return msg?.role === "user" || msg?.role === "assistant";
+		});
+		if (hasConversation) return;
 
 		let updateVersion: string | null = null;
 		let tuiRef: TUI | null = null;
