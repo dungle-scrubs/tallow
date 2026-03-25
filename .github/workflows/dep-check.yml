@@ -2,8 +2,8 @@ name: Dependency Check
 
 on:
   schedule:
-    # Daily at 08:00 UTC
-    - cron: "0 8 * * *"
+    # Weekly on Monday at 08:00 UTC
+    - cron: "0 8 * * 1"
   workflow_dispatch:
 
 jobs:
