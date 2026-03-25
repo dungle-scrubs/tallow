@@ -564,6 +564,19 @@ export class TUI extends Container {
 			if (isKeyRelease(data) && !this.focusedComponent.wantsKeyRelease) {
 				return;
 			}
+			if (process.env.TALLOW_KEY_DEBUG && (data === "\x1b" || data === "\x03")) {
+				const escMatch = matchesKey(data, "escape");
+				const ctrlcMatch = matchesKey(data, "ctrl+c");
+				const comp = this.focusedComponent as unknown as {
+					onEscape?: () => void;
+					actionHandlers?: Map<string, unknown>;
+				};
+				const hasOnEscape = typeof comp.onEscape === "function";
+				const actionCount = comp.actionHandlers instanceof Map ? comp.actionHandlers.size : -1;
+				process.stderr.write(
+					`[key] ${data === "\x1b" ? "ESC" : "C-C"} matchEsc=${escMatch} matchCC=${ctrlcMatch} hasOnEscape=${hasOnEscape} actions=${actionCount}\n`
+				);
+			}
 			this.focusedComponent.handleInput(data);
 			this.requestRender();
 		}
