@@ -29,7 +29,7 @@
     },
     "packages/tallow-tui": {
       "name": "@mariozechner/pi-tui",
-      "version": "0.61.1",
+      "version": "0.62.0",
       "dependencies": {
         "@types/mime-types": "^2.1.4",
         "chalk": "^5.5.0",
