@@ -2,6 +2,15 @@ import { describe, expect, test } from "bun:test";
 import type { WorkspaceTransitionRequest, WorkspaceTransitionUI } from "../workspace-transition.js";
 import { createInteractiveWorkspaceTransitionHost } from "../workspace-transition-interactive.js";
 
+/** Minimal session entry shape for testing extractTaskContext. */
+interface FakeSessionEntry {
+	id: string;
+	message?: { role: string; content: unknown };
+	parentId: string | null;
+	timestamp: string;
+	type: string;
+}
+
 interface FakeSession {
 	abortCount: number;
 	agent: { waitForIdle: () => Promise<void> };
@@ -28,6 +37,7 @@ interface FakeSession {
 		},
 		options?: { deliverAs?: "nextTurn" | "followUp" | "steer"; triggerTurn?: boolean }
 	) => Promise<void>;
+	sessionManager: { getEntries: () => FakeSessionEntry[] };
 	thinkingLevel?: "off" | "high";
 }
 
@@ -62,9 +72,10 @@ interface FakeDeps {
  * Create a fake session that records abort, shutdown, and custom-message calls.
  *
  * @param label - Identifier used in captured content for debugging
+ * @param entries - Optional session entries for extractTaskContext testing
  * @returns Mutable fake session
  */
-function createFakeSession(label: string): FakeSession {
+function createFakeSession(label: string, entries: FakeSessionEntry[] = []): FakeSession {
 	const sendCalls: FakeSession["sendCalls"] = [];
 	return {
 		abort(): void {
@@ -83,7 +94,42 @@ function createFakeSession(label: string): FakeSession {
 		sendCustomMessage: async (message, options): Promise<void> => {
 			sendCalls.push({ message, options });
 		},
+		sessionManager: { getEntries: () => entries },
 		thinkingLevel: "high",
+	};
+}
+
+/**
+ * Build a fake user message entry for session manager testing.
+ *
+ * @param content - Message content (string or content blocks)
+ * @param id - Optional entry ID
+ * @returns Fake session entry with user role
+ */
+function fakeUserEntry(content: unknown, id = "u1"): FakeSessionEntry {
+	return {
+		id,
+		message: { role: "user", content },
+		parentId: null,
+		timestamp: new Date().toISOString(),
+		type: "message",
+	};
+}
+
+/**
+ * Build a fake assistant message entry.
+ *
+ * @param text - Assistant response text
+ * @param id - Optional entry ID
+ * @returns Fake session entry with assistant role
+ */
+function fakeAssistantEntry(text: string, id = "a1"): FakeSessionEntry {
+	return {
+		id,
+		message: { role: "assistant", content: text },
+		parentId: null,
+		timestamp: new Date().toISOString(),
+		type: "message",
 	};
 }
 
@@ -518,5 +564,134 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 			reason: "Another workspace transition is already in progress.",
 			status: "unavailable",
 		});
+	});
+
+	test("carries last user message as task context in tool-driven transitions", async () => {
+		const events: string[] = [];
+		const previousSession = createFakeSession("previous", [
+			fakeUserEntry("fix the bug in auth.ts"),
+			fakeAssistantEntry("I'll look at auth.ts now."),
+		]);
+		const nextSession = createFakeSession("next");
+		const mode = createFakeMode(previousSession, events);
+		const { deps } = createDeps(nextSession, "trusted", events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
+		const host = createInteractiveWorkspaceTransitionHost(
+			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
+			{ session: { type: "new" } },
+			"session-123",
+			() => {},
+			deps
+		);
+
+		await host.requestTransition(createRequest(ui, "tool"));
+
+		expect(nextSession.sendCalls).toHaveLength(1);
+		const content = nextSession.sendCalls[0]?.message.content ?? "";
+		expect(content).toContain("Task context carried forward");
+		expect(content).toContain("fix the bug in auth.ts");
+		expect(content).toContain("Continue working on the task above");
+	});
+
+	test("uses generic message when session has no user messages", async () => {
+		const events: string[] = [];
+		const previousSession = createFakeSession("previous", []);
+		const nextSession = createFakeSession("next");
+		const mode = createFakeMode(previousSession, events);
+		const { deps } = createDeps(nextSession, "trusted", events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
+		const host = createInteractiveWorkspaceTransitionHost(
+			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
+			{ session: { type: "new" } },
+			"session-123",
+			() => {},
+			deps
+		);
+
+		await host.requestTransition(createRequest(ui, "tool"));
+
+		const content = nextSession.sendCalls[0]?.message.content ?? "";
+		expect(content).toContain("Treat the interrupted turn as ended");
+		expect(content).not.toContain("Task context carried forward");
+	});
+
+	test("carries task context from array content blocks", async () => {
+		const events: string[] = [];
+		const previousSession = createFakeSession("previous", [
+			fakeUserEntry([
+				{ type: "text", text: "look at " },
+				{ type: "image", source: { type: "base64", data: "..." } },
+				{ type: "text", text: "this screenshot" },
+			]),
+		]);
+		const nextSession = createFakeSession("next");
+		const mode = createFakeMode(previousSession, events);
+		const { deps } = createDeps(nextSession, "trusted", events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
+		const host = createInteractiveWorkspaceTransitionHost(
+			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
+			{ session: { type: "new" } },
+			"session-123",
+			() => {},
+			deps
+		);
+
+		await host.requestTransition(createRequest(ui, "tool"));
+
+		const content = nextSession.sendCalls[0]?.message.content ?? "";
+		expect(content).toContain("look at ");
+		expect(content).toContain("this screenshot");
+	});
+
+	test("truncates long task context to 2000 characters", async () => {
+		const events: string[] = [];
+		const longMessage = "x".repeat(3000);
+		const previousSession = createFakeSession("previous", [fakeUserEntry(longMessage)]);
+		const nextSession = createFakeSession("next");
+		const mode = createFakeMode(previousSession, events);
+		const { deps } = createDeps(nextSession, "trusted", events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
+		const host = createInteractiveWorkspaceTransitionHost(
+			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
+			{ session: { type: "new" } },
+			"session-123",
+			() => {},
+			deps
+		);
+
+		await host.requestTransition(createRequest(ui, "tool"));
+
+		const content = nextSession.sendCalls[0]?.message.content ?? "";
+		expect(content).toContain("Task context carried forward");
+		expect(content).toContain("(truncated)");
+		// Full 3000-char message should NOT appear
+		expect(content).not.toContain(longMessage);
+	});
+
+	test("picks the LAST user message, not the first", async () => {
+		const events: string[] = [];
+		const previousSession = createFakeSession("previous", [
+			fakeUserEntry("first question", "u1"),
+			fakeAssistantEntry("first answer", "a1"),
+			fakeUserEntry("second question", "u2"),
+			fakeAssistantEntry("second answer", "a2"),
+		]);
+		const nextSession = createFakeSession("next");
+		const mode = createFakeMode(previousSession, events);
+		const { deps } = createDeps(nextSession, "trusted", events);
+		const { ui } = createFakeUi(["Enter /repo/b"], events);
+		const host = createInteractiveWorkspaceTransitionHost(
+			mode as Parameters<typeof createInteractiveWorkspaceTransitionHost>[0],
+			{ session: { type: "new" } },
+			"session-123",
+			() => {},
+			deps
+		);
+
+		await host.requestTransition(createRequest(ui, "tool"));
+
+		const content = nextSession.sendCalls[0]?.message.content ?? "";
+		expect(content).toContain("second question");
+		expect(content).not.toContain("first question");
 	});
 });
