@@ -242,7 +242,16 @@ bind -T copy-mode-vi WheelDownPane \
   if-shell -F "#{==:#{scroll_position},0}" \
     "send-keys -X cancel" \
     "send-keys -X scroll-down"
+
+# Double-click selects word without leaving copy-mode
+# (default tmux behavior copies + exits, jumping back to the prompt)
+bind -T copy-mode-vi DoubleClick1Pane select-pane \; send-keys -X select-word
+
+# Triple-click selects line without leaving copy-mode
+bind -T copy-mode-vi TripleClick1Pane select-pane \; send-keys -X select-line
 ```
+
+After editing, reload with `tmux source-file ~/.tmux.conf`.
 
 ### Mouse tips inside tmux
 
@@ -250,9 +259,10 @@ bind -T copy-mode-vi WheelDownPane \
 |--------|-----|
 | Scroll up | Trackpad/wheel — enters tmux copy-mode (shows scrollback) |
 | Return to prompt | Scroll back down to bottom (auto-exits with config above), or press `q` |
-| Select text | Hold **Shift** + drag — bypasses tmux, terminal handles selection |
+| Select text in copy-mode | Double-click (word) or click + drag (with config above, stays in copy-mode) |
+| Select text (native) | Hold **Shift** + drag — bypasses tmux, terminal handles selection |
 | Click a link | Hold **Shift** + click (or **Cmd** + click in Ghostty) |
-| Copy selection | **Shift** + drag selects with terminal-native copy (goes to system clipboard) |
+| Copy to system clipboard | Hold **Shift** + drag to select, then copy normally |
 
 Without **Shift**, mouse events go to tmux instead of the terminal emulator.
 This is standard tmux behavior, not tallow-specific.
