@@ -226,6 +226,37 @@ telemetry is enabled. Zero overhead when disabled.
 
 See the [SDK docs](https://tallow.dungle-scrubs.com) for all options.
 
+## tmux
+
+Tallow works in tmux, but `set -g mouse on` captures all mouse events,
+which affects scrolling, text selection, and link clicking.
+
+### Recommended tmux config
+
+Add to `~/.tmux.conf`:
+
+```tmux
+# Scroll down past the bottom auto-exits copy-mode (natural flow:
+# scroll up to read history, scroll down to return to the prompt)
+bind -T copy-mode-vi WheelDownPane \
+  if-shell -F "#{==:#{scroll_position},0}" \
+    "send-keys -X cancel" \
+    "send-keys -X scroll-down"
+```
+
+### Mouse tips inside tmux
+
+| Action | How |
+|--------|-----|
+| Scroll up | Trackpad/wheel — enters tmux copy-mode (shows scrollback) |
+| Return to prompt | Scroll back down to bottom (auto-exits with config above), or press `q` |
+| Select text | Hold **Shift** + drag — bypasses tmux, terminal handles selection |
+| Click a link | Hold **Shift** + click (or **Cmd** + click in Ghostty) |
+| Copy selection | **Shift** + drag selects with terminal-native copy (goes to system clipboard) |
+
+Without **Shift**, mouse events go to tmux instead of the terminal emulator.
+This is standard tmux behavior, not tallow-specific.
+
 ## Known limitations
 
 - Requires Node.js 22+ (uses modern ESM features)
