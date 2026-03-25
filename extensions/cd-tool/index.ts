@@ -283,7 +283,10 @@ export default function (pi: ExtensionAPI): void {
 		name: "cd",
 		label: "cd",
 		description:
-			"Request an interactive workspace transition to another directory. Requires explicit user approval and restarts the turn in the new workspace.",
+			"Request an interactive workspace transition to another directory. Requires explicit user approval and restarts the turn in the new workspace. IMPORTANT: cd must be the ONLY tool call in your response — never combine it with other tools (edit, bash, write, etc.). The transition restarts the turn and discards sibling tool results.",
+		promptGuidelines: [
+			"The cd tool triggers an interactive workspace transition that restarts the current turn. When you need to cd, emit it as the SOLE tool call in your response — do not pair it with edit, bash, write, read, or any other tool. Sibling tool calls will race against the transition and their results will be lost when the turn restarts.",
+		],
 		parameters: Type.Object({
 			path: Type.String({
 				description: "Directory path to open via the interactive workspace transition flow",
