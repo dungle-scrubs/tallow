@@ -48,6 +48,8 @@ class MockTerminal implements Terminal {
 
 	clearScreen(): void {}
 
+	enableMouse(): void {}
+	disableMouse(): void {}
 	enterAlternateScreen(): void {}
 
 	leaveAlternateScreen(): void {}
