@@ -65,11 +65,14 @@ export {
 	isKeyRelease,
 	isKeyRepeat,
 	isKittyProtocolActive,
+	isMouseEvent,
 	Key,
 	type KeyEventType,
 	type KeyId,
+	type MouseEvent,
 	matchesKey,
 	parseKey,
+	parseMouseEvent,
 	setKittyProtocolActive,
 } from "./keys.js";
 // Input buffering for batch splitting

@@ -45,6 +45,10 @@ export interface Terminal {
 	clearFromCursor(): void; // Clear from cursor to end of screen
 	clearScreen(): void; // Clear entire screen and move cursor to (0,0)
 
+	// Mouse reporting
+	enableMouse(): void; // Enable SGR mouse tracking (scroll, click)
+	disableMouse(): void; // Disable mouse tracking
+
 	// Screen buffer mode
 	enterAlternateScreen(): void; // Switch to alternate screen buffer (no scrollback)
 	leaveAlternateScreen(): void; // Restore normal screen buffer and scrollback
@@ -70,6 +74,7 @@ export class ProcessTerminal implements Terminal {
 	private stdinDataHandler?: (data: string) => void;
 	private writeLogPath = process.env.PI_TUI_WRITE_LOG || "";
 	private alternateScreenActive = false;
+	private mouseActive = false;
 
 	get kittyProtocolActive(): boolean {
 		return this._kittyProtocolActive;
@@ -103,6 +108,11 @@ export class ProcessTerminal implements Terminal {
 		if (process.platform !== "win32") {
 			process.kill(process.pid, "SIGWINCH");
 		}
+
+		// Enable mouse tracking so scroll events reach the app.
+		// Without this, tmux `mouse on` enters copy-mode on scroll instead
+		// of forwarding events to the application.
+		this.enableMouse();
 
 		// Enable keyboard protocol for modified key detection.
 		// tmux doesn't support the Kitty keyboard protocol but does support xterm's
@@ -239,6 +249,9 @@ export class ProcessTerminal implements Terminal {
 			this.leaveAlternateScreen();
 		}
 
+		// Disable mouse tracking
+		this.disableMouse();
+
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
@@ -325,6 +338,26 @@ export class ProcessTerminal implements Terminal {
 
 	clearScreen(): void {
 		process.stdout.write("\x1b[2J\x1b[H"); // Clear screen and move to home (1,1)
+	}
+
+	/**
+	 * Enable SGR mouse tracking.
+	 * Mode 1000 = button press/release (includes scroll wheel).
+	 * Mode 1006 = SGR extended format (avoids 223-column limit).
+	 */
+	enableMouse(): void {
+		if (this.mouseActive) return;
+		process.stdout.write("\x1b[?1000h\x1b[?1006h");
+		this.mouseActive = true;
+	}
+
+	/**
+	 * Disable mouse tracking and restore default terminal mouse handling.
+	 */
+	disableMouse(): void {
+		if (!this.mouseActive) return;
+		process.stdout.write("\x1b[?1006l\x1b[?1000l");
+		this.mouseActive = false;
 	}
 
 	/**

@@ -5,7 +5,13 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { isKeyRelease, matchesKey } from "./keys.js";
+import {
+	isKeyRelease,
+	isMouseEvent,
+	type MouseEvent,
+	matchesKey,
+	parseMouseEvent,
+} from "./keys.js";
 import type { Terminal } from "./terminal.js";
 import { getCapabilities, isImageLine, setCellDimensions } from "./terminal-image.js";
 import {
@@ -209,6 +215,13 @@ export class TUI extends Container {
 
 	/** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
 	public onDebug?: () => void;
+	/**
+	 * Callback for mouse events. Called when a mouse event is received.
+	 * Scroll events are the primary use case (scroll-up, scroll-down).
+	 * Return value is ignored — mouse events are always consumed and never
+	 * forwarded to focused components.
+	 */
+	public onMouse?: (event: MouseEvent) => void;
 	private renderRequested = false;
 	private pendingRenderHandle?: ReturnType<typeof setTimeout>;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
@@ -517,6 +530,16 @@ export class TUI extends Container {
 			const filtered = this.parseCellSizeResponse();
 			if (filtered.length === 0) return;
 			data = filtered;
+		}
+
+		// Mouse events — intercept before any key handling.
+		// Always consumed: mouse sequences must never reach components as text.
+		if (isMouseEvent(data)) {
+			const event = parseMouseEvent(data);
+			if (event && this.onMouse) {
+				this.onMouse(event);
+			}
+			return;
 		}
 
 		// Global debug key handler (Shift+Ctrl+D)
