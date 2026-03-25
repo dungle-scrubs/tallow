@@ -109,13 +109,12 @@ export class ProcessTerminal implements Terminal {
 			process.kill(process.pid, "SIGWINCH");
 		}
 
-		// Enable mouse tracking inside tmux so scroll events are forwarded
-		// to the app instead of triggering tmux copy-mode. Outside tmux the
-		// terminal emulator handles mouse natively (scroll, selection) and
-		// enabling tracking would steal those events.
-		if (process.env.TMUX) {
-			this.enableMouse();
-		}
+		// Mouse tracking (enableMouse/disableMouse) is available but NOT
+		// enabled anywhere yet. The TUI has no scroll viewport — content
+		// off-screen is only reachable via terminal scrollback (or tmux
+		// copy-mode). Enabling mouse tracking steals scroll events without
+		// providing scroll handling, making things strictly worse. Enable
+		// only after implementing a scroll viewport in the TUI.
 
 		// Enable keyboard protocol for modified key detection.
 		// tmux doesn't support the Kitty keyboard protocol but does support xterm's
