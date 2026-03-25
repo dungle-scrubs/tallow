@@ -279,6 +279,8 @@ function isModernKeybinding(keybinding: string): keybinding is ModernKeybinding 
 
 /**
  * Normalize a legacy or modern keybinding identifier to the modern name.
+ * Only checks TUI_KEYBINDINGS and legacy mappings. For consumer-defined
+ * keybindings (e.g. app.*), use {@link KeybindingsManager.resolveKeybinding}.
  *
  * @param {Keybinding} keybinding - Keybinding identifier to normalize.
  * @returns {ModernKeybinding | null} Modern keybinding or null when unsupported.
@@ -344,7 +346,7 @@ export class KeybindingsManager {
 		userBindings: KeybindingsConfig = {}
 	) {
 		this.definitions = definitions;
-		this.userBindings = normalizeUserBindings(userBindings);
+		this.userBindings = this.normalizeUserBindingsWithDefinitions(userBindings);
 		this.rebuild();
 	}
 
@@ -365,17 +367,37 @@ export class KeybindingsManager {
 	}
 
 	/**
+	 * Resolve a keybinding name to its lookup key in resolvedKeys.
+	 * Checks the TUI namespace and legacy names first, then falls back to
+	 * a direct lookup in definitions/resolvedKeys for consumer-defined
+	 * keybindings (e.g. app.* keybindings registered by pi-coding-agent).
+	 *
+	 * @param {string} keybinding - Keybinding identifier.
+	 * @returns {ModernKeybinding | null} Resolved key or null when unknown.
+	 */
+	private resolveKeybinding(keybinding: string): ModernKeybinding | null {
+		const normalized = normalizeKeybinding(keybinding as Keybinding);
+		if (normalized) return normalized;
+
+		// Fall back to direct lookup for keybindings registered via definitions
+		// but outside the tui.* namespace (e.g. app.interrupt, app.clear).
+		// Check definitions first (available at construction) then resolvedKeys.
+		const asKey = keybinding as ModernKeybinding;
+		return asKey in this.definitions || this.resolvedKeys.has(asKey) ? asKey : null;
+	}
+
+	/**
 	 * Check whether input matches a keybinding.
 	 *
 	 * @param {string} data - Raw terminal input.
-	 * @param {Keybinding} keybinding - Keybinding identifier.
+	 * @param {Keybinding | string} keybinding - Keybinding identifier.
 	 * @returns {boolean} True when the input matches.
 	 */
-	matches(data: string, keybinding: Keybinding): boolean {
-		const modernKey = normalizeKeybinding(keybinding);
-		if (!modernKey) return false;
+	matches(data: string, keybinding: Keybinding | string): boolean {
+		const resolved = this.resolveKeybinding(keybinding as string);
+		if (!resolved) return false;
 
-		for (const key of this.resolvedKeys.get(modernKey) ?? []) {
+		for (const key of this.resolvedKeys.get(resolved) ?? []) {
 			if (matchesKey(data, key)) return true;
 		}
 		return false;
@@ -384,12 +406,12 @@ export class KeybindingsManager {
 	/**
 	 * Get the keys currently bound to a keybinding.
 	 *
-	 * @param {Keybinding} keybinding - Keybinding identifier.
+	 * @param {Keybinding | string} keybinding - Keybinding identifier.
 	 * @returns {KeyId[]} Resolved key list.
 	 */
-	getKeys(keybinding: Keybinding): KeyId[] {
-		const modernKey = normalizeKeybinding(keybinding);
-		return modernKey ? [...(this.resolvedKeys.get(modernKey) ?? [])] : [];
+	getKeys(keybinding: Keybinding | string): KeyId[] {
+		const resolved = this.resolveKeybinding(keybinding as string);
+		return resolved ? [...(this.resolvedKeys.get(resolved) ?? [])] : [];
 	}
 
 	/**
@@ -399,8 +421,34 @@ export class KeybindingsManager {
 	 * @returns {void} Nothing.
 	 */
 	setUserBindings(userBindings: KeybindingsConfig): void {
-		this.userBindings = normalizeUserBindings(userBindings);
+		this.userBindings = this.normalizeUserBindingsWithDefinitions(userBindings);
 		this.rebuild();
+	}
+
+	/**
+	 * Normalize user bindings using both TUI namespace and consumer definitions.
+	 * This extends the module-level normalizeUserBindings to also accept
+	 * keybinding names that exist in this.definitions (e.g. app.*).
+	 *
+	 * @param {KeybindingsConfig} userBindings - Raw user bindings.
+	 * @returns {NormalizedKeybindingsConfig} Normalized modern binding map.
+	 */
+	private normalizeUserBindingsWithDefinitions(
+		userBindings: KeybindingsConfig
+	): NormalizedKeybindingsConfig {
+		const normalized: NormalizedKeybindingsConfig = {};
+
+		for (const [rawKey, rawValue] of Object.entries(userBindings)) {
+			if (rawValue === undefined) continue;
+
+			const resolved = this.resolveKeybinding(rawKey);
+			if (!resolved) continue;
+			if (rawKey !== resolved && userBindings[resolved] !== undefined) continue;
+
+			normalized[resolved] = [...normalizeKeyArray(rawValue)];
+		}
+
+		return normalized;
 	}
 
 	/**
