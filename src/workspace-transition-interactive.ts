@@ -242,16 +242,65 @@ async function swapInteractiveModeSession(
 	mode.ui.requestRender(true);
 }
 
+/** Maximum character length for task context carried across a workspace transition. */
+const MAX_TASK_CONTEXT_LENGTH = 2000;
+
+/**
+ * Extract the last user message from the session to carry forward as task context.
+ *
+ * Walks the session entries backward to find the most recent user message,
+ * which represents the task the user was working on before the transition.
+ *
+ * @param session - Current session before transition
+ * @returns Truncated user message text, or undefined if none found
+ */
+function extractTaskContext(session: AgentSessionLike): string | undefined {
+	try {
+		const entries = session.sessionManager.getEntries();
+		for (let i = entries.length - 1; i >= 0; i--) {
+			const entry = entries[i];
+			if (entry.type !== "message") continue;
+
+			const message = (entry as { message: { role: string; content: unknown } }).message;
+			if (message.role !== "user") continue;
+
+			let text: string;
+			if (typeof message.content === "string") {
+				text = message.content;
+			} else if (Array.isArray(message.content)) {
+				text = (message.content as Array<{ type: string; text?: string }>)
+					.filter((block) => block.type === "text" && block.text)
+					.map((block) => block.text)
+					.join("\n");
+			} else {
+				continue;
+			}
+
+			if (!text.trim()) continue;
+
+			if (text.length > MAX_TASK_CONTEXT_LENGTH) {
+				text = `${text.slice(0, MAX_TASK_CONTEXT_LENGTH)}… (truncated)`;
+			}
+			return text;
+		}
+	} catch {
+		// Best effort — don't block transition if extraction fails.
+	}
+	return undefined;
+}
+
 /**
  * Build the one-shot synthetic custom message used after a tool-driven move.
  *
  * @param request - Transition request payload
  * @param trustedOnEntry - Whether the target workspace is trusted
+ * @param taskContext - Optional task context from the previous session
  * @returns Synthetic custom message payload
  */
 function createTransitionMessage(
 	request: WorkspaceTransitionRequest,
-	trustedOnEntry: boolean
+	trustedOnEntry: boolean,
+	taskContext?: string
 ): {
 	customType: string;
 	content: string;
@@ -264,7 +313,8 @@ function createTransitionMessage(
 			request.sourceCwd,
 			request.targetCwd,
 			request.initiator,
-			trustedOnEntry
+			trustedOnEntry,
+			taskContext
 		),
 		details: {
 			from: request.sourceCwd,
@@ -297,6 +347,10 @@ async function performSessionTransition(
 	deps: WorkspaceTransitionDeps
 ): Promise<WorkspaceTransitionResult> {
 	const previousSession = mode.session;
+
+	// Extract task context BEFORE aborting so the new session can continue the work.
+	const taskContext = extractTaskContext(previousSession);
+
 	if (request.initiator === "tool") {
 		previousSession.abort();
 		await previousSession.agent.waitForIdle();
@@ -321,7 +375,7 @@ async function performSessionTransition(
 		}
 		await swapInteractiveModeSession(mode, next, setCleanupSession);
 
-		const transitionMessage = createTransitionMessage(request, trustedOnEntry);
+		const transitionMessage = createTransitionMessage(request, trustedOnEntry, taskContext);
 		if (request.initiator === "tool") {
 			await mode.session.sendCustomMessage(transitionMessage, { triggerTurn: true });
 		} else {

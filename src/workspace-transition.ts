@@ -117,23 +117,36 @@ export function getWorkspaceTransitionHost(): WorkspaceTransitionHost | null {
  * @param targetCwd - Workspace after the move
  * @param initiator - Transition source kind
  * @param trustedOnEntry - Whether repo-controlled surfaces are enabled in the target workspace
+ * @param taskContext - Optional task context carried forward from the previous session
  * @returns Synthetic transition summary for the restarted turn
  */
 export function buildWorkspaceTransitionSummary(
 	sourceCwd: string,
 	targetCwd: string,
 	initiator: WorkspaceTransitionInitiator,
-	trustedOnEntry: boolean
+	trustedOnEntry: boolean,
+	taskContext?: string
 ): string {
 	const initiatorLabel = initiator === "tool" ? "tool request" : "user command";
 	const trustLabel = trustedOnEntry
 		? "repo-controlled project surfaces are enabled in the target workspace"
 		: "repo-controlled project surfaces remain blocked because the target workspace is untrusted";
-	return (
+	let summary =
 		`Workspace transition complete (${initiatorLabel}).\n` +
 		`Previous workspace: ${sourceCwd}\n` +
 		`Current workspace: ${targetCwd}\n` +
-		`${trustLabel}.\n` +
-		"Treat the interrupted turn as ended. Re-evaluate the new workspace before continuing."
-	);
+		`${trustLabel}.\n`;
+
+	if (taskContext) {
+		summary +=
+			"\n--- Task context carried forward from previous workspace ---\n" +
+			`${taskContext}\n` +
+			"--- End task context ---\n\n" +
+			"Continue working on the task above in the new workspace.";
+	} else {
+		summary +=
+			"Treat the interrupted turn as ended. Re-evaluate the new workspace before continuing.";
+	}
+
+	return summary;
 }
