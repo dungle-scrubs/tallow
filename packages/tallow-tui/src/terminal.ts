@@ -109,10 +109,10 @@ export class ProcessTerminal implements Terminal {
 			process.kill(process.pid, "SIGWINCH");
 		}
 
-		// Enable mouse tracking so scroll events reach the app.
-		// Without this, tmux `mouse on` enters copy-mode on scroll instead
-		// of forwarding events to the application.
-		this.enableMouse();
+		// Mouse tracking is available (enableMouse/disableMouse) but NOT
+		// enabled by default. Capturing mouse events without scroll handling
+		// breaks native terminal scroll and text selection. Enable only after
+		// wiring onMouse scroll behavior in the consumer.
 
 		// Enable keyboard protocol for modified key detection.
 		// tmux doesn't support the Kitty keyboard protocol but does support xterm's
