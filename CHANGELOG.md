@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.28](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.27...tallow-v0.8.28) (2026-03-31)
+
+
+### Added
+
+* **cd-tool:** carry task context across workspace transitions ([302e4cb](https://github.com/dungle-scrubs/tallow/commit/302e4cb66fb9680925d0f720c2f448bf85727dce))
+* **health:** add tmux diagnostic checks ([4c6f6b9](https://github.com/dungle-scrubs/tallow/commit/4c6f6b9e8dd133613c508d24feaee4ca57ecdafe))
+* **loop:** natural language fallback for /loop commands ([0d2078c](https://github.com/dungle-scrubs/tallow/commit/0d2078c59e22d54f7203a60130e4280c53d43c48))
+* **prompt-suggestions:** loop-aware ghost text completions ([b587943](https://github.com/dungle-scrubs/tallow/commit/b5879434dfd562c6486aecde13b9bfb539d67188))
+* **sdk:** default quietStartup to true for clean welcome screen ([accf03c](https://github.com/dungle-scrubs/tallow/commit/accf03cbbdadadb2c032a397db7103f5b88424d2))
+* **tui:** add SGR mouse event parsing and tracking ([3d40f7f](https://github.com/dungle-scrubs/tallow/commit/3d40f7fe744cd63363d66c9649a8438f4ac2c4b4))
+* **tui:** add TALLOW_KEY_DEBUG env var for input diagnostics ([0f555ef](https://github.com/dungle-scrubs/tallow/commit/0f555eff68a60c8b67b889b91b0bd8572b8dc48f))
+* **welcome-screen:** add ASCII art welcome screen extension ([9d1f1e2](https://github.com/dungle-scrubs/tallow/commit/9d1f1e28c937fccece6e967c58074d0597e4c2a8))
+
+
+### Fixed
+
+* **cd-tool:** prevent cd from racing with sibling tool calls ([74816b6](https://github.com/dungle-scrubs/tallow/commit/74816b6c295ad2becadb0a580abec906620fa6a0))
+* **changelog:** restore [Unreleased] above 0.8.27 release ([ec9c233](https://github.com/dungle-scrubs/tallow/commit/ec9c233773a49ce5189f89741b4d520706cdc87d))
+* **cli:** force exit after print/JSON mode to prevent subagent hangs ([15eb4b5](https://github.com/dungle-scrubs/tallow/commit/15eb4b5238088fd4b57588e6c79e4caac5c774e0))
+* correct claude-sonnet-4-6 context window from 1M to 200k ([322f5bb](https://github.com/dungle-scrubs/tallow/commit/322f5bbb2b355ddd804e94351038e7ba7179e8f6))
+* **deps:** support pi 0.61.1 ([58356ad](https://github.com/dungle-scrubs/tallow/commit/58356ad19c68b20b4b9d053fc89116ea0327eb95))
+* resolve extension load failures on fresh install and bump pi deps to 0.64.0 ([389ee15](https://github.com/dungle-scrubs/tallow/commit/389ee15eea19f07806ce227cc33a901f455c8c8a))
+* **subagent-tool:** drop redundant 'subagent single' header ([1b7e9b2](https://github.com/dungle-scrubs/tallow/commit/1b7e9b2e28561fd3056e1e05e289bdc5503b79b0))
+* **subagent:** strip terminal escape sequences from child process stdout ([df50745](https://github.com/dungle-scrubs/tallow/commit/df5074540d287f0d4c9ddff7cfd3fbecdd282672))
+* **tui:** detect gradual content shrinks via rolling peak tracking ([655daf9](https://github.com/dungle-scrubs/tallow/commit/655daf96cf575143e347255233b5057028d32bb4))
+* **tui:** don't auto-enable mouse tracking on setup ([6bb2ab6](https://github.com/dungle-scrubs/tallow/commit/6bb2ab60c7edc478128c514f9f3e491110c48d9d))
+* **tui:** don't enable mouse tracking without scroll viewport ([6c7561c](https://github.com/dungle-scrubs/tallow/commit/6c7561cb3ef3d01401ede2c49f4802ac419f2c69))
+* **tui:** enable mouse tracking only inside tmux ([2e68c54](https://github.com/dungle-scrubs/tallow/commit/2e68c54e090582c0395ae6d562970ef6f6c56ef4))
+* **tui:** resolve consumer-defined keybindings in matches/getKeys ([db4a492](https://github.com/dungle-scrubs/tallow/commit/db4a492e72c41be66aeeffb4ede77da89d6b2656))
+* **tui:** tmux keyboard compatibility ([72839dc](https://github.com/dungle-scrubs/tallow/commit/72839dc8994d5bed600d1cc34f3738c9908f1428))
+* **welcome-screen:** clear changelog children from header container ([9469984](https://github.com/dungle-scrubs/tallow/commit/94699843b4755889e8ca1bd9e9ae13868081fef7))
+* **welcome-screen:** detect fresh sessions by conversation entries, not all entries ([56d392d](https://github.com/dungle-scrubs/tallow/commit/56d392d273d2de18c0fc4748c02e67130ce4861d))
+* **welcome-screen:** skip logo on resumed/continued sessions ([bb1c371](https://github.com/dungle-scrubs/tallow/commit/bb1c37134ce5623ee7dd9cfa6e0ea3abdc094184))
+* **welcome-screen:** target headerContainer children instead of TUI root ([80fff2e](https://github.com/dungle-scrubs/tallow/commit/80fff2ed8f3740a8e7b0c7a6e9ee62e34fa0a979))
+
+
+### Changed
+
+* bump @dungle-scrubs/synapse to 0.1.8 ([2609bde](https://github.com/dungle-scrubs/tallow/commit/2609bde04a9f6fbf95ea89ca8d859ea1786a9fe1))
+
+
+### Documentation
+
+* add tmux mouse and scrolling guide ([b972404](https://github.com/dungle-scrubs/tallow/commit/b972404306c5cab3108e7a5d866daa9b77ee07dd))
+* add welcome-screen extension page and update counts to 53 ([a392aa0](https://github.com/dungle-scrubs/tallow/commit/a392aa087c227ebe5b68ea8a294e4bf752a25cf0))
+* improve tmux config — keep copy-mode on double/triple-click ([c7a7ac1](https://github.com/dungle-scrubs/tallow/commit/c7a7ac173e298a88f4ac068c4a33d3f1ba2e1a57))
+
+
+### Maintenance
+
+* **cd-tool:** add task context and prompt guidelines tests ([44984c1](https://github.com/dungle-scrubs/tallow/commit/44984c142e965cccb1548b3be41fa4eb1e4f0027))
+* **deps:** bump pi-* dependencies ([aabea64](https://github.com/dungle-scrubs/tallow/commit/aabea641d0545863c269f46a7094550a70636e52))
+* fix subagent presentation snapshot and add welcome-screen tests ([40cbd8e](https://github.com/dungle-scrubs/tallow/commit/40cbd8e88eba09473370217921cf94e695a02a42))
+* reduce github actions frequency ([274b485](https://github.com/dungle-scrubs/tallow/commit/274b485f41817dd963de2028b0cfd86a7f4258bf))
+* **tui:** add mouse event parsing tests ([a54b506](https://github.com/dungle-scrubs/tallow/commit/a54b506c44ea8aca341f6daa4ece402b1370bdb0))
+* **tui:** add rolling shrink detection regression tests ([0a03a7f](https://github.com/dungle-scrubs/tallow/commit/0a03a7f6c6f32b2f4d27ee937becb9c2b1e8caba))
+* **welcome-screen:** add E2E integration tests for header rendering ([a41942d](https://github.com/dungle-scrubs/tallow/commit/a41942dcb15e7c73b9073c1666538e7360fe4ba1))
+
 ## [Unreleased]
 
 ### Fixed
