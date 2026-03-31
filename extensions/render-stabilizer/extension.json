@@ -1,0 +1,5 @@
+{
+	"name": "render-stabilizer",
+	"version": "1.0.0",
+	"description": "Prevents screen flicker during session resume by suppressing screen-clearing redraws"
+}
