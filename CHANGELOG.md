@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **packaging:** fix 3 bundled extensions failing on fresh install — `background-task-tool`,
+  `lsp`, and `teams-tool` imported from unpublished `src/` paths; moved to `runtime/` wrappers
+- **packaging:** move `vscode-languageserver-protocol` from devDependencies to dependencies
+  so the `lsp` extension loads on fresh installs
+- **deps:** bump `@mariozechner/pi-coding-agent`, `pi-agent-core`, and `pi-ai` from 0.62.0
+  to 0.64.0 — adapt to `ModelRegistry.create()` factory and `getApiKeyForProvider()` rename
+- **edit-tool:** propagate upstream `prepareArguments` normalization so old-format
+  `{oldText, newText}` params still work after pi 0.64.0 schema change
+
 ## [0.8.27](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.26...tallow-v0.8.27) (2026-03-21)
 
 

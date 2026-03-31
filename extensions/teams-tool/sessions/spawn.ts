@@ -15,7 +15,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@mariozechner/pi-coding-agent";
-import { applyKnownModelMetadataOverrides } from "../../../src/model-metadata-overrides.js";
+import { applyKnownModelMetadataOverrides } from "../../../runtime/model-metadata-overrides.js";
 import { getTallowHomeDir, getTallowPath } from "../../_shared/tallow-paths.js";
 import {
 	type AgentConfig,
@@ -255,7 +255,7 @@ export async function spawnTeammateSession(
 	// Use the user's tallow auth and model config so teammates inherit
 	// API keys and custom model definitions from the main session.
 	const authStorage = AuthStorage.create(getTallowPath("auth.json"));
-	const modelRegistry = new ModelRegistry(authStorage, getTallowPath("models.json"));
+	const modelRegistry = ModelRegistry.create(authStorage, getTallowPath("models.json"));
 	applyKnownModelMetadataOverrides(modelRegistry);
 	const model = modelRegistry.find(resolvedModel.provider, resolvedModel.id);
 	if (!model) {

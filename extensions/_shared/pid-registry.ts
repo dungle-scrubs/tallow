@@ -13,17 +13,17 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-	createRuntimePathProvider,
-	type RuntimePathProvider,
-} from "../../runtime/runtime-path-provider.js";
-import {
 	isPidEntry,
 	isSessionOwner,
 	type PidEntry,
 	type SessionOwner,
 	type SessionPidFile,
 	toOwnerKey,
-} from "../../src/pid-schema.js";
+} from "../../runtime/pid-schema.js";
+import {
+	createRuntimePathProvider,
+	type RuntimePathProvider,
+} from "../../runtime/runtime-path-provider.js";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { acquireFileLock } from "./file-lock.js";
 

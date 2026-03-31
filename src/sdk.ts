@@ -1553,7 +1553,7 @@ export async function createTallowSession(
 			`\x1b[33m🔐 Migrated ${migration.migratedProviders.length} auth credential(s) to secure references: ${migration.migratedProviders.join(", ")}\x1b[0m`
 		);
 	}
-	const modelRegistry = new ModelRegistry(authStorage, join(tallowHome, "models.json"));
+	const modelRegistry = ModelRegistry.create(authStorage, join(tallowHome, "models.json"));
 	applyKnownModelMetadataOverrides(modelRegistry);
 
 	// ── Runtime API key (not persisted) ──────────────────────────────────────

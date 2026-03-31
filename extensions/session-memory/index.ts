@@ -381,7 +381,7 @@ export default function (pi: ExtensionAPI) {
 					};
 				}
 
-				const apiKey = await ctx.modelRegistry.getApiKey(model);
+				const apiKey = await ctx.modelRegistry.getApiKeyForProvider(model.provider);
 				if (!apiKey) {
 					ctx.ui.setWorkingMessage();
 					const sc = new Set(results.map((r) => r.sessionId)).size;
