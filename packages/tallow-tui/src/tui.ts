@@ -284,6 +284,19 @@ export class TUI extends Container {
 	}
 
 	/**
+	 * Reset the startup grace period timer, suppressing screen-clearing full
+	 * redraws for another {@link STARTUP_GRACE_MS} milliseconds.
+	 *
+	 * Call this at the start of a session switch so the chatContainer.clear()
+	 * → renderInitialMessages() transition doesn't cause visible flicker.
+	 *
+	 * @returns {void}
+	 */
+	resetRenderGrace(): void {
+		this.startedAtMs = Date.now();
+	}
+
+	/**
 	 * Request that the next full render clears the terminal scrollback buffer.
 	 *
 	 * Use when the session content is being replaced wholesale (workspace
@@ -403,8 +416,25 @@ export class TUI extends Container {
 		for (const overlay of this.overlayStack) overlay.component.invalidate?.();
 	}
 
+	/**
+	 * Timestamp when `start()` was called.
+	 * Used by startup grace period to suppress screen-clearing full redraws.
+	 */
+	private startedAtMs = 0;
+
+	/**
+	 * Duration (ms) after `start()` during which shrink-triggered full redraws
+	 * use a gentler line-by-line overwrite instead of screen clear.
+	 *
+	 * This prevents the visual flicker that occurs when session resume causes
+	 * rapid content height changes (extension hooks, widget adds/removes) before
+	 * the full message history is rendered.
+	 */
+	private static readonly STARTUP_GRACE_MS = 3000;
+
 	start(): void {
 		this.stopped = false;
+		this.startedAtMs = Date.now();
 		this.terminal.start(
 			(data) => this.handleInput(data),
 			() => this.requestRender()
@@ -454,6 +484,45 @@ export class TUI extends Container {
 		this.terminal.stop();
 	}
 
+	/** When >0, scheduled renders are deferred until the batch completes. */
+	private renderBatchDepth = 0;
+
+	/** Whether a render was requested while batching was active. */
+	private renderDeferredDuringBatch = false;
+
+	/** Whether a forced render was requested while batching was active. */
+	private renderForceDeferredDuringBatch = false;
+
+	/**
+	 * Begin a render batch — all `requestRender()` calls are coalesced and
+	 * deferred until the matching `endRenderBatch()`. Nestable.
+	 *
+	 * Use to prevent intermediate renders (and the screen clears they cause)
+	 * during multi-step UI mutations such as session resume.
+	 *
+	 * @returns {void}
+	 */
+	beginRenderBatch(): void {
+		this.renderBatchDepth++;
+	}
+
+	/**
+	 * End a render batch. When the outermost batch ends, a single render is
+	 * scheduled if any were deferred.
+	 *
+	 * @returns {void}
+	 */
+	endRenderBatch(): void {
+		if (this.renderBatchDepth <= 0) return;
+		this.renderBatchDepth--;
+		if (this.renderBatchDepth === 0 && this.renderDeferredDuringBatch) {
+			const wasForce = this.renderForceDeferredDuringBatch;
+			this.renderDeferredDuringBatch = false;
+			this.renderForceDeferredDuringBatch = false;
+			this.requestRender(wasForce);
+		}
+	}
+
 	requestRender(force = false): void {
 		if (force) {
 			this.previousLines = [];
@@ -463,6 +532,11 @@ export class TUI extends Container {
 			this.maxLinesRendered = 0;
 			this.previousViewportTop = 0;
 			this.rollingShrinkPeak = 0;
+		}
+		if (this.renderBatchDepth > 0) {
+			this.renderDeferredDuringBatch = true;
+			if (force) this.renderForceDeferredDuringBatch = true;
+			return;
 		}
 		if (this.renderRequested) return;
 		this.scheduleRender();
@@ -1004,6 +1078,11 @@ export class TUI extends Container {
 		// Width changed - need full re-render (line wrapping changes)
 		const widthChanged = this.previousWidth !== 0 && this.previousWidth !== width;
 
+		// Whether we are within the startup grace period where screen-clearing
+		// full redraws are softened to prevent flicker during session resume.
+		const inStartupGrace =
+			this.startedAtMs > 0 && Date.now() - this.startedAtMs < TUI.STARTUP_GRACE_MS;
+
 		// Helper to clear viewport (and optionally scrollback) and render all new lines
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
@@ -1028,6 +1107,44 @@ export class TUI extends Container {
 			} else {
 				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 			}
+			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.rollingShrinkPeak = newLines.length;
+			this.positionHardwareCursor(cursorPos, newLines.length);
+			this.previousLines = newLines;
+			this.previousWidth = width;
+		};
+
+		/**
+		 * Gentle full redraw: home cursor + overwrite each line + clear below.
+		 *
+		 * Used during the startup grace period instead of fullRender(true) for
+		 * shrink-triggered redraws. Avoids the visible blank frame caused by
+		 * `\x1b[2J` (clear screen), which makes messages appear to flash in and
+		 * out when session resume triggers rapid content height changes.
+		 *
+		 * Unlike fullRender(true), this never clears the screen — it writes each
+		 * line with a preceding `\x1b[2K` (clear line) so stale content is
+		 * overwritten without a blank frame. Lines below the new content are
+		 * individually erased.
+		 */
+		const gentleFullRender = (): void => {
+			this.fullRedrawCount += 1;
+			let buffer = "\x1b[?2026h\x1b[H"; // Begin synchronized output + home cursor
+			for (let i = 0; i < newLines.length; i++) {
+				buffer += "\x1b[2K"; // Clear current line
+				buffer += newLines[i];
+				if (i < newLines.length - 1) buffer += "\r\n";
+			}
+			// Erase lines that were previously rendered but are no longer needed
+			const staleLines = Math.max(0, this.maxLinesRendered - newLines.length);
+			for (let i = 0; i < staleLines; i++) {
+				buffer += "\r\n\x1b[2K";
+			}
+			buffer += "\x1b[?2026l"; // End synchronized output
+			this.terminal.write(buffer);
+			this.cursorRow = Math.max(0, newLines.length + staleLines - 1);
+			this.hardwareCursorRow = this.cursorRow;
+			this.maxLinesRendered = newLines.length;
 			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
 			this.rollingShrinkPeak = newLines.length;
 			this.positionHardwareCursor(cursorPos, newLines.length);
@@ -1066,7 +1183,11 @@ export class TUI extends Container {
 			this.overlayStack.length === 0
 		) {
 			logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
-			fullRender(true);
+			if (inStartupGrace) {
+				gentleFullRender();
+			} else {
+				fullRender(true);
+			}
 			return;
 		}
 
@@ -1077,7 +1198,11 @@ export class TUI extends Container {
 		const shrinkDelta = this.previousLines.length - newLines.length;
 		if (shrinkDelta > 5 && this.overlayStack.length === 0) {
 			logRedraw(`large shrink (${shrinkDelta} lines)`);
-			fullRender(true);
+			if (inStartupGrace) {
+				gentleFullRender();
+			} else {
+				fullRender(true);
+			}
 			return;
 		}
 
@@ -1092,7 +1217,11 @@ export class TUI extends Container {
 			logRedraw(
 				`rolling shrink (peak=${this.rollingShrinkPeak}, now=${newLines.length}, delta=${this.rollingShrinkPeak - newLines.length})`
 			);
-			fullRender(true);
+			if (inStartupGrace) {
+				gentleFullRender();
+			} else {
+				fullRender(true);
+			}
 			return;
 		}
 
@@ -1167,7 +1296,11 @@ export class TUI extends Container {
 				const extraLines = this.previousLines.length - newLines.length;
 				if (extraLines > height) {
 					logRedraw(`extraLines > height (${extraLines} > ${height})`);
-					fullRender(true);
+					if (inStartupGrace) {
+						gentleFullRender();
+					} else {
+						fullRender(true);
+					}
 					return;
 				}
 				if (extraLines > 0) {
@@ -1195,7 +1328,11 @@ export class TUI extends Container {
 		// If first changed line is above the current viewport basis, partial redraw is unsafe.
 		if (firstChanged < prevViewportTop) {
 			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-			fullRender(true);
+			if (inStartupGrace) {
+				gentleFullRender();
+			} else {
+				fullRender(true);
+			}
 			return;
 		}
 
