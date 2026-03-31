@@ -14,8 +14,8 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 export interface ModelRegistryLike {
 	/** Find a model by provider and ID. */
 	find(provider: string, modelId: string): Model<Api> | undefined;
-	/** Get API key for a model. */
-	getApiKey(model: Model<Api>): Promise<string | undefined>;
+	/** Get API key for a provider. */
+	getApiKeyForProvider(provider: string): Promise<string | undefined>;
 	/** Get all models that have auth configured. */
 	getAvailable(): Model<Api>[];
 	/** Register a provider dynamically. */
@@ -102,7 +102,7 @@ export async function tryResolveModel(
 	const model = registry.find(provider, modelId);
 	if (!model) return null;
 
-	const apiKey = await registry.getApiKey(model);
+	const apiKey = await registry.getApiKeyForProvider(model.provider);
 	if (!apiKey) return null;
 
 	return { model, apiKey };
@@ -135,7 +135,7 @@ export async function resolveAutocompleteModel(
 	const available = registry.getAvailable();
 	const sorted = [...available].sort((a, b) => (a.cost?.input ?? 0) - (b.cost?.input ?? 0));
 	for (const model of sorted) {
-		const apiKey = await registry.getApiKey(model);
+		const apiKey = await registry.getApiKeyForProvider(model.provider);
 		if (apiKey) return { model, apiKey };
 	}
 

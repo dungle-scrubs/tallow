@@ -188,7 +188,7 @@ export default function (pi: ExtensionAPI): void {
 				const model = findNamingModel(ctx);
 				if (!model) return;
 
-				const apiKey = await ctx.modelRegistry.getApiKey(model);
+				const apiKey = await ctx.modelRegistry.getApiKeyForProvider(model.provider);
 				if (!apiKey) return;
 
 				const prompt = buildNamingPrompt(userText, assistantText);

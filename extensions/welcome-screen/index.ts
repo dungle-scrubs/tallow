@@ -11,7 +11,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { TUI } from "@mariozechner/pi-tui";
 import { visibleWidth } from "@mariozechner/pi-tui";
-import { TALLOW_VERSION } from "../../src/config.js";
+import { TALLOW_VERSION } from "../../runtime/config.js";
 
 /** Timeout for npm registry fetch (ms). */
 const FETCH_TIMEOUT = 4_000;

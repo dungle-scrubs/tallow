@@ -75,24 +75,24 @@
 	"dependencies": {
 		"@clack/prompts": "^1.1.0",
 		"@dungle-scrubs/synapse": "0.1.8",
-		"@mariozechner/pi-coding-agent": "^0.62.0",
+		"@mariozechner/pi-coding-agent": "^0.64.0",
 		"@mariozechner/pi-tui": "workspace:*",
 		"@opentelemetry/api": "^1.9.0",
 		"@sinclair/typebox": "0.34.48",
 		"ai": "^6.0.116",
 		"commander": "^14.0.3",
 		"unpdf": "^1.4.0",
-		"vscode-jsonrpc": "8.2.1"
+		"vscode-jsonrpc": "8.2.1",
+		"vscode-languageserver-protocol": "3.17.5"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.4.2",
-		"@mariozechner/pi-agent-core": "^0.62.0",
-		"@mariozechner/pi-ai": "^0.62.0",
+		"@mariozechner/pi-agent-core": "^0.64.0",
+		"@mariozechner/pi-ai": "^0.64.0",
 		"@types/node": "25.2.3",
 		"husky": "^9.1.7",
 		"lint-staged": "^16.4.0",
-		"typescript": "^5.9.3",
-		"vscode-languageserver-protocol": "3.17.5"
+		"typescript": "^5.9.3"
 	},
 	"engines": {
 		"node": ">=22"

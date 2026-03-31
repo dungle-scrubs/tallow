@@ -44,8 +44,9 @@ function createMockRegistry(
 		find(provider: string, modelId: string) {
 			return models.find((m) => m.provider === provider && m.id === modelId);
 		},
-		async getApiKey(model: Model<Api>) {
-			return keys.get(`${model.provider}/${model.id}`);
+		async getApiKeyForProvider(provider: string) {
+			const entry = [...keys.entries()].find(([k]) => k.startsWith(`${provider}/`));
+			return entry?.[1];
 		},
 		getAvailable() {
 			return models.filter((m) => keys.has(`${m.provider}/${m.id}`));
@@ -191,7 +192,7 @@ describe("resolveAutocompleteModel", () => {
 				findCalls.push(`${provider}/${modelId}`);
 				return undefined;
 			},
-			async getApiKey() {
+			async getApiKeyForProvider() {
 				return undefined;
 			},
 			getAvailable() {

@@ -93,6 +93,7 @@ export default function editLive(pi: ExtensionAPI): void {
 		label: baseEditTool.label,
 		description: baseEditTool.description,
 		parameters: baseEditTool.parameters,
+		prepareArguments: baseEditTool.prepareArguments,
 
 		renderCall(args, theme) {
 			const path = args.path ?? "file";
@@ -109,7 +110,8 @@ export default function editLive(pi: ExtensionAPI): void {
 			const filePath = params.path ?? "file";
 			const effectiveCwd = ctx?.cwd ?? process.cwd();
 			const scopedEditTool = createEditTool(effectiveCwd);
-			const result = await scopedEditTool.execute(toolCallId, params, signal, onUpdate);
+			const prepared = scopedEditTool.prepareArguments?.(params) ?? params;
+			const result = await scopedEditTool.execute(toolCallId, prepared, signal, onUpdate);
 			const details = result.details as EditToolDetails | undefined;
 			const diff = details?.diff ?? "";
 			const absoluteFilename = path.isAbsolute(filePath)
