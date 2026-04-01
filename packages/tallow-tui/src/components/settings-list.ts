@@ -45,6 +45,8 @@ export class SettingsList implements Component {
 	// Submenu state
 	private submenuComponent: Component | null = null;
 	private submenuItemIndex: number | null = null;
+	private lastRenderLineCount = 0;
+	private nextMinLineCount = 0;
 
 	constructor(
 		items: SettingItem[],
@@ -79,12 +81,17 @@ export class SettingsList implements Component {
 	}
 
 	render(width: number): string[] {
-		// If submenu is active, render it instead
-		if (this.submenuComponent) {
-			return this.submenuComponent.render(width);
+		const lines = this.submenuComponent
+			? this.submenuComponent.render(width)
+			: this.renderMainList(width);
+
+		if (this.nextMinLineCount > lines.length) {
+			lines.push(...Array.from({ length: this.nextMinLineCount - lines.length }, () => ""));
 		}
 
-		return this.renderMainList(width);
+		this.nextMinLineCount = 0;
+		this.lastRenderLineCount = lines.length;
+		return lines;
 	}
 
 	private renderMainList(width: number): string[] {
@@ -215,7 +222,9 @@ export class SettingsList implements Component {
 		if (!item) return;
 
 		if (item.submenu) {
-			// Open submenu, passing current value so it can pre-select correctly
+			// Preserve height for the first submenu frame so the TUI doesn't treat
+			// the editor→submenu swap as a destructive shrink/expand transition.
+			this.nextMinLineCount = this.lastRenderLineCount;
 			this.submenuItemIndex = this.selectedIndex;
 			this.submenuComponent = item.submenu(item.currentValue, (selectedValue?: string) => {
 				if (selectedValue !== undefined) {
@@ -235,6 +244,9 @@ export class SettingsList implements Component {
 	}
 
 	private closeSubmenu(): void {
+		// Preserve one frame of the submenu height so the transition back to the
+		// main settings list doesn't trigger a screen-clearing shrink redraw.
+		this.nextMinLineCount = this.lastRenderLineCount;
 		this.submenuComponent = null;
 		// Restore selection to the item that opened the submenu
 		if (this.submenuItemIndex !== null) {

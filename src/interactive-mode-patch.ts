@@ -32,6 +32,7 @@ interface InteractiveModeInstanceLike {
 	createExtensionUIContext?:
 		| ((...args: unknown[]) => { notify?: ((...args: unknown[]) => unknown) | undefined })
 		| undefined;
+	showSelector?: ((create: (...args: unknown[]) => unknown) => unknown) | undefined;
 	defaultEditor?: { onEscape?: (() => void) | undefined };
 	editor?: {
 		getText?: (() => string) | undefined;
@@ -50,7 +51,10 @@ interface InteractiveModeInstanceLike {
 	restoreQueuedMessagesToEditor?: ((options?: { abort?: boolean }) => unknown) | undefined;
 	session?: SessionLike;
 	statusContainer?: { clear?: (() => void) | undefined };
-	ui?: { requestRender?: ((force?: boolean) => void) | undefined };
+	ui?: {
+		requestRender?: ((force?: boolean) => void) | undefined;
+		resetRenderGrace?: (() => void) | undefined;
+	};
 	updatePendingMessagesDisplay?: (() => void) | undefined;
 }
 
@@ -81,6 +85,17 @@ interface InteractiveModePrototypeLike {
 	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
+	showSelector?: ((create: (...args: unknown[]) => unknown) => unknown) | undefined;
+}
+
+/**
+ * Reset the TUI render grace timer when swapping large UI surfaces.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function resetRenderGrace(mode: InteractiveModeInstanceLike): void {
+	mode.ui?.resetRenderGrace?.();
 }
 
 const APPLY_FLAG = "__tallow_interactive_stale_ui_patch_applied__";
@@ -818,6 +833,25 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 				};
 			}
 			return result;
+		};
+	}
+
+	const originalShowSelector = prototype.showSelector;
+	if (typeof originalShowSelector === "function") {
+		prototype.showSelector = function (
+			this: InteractiveModeInstanceLike,
+			create: (...args: unknown[]) => unknown
+		) {
+			return originalShowSelector.call(this, (...args: unknown[]) => {
+				const originalDone = args[0] as (() => void) | undefined;
+				const wrappedDone = () => {
+					resetRenderGrace(this);
+					originalDone?.();
+					this.ui?.requestRender?.();
+				};
+				resetRenderGrace(this);
+				return create(wrappedDone);
+			});
 		};
 	}
 

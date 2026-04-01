@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **interactive:** prevent destructive history redraws when changing thinking level from settings by
+  softening selector submenu transitions and resetting render grace around selector swaps
 - **interactive:** route model-triggered compaction through the real interactive compact path
   when upstream InteractiveMode exposes `handleCompactCommand()` instead of `executeCompaction()`
 - **test:** stabilize print-mode routing parity under full-suite load by giving child CLI runs
