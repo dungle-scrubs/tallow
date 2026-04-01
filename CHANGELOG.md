@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.28...tallow-v0.9.0) (2026-04-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove plan mode from bundled extensions
+
+### Added
+
+* remove plan mode from bundled extensions ([3390dc2](https://github.com/dungle-scrubs/tallow/commit/3390dc22a7a08afcfeb6c3099d5b8aa6155dc6f9))
+* **render-stabilizer:** add extension to prevent flicker on session switch ([23f5ab4](https://github.com/dungle-scrubs/tallow/commit/23f5ab41f955655e0af32c43e86c35f2439a6447))
+
+
+### Fixed
+
+* **interactive:** route model compaction through upstream compact command ([cefb064](https://github.com/dungle-scrubs/tallow/commit/cefb06470b263035dda72b77d4021f5add0f119a))
+* **tui:** suppress screen-clearing redraws during startup grace period ([552ab95](https://github.com/dungle-scrubs/tallow/commit/552ab95b8bc6e1169a763483dc2ee70eaa25c8d8))
+
+
+### Documentation
+
+* **extensions:** add render-stabilizer page and refresh changelog ([7b7bf72](https://github.com/dungle-scrubs/tallow/commit/7b7bf722b0945b6446c20cd824aaaa19b868395f))
+
+
+### Maintenance
+
+* **context-fork:** isolate trusted prompt fixtures ([902c4bd](https://github.com/dungle-scrubs/tallow/commit/902c4bdc4b98c53cb544a3e0fdae6e8c32348953))
+* **subagent:** isolate explicit model routing auth state ([9ba52ef](https://github.com/dungle-scrubs/tallow/commit/9ba52efee4d9692b37a11d28c00d8c3607057c12))
+* **subagent:** mock synapse in model-router suites ([081fae1](https://github.com/dungle-scrubs/tallow/commit/081fae1a865f331d490171160d5e30f915537b9e))
+
 ## [Unreleased]
 
 ### Fixed
