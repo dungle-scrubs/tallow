@@ -59,8 +59,8 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 
 #### Registration
 
-- `registerTool(tool: ToolDefinition<TParams, TDetails>)` — Register a tool that the LLM can call.
-- `registerCommand(name: string, options: Omit<RegisteredCommand, "name">)` — Register a custom command.
+- `registerTool(tool: ToolDefinition<TParams, TDetails, TState>)` — Register a tool that the LLM can call.
+- `registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">)` — Register a custom command.
 - `registerFlag(name: string, options: object)` — Register a CLI flag.
 - `registerMessageRenderer(customType: string, renderer: MessageRenderer<T>)` — Register a custom renderer for CustomMessageEntry.
 - `registerProvider(name: string, config: ProviderConfig)` — Register or override a model provider.
@@ -81,7 +81,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `getFlag(name: string)` — Get the value of a registered CLI flag.
 - `exec(command: string, args: string[], options?: ExecOptions)` — Execute a shell command.
 - `getActiveTools()` — Get the list of currently active tool names.
-- `getAllTools()` — Get all configured tools with name and description.
+- `getAllTools()` — Get all configured tools with parameter schema and source metadata.
 - `setActiveTools(toolNames: string[])` — Set the active tools by name.
 - `getCommands()` — Get available slash commands in the current session.
 - `setModel(model: Model<any>)` — Set the current model.

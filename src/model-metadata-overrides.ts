@@ -30,6 +30,29 @@ const KNOWN_CONTEXT_WINDOW_OVERRIDES: Record<string, Record<string, ContextWindo
 	},
 };
 
+/**
+ * MiniMax models don't properly support the reasoning parameter in
+ * completion/summarization calls through OpenRouter. When reasoningEffort
+ * is not explicitly provided, pi-ai's OpenRouter handler sends
+ * `reasoning: { effort: "none" }`, which MiniMax rejects with:
+ * "Reasoning is mandatory for this endpoint and cannot be disabled."
+ *
+ * Setting `reasoning: false` prevents the OpenRouter handler from sending
+ * the reasoning parameter at all, avoiding this error during compaction.
+ */
+const KNOWN_REASONING_OVERRIDES: Record<string, Record<string, boolean>> = {
+	openrouter: {
+		// MiniMax models via OpenRouter — reasoning breaks compact/summarization
+		"minimax/minimax-m2.7": false,
+		"minimax/minimax-m2.7-highspeed": false,
+	},
+	"amazon-bedrock": {
+		// MiniMax models via Bedrock — same reasoning parameter issue
+		"minimax.minimax-m2": false,
+		"minimax.minimax-m2.1": false,
+	},
+};
+
 interface ModelRegistryLike {
 	getAll(): Model<Api>[];
 }
@@ -47,15 +70,25 @@ export function applyKnownModelMetadataOverrides(modelRegistry: ModelRegistryLik
 	let applied = 0;
 
 	for (const model of modelRegistry.getAll()) {
+		// Context window corrections
 		const providerOverrides = KNOWN_CONTEXT_WINDOW_OVERRIDES[model.provider];
-		if (!providerOverrides) continue;
+		if (providerOverrides) {
+			const correction = providerOverrides[model.id];
+			if (correction && model.contextWindow === correction.stale) {
+				model.contextWindow = correction.correct;
+				applied += 1;
+			}
+		}
 
-		const correction = providerOverrides[model.id];
-		if (!correction) continue;
-		if (model.contextWindow !== correction.stale) continue;
-
-		model.contextWindow = correction.correct;
-		applied += 1;
+		// Reasoning corrections for MiniMax
+		const reasoningOverrides = KNOWN_REASONING_OVERRIDES[model.provider];
+		if (reasoningOverrides) {
+			const override = reasoningOverrides[model.id];
+			if (override !== undefined && model.reasoning !== override) {
+				model.reasoning = override;
+				applied += 1;
+			}
+		}
 	}
 
 	return applied;
