@@ -549,7 +549,7 @@ export function runDiagnostics(input: DiagnosticInput): DiagnosticCheck[] {
 			name: "Tools",
 			status: "fail",
 			message: "No tools active",
-			suggestion: "Check extension loading and /plan-mode status",
+			suggestion: "Check extension loading status",
 		});
 	} else {
 		checks.push({ name: "Tools", status: "pass", message: `${input.tools.activeCount} active` });

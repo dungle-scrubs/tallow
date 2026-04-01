@@ -56,7 +56,6 @@ export const STANDARD_EXTENSIONS = [
 	"theme-selector",
 	"custom-footer",
 	"output-styles-tool",
-	"plan-mode-tool",
 	"cheatsheet",
 	"lsp",
 	"debug",

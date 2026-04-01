@@ -160,14 +160,14 @@ describe("startup profile extension loading", () => {
 
 	test("disabledExtensions skips selected extensions for one session", async () => {
 		const tallow = await createProfileSession({
-			additionalExtensions: ["clear", "plan-mode-tool"],
-			disabledExtensions: ["plan-mode-tool"],
+			additionalExtensions: ["clear", "stats"],
+			disabledExtensions: ["stats"],
 			startupProfile: "interactive",
 		});
 
 		const loaded = getLoadedExtensionIds(tallow);
 		expect(loaded).toContain("clear");
-		expect(loaded).not.toContain("plan-mode-tool");
+		expect(loaded).not.toContain("stats");
 	});
 });
 

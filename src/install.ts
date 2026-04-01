@@ -430,14 +430,7 @@ function groupExtensions(extensions: readonly ExtensionInfo[]): readonly Extensi
 		"session-memory",
 	];
 
-	const devTools = [
-		"lsp",
-		"plan-mode-tool",
-		"mcp-adapter-tool",
-		"git-status",
-		"context-files",
-		"hooks",
-	];
+	const devTools = ["lsp", "mcp-adapter-tool", "git-status", "context-files", "hooks"];
 
 	const uiExtensions = [
 		"ask-user-question-tool",
@@ -474,7 +467,7 @@ function groupExtensions(extensions: readonly ExtensionInfo[]): readonly Extensi
 			extensions: categorize(agentTools),
 		},
 		{
-			label: "Developer Tools (LSP, plan mode, MCP, git, hooks)",
+			label: "Developer Tools (LSP, MCP, git, hooks)",
 			extensions: categorize(devTools),
 		},
 		{

@@ -39,7 +39,6 @@ Changes take effect on the next session start.
 | `blocked` | `◇` | Blocked tasks |
 | `unavailable` | `⊘` | Unavailable resources |
 | `spinner` | `["◐","◓","◑","◒"]` | Animated spinner frames in widgets |
-| `plan_mode` | `⏸` | Plan mode indicator |
 | `task_list` | `📋` | Task list indicator |
 | `comment` | `💬` | Task comments |
 
