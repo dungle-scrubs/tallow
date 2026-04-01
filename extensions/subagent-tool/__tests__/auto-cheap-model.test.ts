@@ -39,13 +39,73 @@ const mockModels = [
 ];
 
 const mockScope = createMockScope(import.meta.url);
-mockScope.module("@mariozechner/pi-ai", () => ({
-	getProviders: () => ["anthropic", "google"],
-	getModels: (provider: string) => mockModels.filter((m) => m.provider === provider),
+mockScope.module("@dungle-scrubs/synapse", () => ({
+	listAvailableModels: () => mockModels.map((model) => `${model.provider}/${model.id}`),
+	parseModelMatrixOverrides: () => undefined,
+	resolveModelCandidates: (query: string) => {
+		const normalized = query.toLowerCase().trim();
+		return mockModels
+			.filter(
+				(model) =>
+					model.id.toLowerCase() === normalized ||
+					model.name.toLowerCase().includes(normalized) ||
+					`${model.provider}/${model.id}`.toLowerCase() === normalized
+			)
+			.map((model) => ({
+				displayName: `${model.provider}/${model.id}`,
+				id: model.id,
+				provider: model.provider,
+			}));
+	},
+	resolveModelFuzzy: (
+		query: string,
+		source?: () => Array<{ id: string; name: string; provider: string }>,
+		preferredProviders?: string[]
+	) => {
+		const normalized = query.toLowerCase().trim();
+		const candidates = source
+			? source().map((model) => ({
+					id: model.id,
+					name: model.name,
+					provider: model.provider,
+				}))
+			: mockModels;
+		const matches = candidates.filter(
+			(model) =>
+				model.id.toLowerCase() === normalized ||
+				model.name.toLowerCase().includes(normalized) ||
+				`${model.provider}/${model.id}`.toLowerCase() === normalized
+		);
+		const ordered = preferredProviders?.length
+			? [...matches].sort((left, right) => {
+					const leftIndex = preferredProviders.indexOf(left.provider);
+					const rightIndex = preferredProviders.indexOf(right.provider);
+					const safeLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+					const safeRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+					return safeLeft - safeRight;
+				})
+			: matches;
+		const selected = ordered[0];
+		return selected
+			? {
+					displayName: `${selected.provider}/${selected.id}`,
+					id: selected.id,
+					provider: selected.provider,
+				}
+			: undefined;
+	},
+	selectModels: (_classification: unknown, costPreference: string) => {
+		const ordered =
+			costPreference === "premium"
+				? [mockModels[0], mockModels[1], mockModels[2], mockModels[3]]
+				: [mockModels[3], mockModels[2], mockModels[1], mockModels[0]];
+		return ordered.map((model) => ({
+			displayName: `${model.provider}/${model.id}`,
+			id: model.id,
+			provider: model.provider,
+		}));
+	},
 }));
-
-// NOTE: Do NOT mock ../model-resolver.js — it leaks across test files in bun.
-// The pi-ai mock above provides model data that resolveModelFuzzy uses.
 
 mockScope.module("../task-classifier.js", () => ({
 	classifyTask: async (_task: string, primaryType: string) => ({
