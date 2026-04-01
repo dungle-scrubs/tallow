@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **interactive:** prevent destructive history redraws when changing thinking level from settings by
+  softening selector submenu transitions and resetting render grace around selector swaps
+- **interactive:** route model-triggered compaction through the real interactive compact path
+  when upstream InteractiveMode exposes `handleCompactCommand()` instead of `executeCompaction()`
+- **test:** stabilize print-mode routing parity under full-suite load by giving child CLI runs
+  a realistic timeout budget
+- **packaging:** fix 3 bundled extensions failing on fresh install — `background-task-tool`,
+  `lsp`, and `teams-tool` imported from unpublished `src/` paths; moved to `runtime/` wrappers
+- **packaging:** move `vscode-languageserver-protocol` from devDependencies to dependencies
+  so the `lsp` extension loads on fresh installs
+- **deps:** bump `@mariozechner/pi-coding-agent`, `pi-agent-core`, and `pi-ai` from 0.62.0
+  to 0.64.0 — adapt to `ModelRegistry.create()` factory and `getApiKeyForProvider()` rename
+- **edit-tool:** propagate upstream `prepareArguments` normalization so old-format
+  `{oldText, newText}` params still work after pi 0.64.0 schema change
+
+### Documentation
+
+- **extensions:** add the missing `render-stabilizer` extension page so docs drift checks cover
+  all bundled extensions
+
+### Removed
+
+- **plan-mode-tool:** remove the plan mode extension, slash command, tool, docs, and related
+  installer/schema/test references
+
 ## [0.9.0](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.28...tallow-v0.9.0) (2026-04-01)
 
 
@@ -34,35 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **context-fork:** isolate trusted prompt fixtures ([902c4bd](https://github.com/dungle-scrubs/tallow/commit/902c4bdc4b98c53cb544a3e0fdae6e8c32348953))
 * **subagent:** isolate explicit model routing auth state ([9ba52ef](https://github.com/dungle-scrubs/tallow/commit/9ba52efee4d9692b37a11d28c00d8c3607057c12))
 * **subagent:** mock synapse in model-router suites ([081fae1](https://github.com/dungle-scrubs/tallow/commit/081fae1a865f331d490171160d5e30f915537b9e))
-
-## [Unreleased]
-
-### Fixed
-
-- **interactive:** prevent destructive history redraws when changing thinking level from settings by
-  softening selector submenu transitions and resetting render grace around selector swaps
-- **interactive:** route model-triggered compaction through the real interactive compact path
-  when upstream InteractiveMode exposes `handleCompactCommand()` instead of `executeCompaction()`
-- **test:** stabilize print-mode routing parity under full-suite load by giving child CLI runs
-  a realistic timeout budget
-- **packaging:** fix 3 bundled extensions failing on fresh install — `background-task-tool`,
-  `lsp`, and `teams-tool` imported from unpublished `src/` paths; moved to `runtime/` wrappers
-- **packaging:** move `vscode-languageserver-protocol` from devDependencies to dependencies
-  so the `lsp` extension loads on fresh installs
-- **deps:** bump `@mariozechner/pi-coding-agent`, `pi-agent-core`, and `pi-ai` from 0.62.0
-  to 0.64.0 — adapt to `ModelRegistry.create()` factory and `getApiKeyForProvider()` rename
-- **edit-tool:** propagate upstream `prepareArguments` normalization so old-format
-  `{oldText, newText}` params still work after pi 0.64.0 schema change
-
-### Documentation
-
-- **extensions:** add the missing `render-stabilizer` extension page so docs drift checks cover
-  all bundled extensions
-
-### Removed
-
-- **plan-mode-tool:** remove the plan mode extension, slash command, tool, docs, and related
-  installer/schema/test references
 
 ## [0.8.28](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.27...tallow-v0.8.28) (2026-03-31)
 
