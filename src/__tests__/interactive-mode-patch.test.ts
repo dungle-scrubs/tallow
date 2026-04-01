@@ -33,6 +33,7 @@ class FakeInteractiveMode {
 	flushCalls = 0;
 	followUpQueue: string[] = [];
 	handleBashCommandCalls = 0;
+	handleCompactCommandCalls = 0;
 	handleEventCalls = 0;
 	lastHandledEvent: FakeEvent | undefined;
 	lastRestoredAbort: boolean | undefined;
@@ -167,6 +168,17 @@ class FakeInteractiveMode {
 		this.executeCompactionCalls++;
 		this.lifecycleCalls.push("executeCompaction");
 		return this.executeCompactionResult;
+	}
+
+	/**
+	 * Upstream compact command path used when executeCompaction is unavailable.
+	 *
+	 * @param _customInstructions - Optional compaction instructions
+	 * @returns Promise resolved after recording the lifecycle step
+	 */
+	async handleCompactCommand(_customInstructions?: string): Promise<void> {
+		this.handleCompactCommandCalls++;
+		this.lifecycleCalls.push("handleCompactCommand");
 	}
 
 	/**
@@ -676,6 +688,25 @@ describe("patchInteractiveModePrototype", () => {
 		await mode.handleEvent({ type: "agent_end" });
 
 		expect(mode.executeCompactionCalls).toBe(1);
+		expect(completed).toBe(1);
+	});
+
+	it("uses handleCompactCommand when executeCompaction is unavailable", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		let completed = 0;
+		mode.executeCompaction = undefined;
+
+		await mode.initExtensions();
+		mode.session.extensionRunner.compactFn?.({
+			onComplete: () => {
+				completed++;
+			},
+		});
+		await Promise.resolve();
+
+		expect(mode.executeCompactionCalls).toBe(0);
+		expect(mode.handleCompactCommandCalls).toBe(1);
 		expect(completed).toBe(1);
 	});
 

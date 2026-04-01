@@ -40,6 +40,7 @@ interface InteractiveModeInstanceLike {
 	executeCompaction?:
 		| ((customInstructions?: string, isAuto?: boolean) => Promise<unknown>)
 		| undefined;
+	handleCompactCommand?: ((customInstructions?: string) => Promise<unknown>) | undefined;
 	flushPendingBashComponents?: (() => void) | undefined;
 	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
 	handleReloadCommand?: (() => Promise<unknown>) | undefined;
@@ -315,6 +316,10 @@ function notifyFromInteractiveMode(
 /**
  * Runs InteractiveMode compaction and forwards completion/cleanup callbacks.
  *
+ * Supports both tallow's patched/fork-aware `executeCompaction()` path and
+ * upstream InteractiveMode's `handleCompactCommand()` path. The latter is what
+ * the real PTY integration test exercises today.
+ *
  * @param mode - Interactive mode instance
  * @param options - Extension compact options
  * @returns Nothing
@@ -324,19 +329,26 @@ function runInteractiveExtensionCompact(
 	options?: CompactOptionsLike
 ): void {
 	const executeCompaction = mode.executeCompaction;
-	if (typeof executeCompaction !== "function") {
+	const handleCompactCommand = mode.handleCompactCommand;
+	if (typeof executeCompaction !== "function" && typeof handleCompactCommand !== "function") {
 		return;
 	}
 
 	void (async () => {
 		try {
-			const result = await executeCompaction.call(mode, options?.customInstructions, false);
-			if (result !== undefined) {
-				options?.onComplete?.(result);
+			if (typeof executeCompaction === "function") {
+				const result = await executeCompaction.call(mode, options?.customInstructions, false);
+				if (result !== undefined) {
+					options?.onComplete?.(result);
+					return;
+				}
+
+				options?.onError?.(new Error("Compaction did not complete"));
 				return;
 			}
 
-			options?.onError?.(new Error("Compaction did not complete"));
+			await handleCompactCommand?.call(mode, options?.customInstructions);
+			options?.onComplete?.({ via: "handleCompactCommand" });
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error(String(error));
 			options?.onError?.(err);
@@ -351,12 +363,13 @@ function runInteractiveExtensionCompact(
  * InteractiveMode's UI rebuild, compaction summary rendering, and queued-input
  * flush. In the TUI that leaves model-invoked compact stuck on extension-owned
  * status text instead of running the same path as `/compact` or extension
- * shortcuts. Rebinding here makes extension-driven compaction use
- * `executeCompaction()` while preserving extension callbacks for completion and
- * cleanup.
+ * shortcuts. Rebinding here makes extension-driven compaction use the real
+ * interactive compaction path (`executeCompaction()` when available, otherwise
+ * upstream `handleCompactCommand()`) while preserving extension callbacks for
+ * completion and cleanup.
  *
  * When compaction is requested while the current agent run is still streaming,
- * the actual `executeCompaction()` call must wait until the following
+ * the actual interactive compaction call must wait until the following
  * `agent_end`. Triggering it earlier recreates the original abort/disconnect
  * race, because `executeCompaction()` aborts the session before InteractiveMode
  * has finished its own `agent_end` cleanup.

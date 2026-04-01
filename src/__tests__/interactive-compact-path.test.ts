@@ -119,6 +119,7 @@ function runInteractiveCompactScenario(): Promise<InteractiveScenarioResult> {
 
 		const { session } = await createTallowSession({
 			cwd,
+			startupProfile: "interactive",
 			model: createMockModel(),
 			provider: "mock",
 			apiKey: "mock-api-key",
@@ -335,5 +336,5 @@ describe("interactive compact path", () => {
 		expect(turnStartIndex).toBeGreaterThan(agentStartIndex);
 		expect(continuationIndex).toBeGreaterThan(turnStartIndex);
 		expect(resumedIndex).toBeGreaterThan(continuationIndex);
-	});
-}, 20000);
+	}, 20000);
+});
