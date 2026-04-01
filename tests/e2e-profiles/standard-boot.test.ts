@@ -45,7 +45,6 @@ describe("Standard Profile", () => {
 			"task_status",
 			"task_kill",
 			"ask_user_question",
-			"plan_mode",
 			"switch_theme",
 			"debug_inspect",
 			"session_recall",
@@ -69,13 +68,11 @@ describe("Standard Profile", () => {
 
 		const expected = [
 			"tasks",
-			"todos",
 			"theme",
 			"health",
 			"doctor",
 			"stats",
 			"debug",
-			"plan-mode",
 			"cheatsheet",
 			"init",
 			"context",

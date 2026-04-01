@@ -32,7 +32,6 @@ export type IconKey =
 	| "active"
 	| "blocked"
 	| "unavailable"
-	| "plan_mode"
 	| "task_list"
 	| "comment";
 
@@ -63,7 +62,6 @@ export const ICON_DEFAULTS: Record<IconKey, IconValue> = {
 	active: "⚡",
 	blocked: "◇",
 	unavailable: "⊘",
-	plan_mode: "⏸",
 	task_list: "📋",
 	comment: "💬",
 };

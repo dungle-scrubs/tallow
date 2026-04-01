@@ -13,7 +13,6 @@ describe("Icon Registry", () => {
 		expect(registry.getString("active")).toBe("⚡");
 		expect(registry.getString("blocked")).toBe("◇");
 		expect(registry.getString("unavailable")).toBe("⊘");
-		expect(registry.getString("plan_mode")).toBe("⏸");
 		expect(registry.getString("task_list")).toBe("📋");
 		expect(registry.getString("comment")).toBe("💬");
 	});

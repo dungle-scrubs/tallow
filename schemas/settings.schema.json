@@ -429,11 +429,6 @@
 					"default": ["◐", "◓", "◑", "◒"],
 					"minItems": 1
 				},
-				"plan_mode": {
-					"type": "string",
-					"description": "Plan mode indicator (default: '⏸').",
-					"default": "⏸"
-				},
 				"task_list": {
 					"type": "string",
 					"description": "Task list indicator (default: '📋').",

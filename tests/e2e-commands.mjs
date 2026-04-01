@@ -46,12 +46,10 @@ const EXPECTED_COMMANDS = [
 	"keys",
 	"mcp",
 	"output-style",
-	"plan-mode",
 	"prompt",
 	"show-system-prompt",
 	"tasks",
 	"theme",
-	"todos",
 ];
 
 // Agent commands registered by agent-commands-tool extension from bundled agents/
