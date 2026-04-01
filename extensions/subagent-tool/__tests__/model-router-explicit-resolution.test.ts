@@ -38,9 +38,62 @@ const mockModels = [
 ];
 
 const mockScope = createMockScope(import.meta.url);
-mockScope.module("@mariozechner/pi-ai", () => ({
-	getProviders: () => ["anthropic", "opencode", "openrouter", "minimax", "zai"],
-	getModels: (provider: string) => mockModels.filter((model) => model.provider === provider),
+mockScope.module("@dungle-scrubs/synapse", () => ({
+	listAvailableModels: () => mockModels.map((model) => `${model.provider}/${model.id}`),
+	parseModelMatrixOverrides: () => undefined,
+	resolveModelCandidates: (query: string) => {
+		const normalized = query.toLowerCase().trim();
+		return mockModels
+			.filter(
+				(model) =>
+					model.id.toLowerCase() === normalized ||
+					model.name.toLowerCase().includes(normalized) ||
+					`${model.provider}/${model.id}`.toLowerCase() === normalized
+			)
+			.map((model) => ({
+				displayName: `${model.provider}/${model.id}`,
+				id: model.id,
+				provider: model.provider,
+			}));
+	},
+	resolveModelFuzzy: (
+		query: string,
+		source?: () => Array<{ id: string; name: string; provider: string }>,
+		preferredProviders?: string[]
+	) => {
+		const normalized = query.toLowerCase().trim();
+		const candidates = source
+			? source().map((model) => ({
+					id: model.id,
+					name: model.name,
+					provider: model.provider,
+				}))
+			: mockModels;
+		const matches = candidates.filter(
+			(model) =>
+				model.id.toLowerCase() === normalized ||
+				model.name.toLowerCase().includes(normalized) ||
+				`${model.provider}/${model.id}`.toLowerCase() === normalized
+		);
+		const ordered = preferredProviders?.length
+			? [...matches].sort((left, right) => {
+					const leftIndex = preferredProviders.indexOf(left.provider);
+					const rightIndex = preferredProviders.indexOf(right.provider);
+					const safeLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+					const safeRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+					return safeLeft - safeRight;
+				})
+			: matches;
+		const selected = ordered[0];
+		return selected
+			? {
+					displayName: `${selected.provider}/${selected.id}`,
+					id: selected.id,
+					provider: selected.provider,
+				}
+			: undefined;
+	},
+	selectModels: () => [],
 }));
 
 mockScope.module("../task-classifier.js", () => ({
