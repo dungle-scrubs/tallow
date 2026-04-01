@@ -42,12 +42,17 @@ describe("buildFrontmatterIndex", () => {
 	let originalCwd: string;
 	let originalTrustCwd: string | undefined;
 	let originalTrustStatus: string | undefined;
+	let originalCodingAgentDir: string | undefined;
+	let isolatedAgentDir: string;
 
 	beforeAll(() => {
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fork-index-test-"));
 		originalCwd = process.cwd();
 		originalTrustCwd = process.env.TALLOW_PROJECT_TRUST_CWD;
 		originalTrustStatus = process.env.TALLOW_PROJECT_TRUST_STATUS;
+		originalCodingAgentDir = process.env.TALLOW_CODING_AGENT_DIR;
+		isolatedAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "fork-agent-dir-"));
+		process.env.TALLOW_CODING_AGENT_DIR = isolatedAgentDir;
 
 		// Create project structure with prompts and commands
 		const promptsDir = path.join(tmpDir, ".tallow", "prompts");
@@ -138,7 +143,11 @@ Use opus model.
 		if (originalTrustStatus !== undefined)
 			process.env.TALLOW_PROJECT_TRUST_STATUS = originalTrustStatus;
 		else delete process.env.TALLOW_PROJECT_TRUST_STATUS;
+		if (originalCodingAgentDir !== undefined)
+			process.env.TALLOW_CODING_AGENT_DIR = originalCodingAgentDir;
+		else delete process.env.TALLOW_CODING_AGENT_DIR;
 		fs.rmSync(tmpDir, { recursive: true, force: true });
+		fs.rmSync(isolatedAgentDir, { recursive: true, force: true });
 	});
 
 	test("indexes prompt with context: fork", () => {
