@@ -44,6 +44,7 @@ class FakeInteractiveMode {
 	pendingBashComponents: unknown[] = [];
 	pendingWorkingMessage: unknown = "stale";
 	forceRenderRequests = 0;
+	renderGraceResets = 0;
 	renderRequests = 0;
 	session: {
 		clearQueue: () => { followUp: string[]; steering: string[] };
@@ -60,6 +61,10 @@ class FakeInteractiveMode {
 			this.lifecycleCalls.push("ui.requestRender");
 			this.renderRequests++;
 			if (force) this.forceRenderRequests++;
+		},
+		resetRenderGrace: (): void => {
+			this.lifecycleCalls.push("ui.resetRenderGrace");
+			this.renderGraceResets++;
 		},
 	};
 
@@ -155,6 +160,19 @@ class FakeInteractiveMode {
 	 */
 	async handleReloadCommand(): Promise<void> {
 		this.lifecycleCalls.push("handleReloadCommand");
+	}
+
+	/**
+	 * Base showSelector implementation used by the patch wrapper.
+	 *
+	 * @param create - Selector factory receiving a done callback
+	 * @returns Factory result
+	 */
+	showSelector(create: (done: () => void) => unknown): unknown {
+		this.lifecycleCalls.push("showSelector");
+		return create(() => {
+			this.lifecycleCalls.push("showSelector.done");
+		});
 	}
 
 	/**
@@ -551,6 +569,22 @@ describe("patchInteractiveModePrototype", () => {
 
 		expect(mode.escapeCalls).toBe(1);
 		expect(mode.lastRestoredAbort).toBeUndefined();
+	});
+
+	it("resets render grace around selector swaps", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		let done: (() => void) | undefined;
+
+		mode.showSelector((selectorDone) => {
+			done = selectorDone;
+			return { component: "selector" };
+		});
+		done?.();
+
+		expect(mode.renderGraceResets).toBe(2);
+		expect(mode.renderRequests).toBe(1);
+		expect(mode.lifecycleCalls).toContain("ui.resetRenderGrace");
 	});
 
 	it("allows idle setWorkingMessage for post-compaction resuming indicators", () => {
