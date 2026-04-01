@@ -1,0 +1,36 @@
+---
+title: render-stabilizer
+description: Prevents resume-time screen flicker by favoring gentler redraws during session switches.
+---
+
+Prevents visible screen flicker when resuming or switching sessions.
+
+Without this extension, the TUI can briefly clear and rebuild large
+parts of the screen while restoring chat content. That redraw path can
+produce a blank-frame flash, especially in terminals where full-screen
+clears are visually obvious.
+
+## How it works
+
+On first `session_start`, the extension captures a reference to the
+active TUI instance.
+
+Before `session_before_switch`, it resets the TUI render grace period.
+That nudges the renderer toward gentler line-by-line updates instead of
+more aggressive screen-clearing redraws during the resume transition.
+
+## User-facing behavior
+
+This extension has no commands, tools, or settings.
+
+If it is enabled, session resume should feel steadier and less flashy.
+If you disable it, resume still works — it just may redraw more harshly
+on some terminals.
+
+## Relationships with other extensions
+
+### [rewind](/extensions/rewind/)
+
+`rewind` and normal session resume both move through session restoration
+paths. `render-stabilizer` does not change session data — it only makes
+those transitions render more smoothly.

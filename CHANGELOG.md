@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **interactive:** route model-triggered compaction through the real interactive compact path
+  when upstream InteractiveMode exposes `handleCompactCommand()` instead of `executeCompaction()`
+- **test:** stabilize print-mode routing parity under full-suite load by giving child CLI runs
+  a realistic timeout budget
+- **packaging:** fix 3 bundled extensions failing on fresh install — `background-task-tool`,
+  `lsp`, and `teams-tool` imported from unpublished `src/` paths; moved to `runtime/` wrappers
+- **packaging:** move `vscode-languageserver-protocol` from devDependencies to dependencies
+  so the `lsp` extension loads on fresh installs
+- **deps:** bump `@mariozechner/pi-coding-agent`, `pi-agent-core`, and `pi-ai` from 0.62.0
+  to 0.64.0 — adapt to `ModelRegistry.create()` factory and `getApiKeyForProvider()` rename
+- **edit-tool:** propagate upstream `prepareArguments` normalization so old-format
+  `{oldText, newText}` params still work after pi 0.64.0 schema change
+
+### Documentation
+
+- **extensions:** add the missing `render-stabilizer` extension page so docs drift checks cover
+  all bundled extensions
+
+### Removed
+
+- **plan-mode-tool:** remove the plan mode extension, slash command, tool, docs, and related
+  installer/schema/test references
+
 ## [0.8.28](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.27...tallow-v0.8.28) (2026-03-31)
 
 
@@ -63,19 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **tui:** add mouse event parsing tests ([a54b506](https://github.com/dungle-scrubs/tallow/commit/a54b506c44ea8aca341f6daa4ece402b1370bdb0))
 * **tui:** add rolling shrink detection regression tests ([0a03a7f](https://github.com/dungle-scrubs/tallow/commit/0a03a7f6c6f32b2f4d27ee937becb9c2b1e8caba))
 * **welcome-screen:** add E2E integration tests for header rendering ([a41942d](https://github.com/dungle-scrubs/tallow/commit/a41942dcb15e7c73b9073c1666538e7360fe4ba1))
-
-## [Unreleased]
-
-### Fixed
-
-- **packaging:** fix 3 bundled extensions failing on fresh install — `background-task-tool`,
-  `lsp`, and `teams-tool` imported from unpublished `src/` paths; moved to `runtime/` wrappers
-- **packaging:** move `vscode-languageserver-protocol` from devDependencies to dependencies
-  so the `lsp` extension loads on fresh installs
-- **deps:** bump `@mariozechner/pi-coding-agent`, `pi-agent-core`, and `pi-ai` from 0.62.0
-  to 0.64.0 — adapt to `ModelRegistry.create()` factory and `getApiKeyForProvider()` rename
-- **edit-tool:** propagate upstream `prepareArguments` normalization so old-format
-  `{oldText, newText}` params still work after pi 0.64.0 schema change
 
 ## [0.8.27](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.8.26...tallow-v0.8.27) (2026-03-21)
 
