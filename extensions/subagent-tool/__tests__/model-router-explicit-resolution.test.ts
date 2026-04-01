@@ -1,4 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createMockScope } from "../../../test-utils/mock-scope.js";
 
 const mockModels = [
@@ -48,7 +51,23 @@ mockScope.module("../task-classifier.js", () => ({
 let routeModel!: typeof import("../model-router.js").routeModel;
 
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
-const ENV_KEYS = ["OPENCODE_API_KEY", "ZAI_API_KEY"] as const;
+const ENV_KEYS = [
+	"ANTHROPIC_API_KEY",
+	"GEMINI_API_KEY",
+	"GOOGLE_API_KEY",
+	"MINIMAX_API_KEY",
+	"MINIMAX_CN_API_KEY",
+	"OPENCODE_API_KEY",
+	"OPENAI_API_KEY",
+	"OPENROUTER_API_KEY",
+	"TALLOW_CODING_AGENT_DIR",
+	"VERCEL_AI_GATEWAY_API_KEY",
+	"VERCEL_API_KEY",
+	"XAI_API_KEY",
+	"ZAI_API_KEY",
+] as const;
+
+let isolatedTallowHome: string;
 
 beforeAll(async () => {
 	mockScope.install();
@@ -65,6 +84,8 @@ beforeEach(() => {
 		ORIGINAL_ENV[key] = process.env[key];
 		delete process.env[key];
 	}
+	isolatedTallowHome = mkdtempSync(join(tmpdir(), "subagent-router-explicit-"));
+	process.env.TALLOW_CODING_AGENT_DIR = isolatedTallowHome;
 });
 
 afterEach(() => {
@@ -72,8 +93,8 @@ afterEach(() => {
 		if (ORIGINAL_ENV[key] === undefined) delete process.env[key];
 		else process.env[key] = ORIGINAL_ENV[key];
 	}
+	rmSync(isolatedTallowHome, { force: true, recursive: true });
 });
-
 describe("routeModel explicit model resolution", () => {
 	it("honors explicit provider/model choices without auto-routing", async () => {
 		const result = await routeModel(
