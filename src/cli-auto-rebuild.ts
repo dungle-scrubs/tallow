@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
 	getStaleBuildGroups,
@@ -140,6 +141,32 @@ export function maybeAutoRebuildCurrentCli(options: CliAutoRebuildOptions): void
 		`\x1b[2m↻ Detected stale local tallow build (${staleLabel}); running bun run build...\x1b[0m`
 	);
 
+	// ── Install stale dependencies before building ──────────────────────
+	// When bun.lock or package.json is newer than node_modules, the
+	// installed packages are likely out of date (e.g. after `git pull`).
+	// Running `bun install` first prevents build failures from missing or
+	// changed upstream APIs.
+	if (areDependenciesStale(options.packageDir)) {
+		console.error("\x1b[2m↻ Dependencies appear stale; running bun install...\x1b[0m");
+		try {
+			execFileSync("bun", ["install", "--frozen-lockfile"], {
+				cwd: options.packageDir,
+				stdio: "inherit",
+			});
+		} catch {
+			// frozen-lockfile can fail when lockfile is out of sync with
+			// package.json — fall back to a regular install
+			try {
+				execFileSync("bun", ["install"], {
+					cwd: options.packageDir,
+					stdio: "inherit",
+				});
+			} catch {
+				console.error("\x1b[33m⚠ bun install failed; attempting build anyway...\x1b[0m");
+			}
+		}
+	}
+
 	try {
 		execFileSync("bun", ["run", "build"], {
 			cwd: options.packageDir,
@@ -169,4 +196,42 @@ export function maybeAutoRebuildCurrentCli(options: CliAutoRebuildOptions): void
 	}
 
 	process.exit(restart.status ?? 1);
+}
+
+/**
+ * Check whether installed node_modules are stale relative to the lockfile.
+ *
+ * Compares the mtime of `bun.lock` and `package.json` against the mtime of
+ * `node_modules/.bun` (bun's install marker directory). When either manifest
+ * file is newer than the marker, dependencies likely need reinstalling.
+ *
+ * @param packageDir - Package root directory containing bun.lock and node_modules
+ * @returns True when dependencies appear stale and `bun install` should run
+ */
+function areDependenciesStale(packageDir: string): boolean {
+	const markerPath = join(packageDir, "node_modules", ".bun");
+	if (!existsSync(markerPath)) {
+		// No node_modules/.bun means deps were never installed with bun
+		return existsSync(join(packageDir, "package.json"));
+	}
+
+	let markerMtimeMs: number;
+	try {
+		markerMtimeMs = statSync(markerPath).mtimeMs;
+	} catch {
+		return true;
+	}
+
+	for (const manifest of ["bun.lock", "package.json"]) {
+		const manifestPath = join(packageDir, manifest);
+		try {
+			if (statSync(manifestPath).mtimeMs > markerMtimeMs) {
+				return true;
+			}
+		} catch {
+			// Missing manifest — skip
+		}
+	}
+
+	return false;
 }

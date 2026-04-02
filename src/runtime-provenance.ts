@@ -30,6 +30,7 @@ export interface RuntimeProvenanceOptions {
 const BUILD_GROUPS = [
 	{
 		inputPaths: [
+			"bun.lock",
 			"extensions",
 			"package.json",
 			"schemas",

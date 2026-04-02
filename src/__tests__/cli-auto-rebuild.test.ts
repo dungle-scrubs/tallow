@@ -164,6 +164,7 @@ describe("assessCliAutoRebuild", () => {
 		expect(
 			assessCliAutoRebuild({
 				argv: ["node", entrypoint],
+				env: {},
 				packageDir,
 			})
 		).toEqual({
@@ -180,6 +181,7 @@ describe("assessCliAutoRebuild", () => {
 		expect(
 			assessCliAutoRebuild({
 				argv: ["node", entrypoint],
+				env: {},
 				packageDir,
 			})
 		).toEqual({
@@ -199,6 +201,7 @@ describe("assessCliAutoRebuild", () => {
 		expect(
 			assessCliAutoRebuild({
 				argv: ["node", entrypoint],
+				env: {},
 				packageDir,
 			})
 		).toEqual({
