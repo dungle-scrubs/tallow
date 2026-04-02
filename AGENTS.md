@@ -175,6 +175,33 @@ Tallow bridges `.claude/` directories so projects with Claude Code config
 (skills, agents, commands in `.claude/`) work in tallow without changes.
 Both `.tallow/` and `.claude/` are scanned; `.tallow/` takes precedence.
 
+## Known Issues and Workarounds
+
+### MiniMax auto-compaction fails with "Reasoning is mandatory for this endpoint"
+
+`pi-coding-agent`'s `generateTurnPrefixSummary()` (used during context overflow
+auto-compaction) does not pass a `reasoning` parameter to the pi-ai OpenRouter
+handler. pi-ai then defaults to `reasoning: { effort: "none" }`, which MiniMax
+rejects: **"Reasoning is mandatory for this endpoint and cannot be disabled."**
+
+`generateSummary()` at the same file has the correct guard (`model.reasoning
+? reasoning: "high" : …`) but `generateTurnPrefixSummary()` was missing it.
+
+**Fix:** `node_modules/@mariozechner/pi-coding-agent/dist/core/compaction/compaction.js`
+is patched automatically by `scripts/patch-upstream-debug.mjs` (runs as postinstall).
+The patch adds `const completionOptions = model.reasoning
+    ? { maxTokens, signal, apiKey, reasoning: "high" }
+    : { maxTokens, signal, apiKey };` and passes `completionOptions` instead
+of bare `{ maxTokens, signal, apiKey }`.
+
+If the error recurs after `pnpm install`, reapply with:
+`bun run postinstall` or `node scripts/patch-upstream-debug.mjs`.
+
+Note: `src/model-metadata-overrides.ts` also adds `model.reasoning = false`
+for MiniMax models to prevent `generateSummary()` from passing `reasoning: "high"`
+when `model.reasoning` is `true` — but `generateTurnPrefixSummary()` bypasses
+`model.reasoning` entirely, so both patches are required.
+
 ## Content Boundaries
 
 `~/.config/tallow-work-dirs` and `~/.config/claude-work-dirs` are the
