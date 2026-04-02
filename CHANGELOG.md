@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.1...tallow-v0.9.2) (2026-04-02)
+
+
+### Fixed
+
+* disable reasoning metadata for MiniMax models to fix compact failures ([eb7d3f1](https://github.com/dungle-scrubs/tallow/commit/eb7d3f16539add7ac0bb3e6f8956e089fd0a4855))
+* patch pi-coding-agent generateTurnPrefixSummary to pass reasoning for MiniMax ([f904115](https://github.com/dungle-scrubs/tallow/commit/f904115510de74017cf86e3bb1551f753562fb27))
+
 ## [0.9.1](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.0...tallow-v0.9.1) (2026-04-01)
 
 
