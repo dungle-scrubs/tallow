@@ -154,7 +154,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `modelRegistry` — Model registry for API key resolution
 - `model` — Current model (may be undefined)
 - `isIdle()` — Whether the agent is idle (not streaming)
-- `signal` — The current abort signal, or undefined when the agent is not streaming.
 - `abort()` — Abort the current agent operation
 - `hasPendingMessages()` — Whether there are queued messages waiting
 - `shutdown()` — Gracefully shutdown pi and exit.
@@ -179,7 +178,6 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `onTerminalInput(handler: TerminalInputHandler)` — Listen to raw terminal input (interactive mode only).
 - `setStatus(key: string, text: string)` — Set status text in the footer/status bar.
 - `setWorkingMessage(message?: string)` — Set the working/loading message shown during streaming.
-- `setHiddenThinkingLabel(label?: string)` — Set the label shown for hidden thinking blocks.
 - `setWidget(key: string, content: string[], options?: ExtensionWidgetOptions)` — Set a widget to display above or below the editor.
 - `setTitle(title: string)` — Set the terminal window/tab title.
 - `pasteToEditor(text: string)` — Paste text into the editor, triggering paste handling (collapse for large content).
