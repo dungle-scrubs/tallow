@@ -1,4 +1,7 @@
-# Changelog
+---
+title: Changelog
+description: All notable changes to tallow, following Keep a Changelog.
+---
 
 All notable changes to this project will be documented in this file.
 
