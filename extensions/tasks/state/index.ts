@@ -38,7 +38,7 @@ export const LEGACY_TEAMS_DIR = getTallowPath("teams");
 export const TEAM_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Minimum width for side-by-side layout (tasks left, subagents right). */
-export const MIN_SIDE_BY_SIDE_WIDTH = 120;
+export const MIN_SIDE_BY_SIDE_WIDTH = 140;
 
 /** Prefix used for session-scoped shared task-group directories. */
 const SESSION_TASK_GROUP_PREFIX = "task-group";

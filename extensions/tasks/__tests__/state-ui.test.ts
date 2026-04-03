@@ -114,10 +114,10 @@ describe("tasks ui helpers", () => {
 		expect(visibleWidth(truncated)).toBe(3);
 	});
 
-	it("mergeSideBySide bottom-aligns right column and keeps width bounds", () => {
+	it("mergeSideBySide top-aligns right column and keeps width bounds", () => {
 		const merged = mergeSideBySide(["left1", "left2", "left3"], ["right"], 6, " | ", 16);
 		expect(merged).toHaveLength(3);
-		expect(merged[0]).toBe("left1  | ");
-		expect(merged[2]).toContain("right");
+		expect(merged[0]).toContain("right");
+		expect(merged[2]).toBe("left3  | ");
 	});
 });

@@ -310,7 +310,7 @@ function normalizeKeyArray(value: KeyId | readonly KeyId[]): readonly KeyId[] {
  * @param {KeybindingsConfig} userBindings - Raw user bindings.
  * @returns {NormalizedKeybindingsConfig} Normalized modern binding map.
  */
-function normalizeUserBindings(userBindings: KeybindingsConfig): NormalizedKeybindingsConfig {
+function _normalizeUserBindings(userBindings: KeybindingsConfig): NormalizedKeybindingsConfig {
 	const normalized: NormalizedKeybindingsConfig = {};
 
 	for (const [rawKey, rawValue] of Object.entries(userBindings)) {

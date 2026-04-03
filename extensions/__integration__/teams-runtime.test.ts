@@ -226,7 +226,10 @@ describe("Teams runtime wiring", () => {
 		task.assignee = "alice";
 		const archived = archiveTeam(team.name);
 		expect(archived).toBeDefined();
-		writeArchivedTeamToDisk(archived!);
+		if (!archived) {
+			throw new Error("expected archiveTeam() to return archived team data");
+		}
+		writeArchivedTeamToDisk(archived);
 
 		const resume = getTool(harness, "team_resume");
 

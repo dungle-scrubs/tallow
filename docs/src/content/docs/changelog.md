@@ -12,11 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **auto-rebuild:** run `bun install` when dependencies are stale before
-  rebuilding, preventing build failures after `git pull` bumps upstream packages
-- **auto-rebuild:** include `bun.lock` in staleness inputs so lockfile-only
-  changes trigger a rebuild
-- **tests:** isolate `assessCliAutoRebuild` tests from inherited env vars
+- **interactive:** stabilize settings submenu transitions so changing thinking
+  level no longer triggers chat re-append jitter or viewport jumps
+- **interactive:** reset render grace before chat rebuild paths
+  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
+  churn across reload, fork, navigation, and settings-driven rebuilds
+- **runtime:** remove published runtime wrapper references to `src/`, making
+  global installs resilient when only `runtime/` and `dist/` are shipped
+- **tasks:** top-align the side-by-side background column and require a wider
+  terminal before using split layout, removing large blank gaps above
+  background task content
+
+## [0.9.3](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.2...tallow-v0.9.3) (2026-04-02)
+
+
+### Fixed
+
+* **auto-rebuild:** install stale dependencies before rebuilding ([d07da7a](https://github.com/dungle-scrubs/tallow/commit/d07da7a88b4133e635f22e5d42e59adf7d2db8d4))
 
 ## [0.9.2](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.1...tallow-v0.9.2) (2026-04-02)
 

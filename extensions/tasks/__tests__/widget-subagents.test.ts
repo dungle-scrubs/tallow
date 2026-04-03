@@ -406,7 +406,7 @@ describe("tasks widget subagent sections", () => {
 			expectLinesWithinWidth(stackedNarrow, 55);
 			expectLinesWithinWidth(stackedWide, 95);
 
-			const sideBySideNarrow = renderWidget(fixture.captured, 124);
+			const sideBySideNarrow = renderWidget(fixture.captured, 144);
 			const sideBySideWide = renderWidget(fixture.captured, 180);
 			const sideBySideNarrowPreview = extractPreview(sideBySideNarrow, "seg01");
 			const sideBySideWidePreview = extractPreview(sideBySideWide, "seg01");
@@ -417,7 +417,7 @@ describe("tasks widget subagent sections", () => {
 			expect(visibleWidth(sideBySideWidePreview)).toBeGreaterThan(
 				visibleWidth(sideBySideNarrowPreview)
 			);
-			expectLinesWithinWidth(sideBySideNarrow, 124);
+			expectLinesWithinWidth(sideBySideNarrow, 144);
 			expectLinesWithinWidth(sideBySideWide, 180);
 		} finally {
 			await shutdownFixture(fixture);

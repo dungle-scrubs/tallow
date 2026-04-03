@@ -45,7 +45,7 @@ export function padToWidth(line: string, targetWidth: number): string {
 }
 
 /**
- * Merge two column arrays into side-by-side lines, with right column bottom-aligned.
+ * Merge two column arrays into side-by-side lines with top-aligned rows.
  *
  * Both columns are truncated to their allotted widths to prevent overflow.
  *
@@ -68,14 +68,9 @@ export function mergeSideBySide(
 	const maxRows = Math.max(leftLines.length, rightLines.length);
 	const result: string[] = [];
 
-	// Bottom-align: pad right column at the top
-	const rightPadding = maxRows - rightLines.length;
-
 	for (let i = 0; i < maxRows; i++) {
 		const left = leftLines[i] ?? "";
-		const rightIndex = i - rightPadding;
-		const rawRight = rightIndex >= 0 ? (rightLines[rightIndex] ?? "") : "";
-		// Truncate right column to prevent overflow
+		const rawRight = rightLines[i] ?? "";
 		const right =
 			rightWidth > 0 && visibleWidth(rawRight) > rightWidth
 				? truncateToWidth(rawRight, rightWidth, "")

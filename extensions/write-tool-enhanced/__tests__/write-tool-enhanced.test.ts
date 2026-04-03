@@ -68,6 +68,21 @@ function stubContext(): ExtensionContext {
 	} as unknown as ExtensionContext;
 }
 
+/**
+ * Resolve the registered write tool from a loaded harness.
+ *
+ * @param harness - Extension harness with write-tool-enhanced loaded
+ * @returns Registered write tool definition
+ * @throws {Error} When the write tool is unavailable
+ */
+function getWriteTool(harness: ExtensionHarness) {
+	const tool = harness.tools.get("write");
+	if (!tool) {
+		throw new Error("write tool not registered");
+	}
+	return tool;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("write-tool-enhanced", () => {
@@ -109,7 +124,7 @@ describe("write-tool-enhanced", () => {
 			const harness = ExtensionHarness.create();
 			await harness.loadExtension(writePreview);
 
-			const tool = harness.tools.get("write")!;
+			const tool = getWriteTool(harness);
 			const content = "const x = 1;\nconst y = 2;";
 
 			const result = await tool.execute(
@@ -128,7 +143,7 @@ describe("write-tool-enhanced", () => {
 			const harness = ExtensionHarness.create();
 			await harness.loadExtension(writePreview);
 
-			const tool = harness.tools.get("write")!;
+			const tool = getWriteTool(harness);
 			const content = "line1\nline2\nline3"; // 3 lines
 
 			const result = await tool.execute(
@@ -148,7 +163,7 @@ describe("write-tool-enhanced", () => {
 			const harness = ExtensionHarness.create();
 			await harness.loadExtension(writePreview);
 
-			const tool = harness.tools.get("write")!;
+			const tool = getWriteTool(harness);
 			// 1200 chars → 1200/1024 ≈ 1.171875 → toFixed(1) = "1.2"
 			const content = "a".repeat(1200);
 			const expectedKb = (content.length / 1024).toFixed(1);
@@ -170,7 +185,7 @@ describe("write-tool-enhanced", () => {
 			const harness = ExtensionHarness.create();
 			await harness.loadExtension(writePreview);
 
-			const tool = harness.tools.get("write")!;
+			const tool = getWriteTool(harness);
 			const content = "hello\nworld"; // 2 lines, 11 chars
 
 			const result = await tool.execute(
@@ -190,7 +205,7 @@ describe("write-tool-enhanced", () => {
 			const harness = ExtensionHarness.create();
 			await harness.loadExtension(writePreview);
 
-			const tool = harness.tools.get("write")!;
+			const tool = getWriteTool(harness);
 
 			const result = await tool.execute(
 				"test-id",
@@ -211,7 +226,7 @@ describe("write-tool-enhanced", () => {
 			const harness = ExtensionHarness.create();
 			await harness.loadExtension(writePreview);
 
-			const tool = harness.tools.get("write")!;
+			const tool = getWriteTool(harness);
 
 			await expect(
 				tool.execute(

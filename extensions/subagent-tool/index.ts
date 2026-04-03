@@ -1412,7 +1412,7 @@ function renderSubagentCall(args: Record<string, unknown>, theme: Theme) {
 		return new Text(lines.join("\n"), 0, 0);
 	}
 
-	const agentName = (args.agent as string) || "...";
+	const _agentName = (args.agent as string) || "...";
 	const task = typeof args.task === "string" ? args.task : "...";
 	// Single mode: skip the redundant "subagent single" header — the result
 	// renderer already shows "subagent running <duration> <agent>" with a spinner.

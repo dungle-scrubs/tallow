@@ -40,7 +40,7 @@ describe("show-system-prompt extension", () => {
 			logged.push(args.join(" "));
 		};
 		try {
-			await handler!("", ctx);
+			await handler?.("", ctx);
 		} finally {
 			console.log = origLog;
 		}

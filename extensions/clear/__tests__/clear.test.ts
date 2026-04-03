@@ -32,7 +32,7 @@ describe("clear extension", () => {
 		registerClear(pi);
 
 		const newSession = mock(() => Promise.resolve());
-		await handler!("", { newSession });
+		await handler?.("", { newSession });
 		expect(newSession).toHaveBeenCalledTimes(1);
 	});
 });

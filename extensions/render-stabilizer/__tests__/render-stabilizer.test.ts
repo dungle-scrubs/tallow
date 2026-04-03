@@ -8,16 +8,16 @@ describe("render-stabilizer extension", () => {
 		const mockPi = {
 			on(event: string, handler: unknown) {
 				if (!handlers.has(event)) handlers.set(event, []);
-				handlers.get(event)!.push(handler);
+				handlers.get(event)?.push(handler);
 			},
 		};
 
 		renderStabilizerExtension(mockPi as never);
 
 		expect(handlers.has("session_start")).toBe(true);
-		expect(handlers.get("session_start")!.length).toBe(1);
+		expect(handlers.get("session_start")?.length).toBe(1);
 		expect(handlers.has("session_before_switch")).toBe(true);
-		expect(handlers.get("session_before_switch")!.length).toBe(1);
+		expect(handlers.get("session_before_switch")?.length).toBe(1);
 	});
 
 	it("does not register any commands or tools", () => {

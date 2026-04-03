@@ -176,6 +176,24 @@ class FakeInteractiveMode {
 	}
 
 	/**
+	 * Base renderInitialMessages implementation used by the patch wrapper.
+	 *
+	 * @returns Nothing
+	 */
+	renderInitialMessages(): void {
+		this.lifecycleCalls.push("renderInitialMessages");
+	}
+
+	/**
+	 * Base rebuildChatFromMessages implementation used by the patch wrapper.
+	 *
+	 * @returns Nothing
+	 */
+	rebuildChatFromMessages(): void {
+		this.lifecycleCalls.push("rebuildChatFromMessages");
+	}
+
+	/**
 	 * Base executeCompaction implementation used by the patch wrapper.
 	 *
 	 * @param _customInstructions - Optional compaction instructions
@@ -583,8 +601,54 @@ describe("patchInteractiveModePrototype", () => {
 		done?.();
 
 		expect(mode.renderGraceResets).toBe(2);
-		expect(mode.renderRequests).toBe(1);
+		expect(mode.renderRequests).toBe(2);
 		expect(mode.lifecycleCalls).toContain("ui.resetRenderGrace");
+	});
+
+	it("binds settings submenu layout transitions to stable renders", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		let layoutTransition: (() => void) | undefined;
+
+		mode.showSelector(() => ({
+			component: {
+				getSettingsList: () => ({
+					setLayoutTransitionCallback: (callback?: () => void) => {
+						layoutTransition = callback;
+					},
+				}),
+			},
+			focus: "selector",
+		}));
+
+		expect(typeof layoutTransition).toBe("function");
+		const resetsBefore = mode.renderGraceResets;
+		const rendersBefore = mode.renderRequests;
+		layoutTransition?.();
+		expect(mode.renderGraceResets).toBe(resetsBefore + 1);
+		expect(mode.renderRequests).toBe(rendersBefore + 1);
+	});
+
+	it("resets render grace before renderInitialMessages", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		mode.renderInitialMessages();
+
+		expect(mode.renderGraceResets).toBe(1);
+		expect(mode.renderRequests).toBe(1);
+		expect(mode.lifecycleCalls).toContain("renderInitialMessages");
+	});
+
+	it("resets render grace before rebuildChatFromMessages", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		mode.rebuildChatFromMessages();
+
+		expect(mode.renderGraceResets).toBe(1);
+		expect(mode.renderRequests).toBe(1);
+		expect(mode.lifecycleCalls).toContain("rebuildChatFromMessages");
 	});
 
 	it("allows idle setWorkingMessage for post-compaction resuming indicators", () => {
