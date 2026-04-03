@@ -47,6 +47,7 @@ export class SettingsList implements Component {
 	private submenuItemIndex: number | null = null;
 	private lastRenderLineCount = 0;
 	private nextMinLineCount = 0;
+	private layoutTransitionCallback?: () => void;
 
 	constructor(
 		items: SettingItem[],
@@ -68,12 +69,31 @@ export class SettingsList implements Component {
 		}
 	}
 
-	/** Update an item's currentValue */
+	/**
+	 * Update an item's current value.
+	 *
+	 * @param id - Setting identifier
+	 * @param newValue - New value to display
+	 * @returns Nothing
+	 */
 	updateValue(id: string, newValue: string): void {
 		const item = this.items.find((i) => i.id === id);
 		if (item) {
 			item.currentValue = newValue;
 		}
+	}
+
+	/**
+	 * Set a callback fired before submenu-driven layout transitions.
+	 *
+	 * Callers can use this to reset TUI render-grace state before the settings
+	 * list expands into, or collapses out of, a submenu.
+	 *
+	 * @param callback - Transition callback, or undefined to clear it
+	 * @returns Nothing
+	 */
+	setLayoutTransitionCallback(callback?: () => void): void {
+		this.layoutTransitionCallback = callback;
 	}
 
 	invalidate(): void {
@@ -225,6 +245,7 @@ export class SettingsList implements Component {
 			// Preserve height for the first submenu frame so the TUI doesn't treat
 			// the editor→submenu swap as a destructive shrink/expand transition.
 			this.nextMinLineCount = this.lastRenderLineCount;
+			this.layoutTransitionCallback?.();
 			this.submenuItemIndex = this.selectedIndex;
 			this.submenuComponent = item.submenu(item.currentValue, (selectedValue?: string) => {
 				if (selectedValue !== undefined) {
@@ -243,10 +264,16 @@ export class SettingsList implements Component {
 		}
 	}
 
+	/**
+	 * Close the active submenu and restore the main settings list.
+	 *
+	 * @returns Nothing
+	 */
 	private closeSubmenu(): void {
 		// Preserve one frame of the submenu height so the transition back to the
 		// main settings list doesn't trigger a screen-clearing shrink redraw.
 		this.nextMinLineCount = this.lastRenderLineCount;
+		this.layoutTransitionCallback?.();
 		this.submenuComponent = null;
 		// Restore selection to the item that opened the submenu
 		if (this.submenuItemIndex !== null) {

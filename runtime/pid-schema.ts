@@ -1,12 +1,32 @@
 import { resolveRuntimeModuleUrl } from "./resolve-module.js";
 
-const pidSchemaModule = (await import(
-	resolveRuntimeModuleUrl("pid-schema.js")
-)) as typeof import("../src/pid-schema.js");
+export interface PidEntry {
+	command: string;
+	ownerPid?: number;
+	ownerStartedAt?: string;
+	pid: number;
+	processStartedAt?: string;
+	startedAt: number;
+}
 
-export type PidEntry = import("../src/pid-schema.js").PidEntry;
-export type SessionOwner = import("../src/pid-schema.js").SessionOwner;
-export type SessionPidFile = import("../src/pid-schema.js").SessionPidFile;
+export interface SessionOwner {
+	pid: number;
+	startedAt?: string;
+}
+
+export interface SessionPidFile {
+	entries: PidEntry[];
+	owner: SessionOwner;
+	version: 2;
+}
+
+interface PidSchemaModule {
+	isPidEntry(value: unknown): value is PidEntry;
+	isSessionOwner(value: unknown): value is SessionOwner;
+	toOwnerKey(owner: SessionOwner): string;
+}
+
+const pidSchemaModule = (await import(resolveRuntimeModuleUrl("pid-schema.js"))) as PidSchemaModule;
 
 export const isPidEntry = pidSchemaModule.isPidEntry;
 export const isSessionOwner = pidSchemaModule.isSessionOwner;

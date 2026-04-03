@@ -77,7 +77,10 @@ function patchMiniMax(target) {
 	if (content.includes("MINIMAX_ALREADY_PATCHED")) return false;
 	if (!content.includes(MINIMAX_BUGGY)) return false;
 
-	const patched = content.replace(MINIMAX_BUGGY, `${MINIMAX_FIXED}\n    // MINIMAX_ALREADY_PATCHED`);
+	const patched = content.replace(
+		MINIMAX_BUGGY,
+		`${MINIMAX_FIXED}\n    // MINIMAX_ALREADY_PATCHED`
+	);
 	writeFileSync(target, patched);
 	return true;
 }

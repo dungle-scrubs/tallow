@@ -685,7 +685,7 @@ export function registerTasksExtension(
 				const useSideBySide = width >= MIN_SIDE_BY_SIDE_WIDTH && hasTasks && hasRightColumn;
 
 				if (useSideBySide) {
-					// Side-by-side: tasks on left, subagents + bg tasks on right (bottom-aligned)
+					// Side-by-side: tasks on left, subagents + bg tasks on right
 					const separator = "\x1b[38;2;60;60;70m  │  \x1b[0m"; // Dark gray
 					const separatorWidth = 5; // "  │  " is 5 visible chars
 					const leftColumnWidth = Math.floor((width - separatorWidth) / 2);

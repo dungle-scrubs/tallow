@@ -5,7 +5,7 @@
  * other test files in the same Bun worker. Tests cover command/handler
  * registration and event handler presence without mocking the _shared modules.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
 import registerPermissions from "../index.js";
@@ -71,7 +71,7 @@ describe("permissions extension registration", () => {
 describe("tool_call handler", () => {
 	test("skips bash tool (handled by shell-policy)", async () => {
 		const { handlers } = captureRegistrations();
-		const result = await handlers.tool_call!(
+		const result = await handlers.tool_call?.(
 			{ type: "tool_call", toolName: "bash", toolCallId: "t1", input: { command: "ls" } },
 			{ cwd: "/tmp", hasUI: false, ui: {} } as unknown as ExtensionContext
 		);
@@ -81,7 +81,7 @@ describe("tool_call handler", () => {
 
 	test("skips bg_bash tool (handled by shell-policy)", async () => {
 		const { handlers } = captureRegistrations();
-		const result = await handlers.tool_call!(
+		const result = await handlers.tool_call?.(
 			{ type: "tool_call", toolName: "bg_bash", toolCallId: "t2", input: { command: "ls" } },
 			{ cwd: "/tmp", hasUI: false, ui: {} } as unknown as ExtensionContext
 		);
@@ -92,7 +92,7 @@ describe("tool_call handler", () => {
 		const { handlers } = captureRegistrations();
 		// Session-start hasn't been called yet, so currentCwd is "", and
 		// getPermissions("") returns empty rules → skip
-		const result = await handlers.tool_call!(
+		const result = await handlers.tool_call?.(
 			{
 				type: "tool_call",
 				toolName: "read",

@@ -28,6 +28,7 @@ interface SessionLike {
 }
 
 interface InteractiveModeInstanceLike {
+	chatContainer?: { clear?: (() => void) | undefined };
 	compactionQueuedMessages?: Array<unknown>;
 	createExtensionUIContext?:
 		| ((...args: unknown[]) => { notify?: ((...args: unknown[]) => unknown) | undefined })
@@ -38,6 +39,8 @@ interface InteractiveModeInstanceLike {
 		getText?: (() => string) | undefined;
 		setText?: ((text: string) => void) | undefined;
 	};
+	renderInitialMessages?: (() => void) | undefined;
+	rebuildChatFromMessages?: (() => void) | undefined;
 	executeCompaction?:
 		| ((customInstructions?: string, isAuto?: boolean) => Promise<unknown>)
 		| undefined;
@@ -84,6 +87,8 @@ interface InteractiveModePrototypeLike {
 	handleEvent?: ((event: InteractiveModeEventLike) => Promise<unknown>) | undefined;
 	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
+	renderInitialMessages?: ((...args: unknown[]) => unknown) | undefined;
+	rebuildChatFromMessages?: ((...args: unknown[]) => unknown) | undefined;
 	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
 	showSelector?: ((create: (...args: unknown[]) => unknown) => unknown) | undefined;
 }
@@ -96,6 +101,63 @@ interface InteractiveModePrototypeLike {
  */
 function resetRenderGrace(mode: InteractiveModeInstanceLike): void {
 	mode.ui?.resetRenderGrace?.();
+}
+
+interface SettingsListLike {
+	setLayoutTransitionCallback?: ((callback?: () => void) => void) | undefined;
+}
+
+interface SelectorCreateResultLike {
+	component?: unknown;
+	focus?: unknown;
+}
+
+/**
+ * Reset render grace and request a repaint for a large UI surface transition.
+ *
+ * @param mode - Interactive mode instance
+ * @returns Nothing
+ */
+function requestStableRender(mode: InteractiveModeInstanceLike): void {
+	resetRenderGrace(mode);
+	mode.ui?.requestRender?.();
+}
+
+/**
+ * Resolve a settings list instance from a selector result when available.
+ *
+ * @param result - Selector factory result
+ * @returns Settings list instance, or undefined when the selector is not settings-backed
+ */
+function getSettingsListFromSelectorResult(
+	result: SelectorCreateResultLike | undefined
+): SettingsListLike | undefined {
+	if (!result || typeof result !== "object") return undefined;
+	const focusCandidate = result.focus as SettingsListLike | undefined;
+	if (typeof focusCandidate?.setLayoutTransitionCallback === "function") {
+		return focusCandidate;
+	}
+	const componentCandidate = result.component as
+		| { getSettingsList?: (() => SettingsListLike | undefined) | undefined }
+		| undefined;
+	return componentCandidate?.getSettingsList?.();
+}
+
+/**
+ * Install render-stabilization hooks for settings submenu transitions.
+ *
+ * @param mode - Interactive mode instance
+ * @param result - Selector factory result
+ * @returns Nothing
+ */
+function bindSettingsLayoutTransitions(
+	mode: InteractiveModeInstanceLike,
+	result: SelectorCreateResultLike | undefined
+): void {
+	const settingsList = getSettingsListFromSelectorResult(result);
+	settingsList?.setLayoutTransitionCallback?.(() => {
+		requestStableRender(mode);
+	});
 }
 
 const APPLY_FLAG = "__tallow_interactive_stale_ui_patch_applied__";
@@ -639,6 +701,28 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 		};
 	}
 
+	const originalRenderInitialMessages = prototype.renderInitialMessages;
+	if (typeof originalRenderInitialMessages === "function") {
+		prototype.renderInitialMessages = function (
+			this: InteractiveModeInstanceLike,
+			...args: unknown[]
+		) {
+			requestStableRender(this);
+			return originalRenderInitialMessages.call(this, ...args);
+		};
+	}
+
+	const originalRebuildChatFromMessages = prototype.rebuildChatFromMessages;
+	if (typeof originalRebuildChatFromMessages === "function") {
+		prototype.rebuildChatFromMessages = function (
+			this: InteractiveModeInstanceLike,
+			...args: unknown[]
+		) {
+			requestStableRender(this);
+			return originalRebuildChatFromMessages.call(this, ...args);
+		};
+	}
+
 	const originalHandleEvent = prototype.handleEvent;
 	if (typeof originalHandleEvent === "function") {
 		prototype.handleEvent = async function (
@@ -845,12 +929,13 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			return originalShowSelector.call(this, (...args: unknown[]) => {
 				const originalDone = args[0] as (() => void) | undefined;
 				const wrappedDone = () => {
-					resetRenderGrace(this);
+					requestStableRender(this);
 					originalDone?.();
-					this.ui?.requestRender?.();
 				};
-				resetRenderGrace(this);
-				return create(wrappedDone);
+				requestStableRender(this);
+				const result = create(wrappedDone) as SelectorCreateResultLike | undefined;
+				bindSettingsLayoutTransitions(this, result);
+				return result;
 			});
 		};
 	}

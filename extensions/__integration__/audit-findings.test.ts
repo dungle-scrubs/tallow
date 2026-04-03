@@ -9,20 +9,11 @@
  * - session_shutdown handlers fire during cleanup
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionFactory } from "@mariozechner/pi-coding-agent";
 import { ExtensionHarness } from "../../test-utils/extension-harness.js";
-import { createScriptedStreamFn } from "../../test-utils/mock-model.js";
-import { createSessionRunner, type SessionRunner } from "../../test-utils/session-runner.js";
-
-let runner: SessionRunner | undefined;
-
-afterEach(() => {
-	runner?.dispose();
-	runner = undefined;
-});
 
 // ════════════════════════════════════════════════════════════════
 // Audit Finding 1.1: Dead cwd_changed listener removed
@@ -61,7 +52,7 @@ describe("session_shutdown type safety", () => {
 			if (!existsSync(indexPath)) continue;
 			const source = readFileSync(indexPath, "utf-8");
 			if (source.includes('session_shutdown" as never')) {
-				violations.push(dir.split("/").pop()!);
+				violations.push(dir.split("/").at(-1) ?? dir);
 			}
 		}
 

@@ -46,4 +46,36 @@ describe("SettingsList submenu transitions", () => {
 		expect(firstFrameAfterClose.length).toBe(submenuLines.length);
 		expect(secondFrameAfterClose.length).toBe(initialLines.length);
 	});
+
+	it("fires the layout transition callback when opening and closing a submenu", () => {
+		const list = new SettingsList(
+			[
+				{
+					id: "thinking",
+					label: "Thinking level",
+					currentValue: "medium",
+					submenu: (_currentValue, done) => ({
+						handleInput: () => done("high"),
+						invalidate: () => {},
+						render: () => ["submenu", "one", "two"],
+					}),
+				},
+			],
+			10,
+			theme,
+			() => {},
+			() => {}
+		);
+		const transitions: string[] = [];
+		list.setLayoutTransitionCallback(() => {
+			transitions.push("transition");
+		});
+
+		list.render(80);
+		list.handleInput(" ");
+		list.render(80);
+		list.handleInput("x");
+
+		expect(transitions).toEqual(["transition", "transition"]);
+	});
 });

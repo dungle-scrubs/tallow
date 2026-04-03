@@ -15,7 +15,6 @@ import { dirname, join } from "node:path";
 import {
 	isPidEntry,
 	isSessionOwner,
-	type PidEntry,
 	type SessionOwner,
 	type SessionPidFile,
 	toOwnerKey,
