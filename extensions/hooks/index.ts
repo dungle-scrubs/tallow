@@ -1610,11 +1610,40 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// Hook into session_switch — fires after switching sessions
-	pi.on("session_switch", async (event) => {
+	// session_switch/session_fork were removed upstream in favor of session_start
+	// with a reason discriminator. Preserve hook compatibility here.
+	pi.on("session_start", async (event) => {
+		if (event.reason === "resume" || event.reason === "new") {
+			await runHooks("session_switch", {
+				reason: event.reason,
+				previousSessionFile: event.previousSessionFile,
+			});
+		}
+		if (event.reason === "fork") {
+			await runHooks("session_fork", {
+				previousSessionFile: event.previousSessionFile,
+			});
+		}
+	});
+	(
+		pi as unknown as {
+			on: (event: string, handler: (event: Record<string, unknown>) => Promise<void>) => void;
+		}
+	).on("session_switch", async (event) => {
 		await runHooks("session_switch", {
-			reason: event.reason,
-			previousSessionFile: event.previousSessionFile,
+			reason: String(event.reason ?? "resume"),
+			previousSessionFile:
+				typeof event.previousSessionFile === "string" ? event.previousSessionFile : undefined,
+		});
+	});
+	(
+		pi as unknown as {
+			on: (event: string, handler: (event: Record<string, unknown>) => Promise<void>) => void;
+		}
+	).on("session_fork", async (event) => {
+		await runHooks("session_fork", {
+			previousSessionFile:
+				typeof event.previousSessionFile === "string" ? event.previousSessionFile : undefined,
 		});
 	});
 
@@ -1629,13 +1658,6 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui?.notify(`⛔ Hook blocked session fork: ${reason}`, "error");
 			return { cancel: true };
 		}
-	});
-
-	// Hook into session_fork — fires after forking
-	pi.on("session_fork", async (event) => {
-		await runHooks("session_fork", {
-			previousSessionFile: event.previousSessionFile,
-		});
 	});
 
 	// Hook into session_before_tree — fires before tree navigation (can cancel)

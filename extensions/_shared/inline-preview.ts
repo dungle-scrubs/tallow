@@ -22,7 +22,7 @@ const ANSI_RE = /\x1b\[[0-9;]*m/g;
  * @returns Array of clean, truncated preview lines
  */
 export function extractPreview(output: string, maxLines = 3, maxLineWidth = 80): string[] {
-	if (!output || !output.trim()) return [];
+	if (!output.trim()) return [];
 
 	const lines = output
 		.split("\n")

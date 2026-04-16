@@ -8,10 +8,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.3...tallow-v0.9.4) (2026-04-03)
+
+
+### Fixed
+
+* stabilize redraws, tasks layout, and runtime packaging ([4bbc8ed](https://github.com/dungle-scrubs/tallow/commit/4bbc8ed69196e982e417b8095ef3554eec96891e))
+
 ## [Unreleased]
 
 ### Fixed
 
+- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
+  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
+  transition compatibility hooks during the upgrade
+- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
+  config so dependency bumps continue to build and validate cleanly
 - **interactive:** stabilize settings submenu transitions so changing thinking
   level no longer triggers chat re-append jitter or viewport jumps
 - **interactive:** reset render grace before chat rebuild paths

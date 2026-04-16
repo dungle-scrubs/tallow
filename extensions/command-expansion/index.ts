@@ -418,7 +418,7 @@ export function registerCommandExpansionExtension(
 
 		// Only process if it looks like a command with arguments
 		const split = splitOuterCommand(text);
-		if (!split || !split.args) {
+		if (!split?.args) {
 			return { action: "continue" as const };
 		}
 

@@ -117,7 +117,7 @@ function runInteractiveCompactScenario(): Promise<InteractiveScenarioResult> {
 			});
 		};
 
-		const { session } = await createTallowSession({
+		const tallow = await createTallowSession({
 			cwd,
 			startupProfile: "interactive",
 			model: createMockModel(),
@@ -135,6 +135,7 @@ function runInteractiveCompactScenario(): Promise<InteractiveScenarioResult> {
 				},
 			},
 		});
+		const { runtime, session } = tallow;
 
 		session.agent.streamFn = createScriptedStreamFn([
 			{ text: "warmup complete" },
@@ -143,7 +144,7 @@ function runInteractiveCompactScenario(): Promise<InteractiveScenarioResult> {
 			{ text: "resumed after compact" },
 		]);
 
-		const mode = new InteractiveMode(session, {
+		const mode = new InteractiveMode(runtime, {
 			initialMessages: ["warm up the session", "compact the session"],
 			verbose: false,
 		});

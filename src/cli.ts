@@ -480,6 +480,10 @@ async function run(opts: {
 			return;
 		}
 
+		if (process.cwd() !== tallow.runtime.cwd) {
+			process.chdir(tallow.runtime.cwd);
+		}
+
 		// ── Run in the requested mode ────────────────────────────────────────────
 
 		switch (opts.mode) {
@@ -489,7 +493,7 @@ async function run(opts: {
 
 				if (initialMessage) {
 					// Print mode: single-shot (explicit -p, piped stdin, or both)
-					await runPrintMode(tallow.session, {
+					await runPrintMode(tallow.runtime, {
 						mode: "text",
 						initialMessage,
 					});
@@ -517,7 +521,7 @@ async function run(opts: {
 					// Sentinel so child processes (bash tool, subagents) know they're inside
 					// an interactive session. Print/RPC mode intentionally skips this.
 					process.env.TALLOW_INTERACTIVE = "1";
-					const mode = new InteractiveMode(tallow.session, {
+					const mode = new InteractiveMode(tallow.runtime, {
 						modelFallbackMessage: tallow.modelFallbackMessage,
 					});
 					registerWorkspaceTransitionHost(
@@ -578,7 +582,7 @@ async function run(opts: {
 			}
 
 			case "rpc": {
-				await runRpcMode(tallow.session);
+				await runRpcMode(tallow.runtime);
 				break;
 			}
 
@@ -588,7 +592,7 @@ async function run(opts: {
 					console.error("JSON mode requires -p <prompt> or piped stdin");
 					process.exit(1);
 				}
-				await runPrintMode(tallow.session, {
+				await runPrintMode(tallow.runtime, {
 					mode: "json",
 					initialMessage: jsonMessage,
 				});

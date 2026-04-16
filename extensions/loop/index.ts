@@ -798,7 +798,20 @@ export default function loopExtension(pi: ExtensionAPI): void {
 		stopLoop(ctx, "Loop stopped (session shutdown)");
 	});
 
-	pi.on("session_switch", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
+		if (event.reason !== "startup") {
+			stopLoop(ctx, `Loop stopped (session ${event.reason})`);
+		}
+	});
+
+	(
+		pi as unknown as {
+			on: (
+				event: string,
+				handler: (event: unknown, ctx: ExtensionContext) => Promise<void>
+			) => void;
+		}
+	).on("session_switch", async (_event, ctx) => {
 		stopLoop(ctx, "Loop stopped (session switch)");
 	});
 }
