@@ -8,13 +8,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.3...tallow-v0.9.4) (2026-04-03)
-
-
-### Fixed
-
-* stabilize redraws, tasks layout, and runtime packaging ([4bbc8ed](https://github.com/dungle-scrubs/tallow/commit/4bbc8ed69196e982e417b8095ef3554eec96891e))
-
 ## [Unreleased]
 
 ### Fixed
@@ -34,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **tasks:** top-align the side-by-side background column and require a wider
   terminal before using split layout, removing large blank gaps above
   background task content
+
+## [0.9.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.3...tallow-v0.9.4) (2026-04-03)
+
+
+### Fixed
+
+* stabilize redraws, tasks layout, and runtime packaging ([4bbc8ed](https://github.com/dungle-scrubs/tallow/commit/4bbc8ed69196e982e417b8095ef3554eec96891e))
 
 ## [0.9.3](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.2...tallow-v0.9.3) (2026-04-02)
 
