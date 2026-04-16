@@ -4,6 +4,7 @@
 		"module": "ES2022",
 		"moduleResolution": "bundler",
 		"lib": ["ES2024"],
+		"types": ["node"],
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,

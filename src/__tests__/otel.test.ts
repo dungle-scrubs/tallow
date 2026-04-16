@@ -15,7 +15,6 @@ import {
 	sessionAttributes,
 	subagentAttributes,
 	type TallowTelemetryConfig,
-	type TelemetryHandle,
 	teammateAttributes,
 	toolAttributes,
 } from "../otel.js";
@@ -176,8 +175,8 @@ describe("trace context env propagation", () => {
 		const tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
 		const result = extractTraceContextFromEnv({ TRACEPARENT: tp });
 		expect(result).not.toBeNull();
-		expect(result!.traceparent).toBe(tp);
-		expect(result!.tracestate).toBeUndefined();
+		expect(result?.traceparent).toBe(tp);
+		expect(result?.tracestate).toBeUndefined();
 	});
 
 	test("extractTraceContextFromEnv includes tracestate when present", () => {
@@ -186,13 +185,13 @@ describe("trace context env propagation", () => {
 			TRACEPARENT: tp,
 			TRACESTATE: "congo=t61rcWkgMzE",
 		});
-		expect(result!.tracestate).toBe("congo=t61rcWkgMzE");
+		expect(result?.tracestate).toBe("congo=t61rcWkgMzE");
 	});
 
 	test("extractTraceContextFromEnv handles lowercase env vars", () => {
 		const tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
 		const result = extractTraceContextFromEnv({ traceparent: tp });
-		expect(result!.traceparent).toBe(tp);
+		expect(result?.traceparent).toBe(tp);
 	});
 
 	test("injectTraceContextToEnv writes TRACEPARENT", () => {
@@ -279,8 +278,8 @@ describe("live telemetry handle", () => {
 								return this;
 							},
 							setStatus(status: { code: number; message?: string }) {
-								record.attributes["__status_code"] = status.code;
-								if (status.message) record.attributes["__status_message"] = status.message;
+								record.attributes.__status_code = status.code;
+								if (status.message) record.attributes.__status_message = status.message;
 								return this;
 							},
 							updateName(n: string) {
@@ -294,7 +293,7 @@ describe("live telemetry handle", () => {
 								return true;
 							},
 							recordException(err: Error) {
-								record.attributes["__exception"] = err.message;
+								record.attributes.__exception = err.message;
 							},
 						};
 					},
@@ -337,7 +336,7 @@ describe("live telemetry handle", () => {
 		expect(result).toBe("done");
 		expect(spans).toHaveLength(1);
 		expect(spans[0].ended).toBe(true);
-		expect(spans[0].attributes["__status_code"]).toBe(1); // OK
+		expect(spans[0].attributes.__status_code).toBe(1); // OK
 	});
 
 	test("withSpan records error and re-throws on failure", async () => {
@@ -351,9 +350,9 @@ describe("live telemetry handle", () => {
 		}).toThrow("test error");
 
 		expect(spans[0].ended).toBe(true);
-		expect(spans[0].attributes["__status_code"]).toBe(2); // ERROR
-		expect(spans[0].attributes["__status_message"]).toBe("test error");
-		expect(spans[0].attributes["__exception"]).toBe("test error");
+		expect(spans[0].attributes.__status_code).toBe(2); // ERROR
+		expect(spans[0].attributes.__status_message).toBe("test error");
+		expect(spans[0].attributes.__exception).toBe("test error");
 	});
 
 	test("withSpanAsync ends span on success", async () => {
@@ -370,7 +369,7 @@ describe("live telemetry handle", () => {
 
 		expect(result).toBe("model-result");
 		expect(spans[0].ended).toBe(true);
-		expect(spans[0].attributes["__status_code"]).toBe(1);
+		expect(spans[0].attributes.__status_code).toBe(1);
 	});
 
 	test("withSpanAsync records error and re-throws on failure", async () => {
@@ -384,7 +383,7 @@ describe("live telemetry handle", () => {
 		).rejects.toThrow("async error");
 
 		expect(spans[0].ended).toBe(true);
-		expect(spans[0].attributes["__status_code"]).toBe(2);
+		expect(spans[0].attributes.__status_code).toBe(2);
 	});
 
 	test("getTracerProvider returns the configured provider", async () => {
@@ -401,7 +400,7 @@ describe("live telemetry handle", () => {
 		const span = handle.startSpan("tallow.session.create");
 		const carrier = handle.getTraceContext();
 		expect(carrier).not.toBeNull();
-		expect(carrier!.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
+		expect(carrier?.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$/);
 
 		span.end();
 	});

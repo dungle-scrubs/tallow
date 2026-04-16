@@ -943,7 +943,11 @@ export default function contextFilesExtension(pi: ExtensionAPI) {
 		resetSessionState();
 	});
 
-	pi.on("session_switch", async () => {
+	(
+		pi as unknown as {
+			on: (event: string, handler: () => Promise<void>) => void;
+		}
+	).on("session_switch", async () => {
 		resetSessionState();
 	});
 

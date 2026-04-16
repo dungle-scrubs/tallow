@@ -3,8 +3,8 @@
 	"version": "1.0.0",
 	"type": "module",
 	"dependencies": {
-		"@sinclair/typebox": "^0.34.0",
+		"@sinclair/typebox": "^0.34.49",
 		"vscode-languageserver-protocol": "^3.17.5",
-		"vscode-jsonrpc": "^8.2.0"
+		"vscode-jsonrpc": "^8.2.1"
 	}
 }

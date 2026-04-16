@@ -351,6 +351,14 @@ nav.sidebar [aria-current="page"]:focus {
 	color: #c8cee0;
 }
 
+.theme-description {
+	font-size: 0.9rem;
+	color: var(--sl-color-gray-2);
+	line-height: 1.65;
+	max-width: 38ch;
+	margin-block: 1.25rem 1.5rem;
+}
+
 :root[data-theme="light"] .theme-description {
 	color: #9298ae;
 }
@@ -359,14 +367,6 @@ nav.sidebar [aria-current="page"]:focus {
 :root[data-theme="light"] hr:has(+ .feature-section > .theme-preview),
 :root[data-theme="light"] .feature-section:has(.theme-preview) + hr {
 	display: none;
-}
-
-.theme-description {
-	font-size: 0.9rem;
-	color: var(--sl-color-gray-2);
-	line-height: 1.65;
-	max-width: 38ch;
-	margin-block: 1.25rem 1.5rem;
 }
 
 /* Quick Start terminal widget */
@@ -462,8 +462,8 @@ nav.sidebar [aria-current="page"]:focus {
 }
 
 /* Stats / numbers row */
-.sl-markdown-content .stats-row,
-.stats-row {
+.stats-row,
+.sl-markdown-content .stats-row {
 	display: flex;
 	flex-direction: row;
 	gap: 3rem;
@@ -472,8 +472,8 @@ nav.sidebar [aria-current="page"]:focus {
 	align-items: baseline;
 }
 
-.sl-markdown-content .stat,
-.stat {
+.stat,
+.sl-markdown-content .stat {
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
@@ -744,8 +744,8 @@ nav.sidebar [aria-current="page"]:focus {
    Image gallery grid
    ──────────────────────────────────── */
 
-.sl-markdown-content .gallery-grid,
-.gallery-grid {
+.gallery-grid,
+.sl-markdown-content .gallery-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
 	gap: 0.5rem;
@@ -753,8 +753,8 @@ nav.sidebar [aria-current="page"]:focus {
 	align-items: start;
 }
 
-.sl-markdown-content .gallery-grid > *,
-.gallery-grid > * {
+.gallery-grid > *,
+.sl-markdown-content .gallery-grid > * {
 	margin: 0;
 	margin-top: 0;
 	margin-bottom: 0;
@@ -763,17 +763,17 @@ nav.sidebar [aria-current="page"]:focus {
 }
 
 /* Nuclear option: reset all possible spacing on gallery buttons */
-.sl-markdown-content .gallery-thumb,
-.sl-markdown-content button.gallery-thumb,
-button.gallery-thumb {
+.gallery-thumb,
+button.gallery-thumb,
+.sl-markdown-content button.gallery-thumb {
 	margin: 0;
 	margin-block: 0;
 	margin-inline: 0;
 	vertical-align: top;
 }
 
-.sl-markdown-content .gallery-thumb,
-.gallery-thumb {
+.gallery-thumb,
+.sl-markdown-content .gallery-thumb {
 	position: relative;
 	border: 1px solid var(--sl-color-gray-5);
 	border-radius: 6px;
@@ -1100,7 +1100,7 @@ button.gallery-thumb {
 	.theme-swatch-label,
 	.sl-markdown-content a:not([class]),
 	.extension-tag,
-	.gallery-thumb,
+	.sl-markdown-content .gallery-thumb,
 	.gallery-thumb-caption,
 	.lightbox-overlay,
 	.lightbox-img,

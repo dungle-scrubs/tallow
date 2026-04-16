@@ -7,6 +7,7 @@ import {
 	type CreateAgentSessionResult,
 	codingTools,
 	createAgentSession,
+	createAgentSessionRuntime,
 	createEventBus,
 	DefaultPackageManager,
 	DefaultResourceLoader,
@@ -22,6 +23,7 @@ import {
 	readOnlyTools,
 	readTool,
 	SessionManager,
+	type SessionStartEvent,
 	SettingsManager,
 	type Skill,
 	writeTool,
@@ -1012,8 +1014,11 @@ function isToolResultMessageLike(value: unknown): value is ToolResultMessageLike
 }
 
 export interface TallowSession {
-	/** The underlying AgentSession */
-	session: CreateAgentSessionResult["session"];
+	/** Runtime host used by interactive/print/rpc modes and session replacement flows. */
+	runtime: Awaited<ReturnType<typeof createAgentSessionRuntime>>;
+
+	/** The current underlying AgentSession. This getter tracks runtime.session. */
+	readonly session: CreateAgentSessionResult["session"];
 
 	/** Extension loading results */
 	extensions: CreateAgentSessionResult["extensionsResult"];
@@ -1507,12 +1512,45 @@ function applyExtensionStartupPolicies(
  * await session.prompt("Fix the failing tests");
  * ```
  */
+/**
+ * Apply tallow runtime setting overrides that must be consistent across initial
+ * startup and runtime-backed session recreation.
+ *
+ * @param settingsManager - Settings manager to mutate
+ * @param runtimeSettings - Optional runtime settings overrides from SDK/CLI
+ * @param trustStatus - Effective project trust status for the target cwd
+ * @returns Nothing
+ */
+function applySessionSettingsOverrides(
+	settingsManager: SettingsManager,
+	runtimeSettings: TallowSessionOptions["settings"] | undefined,
+	trustStatus: ProjectTrustStatus
+): void {
+	const global = settingsManager.getGlobalSettings() as Record<string, unknown>;
+	const project = settingsManager.getProjectSettings() as Record<string, unknown>;
+	if (global.quietStartup === undefined && project.quietStartup === undefined) {
+		settingsManager.applyOverrides({ quietStartup: true });
+	}
+	if (runtimeSettings) {
+		settingsManager.applyOverrides(runtimeSettings);
+	}
+	if (trustStatus !== "trusted") {
+		const globalPackages = settingsManager.getGlobalSettings().packages;
+		settingsManager.applyOverrides({
+			packages: (Array.isArray(globalPackages) ? globalPackages : []) as Array<
+				string | { source: string }
+			>,
+		});
+	}
+}
+
 export async function createTallowSession(
 	options: TallowSessionOptions = {}
 ): Promise<TallowSession> {
 	const startupProfile = normalizeStartupProfile(options.startupProfile);
 	const startupTiming = createStartupTimingLogger(startupProfile);
 	const createSessionStartedAtMs = Date.now();
+	const callerCwd = process.cwd();
 
 	// Ensure env is configured before any framework internals resolve paths
 	bootstrap();
@@ -1577,30 +1615,7 @@ export async function createTallowSession(
 
 	const settingsManager = SettingsManager.create(cwd, tallowHome);
 
-	// Default to quiet startup — the welcome-screen extension provides the branded
-	// header, so the built-in keybinding list and resource listing are redundant.
-	// Only apply when the user/project settings haven't explicitly set the value.
-	{
-		const global = settingsManager.getGlobalSettings() as Record<string, unknown>;
-		const project = settingsManager.getProjectSettings() as Record<string, unknown>;
-		if (global.quietStartup === undefined && project.quietStartup === undefined) {
-			settingsManager.applyOverrides({ quietStartup: true });
-		}
-	}
-
-	// Runtime overrides from options.settings come last so they win.
-	if (options.settings) {
-		settingsManager.applyOverrides(options.settings);
-	}
-
-	if (projectTrust.status !== "trusted") {
-		const globalPackages = settingsManager.getGlobalSettings().packages;
-		settingsManager.applyOverrides({
-			packages: (Array.isArray(globalPackages) ? globalPackages : []) as Array<
-				string | { source: string }
-			>,
-		});
-	}
+	applySessionSettingsOverrides(settingsManager, options.settings, projectTrust.status);
 
 	const toolResultRetentionPolicy = resolveToolResultRetentionPolicy({
 		globalSettings: settingsManager.getGlobalSettings() as Record<string, unknown>,
@@ -1734,10 +1749,6 @@ export async function createTallowSession(
 	// Packages contribute extensions, skills, prompts, themes — but the framework
 	// doesn't load AGENTS.md from packages. Use agentsFilesOverride to inject them.
 
-	const packageAgentsFiles = loadAgentsFilesFromPackages(settingsManager, cwd);
-	const projectExtensionsDir = resolve(cwd, ".tallow", "extensions");
-	const shouldBlockProjectExtensions = projectTrust.status !== "trusted";
-
 	if (projectTrust.status !== "trusted") {
 		console.error(
 			projectTrust.status === "stale_fingerprint"
@@ -1748,77 +1759,168 @@ export async function createTallowSession(
 
 	const dedupedExtensionPaths = [...new Set(additionalExtensionPaths)];
 	const disabledExtensionNames = new Set(options.disabledExtensions ?? []);
-	const shouldApplyExtensionStartupPolicies =
-		shouldBlockProjectExtensions ||
-		startupProfile === "headless" ||
-		disabledExtensionNames.size > 0;
 	const explicitToolRestrictionNames = resolveExplicitToolRestrictionNames(options);
 
-	const loader = new DefaultResourceLoader({
-		cwd,
-		agentDir: tallowHome,
-		settingsManager,
-		eventBus,
-		additionalExtensionPaths: dedupedExtensionPaths,
-		additionalSkillPaths,
-		additionalPromptTemplatePaths: additionalPromptPaths,
-		additionalThemePaths,
-		extensionFactories: [
-			createRebrandSystemPromptExtension(contextBudgetPolicy),
-			injectImageFilePaths,
-			createToolResultRetentionExtension(toolResultRetentionPolicy, contextBudgetPolicy),
-			createContextBudgetPlannerExtension(contextBudgetPolicy),
-			detectOutputTruncation,
-			createProjectTrustExtension(cwd, projectTrust),
-			createTelemetryExtension(telemetry, cwd),
-			...(explicitToolRestrictionNames
-				? [createExplicitToolRestrictionExtension(explicitToolRestrictionNames)]
-				: []),
-			...(options.extensionFactories ?? []),
-		],
-		noExtensions: extensionsOnly,
-		extensionsOverride: shouldApplyExtensionStartupPolicies
-			? (base) =>
-					applyExtensionStartupPolicies(base, {
-						blockProjectExtensions: shouldBlockProjectExtensions,
-						disabledExtensionNames,
-						projectExtensionsDir,
-						startupProfile,
-					})
-			: undefined,
-		systemPromptOverride: options.systemPrompt ? () => options.systemPrompt : undefined,
-		appendSystemPromptOverride: options.appendSystemPrompt
-			? (base) => {
-					const append = options.appendSystemPrompt;
-					return append ? [...base, append] : base;
-				}
-			: undefined,
-		agentsFilesOverride:
-			packageAgentsFiles.length > 0
-				? (base) => ({
-						agentsFiles: [...base.agentsFiles, ...packageAgentsFiles],
-					})
-				: undefined,
-		skillsOverride: (base) => {
-			const normalized = normalizeSkillNames(base);
-			const extra = options.additionalSkills;
-			return {
-				skills: extra ? [...normalized.skills, ...extra] : normalized.skills,
-				diagnostics: normalized.diagnostics,
-			};
-		},
-		promptsOverride: options.additionalPrompts
-			? (base) => {
-					const extra = options.additionalPrompts;
-					return {
-						prompts: extra ? [...base.prompts, ...extra] : base.prompts,
-						diagnostics: base.diagnostics,
-					};
-				}
-			: undefined,
-	});
+	/**
+	 * Create a runtime-backed session for the given cwd/session target.
+	 *
+	 * @param runtimeCwd - Effective session cwd
+	 * @param runtimeSessionManager - Session manager to attach
+	 * @param sessionStartEvent - Optional lifecycle metadata for replacement flows
+	 * @returns Created session, extension load result, and runtime services
+	 */
+	const createRuntime = async ({
+		cwd: runtimeCwd,
+		sessionManager: runtimeSessionManager,
+		sessionStartEvent,
+	}: {
+		cwd: string;
+		sessionManager: SessionManager;
+		sessionStartEvent?: SessionStartEvent;
+	}) => {
+		const runtimeProjectTrust = resolveProjectTrust(runtimeCwd);
+		applyProjectTrustContextToEnv(runtimeProjectTrust);
+		const runtimeSettingsManager = SettingsManager.create(runtimeCwd, tallowHome);
+		applySessionSettingsOverrides(
+			runtimeSettingsManager,
+			options.settings,
+			runtimeProjectTrust.status
+		);
+		const runtimePackageAgentsFiles = loadAgentsFilesFromPackages(
+			runtimeSettingsManager,
+			runtimeCwd
+		);
+		const runtimeProjectExtensionsDir = resolve(runtimeCwd, ".tallow", "extensions");
+		const runtimeShouldBlockProjectExtensions = runtimeProjectTrust.status !== "trusted";
+		const runtimeShouldApplyExtensionStartupPolicies =
+			runtimeShouldBlockProjectExtensions ||
+			startupProfile === "headless" ||
+			disabledExtensionNames.size > 0;
 
-	await loader.reload();
+		const runtimeLoader = new DefaultResourceLoader({
+			cwd: runtimeCwd,
+			agentDir: tallowHome,
+			settingsManager: runtimeSettingsManager,
+			eventBus,
+			additionalExtensionPaths: dedupedExtensionPaths,
+			additionalSkillPaths,
+			additionalPromptTemplatePaths: additionalPromptPaths,
+			additionalThemePaths,
+			extensionFactories: [
+				createRebrandSystemPromptExtension(contextBudgetPolicy),
+				injectImageFilePaths,
+				createToolResultRetentionExtension(toolResultRetentionPolicy, contextBudgetPolicy),
+				createContextBudgetPlannerExtension(contextBudgetPolicy),
+				detectOutputTruncation,
+				createProjectTrustExtension(runtimeCwd, runtimeProjectTrust),
+				createTelemetryExtension(telemetry, runtimeCwd),
+				...(explicitToolRestrictionNames
+					? [createExplicitToolRestrictionExtension(explicitToolRestrictionNames)]
+					: []),
+				...(options.extensionFactories ?? []),
+			],
+			noExtensions: extensionsOnly,
+			extensionsOverride: runtimeShouldApplyExtensionStartupPolicies
+				? (base) =>
+						applyExtensionStartupPolicies(base, {
+							blockProjectExtensions: runtimeShouldBlockProjectExtensions,
+							disabledExtensionNames,
+							projectExtensionsDir: runtimeProjectExtensionsDir,
+							startupProfile,
+						})
+				: undefined,
+			systemPromptOverride: options.systemPrompt ? () => options.systemPrompt : undefined,
+			appendSystemPromptOverride: options.appendSystemPrompt
+				? (base) => {
+						const append = options.appendSystemPrompt;
+						return append ? [...base, append] : base;
+					}
+				: undefined,
+			agentsFilesOverride:
+				runtimePackageAgentsFiles.length > 0
+					? (base) => ({
+							agentsFiles: [...base.agentsFiles, ...runtimePackageAgentsFiles],
+						})
+					: undefined,
+			skillsOverride: (base) => {
+				const normalized = normalizeSkillNames(base);
+				const extra = options.additionalSkills;
+				return {
+					skills: extra ? [...normalized.skills, ...extra] : normalized.skills,
+					diagnostics: normalized.diagnostics,
+				};
+			},
+			promptsOverride: options.additionalPrompts
+				? (base) => {
+						const extra = options.additionalPrompts;
+						return {
+							prompts: extra ? [...base.prompts, ...extra] : base.prompts,
+							diagnostics: base.diagnostics,
+						};
+					}
+				: undefined,
+		});
+
+		await runtimeLoader.reload();
+		applySessionSettingsOverrides(
+			runtimeSettingsManager,
+			options.settings,
+			runtimeProjectTrust.status
+		);
+
+		let resolvedModel = options.model;
+		if (!resolvedModel && options.provider) {
+			const modelId = options.modelId ?? runtimeSettingsManager.getDefaultModel();
+			if (modelId) {
+				resolvedModel = modelRegistry.find(options.provider, modelId) ?? undefined;
+				if (!resolvedModel) {
+					throw new Error(`Model ${options.provider}/${modelId} not found`);
+				}
+			} else {
+				const available = modelRegistry.getAll().filter((m) => m.provider === options.provider);
+				if (available.length === 0) {
+					throw new Error(`No models found for provider "${options.provider}"`);
+				}
+				resolvedModel = available[0];
+			}
+		}
+
+		const result = await createAgentSession({
+			cwd: runtimeCwd,
+			agentDir: tallowHome,
+			model: resolvedModel,
+			thinkingLevel: options.thinkingLevel,
+			authStorage,
+			modelRegistry,
+			resourceLoader: runtimeLoader,
+			sessionManager: runtimeSessionManager,
+			settingsManager: runtimeSettingsManager,
+			tools: options.tools,
+			customTools: options.customTools,
+			sessionStartEvent,
+		});
+
+		if (explicitToolRestrictionNames) {
+			const sessionWithToolControl = result.session as typeof result.session & {
+				setActiveToolsByName?: (toolNames: readonly string[]) => void;
+			};
+			sessionWithToolControl.setActiveToolsByName?.(explicitToolRestrictionNames);
+		}
+
+		return {
+			...result,
+			diagnostics: [],
+			services: {
+				agentDir: tallowHome,
+				authStorage,
+				cwd: runtimeCwd,
+				diagnostics: [],
+				modelRegistry,
+				resourceLoader: runtimeLoader,
+				settingsManager: runtimeSettingsManager,
+			},
+		};
+	};
 
 	// ── Session Manager ──────────────────────────────────────────────────────
 
@@ -1863,56 +1965,34 @@ export async function createTallowSession(
 		}
 	}
 
-	// ── Model resolution (string → Model object) ────────────────────────────
-
-	let resolvedModel = options.model;
-	if (!resolvedModel && options.provider) {
-		const modelId = options.modelId ?? settingsManager.getDefaultModel();
-		if (modelId) {
-			resolvedModel = modelRegistry.find(options.provider, modelId) ?? undefined;
-			if (!resolvedModel) {
-				throw new Error(`Model ${options.provider}/${modelId} not found`);
-			}
-		} else {
-			// Provider without model: find any available model for this provider
-			const available = modelRegistry.getAll().filter((m) => m.provider === options.provider);
-			if (available.length === 0) {
-				throw new Error(`No models found for provider "${options.provider}"`);
-			}
-			resolvedModel = available[0];
+	const runtime = await createAgentSessionRuntime(
+		({ cwd: runtimeCwd, sessionManager: runtimeSessionManager, sessionStartEvent }) =>
+			createRuntime({
+				cwd: runtimeCwd,
+				sessionManager: runtimeSessionManager,
+				sessionStartEvent,
+			}),
+		{
+			cwd,
+			agentDir: tallowHome,
+			sessionManager,
 		}
-	}
+	);
 
-	// ── Create Session ───────────────────────────────────────────────────────
-
-	const result = await createAgentSession({
-		cwd,
-		agentDir: tallowHome,
-		model: resolvedModel,
-		thinkingLevel: options.thinkingLevel,
-		authStorage,
-		modelRegistry,
-		resourceLoader: loader,
-		sessionManager,
-		settingsManager,
-		tools: options.tools,
-		customTools: options.customTools,
-	});
-
-	if (explicitToolRestrictionNames) {
-		const sessionWithToolControl = result.session as typeof result.session & {
-			setActiveToolsByName?: (toolNames: readonly string[]) => void;
-		};
-		sessionWithToolControl.setActiveToolsByName?.(explicitToolRestrictionNames);
+	if (process.cwd() !== callerCwd) {
+		process.chdir(callerCwd);
 	}
 
 	startupTiming.mark("create-session", createSessionStartedAtMs);
-	instrumentSessionStartupTimings(result.session, startupTiming);
+	instrumentSessionStartupTimings(runtime.session, startupTiming);
 
 	return {
-		session: result.session,
-		extensions: result.extensionsResult,
-		modelFallbackMessage: result.modelFallbackMessage,
+		runtime,
+		get session() {
+			return runtime.session;
+		},
+		extensions: runtime.services.resourceLoader.getExtensions(),
+		modelFallbackMessage: runtime.modelFallbackMessage,
 		version: TALLOW_VERSION,
 		extensionOverrides,
 		resolvedPlugins,
@@ -2608,7 +2688,7 @@ function truncateTextToBytes(text: string, maxBytes: number): string {
  * message content and allocates a budget envelope for each one, keyed
  * by toolCallId. Envelopes are single-use (consumed via the API) and
  * automatically cleaned up on turn_end, agent_end, session_before_switch,
- * and session_switch events.
+ * and post-transition session_start events.
  *
  * @param budgetPolicy - Resolved context-budget policy
  * @returns Extension factory
@@ -2752,6 +2832,7 @@ function createContextBudgetPlannerExtension(budgetPolicy: ContextBudgetPolicy):
 		};
 
 		pi.on("session_start", async () => {
+			clearEnvelopes();
 			publishBudgetApi();
 		});
 
@@ -2766,9 +2847,6 @@ function createContextBudgetPlannerExtension(budgetPolicy: ContextBudgetPolicy):
 			clearEnvelopes();
 		});
 		pi.on("session_before_switch", async () => {
-			clearEnvelopes();
-		});
-		pi.on("session_switch", async () => {
 			clearEnvelopes();
 		});
 	};

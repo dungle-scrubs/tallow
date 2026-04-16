@@ -2168,15 +2168,15 @@ Before calling manage_tasks complete/update, call manage_tasks list first so ind
 		updateAgentBar(ctx);
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
-		restoreSessionState(ctx);
-	});
-
-	pi.on("session_switch", async (_event, ctx) => {
-		restoreSessionState(ctx);
-	});
-
-	// Cleanup on session end
+	pi.on("session_start", async (_event, ctx) => restoreSessionState(ctx));
+	(
+		pi as unknown as {
+			on: (
+				event: string,
+				handler: (event: unknown, ctx: ExtensionContext) => Promise<void>
+			) => void;
+		}
+	).on("session_switch", async (_event, ctx) => restoreSessionState(ctx));
 	pi.on("session_shutdown", async () => {
 		emitInteropEvent(pi.events, INTEROP_EVENT_NAMES.backgroundTasksPresenterState, {
 			active: false,

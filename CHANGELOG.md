@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
+  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
+  transition compatibility hooks during the upgrade
+- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
+  config so dependency bumps continue to build and validate cleanly
 - **interactive:** stabilize settings submenu transitions so changing thinking
   level no longer triggers chat re-append jitter or viewport jumps
 - **interactive:** reset render grace before chat rebuild paths

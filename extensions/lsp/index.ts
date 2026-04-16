@@ -14,7 +14,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { StreamMessageReader, StreamMessageWriter } from "vscode-jsonrpc/node";
 import {
@@ -1088,8 +1088,18 @@ async function sendAndFormat<T>(
  * @param pi - Extension API for registering tools and event handlers
  */
 export default function lspExtension(pi: ExtensionAPI) {
+	/**
+	 * Bridge generic tool typing across upstream TypeBox/API changes.
+	 *
+	 * @param tool - Tool definition object
+	 * @returns Nothing
+	 */
+	const registerTool = (tool: unknown): void => {
+		pi.registerTool(tool as Parameters<ExtensionAPI["registerTool"]>[0]);
+	};
+
 	// Tool: Go to Definition
-	pi.registerTool({
+	registerTool({
 		name: "lsp_definition",
 		label: "lsp_definition",
 		description: `Jump to the definition of a symbol at a specific location in a file. Uses Language Server Protocol for precise navigation.
@@ -1105,7 +1115,13 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 			line: Type.Number({ description: "Line number (1-indexed)" }),
 			character: Type.Number({ description: "Character/column position (1-indexed)" }),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(
+			_toolCallId: string,
+			params: { file: string; line: number; character: number },
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ExtensionContext
+		) {
 			const setup = await withFileConnection(
 				params,
 				signal,
@@ -1131,7 +1147,7 @@ SUPPORTED: TypeScript, Python (ty/pyright), Rust, Swift, PHP (intelephense)`,
 	});
 
 	// Tool: Find References
-	pi.registerTool({
+	registerTool({
 		name: "lsp_references",
 		label: "lsp_references",
 		description: `Find all references to a symbol at a specific location. Returns all files and locations where the symbol is used.
@@ -1148,7 +1164,18 @@ WHEN TO USE:
 				Type.Boolean({ description: "Include the declaration in results (default: true)" })
 			),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(
+			_toolCallId: string,
+			params: {
+				file: string;
+				line: number;
+				character: number;
+				includeDeclaration?: boolean;
+			},
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ExtensionContext
+		) {
 			const setup = await withFileConnection(
 				params,
 				signal,
@@ -1177,7 +1204,7 @@ WHEN TO USE:
 	});
 
 	// Tool: Hover (Type Info)
-	pi.registerTool({
+	registerTool({
 		name: "lsp_hover",
 		label: "lsp_hover",
 		description: `Get type information and documentation for a symbol at a specific location.
@@ -1191,7 +1218,13 @@ WHEN TO USE:
 			line: Type.Number({ description: "Line number (1-indexed)" }),
 			character: Type.Number({ description: "Character/column position (1-indexed)" }),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(
+			_toolCallId: string,
+			params: { file: string; line: number; character: number },
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ExtensionContext
+		) {
 			const setup = await withFileConnection(
 				params,
 				signal,
@@ -1216,7 +1249,7 @@ WHEN TO USE:
 	});
 
 	// Tool: Document Symbols
-	pi.registerTool({
+	registerTool({
 		name: "lsp_symbols",
 		label: "lsp_symbols",
 		description: `List all symbols (functions, classes, variables, etc.) in a file.
@@ -1228,7 +1261,13 @@ WHEN TO USE:
 		parameters: Type.Object({
 			file: Type.String({ description: "Path to the file" }),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(
+			_toolCallId: string,
+			params: { file: string },
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ExtensionContext
+		) {
 			const setup = await withFileConnection(
 				params,
 				signal,
@@ -1250,7 +1289,7 @@ WHEN TO USE:
 	});
 
 	// Tool: Workspace Symbol Search
-	pi.registerTool({
+	registerTool({
 		name: "lsp_workspace_symbols",
 		label: "lsp_workspace_symbols",
 		description: `Search for symbols across the entire workspace/project by name.
@@ -1267,7 +1306,13 @@ WHEN TO USE:
 				})
 			),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+		async execute(
+			_toolCallId: string,
+			params: { query: string; language?: string },
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			_ctx: ExtensionContext
+		) {
 			const language = params.language || "typescript";
 
 			// For workspace symbols, we need an active connection
@@ -1321,12 +1366,18 @@ WHEN TO USE:
 	});
 
 	// Tool: Check LSP Status
-	pi.registerTool({
+	registerTool({
 		name: "lsp_status",
 		label: "lsp_status",
 		description: "Check which language servers are running and their capabilities.",
 		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
+		async execute(
+			_toolCallId: string,
+			_params: Record<string, never>,
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ExtensionContext
+		) {
 			const lines: string[] = ["LSP Server Status:"];
 			const startupTimeoutMs = getEffectiveStartupTimeoutMs(ctx.cwd);
 

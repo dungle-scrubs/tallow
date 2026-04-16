@@ -1,6 +1,6 @@
 {
 	"name": "@mariozechner/pi-tui",
-	"version": "0.62.0",
+	"version": "0.67.3",
 	"private": true,
 	"description": "Tallow's TUI fork — customizable loader, rounded borders, which-key overlay",
 	"type": "module",
@@ -15,10 +15,10 @@
 		"node": ">=22"
 	},
 	"dependencies": {
-		"@types/mime-types": "^2.1.4",
-		"chalk": "^5.5.0",
-		"get-east-asian-width": "^1.3.0",
-		"marked": "^15.0.12",
-		"mime-types": "^3.0.1"
+		"@types/mime-types": "^3.0.1",
+		"chalk": "^5.6.2",
+		"get-east-asian-width": "^1.5.0",
+		"marked": "^18.0.0",
+		"mime-types": "^3.0.2"
 	}
 }

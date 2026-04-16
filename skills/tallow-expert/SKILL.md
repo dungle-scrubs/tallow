@@ -99,9 +99,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 | `resources_discover` | `ResourcesDiscoverEvent` | `ResourcesDiscoverResult` |
 | `session_start` | `SessionStartEvent` | — |
 | `session_before_switch` | `SessionBeforeSwitchEvent` | `SessionBeforeSwitchResult` |
-| `session_switch` | `SessionSwitchEvent` | — |
 | `session_before_fork` | `SessionBeforeForkEvent` | `SessionBeforeForkResult` |
-| `session_fork` | `SessionForkEvent` | — |
 | `session_before_compact` | `SessionBeforeCompactEvent` | `SessionBeforeCompactResult` |
 | `session_compact` | `SessionCompactEvent` | — |
 | `session_shutdown` | `SessionShutdownEvent` | — |
