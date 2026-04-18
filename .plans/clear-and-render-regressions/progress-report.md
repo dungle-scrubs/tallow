@@ -16,7 +16,7 @@ Source: `extensions/context-fork/index.ts`,
 - [ ] Feature: `/clear` after model compaction scheduling does not fire a
   hidden continuation prompt.
 - [ ] Feature: new session starts idle with no hidden queued prompt.
-- [ ] Feature: old-session deferred triggers are cancelled or ignored
+- [x] Feature: old-session deferred triggers are cancelled or ignored
   after reset.
 - [ ] Feature: test output identifies which trigger source leaked.
 
@@ -42,7 +42,7 @@ Source: `src/interactive-mode-patch.ts`,
 
 - [ ] Feature: ordinary idle turn boundaries do not repaint the full
   transcript.
-- [ ] Feature: stale loader cleanup does not require unconditional
+- [x] Feature: stale loader cleanup does not require unconditional
   `requestRender(true)` on every turn end.
 - [ ] Feature: rapid message end / agent end sequences keep transcript
   order stable.
@@ -57,11 +57,11 @@ Source: `packages/tallow-tui/src/tui.ts`,
 
 - [ ] Feature: the first render after reset clears stale bottom-of-screen
   artifacts.
-- [ ] Feature: scrollback clear is honored on reset renders, not only on
+- [x] Feature: scrollback clear is honored on reset renders, not only on
   later shrink-triggered full renders.
 - [ ] Feature: startup-grace behavior does not leave old transcript lines
   stranded below the current UI.
-- [ ] Feature: forced invalidation and first-render paths obey the same
+- [x] Feature: forced invalidation and first-render paths obey the same
   reset clear semantics.
 - [ ] Feature: obsolete workaround code is removed or narrowed.
 
@@ -93,5 +93,5 @@ Source: new end-to-end reset fixture plus existing integration suites
 ## Summary
 
 - Total features: 30
-- Completed: 0
-- Remaining: 30
+- Completed: 4
+- Remaining: 26

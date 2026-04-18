@@ -858,10 +858,9 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 
 				this.updatePendingMessagesDisplay?.();
 
-				// Force a full re-render to guarantee stale loader text is cleared
-				// from the terminal. A non-forced requestRender() can coalesce with
-				// a stale pending render that ran before statusContainer.clear().
-				this.ui?.requestRender?.(true);
+				// Normal turn cleanup should only request a standard render.
+				// Forced redraws replay transcript history and make the UI jump.
+				this.ui?.requestRender?.();
 
 				const deferredCompact = pendingInteractiveExtensionCompact.get(this);
 				if (deferredCompact) {
@@ -911,7 +910,7 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			if (!shouldPreserveCompactionStatus(this)) {
 				this.statusContainer?.clear?.();
 			}
-			this.ui?.requestRender?.(true);
+			this.ui?.requestRender?.();
 
 			return originalGetUserInput.call(this);
 		};

@@ -352,10 +352,10 @@ describe("patchInteractiveModePrototype", () => {
 		// (plan 159, bug 2). For normal turns we must clear to avoid a stale spinner.
 		expect(mode.statusClears).toBe(1);
 		expect(mode.updateCalls).toBe(1);
-		// agent_end forces a full re-render to guarantee stale loader text is
-		// cleared even when a non-forced render coalesced with stale content.
+		// Normal turn cleanup should not force a full redraw. Forced redraws
+		// replay transcript history and make the UI jump.
 		expect(mode.renderRequests).toBe(1);
-		expect(mode.forceRenderRequests).toBe(1);
+		expect(mode.forceRenderRequests).toBe(0);
 
 		const flushCallIndex = mode.lifecycleCalls.indexOf("flushPendingBashComponents");
 		const updateCallIndex = mode.lifecycleCalls.indexOf("updatePendingMessagesDisplay");
@@ -402,7 +402,8 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.loadingAnimation).toBeNull();
 		expect(mode.pendingWorkingMessage).toBeUndefined();
 		expect(mode.statusClears).toBe(1);
-		expect(mode.forceRenderRequests).toBe(1);
+		expect(mode.renderRequests).toBe(1);
+		expect(mode.forceRenderRequests).toBe(0);
 	});
 
 	it("suppresses overflow payloads while keeping a visible overflow indicator", async () => {
