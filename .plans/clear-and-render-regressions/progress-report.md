@@ -13,7 +13,7 @@ Source: `extensions/context-fork/index.ts`,
 
 - [ ] Feature: `/clear` after deferred fork completion does not start a
   new turn in the replacement session.
-- [ ] Feature: `/clear` after model compaction scheduling does not fire a
+- [x] Feature: `/clear` after model compaction scheduling does not fire a
   hidden continuation prompt.
 - [ ] Feature: new session starts idle with no hidden queued prompt.
 - [x] Feature: old-session deferred triggers are cancelled or ignored
@@ -93,5 +93,5 @@ Source: new end-to-end reset fixture plus existing integration suites
 ## Summary
 
 - Total features: 30
-- Completed: 4
-- Remaining: 26
+- Completed: 5
+- Remaining: 25
