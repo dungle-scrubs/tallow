@@ -17,6 +17,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import { recordResetDiagnostic } from "../../src/reset-diagnostics.js";
 
 /**
  * Deferred compact request — set by the tool handler, consumed on the first
@@ -154,13 +155,18 @@ function stopCompactProgress(ctx?: ExtensionContext): void {
  *
  * @returns Nothing
  */
-function clearContinuationTimer(): void {
+function clearContinuationTimer(reason?: string): void {
 	if (!continuationTimer) {
 		return;
 	}
 
 	timerScheduler.clearTimeout(continuationTimer);
 	continuationTimer = null;
+	recordResetDiagnostic({
+		kind: "deferred_cancelled",
+		reason: reason ?? "clear_continuation_timer",
+		source: "slash-command-bridge",
+	});
 }
 
 /**
@@ -338,6 +344,7 @@ function startDeferredCompact(
 			// 200ms gives session.prompt()'s async setup (API key resolution,
 			// compaction check) time to settle. The turn_start listener cancels
 			// this timer if a turn starts before it fires (defense-in-depth).
+			recordResetDiagnostic({ kind: "deferred_registered", source: "slash-command-bridge" });
 			continuationTimer = timerScheduler.setTimeout(() => {
 				continuationTimer = null;
 				if (ctx.isIdle()) {
@@ -354,6 +361,11 @@ function startDeferredCompact(
 				} else {
 					// User sent a message during compaction — their turn is
 					// handling things, clean up our indicators.
+					recordResetDiagnostic({
+						kind: "deferred_dropped",
+						reason: "session_not_idle",
+						source: "slash-command-bridge",
+					});
 					resumingAfterCompact = false;
 					ctx.ui?.setWidget?.("compact-progress", undefined);
 					ctx.ui?.setWorkingMessage?.();
@@ -601,7 +613,7 @@ WHEN NOT TO USE:
 	 * now active and showing the pending working message ("Resuming task…").
 	 */
 	pi.on("turn_start", (_event, ctx) => {
-		clearContinuationTimer();
+		clearContinuationTimer("turn_start");
 		if (!resumingAfterCompact) return;
 		resumingAfterCompact = false;
 		ctx.ui?.setWidget?.("compact-progress", undefined);

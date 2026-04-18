@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import {
+	getResetDiagnosticsForTests,
+	resetResetDiagnosticsForTests,
+} from "../reset-diagnostics.js";
 import type { WorkspaceTransitionRequest, WorkspaceTransitionUI } from "../workspace-transition.js";
 import { createInteractiveWorkspaceTransitionHost } from "../workspace-transition-interactive.js";
 
@@ -300,6 +304,10 @@ function createRequest(
 	};
 }
 
+afterEach(() => {
+	resetResetDiagnosticsForTests();
+});
+
 describe("createInteractiveWorkspaceTransitionHost", () => {
 	test("restarts the turn for tool-driven transitions and swaps the session", async () => {
 		const events: string[] = [];
@@ -345,6 +353,14 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 		expect(nextSession.sendCalls[0]?.options).toEqual({ triggerTurn: true });
 		expect(nextSession.sendCalls[0]?.message.customType).toBe("workspace-transition");
 		expect(nextSession.sendCalls[0]?.message.content).toContain("Workspace transition complete");
+		expect(
+			getResetDiagnosticsForTests().filter(
+				(event) => event.kind === "reset_start" || event.kind === "reset_complete"
+			)
+		).toEqual([
+			{ kind: "reset_start", reason: "workspace-transition", timestamp: expect.any(Number) },
+			{ kind: "reset_complete", reason: "workspace-transition", timestamp: expect.any(Number) },
+		]);
 		expect(events).toEqual([
 			"ui.select:Directory jump — choose the landing zone",
 			"deps.resolveTrust:/repo/b",

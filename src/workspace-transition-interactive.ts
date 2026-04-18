@@ -1,3 +1,4 @@
+import { resetInteractiveSessionState } from "./interactive-reset.js";
 import { resolveProjectTrust, trustProject } from "./project-trust.js";
 import type { TallowSession, TallowSessionOptions } from "./sdk.js";
 import { createTallowSession } from "./sdk.js";
@@ -28,7 +29,11 @@ interface InteractiveModeLike {
 	streamingComponent?: unknown;
 	streamingMessage?: unknown;
 	subscribeToAgent(): void;
-	ui: { requestRender(force?: boolean): void; requestScrollbackClear?(): void };
+	ui: {
+		requestRender(force?: boolean): void;
+		requestScrollbackClear?(): void;
+		resetRenderGrace?(): void;
+	};
 	unsubscribe?: (() => void) | undefined;
 	updateTerminalTitle(): void;
 	initExtensions(): Promise<void>;
@@ -185,24 +190,12 @@ function buildTransitionSessionOptions(
  * @returns Nothing
  */
 function resetInteractiveModeState(mode: InteractiveModeLike): void {
-	if (mode.loadingAnimation) {
-		mode.loadingAnimation.stop();
-		mode.loadingAnimation = undefined;
-	}
-	mode.statusContainer.clear();
-	mode.pendingMessagesContainer.clear();
-	mode.compactionQueuedMessages = [];
-	mode.streamingComponent = undefined;
-	mode.streamingMessage = undefined;
-	mode.pendingTools.clear();
-	mode.chatContainer.clear();
-	mode.resetExtensionUI();
-	mode.unsubscribe?.();
-	mode.unsubscribe = undefined;
-
-	// Clear terminal scrollback so stale content from the previous session
-	// doesn't visually flow into the new session's startup output.
-	mode.ui.requestScrollbackClear?.();
+	resetInteractiveSessionState(mode, {
+		clearExtensionUi: true,
+		clearSubscription: true,
+		reason: "workspace-transition",
+		requestScrollbackClear: true,
+	});
 }
 
 /**

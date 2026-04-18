@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { resetInteractiveSessionState } from "./interactive-reset.js";
 import { scheduleAfterIO } from "./yield-to-io.js";
 
 interface QueuedMessagesLike {
@@ -88,6 +89,7 @@ interface InteractiveModePrototypeLike {
 		| undefined;
 	handleEvent?: ((event: InteractiveModeEventLike) => Promise<unknown>) | undefined;
 	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
+	handleRuntimeSessionChange?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	renderCurrentSessionState?: ((...args: unknown[]) => unknown) | undefined;
 	renderInitialMessages?: ((...args: unknown[]) => unknown) | undefined;
@@ -704,6 +706,37 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 		};
 	}
 
+	const originalHandleRuntimeSessionChange = prototype.handleRuntimeSessionChange;
+	if (typeof originalHandleRuntimeSessionChange === "function") {
+		prototype.handleRuntimeSessionChange = async function (
+			this: InteractiveModeInstanceLike,
+			...args: unknown[]
+		) {
+			resetInteractiveSessionState(
+				this as InteractiveModeInstanceLike & {
+					chatContainer: { clear(): void };
+					compactionQueuedMessages: unknown[];
+					pendingMessagesContainer: { clear(): void };
+					pendingTools: Map<string, unknown>;
+					resetExtensionUI: () => void;
+					statusContainer: { clear(): void };
+					ui: {
+						requestRender?: (force?: boolean) => void;
+						requestScrollbackClear?: () => void;
+						resetRenderGrace?: () => void;
+					};
+				},
+				{
+					clearExtensionUi: true,
+					clearSubscription: true,
+					reason: "interactive-runtime-session-change",
+				}
+			);
+			const result = await originalHandleRuntimeSessionChange.call(this, ...args);
+			return result;
+		};
+	}
+
 	const originalRenderInitialMessages = prototype.renderInitialMessages;
 	if (typeof originalRenderInitialMessages === "function") {
 		prototype.renderInitialMessages = function (
@@ -716,14 +749,34 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 	}
 
 	const originalRenderCurrentSessionState = prototype.renderCurrentSessionState;
-	if (typeof originalRenderCurrentSessionState === "function") {
+	if (
+		typeof originalRenderCurrentSessionState === "function" &&
+		typeof originalRenderInitialMessages === "function"
+	) {
 		prototype.renderCurrentSessionState = function (
 			this: InteractiveModeInstanceLike,
 			...args: unknown[]
 		) {
-			resetRenderGrace(this);
-			this.ui?.requestScrollbackClear?.();
-			const result = originalRenderCurrentSessionState.call(this, ...args);
+			resetInteractiveSessionState(
+				this as InteractiveModeInstanceLike & {
+					chatContainer: { clear(): void };
+					compactionQueuedMessages: unknown[];
+					pendingMessagesContainer: { clear(): void };
+					pendingTools: Map<string, unknown>;
+					statusContainer: { clear(): void };
+					ui: {
+						requestRender?: (force?: boolean) => void;
+						requestScrollbackClear?: () => void;
+						resetRenderGrace?: () => void;
+					};
+				},
+				{
+					reason: "interactive-render-current-session-state",
+					requestScrollbackClear: true,
+					resetRenderGrace: true,
+				}
+			);
+			const result = originalRenderInitialMessages.call(this, ...args);
 			this.ui?.requestRender?.(true);
 			return result;
 		};
