@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import renderStabilizerExtension from "../index.js";
 
 describe("render-stabilizer extension", () => {
-	it("registers session_start and session_before_switch handlers", () => {
+	it("registers only the legacy session_before_switch hook", () => {
 		const handlers = new Map<string, unknown[]>();
 
 		const mockPi = {
@@ -14,8 +14,7 @@ describe("render-stabilizer extension", () => {
 
 		renderStabilizerExtension(mockPi as never);
 
-		expect(handlers.has("session_start")).toBe(true);
-		expect(handlers.get("session_start")?.length).toBe(1);
+		expect(handlers.has("session_start")).toBe(false);
 		expect(handlers.has("session_before_switch")).toBe(true);
 		expect(handlers.get("session_before_switch")?.length).toBe(1);
 	});

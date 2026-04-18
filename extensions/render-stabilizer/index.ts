@@ -43,15 +43,15 @@ function captureTuiRef(ui: {
 /**
  * Register render stabilization hooks.
  *
+ * The shared reset helper now owns reset-grace handling for the main
+ * interactive reset paths. This extension remains as a compatibility shim
+ * for any remaining session-switch surfaces that still depend on an
+ * extension-side hook.
+ *
  * @param pi - Extension API
  */
 export default function renderStabilizerExtension(pi: ExtensionAPI): void {
-	// Capture the TUI reference on first session_start
-	pi.on("session_start", async (_event, ctx) => {
-		captureTuiRef(ctx.ui);
-	});
-
-	// Reset the render grace period before a session switch so the
+	// Reset the render grace period before a legacy session switch so the
 	// chatContainer.clear() → renderInitialMessages() transition uses
 	// gentle line-by-line redraws instead of screen-clearing redraws.
 	pi.on("session_before_switch", async (_event, ctx) => {

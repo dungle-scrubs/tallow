@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@mariozechner/pi-ai";
 import type {
 	ExtensionAPI,
@@ -6,8 +9,13 @@ import type {
 	ExtensionUIContext,
 	TurnEndEvent,
 } from "@mariozechner/pi-coding-agent";
+import {
+	getResetDiagnosticsForTests,
+	resetResetDiagnosticsForTests,
+} from "../../../src/reset-diagnostics.js";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
 import { ManualTimerScheduler } from "../../../test-utils/manual-timer-scheduler.js";
+import { registerContextForkExtension } from "../../context-fork/index.js";
 import slashCommandBridge, {
 	resetSlashCommandBridgeStateForTests,
 	setSlashCommandBridgeSchedulerForTests,
@@ -33,6 +41,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	resetResetDiagnosticsForTests();
 	resetSlashCommandBridgeStateForTests();
 });
 
@@ -102,6 +111,28 @@ function buildCompactToolResult(): ToolResultMessage<{ command: string }> {
 		isError: false,
 		timestamp: Date.now(),
 	};
+}
+
+interface Deferred<T> {
+	readonly promise: Promise<T>;
+	readonly reject: (error?: unknown) => void;
+	readonly resolve: (value: T) => void;
+}
+
+/**
+ * Create a deferred promise for controlling async completion timing in tests.
+ *
+ * @template T
+ * @returns Deferred promise controls
+ */
+function createDeferred<T>(): Deferred<T> {
+	let reject!: (error?: unknown) => void;
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((innerResolve, innerReject) => {
+		resolve = innerResolve;
+		reject = innerReject;
+	});
+	return { promise, reject, resolve };
 }
 
 describe("clear extension", () => {
@@ -188,5 +219,87 @@ describe("clear extension", () => {
 		);
 		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 		expect(workingMessages.at(-1)).toBeUndefined();
+	});
+
+	test("/clear after deferred fork completion leaves the replacement session idle", async () => {
+		const commandDir = mkdtempSync(join(tmpdir(), "clear-fork-command-"));
+		const commandPath = join(commandDir, "review.md");
+		const deferred = createDeferred<{ duration: number; exitCode: number; output: string }>();
+		const workingMessages: string[] = [];
+		writeFileSync(commandPath, "Review the code.\n", "utf-8");
+
+		try {
+			registerContextForkExtension(harness.api, {
+				buildFrontmatterIndex: () =>
+					new Map([
+						[
+							"review",
+							{
+								context: "fork",
+								filePath: commandPath,
+							},
+						],
+					]),
+				loadAllAgents: () => new Map(),
+				routeForkedModel: async () => undefined,
+				spawnForkSubprocess: () => deferred.promise,
+			});
+			registerClear(harness.api);
+
+			const clearCommand = harness.commands.get("clear");
+			const ctx = buildContext({
+				hasUI: true,
+				ui: {
+					notify: () => {},
+					setWorkingMessage: (message?: string) => {
+						workingMessages.push(message ?? "");
+					},
+				} as ExtensionUIContext,
+				isIdle: () => true,
+			});
+
+			if (!clearCommand?.handler) {
+				throw new Error("expected clear command to be registered");
+			}
+
+			const [forkResult] = await harness.fireEvent("input", { text: "/review" }, ctx);
+			expect(forkResult).toEqual({ action: "handled" });
+			expect(harness.sentMessages).toHaveLength(1);
+			expect(harness.sentMessages[0]?.content).toContain("🔀 /review");
+
+			const newSession = mock(async () => {
+				await harness.fireEvent(
+					"session_before_switch",
+					{ type: "session_before_switch", reason: "new" },
+					ctx
+				);
+			});
+			await clearCommand.handler("", { ...ctx, newSession } as never);
+			deferred.resolve({ duration: 5, exitCode: 0, output: "fork done" });
+			await Promise.resolve();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(newSession).toHaveBeenCalledTimes(1);
+			expect(workingMessages).toContain("🔀 forking: /review");
+			expect(workingMessages.at(-1)).toBe("");
+			expect(harness.sentMessages).toHaveLength(1);
+			expect(harness.sentMessages.some((message) => message.options?.triggerTurn === true)).toBe(
+				false
+			);
+
+			const diagnostics = getResetDiagnosticsForTests();
+			expect(diagnostics.some((event) => event.kind === "deferred_cancelled")).toBe(true);
+			expect(
+				diagnostics.some(
+					(event) =>
+						event.kind === "deferred_dropped" &&
+						event.source === "context-fork" &&
+						event.reason === "session_generation_mismatch"
+				)
+			).toBe(true);
+		} finally {
+			deferred.reject(new Error("cleanup"));
+			rmSync(commandDir, { force: true, recursive: true });
+		}
 	});
 });

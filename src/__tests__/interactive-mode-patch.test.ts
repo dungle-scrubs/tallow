@@ -1,5 +1,9 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { patchInteractiveModePrototype } from "../interactive-mode-patch.js";
+import {
+	getResetDiagnosticsForTests,
+	resetResetDiagnosticsForTests,
+} from "../reset-diagnostics.js";
 
 interface FakeMessageContent {
 	text?: string;
@@ -42,6 +46,12 @@ class FakeInteractiveMode {
 	loaderStopCalls = 0;
 	notifyCalls: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
 	pendingBashComponents: unknown[] = [];
+	pendingMessagesContainer = {
+		clear: (): void => {
+			this.lifecycleCalls.push("pendingMessagesContainer.clear");
+		},
+	};
+	pendingTools = new Map<string, unknown>();
 	pendingWorkingMessage: unknown = "stale";
 	forceRenderRequests = 0;
 	renderGraceResets = 0;
@@ -190,6 +200,15 @@ class FakeInteractiveMode {
 	}
 
 	/**
+	 * Base handleRuntimeSessionChange implementation used by the patch wrapper.
+	 *
+	 * @returns Promise resolved after recording the lifecycle step
+	 */
+	async handleRuntimeSessionChange(): Promise<void> {
+		this.lifecycleCalls.push("handleRuntimeSessionChange");
+	}
+
+	/**
 	 * Base rebuildChatFromMessages implementation used by the patch wrapper.
 	 *
 	 * @returns Nothing
@@ -272,6 +291,20 @@ class FakeInteractiveMode {
 		this.updateCalls++;
 	}
 
+	chatContainer = {
+		clear: (): void => {
+			this.lifecycleCalls.push("chatContainer.clear");
+		},
+	};
+
+	resetExtensionUI(): void {
+		this.lifecycleCalls.push("resetExtensionUI");
+	}
+
+	unsubscribe = (): void => {
+		this.lifecycleCalls.push("unsubscribe");
+	};
+
 	statusContainer = {
 		clear: (): void => {
 			this.lifecycleCalls.push("statusContainer.clear");
@@ -332,6 +365,10 @@ async function withImmediateTimers(action: () => Promise<void>): Promise<void> {
 		globalThis.setTimeout = originalSetTimeout;
 	}
 }
+
+afterEach(() => {
+	resetResetDiagnosticsForTests();
+});
 
 describe("patchInteractiveModePrototype", () => {
 	it("applies agent_end cleanup with bash flush before pending-message refresh", async () => {
@@ -675,7 +712,51 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.renderGraceResets).toBe(1);
 		expect(mode.scrollbackClearRequests).toBe(1);
 		expect(mode.forceRenderRequests).toBe(1);
-		expect(mode.lifecycleCalls).toContain("renderCurrentSessionState");
+		expect(mode.lifecycleCalls).toContain("renderInitialMessages");
+		expect(
+			getResetDiagnosticsForTests().filter(
+				(event) => event.kind === "reset_start" || event.kind === "reset_complete"
+			)
+		).toEqual([
+			{
+				kind: "reset_start",
+				reason: "interactive-render-current-session-state",
+				timestamp: expect.any(Number),
+			},
+			{
+				kind: "reset_complete",
+				reason: "interactive-render-current-session-state",
+				timestamp: expect.any(Number),
+			},
+		]);
+	});
+
+	it("uses the shared reset helper during runtime session changes", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		await mode.handleRuntimeSessionChange();
+
+		expect(mode.lifecycleCalls).toContain("handleRuntimeSessionChange");
+		expect(mode.lifecycleCalls).toContain("resetExtensionUI");
+		expect(mode.lifecycleCalls).toContain("unsubscribe");
+		expect(mode.statusClears).toBe(1);
+		expect(
+			getResetDiagnosticsForTests().filter(
+				(event) => event.kind === "reset_start" || event.kind === "reset_complete"
+			)
+		).toEqual([
+			{
+				kind: "reset_start",
+				reason: "interactive-runtime-session-change",
+				timestamp: expect.any(Number),
+			},
+			{
+				kind: "reset_complete",
+				reason: "interactive-runtime-session-change",
+				timestamp: expect.any(Number),
+			},
+		]);
 	});
 
 	it("allows idle setWorkingMessage for post-compaction resuming indicators", () => {

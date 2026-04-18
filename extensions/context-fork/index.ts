@@ -23,6 +23,7 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { recordResetDiagnostic } from "../../src/reset-diagnostics.js";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
 import { isProjectTrusted } from "../_shared/project-trust.js";
 import { isShellInterpolationEnabled } from "../_shared/shell-policy.js";
@@ -381,8 +382,14 @@ export function registerContextForkExtension(
 	});
 
 	// Invalidate any in-flight fork completions before switching sessions.
-	pi.on("session_before_switch", async () => {
+	pi.on("session_before_switch", async (_event, ctx) => {
 		sessionGeneration += 1;
+		ctx.ui?.setWorkingMessage?.();
+		recordResetDiagnostic({
+			kind: "deferred_cancelled",
+			reason: "session_before_switch",
+			source: "context-fork",
+		});
 	});
 
 	// Register custom message renderer for fork results
@@ -513,6 +520,7 @@ export function registerContextForkExtension(
 		// Mark as handled — prevent command-prompt/minimal-skill-display from processing
 		// We continue the fork asynchronously via the promise below
 		const forkGeneration = sessionGeneration;
+		recordResetDiagnostic({ kind: "deferred_registered", source: "context-fork" });
 		const forkPromise = dependencies.spawnForkSubprocess({
 			content,
 			cwd: ctx.cwd,
@@ -525,6 +533,11 @@ export function registerContextForkExtension(
 		forkPromise
 			.then((result) => {
 				if (forkGeneration !== sessionGeneration) {
+					recordResetDiagnostic({
+						kind: "deferred_dropped",
+						reason: "session_generation_mismatch",
+						source: "context-fork",
+					});
 					return;
 				}
 				ctx.ui.setWorkingMessage();
@@ -562,6 +575,11 @@ export function registerContextForkExtension(
 			})
 			.catch((err: unknown) => {
 				if (forkGeneration !== sessionGeneration) {
+					recordResetDiagnostic({
+						kind: "deferred_dropped",
+						reason: "session_generation_mismatch",
+						source: "context-fork",
+					});
 					return;
 				}
 				ctx.ui.setWorkingMessage();

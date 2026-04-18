@@ -13,6 +13,10 @@ import type {
 	ExtensionUIContext,
 	TurnEndEvent,
 } from "@mariozechner/pi-coding-agent";
+import {
+	getResetDiagnosticsForTests,
+	resetResetDiagnosticsForTests,
+} from "../../../src/reset-diagnostics.js";
 import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
 import { ManualTimerScheduler } from "../../../test-utils/manual-timer-scheduler.js";
 import slashCommandBridge, {
@@ -40,6 +44,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+	resetResetDiagnosticsForTests();
 	resetSlashCommandBridgeStateForTests();
 });
 
@@ -314,6 +319,11 @@ describe("compact", () => {
 		const continuation = harness.sentMessages.find(
 			(message) => message.customType === "compact-continue"
 		);
+		expect(
+			getResetDiagnosticsForTests().some(
+				(event) => event.kind === "deferred_registered" && event.source === "slash-command-bridge"
+			)
+		).toBe(true);
 		expect(continuation?.display).toBe(false);
 		expect(continuation?.options?.triggerTurn).toBe(true);
 		expect(continuation?.content).toContain("compaction is complete");
@@ -344,6 +354,14 @@ describe("compact", () => {
 		await harness.fireEvent("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 0 }, ctx);
 		scheduler.advanceBy(200);
 
+		expect(
+			getResetDiagnosticsForTests().some(
+				(event) =>
+					event.kind === "deferred_cancelled" &&
+					event.source === "slash-command-bridge" &&
+					event.reason === "turn_start"
+			)
+		).toBe(true);
 		expect(harness.sentMessages).toHaveLength(0);
 		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 	});
@@ -374,6 +392,14 @@ describe("compact", () => {
 		compactOptions?.onComplete?.();
 		scheduler.advanceBy(200);
 
+		expect(
+			getResetDiagnosticsForTests().some(
+				(event) =>
+					event.kind === "deferred_dropped" &&
+					event.source === "slash-command-bridge" &&
+					event.reason === "session_not_idle"
+			)
+		).toBe(true);
 		expect(harness.sentMessages).toHaveLength(0);
 		expect(widgetUpdates.at(-1)).toEqual({ key: "compact-progress", content: undefined });
 		expect(workingMessages.at(-1)).toBeUndefined();
