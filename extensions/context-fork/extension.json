@@ -4,7 +4,7 @@
 	"description": "Runs commands/skills with context: fork frontmatter in isolated pi subprocesses",
 	"whenToUse": "Use when a command or skill must run in an isolated forked tallow subprocess.",
 	"capabilities": {
-		"events": ["input", "session_start"]
+		"events": ["input", "session_before_switch", "session_start"]
 	},
 	"permissionSurface": {
 		"filesystem": "write",

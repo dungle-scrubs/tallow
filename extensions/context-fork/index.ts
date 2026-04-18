@@ -326,6 +326,7 @@ export function registerContextForkExtension(
 
 	let frontmatterIndex: FrontmatterIndex = new Map();
 	let agents: Map<string, AgentConfig> = new Map();
+	let sessionGeneration = 0;
 
 	const debug = (...args: unknown[]) => {
 		if (process.env.DEBUG) {
@@ -375,7 +376,13 @@ export function registerContextForkExtension(
 
 	// Reset lazy state on each session start so resources reflect on-disk changes.
 	pi.on("session_start", async () => {
+		sessionGeneration += 1;
 		resetResources();
+	});
+
+	// Invalidate any in-flight fork completions before switching sessions.
+	pi.on("session_before_switch", async () => {
+		sessionGeneration += 1;
 	});
 
 	// Register custom message renderer for fork results
@@ -505,6 +512,7 @@ export function registerContextForkExtension(
 
 		// Mark as handled — prevent command-prompt/minimal-skill-display from processing
 		// We continue the fork asynchronously via the promise below
+		const forkGeneration = sessionGeneration;
 		const forkPromise = dependencies.spawnForkSubprocess({
 			content,
 			cwd: ctx.cwd,
@@ -516,6 +524,9 @@ export function registerContextForkExtension(
 
 		forkPromise
 			.then((result) => {
+				if (forkGeneration !== sessionGeneration) {
+					return;
+				}
 				ctx.ui.setWorkingMessage();
 
 				if (result.exitCode !== 0 && !result.output) {
@@ -550,6 +561,9 @@ export function registerContextForkExtension(
 				);
 			})
 			.catch((err: unknown) => {
+				if (forkGeneration !== sessionGeneration) {
+					return;
+				}
 				ctx.ui.setWorkingMessage();
 				const message = err instanceof Error ? err.message : String(err);
 				ctx.ui.notify(`Fork /${commandName} error: ${message}`, "error");
