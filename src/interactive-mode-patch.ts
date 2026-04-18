@@ -39,6 +39,7 @@ interface InteractiveModeInstanceLike {
 		getText?: (() => string) | undefined;
 		setText?: ((text: string) => void) | undefined;
 	};
+	renderCurrentSessionState?: (() => void) | undefined;
 	renderInitialMessages?: (() => void) | undefined;
 	rebuildChatFromMessages?: (() => void) | undefined;
 	executeCompaction?:
@@ -56,6 +57,7 @@ interface InteractiveModeInstanceLike {
 	statusContainer?: { clear?: (() => void) | undefined };
 	ui?: {
 		requestRender?: ((force?: boolean) => void) | undefined;
+		requestScrollbackClear?: (() => void) | undefined;
 		resetRenderGrace?: (() => void) | undefined;
 	};
 	updatePendingMessagesDisplay?: (() => void) | undefined;
@@ -87,6 +89,7 @@ interface InteractiveModePrototypeLike {
 	handleEvent?: ((event: InteractiveModeEventLike) => Promise<unknown>) | undefined;
 	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
+	renderCurrentSessionState?: ((...args: unknown[]) => unknown) | undefined;
 	renderInitialMessages?: ((...args: unknown[]) => unknown) | undefined;
 	rebuildChatFromMessages?: ((...args: unknown[]) => unknown) | undefined;
 	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
@@ -709,6 +712,20 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 		) {
 			requestStableRender(this);
 			return originalRenderInitialMessages.call(this, ...args);
+		};
+	}
+
+	const originalRenderCurrentSessionState = prototype.renderCurrentSessionState;
+	if (typeof originalRenderCurrentSessionState === "function") {
+		prototype.renderCurrentSessionState = function (
+			this: InteractiveModeInstanceLike,
+			...args: unknown[]
+		) {
+			resetRenderGrace(this);
+			this.ui?.requestScrollbackClear?.();
+			const result = originalRenderCurrentSessionState.call(this, ...args);
+			this.ui?.requestRender?.(true);
+			return result;
 		};
 	}
 

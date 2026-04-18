@@ -482,6 +482,23 @@ describe("TUI differential rendering shrink regression", () => {
 		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(false);
 	});
 
+	test("requestScrollbackClear applies on first render after forced reset", () => {
+		const width = 40;
+		const height = 10;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const component = new MutableLinesComponent(Array.from({ length: 8 }, (_, i) => `line ${i}`));
+		tui.addChild(component);
+		renderNow(tui);
+
+		terminal.writes.length = 0;
+		tui.requestScrollbackClear();
+		tui.requestRender(true);
+		renderNow(tui);
+
+		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(true);
+	});
+
 	test("gradual shrink across multiple frames triggers full redraw", () => {
 		const width = 40;
 		const height = 10;

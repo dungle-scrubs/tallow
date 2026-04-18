@@ -46,6 +46,7 @@ class FakeInteractiveMode {
 	forceRenderRequests = 0;
 	renderGraceResets = 0;
 	renderRequests = 0;
+	scrollbackClearRequests = 0;
 	session: {
 		clearQueue: () => { followUp: string[]; steering: string[] };
 		extensionRunner: { compactFn: ((options?: unknown) => void) | undefined };
@@ -61,6 +62,10 @@ class FakeInteractiveMode {
 			this.lifecycleCalls.push("ui.requestRender");
 			this.renderRequests++;
 			if (force) this.forceRenderRequests++;
+		},
+		requestScrollbackClear: (): void => {
+			this.lifecycleCalls.push("ui.requestScrollbackClear");
+			this.scrollbackClearRequests++;
 		},
 		resetRenderGrace: (): void => {
 			this.lifecycleCalls.push("ui.resetRenderGrace");
@@ -191,6 +196,15 @@ class FakeInteractiveMode {
 	 */
 	rebuildChatFromMessages(): void {
 		this.lifecycleCalls.push("rebuildChatFromMessages");
+	}
+
+	/**
+	 * Base renderCurrentSessionState implementation used by the patch wrapper.
+	 *
+	 * @returns Nothing
+	 */
+	renderCurrentSessionState(): void {
+		this.lifecycleCalls.push("renderCurrentSessionState");
 	}
 
 	/**
@@ -649,6 +663,18 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.renderGraceResets).toBe(1);
 		expect(mode.renderRequests).toBe(1);
 		expect(mode.lifecycleCalls).toContain("rebuildChatFromMessages");
+	});
+
+	it("forces a scrollback-clearing redraw when rebuilding session state", () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+
+		mode.renderCurrentSessionState();
+
+		expect(mode.renderGraceResets).toBe(1);
+		expect(mode.scrollbackClearRequests).toBe(1);
+		expect(mode.forceRenderRequests).toBe(1);
+		expect(mode.lifecycleCalls).toContain("renderCurrentSessionState");
 	});
 
 	it("allows idle setWorkingMessage for post-compaction resuming indicators", () => {
