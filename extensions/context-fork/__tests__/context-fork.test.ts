@@ -6,7 +6,7 @@ import { ExtensionHarness } from "../../../test-utils/extension-harness.js";
 import { buildFrontmatterIndex } from "../frontmatter-index.js";
 import { registerContextForkExtension } from "../index.js";
 import { resolveModel } from "../model-resolver.js";
-import type { ForkOptions } from "../spawn.js";
+import type { ForkOptions, ForkResult } from "../spawn.js";
 import { buildForkArgs } from "../spawn.js";
 
 // ── Model Resolver ──────────────────────────────────────────
@@ -501,5 +501,98 @@ describe("context-fork lazy resource initialization", () => {
 		await harness.fireEvent("input", { text: "/second" });
 		expect(frontmatterLoads).toBe(2);
 		expect(agentLoads).toBe(2);
+	});
+});
+
+interface Deferred<T> {
+	readonly promise: Promise<T>;
+	readonly reject: (error?: unknown) => void;
+	readonly resolve: (value: T) => void;
+}
+
+/**
+ * Create a deferred promise for controlling async completion timing in tests.
+ *
+ * @template T
+ * @returns Deferred promise controls
+ */
+function createDeferred<T>(): Deferred<T> {
+	let reject!: (error?: unknown) => void;
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((innerResolve, innerReject) => {
+		resolve = innerResolve;
+		reject = innerReject;
+	});
+	return { promise, reject, resolve };
+}
+
+/**
+ * Build a minimal extension context with a mutable working-message log.
+ *
+ * @param workingMessages - Collector for working-message updates
+ * @returns Minimal extension context for context-fork tests
+ */
+function buildTestContext(workingMessages: string[]): Record<string, unknown> {
+	return {
+		cwd: process.cwd(),
+		hasUI: true,
+		isIdle: () => true,
+		model: undefined,
+		ui: {
+			notify: () => {},
+			setWorkingMessage: (message?: string) => {
+				workingMessages.push(message ?? "");
+			},
+		},
+	};
+}
+
+describe("context-fork reset boundaries", () => {
+	test("ignores late fork completion after session_before_switch", async () => {
+		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fork-reset-test-"));
+		const commandPath = path.join(tmpDir, "review.md");
+		const deferred = createDeferred<ForkResult>();
+		const harness = ExtensionHarness.create();
+		const workingMessages: string[] = [];
+		fs.writeFileSync(commandPath, "Review the code.\n", "utf-8");
+
+		try {
+			registerContextForkExtension(harness.api, {
+				buildFrontmatterIndex: () =>
+					new Map([
+						[
+							"review",
+							{
+								context: "fork",
+								filePath: commandPath,
+							},
+						],
+					]),
+				loadAllAgents: () => new Map(),
+				routeForkedModel: async () => undefined,
+				spawnForkSubprocess: () => deferred.promise,
+			});
+
+			const ctx = buildTestContext(workingMessages);
+			const [result] = await harness.fireEvent("input", { text: "/review" }, ctx as never);
+			expect(result).toEqual({ action: "handled" });
+			expect(harness.sentMessages).toHaveLength(1);
+			expect(harness.sentMessages[0]?.content).toContain("🔀 /review");
+
+			await harness.fireEvent(
+				"session_before_switch",
+				{ type: "session_before_switch", reason: "new" },
+				ctx as never
+			);
+			deferred.resolve({ duration: 5, exitCode: 0, output: "fork done" });
+			await Promise.resolve();
+			await new Promise((resolve) => setTimeout(resolve, 0));
+
+			expect(workingMessages).toContain("🔀 forking: /review");
+			expect(harness.sentMessages).toHaveLength(1);
+		} finally {
+			deferred.reject(new Error("cleanup"));
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		}
 	});
 });
