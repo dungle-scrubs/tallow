@@ -17,23 +17,6 @@ import {
 import type { Component } from "../tui.js";
 import { hyperlink } from "../utils.js";
 
-/**
- * Pending file path for the next Image instance.
- * Set by external code (e.g. a tool_result hook) before Image construction.
- * Consumed once by the next Image constructor, then cleared.
- */
-let pendingFilePath: string | undefined;
-
-/**
- * Set the file path for the next Image instance to be constructed.
- * Called before Image creation so the component can render a clickable link.
- *
- * @param path - Absolute file path, or undefined to clear
- */
-export function setNextImageFilePath(path: string | undefined): void {
-	pendingFilePath = path;
-}
-
 export interface ImageTheme {
 	fallbackColor: (str: string) => string;
 }
@@ -117,12 +100,6 @@ export class Image implements Component {
 		this.dimensions = dimensions ||
 			getImageDimensions(base64Data, mimeType) || { widthPx: 800, heightPx: 600 };
 		this.imageId = options.imageId;
-
-		// Auto-consume pending file path if not explicitly provided
-		if (!this.options.filePath && pendingFilePath) {
-			this.options = { ...this.options, filePath: pendingFilePath };
-			pendingFilePath = undefined;
-		}
 	}
 
 	/**

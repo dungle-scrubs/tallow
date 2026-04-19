@@ -28,7 +28,6 @@ import {
 	type Skill,
 	writeTool,
 } from "@mariozechner/pi-coding-agent";
-import * as PiTui from "@mariozechner/pi-tui";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-hardening.js";
 import { applyAgentSessionCompactionCancelPatch } from "./compaction-cancel-patch.js";
@@ -1808,7 +1807,6 @@ export async function createTallowSession(
 			additionalThemePaths,
 			extensionFactories: [
 				createRebrandSystemPromptExtension(contextBudgetPolicy),
-				injectImageFilePaths,
 				createToolResultRetentionExtension(toolResultRetentionPolicy, contextBudgetPolicy),
 				createContextBudgetPlannerExtension(contextBudgetPolicy),
 				detectOutputTruncation,
@@ -2439,29 +2437,6 @@ function createRebrandSystemPromptExtension(budgetPolicy: ContextBudgetPolicy): 
 			return { systemPrompt: prompt };
 		});
 	};
-}
-
-/**
- * Injects file paths into Image components for clickable OSC 8 links.
- * When the read tool returns an image, sets the pending file path so
- * the next Image constructor picks it up automatically.
- *
- * @param pi - Extension API
- */
-function injectImageFilePaths(pi: ExtensionAPI): void {
-	pi.on("tool_result", async (event) => {
-		if (event.toolName !== "read") return;
-		const hasImage = event.content?.some((c: { type: string }) => c.type === "image");
-		if (hasImage && event.input?.path) {
-			const filePath = resolve(String(event.input.path));
-			// pi-tui >= 0.55 may not expose this helper; skip injection when unavailable.
-			const maybeSetNextImageFilePath = (PiTui as { setNextImageFilePath?: unknown })
-				.setNextImageFilePath;
-			if (typeof maybeSetNextImageFilePath === "function") {
-				maybeSetNextImageFilePath(filePath);
-			}
-		}
-	});
 }
 
 /**

@@ -12,9 +12,10 @@
  */
 
 import type { ExtensionAPI, ThemeColor } from "@mariozechner/pi-coding-agent";
-import { hyperlink, Text } from "@mariozechner/pi-tui";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { getIcon } from "../_icons/index.js";
+import { hyperlink } from "../_shared/terminal-links.js";
 import { formatToolVerb, renderLines } from "../tool-display/index.js";
 import { BraveSearchProvider } from "./providers/brave.js";
 import { SearchError, type SearchProvider, type SearchResult } from "./providers/interface.js";
