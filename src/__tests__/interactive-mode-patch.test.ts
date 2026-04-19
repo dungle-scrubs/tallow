@@ -56,18 +56,33 @@ class FakeInteractiveMode {
 	forceRenderRequests = 0;
 	renderGraceResets = 0;
 	renderRequests = 0;
+	renderBatchBegins = 0;
+	renderBatchEnds = 0;
 	scrollbackClearRequests = 0;
 	session: {
+		_sessionStartEvent?: { reason?: string };
 		clearQueue: () => { followUp: string[]; steering: string[] };
 		extensionRunner: { compactFn: ((options?: unknown) => void) | undefined };
 		getFollowUpMessages: () => string[];
 		getSteeringMessages: () => string[];
 		isStreaming: boolean;
 	};
+	sessionManager = {
+		buildSessionContext: (): { messages: unknown[] } => ({ messages: [] }),
+		getEntries: (): Array<{ type: string }> => [],
+	};
 	steeringQueue: string[] = [];
 	statusClears = 0;
 	updateCalls = 0;
 	ui = {
+		beginRenderBatch: (): void => {
+			this.lifecycleCalls.push("ui.beginRenderBatch");
+			this.renderBatchBegins++;
+		},
+		endRenderBatch: (): void => {
+			this.lifecycleCalls.push("ui.endRenderBatch");
+			this.renderBatchEnds++;
+		},
 		requestRender: (force?: boolean): void => {
 			this.lifecycleCalls.push("ui.requestRender");
 			this.renderRequests++;
@@ -160,12 +175,52 @@ class FakeInteractiveMode {
 	}
 
 	/**
+	 * Base init implementation used by the patch wrapper.
+	 *
+	 * @returns Promise resolved after recording the lifecycle step
+	 */
+	async init(): Promise<void> {
+		this.lifecycleCalls.push("init");
+	}
+
+	showLoadedResourcesCalls = 0;
+	showPackageUpdateNotificationCalls = 0;
+	showStartupNoticesCalls = 0;
+	showWarningCalls = 0;
+	showNewVersionNotificationCalls = 0;
+
+	/**
 	 * Base initExtensions implementation used by the patch wrapper.
 	 *
 	 * @returns Promise resolved after recording the lifecycle step
 	 */
 	async initExtensions(): Promise<void> {
 		this.lifecycleCalls.push("initExtensions");
+	}
+
+	showLoadedResources(): void {
+		this.lifecycleCalls.push("showLoadedResources");
+		this.showLoadedResourcesCalls++;
+	}
+
+	showStartupNoticesIfNeeded(): void {
+		this.lifecycleCalls.push("showStartupNoticesIfNeeded");
+		this.showStartupNoticesCalls++;
+	}
+
+	showWarning(_message: string): void {
+		this.lifecycleCalls.push("showWarning");
+		this.showWarningCalls++;
+	}
+
+	showNewVersionNotification(_version: string): void {
+		this.lifecycleCalls.push("showNewVersionNotification");
+		this.showNewVersionNotificationCalls++;
+	}
+
+	showPackageUpdateNotification(_updates: unknown[]): void {
+		this.lifecycleCalls.push("showPackageUpdateNotification");
+		this.showPackageUpdateNotificationCalls++;
 	}
 
 	/**
@@ -681,6 +736,66 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.renderRequests).toBe(rendersBefore + 1);
 	});
 
+	it("uses a batched forced render for init when continuing an existing session", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.sessionManager.buildSessionContext = () => ({ messages: [{ role: "user" }] });
+
+		await mode.init();
+
+		expect(mode.renderBatchBegins).toBe(1);
+		expect(mode.renderBatchEnds).toBe(1);
+		expect(mode.forceRenderRequests).toBe(1);
+		expect(mode.lifecycleCalls).toContain("init");
+	});
+
+	it("uses restore batching when persisted entries exist even if session context is empty", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.sessionManager.getEntries = () => [{ type: "message" }];
+
+		await mode.init();
+
+		expect(mode.renderBatchBegins).toBe(1);
+		expect(mode.renderBatchEnds).toBe(1);
+		expect(mode.forceRenderRequests).toBe(1);
+	});
+
+	it("skips initial history render for startup continue sessions", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.session._sessionStartEvent = { reason: "resume" };
+		mode.sessionManager.getEntries = () => [{ type: "message" }];
+
+		await mode.init();
+
+		expect(mode.lifecycleCalls).not.toContain("renderInitialMessages");
+		expect(mode.forceRenderRequests).toBe(1);
+	});
+
+	it("suppresses startup chat noise while restoring an existing session", async () => {
+		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
+		const mode = new FakeInteractiveMode();
+		mode.sessionManager.getEntries = () => [{ type: "message" }];
+
+		await mode.init();
+		mode.showLoadedResources();
+		mode.showStartupNoticesIfNeeded();
+		mode.showWarning("warning");
+		mode.showNewVersionNotification("1.0.0");
+		mode.showPackageUpdateNotification([]);
+
+		expect(mode.showLoadedResourcesCalls).toBe(0);
+		expect(mode.showStartupNoticesCalls).toBe(0);
+		expect(mode.showWarningCalls).toBe(0);
+		expect(mode.showNewVersionNotificationCalls).toBe(0);
+		expect(mode.showPackageUpdateNotificationCalls).toBe(0);
+
+		await mode.handleEvent({ type: "turn_start" });
+		mode.showWarning("warning");
+		expect(mode.showWarningCalls).toBe(1);
+	});
+
 	it("resets render grace before renderInitialMessages", () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();
@@ -709,6 +824,8 @@ describe("patchInteractiveModePrototype", () => {
 
 		mode.renderCurrentSessionState();
 
+		expect(mode.renderBatchBegins).toBe(1);
+		expect(mode.renderBatchEnds).toBe(1);
 		expect(mode.renderGraceResets).toBe(1);
 		expect(mode.scrollbackClearRequests).toBe(1);
 		expect(mode.forceRenderRequests).toBe(1);
