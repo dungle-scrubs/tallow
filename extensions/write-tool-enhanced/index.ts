@@ -2,8 +2,9 @@
  * Enhanced write tool — shows full written content with summary footer.
  */
 import { createWriteTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { fileLink, Text } from "@mariozechner/pi-tui";
+import { Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
+import { fileLink } from "../_shared/terminal-links.js";
 import {
 	appendSection,
 	dimProcessOutputLine,

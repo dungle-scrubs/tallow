@@ -28,20 +28,18 @@ import {
 	loadSkills,
 	parseFrontmatter,
 } from "@mariozechner/pi-coding-agent";
+import { getImageDimensions, Text, visibleWidth } from "@mariozechner/pi-tui";
+import { Type } from "@sinclair/typebox";
+import { getIcon } from "../_icons/index.js";
+import type { ImageMetadata } from "../_shared/image-metadata.js";
 import {
 	createImageMetadata,
 	detectImageFormat,
-	fileLink,
 	formatImageDimensions,
-	getImageDimensions,
-	type ImageMetadata,
 	imageFormatToMime,
-	Text,
-	visibleWidth,
-} from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
-import { getIcon } from "../_icons/index.js";
+} from "../_shared/image-metadata.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
+import { fileLink } from "../_shared/terminal-links.js";
 import {
 	appendSection,
 	dimProcessOutputLine,

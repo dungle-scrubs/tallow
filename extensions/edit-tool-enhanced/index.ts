@@ -14,9 +14,10 @@ import {
 	renderDiff,
 	type ThemeColor,
 } from "@mariozechner/pi-coding-agent";
-import { fileLink, hyperlink, Text } from "@mariozechner/pi-tui";
+import { Text } from "@mariozechner/pi-tui";
 import { getIcon } from "../_icons/index.js";
 import { commandExistsOnPath, runGitCommandSync } from "../_shared/shell-policy.js";
+import { fileLink, hyperlink } from "../_shared/terminal-links.js";
 import {
 	appendSection,
 	dimProcessOutputLine,
