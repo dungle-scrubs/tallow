@@ -1083,9 +1083,13 @@ export class TUI extends Container {
 		const inStartupGrace =
 			this.startedAtMs > 0 && Date.now() - this.startedAtMs < TUI.STARTUP_GRACE_MS;
 
-		// Helper to clear viewport (and optionally scrollback) and render all new lines
+		// Helper to clear the screen and render only the visible viewport slice.
+		// Rendering all transcript lines during a full redraw causes session resume
+		// to visibly replay the transcript and scroll through the whole history.
 		const fullRender = (clear: boolean): void => {
 			this.fullRedrawCount += 1;
+			const viewportTopForRender = Math.max(0, newLines.length - height);
+			const visibleLines = newLines.slice(viewportTopForRender);
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
 			if (clear && this.pendingScrollbackClear) {
 				buffer += "\x1b[3J\x1b[2J\x1b[H"; // Clear scrollback, screen, and home
@@ -1093,21 +1097,20 @@ export class TUI extends Container {
 			} else if (clear) {
 				buffer += "\x1b[2J\x1b[H"; // Clear screen and home (preserve scrollback)
 			}
-			for (let i = 0; i < newLines.length; i++) {
+			for (let i = 0; i < visibleLines.length; i++) {
 				if (i > 0) buffer += "\r\n";
-				buffer += newLines[i];
+				buffer += visibleLines[i];
 			}
 			buffer += "\x1b[?2026l"; // End synchronized output
 			this.terminal.write(buffer);
 			this.cursorRow = Math.max(0, newLines.length - 1);
 			this.hardwareCursorRow = this.cursorRow;
-			// Reset max lines when clearing, otherwise track growth
 			if (clear) {
 				this.maxLinesRendered = newLines.length;
 			} else {
 				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
 			}
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.previousViewportTop = viewportTopForRender;
 			this.rollingShrinkPeak = newLines.length;
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;
@@ -1129,23 +1132,24 @@ export class TUI extends Container {
 		 */
 		const gentleFullRender = (): void => {
 			this.fullRedrawCount += 1;
+			const viewportTopForRender = Math.max(0, newLines.length - height);
+			const visibleLines = newLines.slice(viewportTopForRender);
 			let buffer = "\x1b[?2026h\x1b[H"; // Begin synchronized output + home cursor
-			for (let i = 0; i < newLines.length; i++) {
+			for (let i = 0; i < visibleLines.length; i++) {
 				buffer += "\x1b[2K"; // Clear current line
-				buffer += newLines[i];
-				if (i < newLines.length - 1) buffer += "\r\n";
+				buffer += visibleLines[i];
+				if (i < visibleLines.length - 1) buffer += "\r\n";
 			}
-			// Erase lines that were previously rendered but are no longer needed
-			const staleLines = Math.max(0, this.maxLinesRendered - newLines.length);
+			const staleLines = Math.max(0, Math.min(this.maxLinesRendered, height) - visibleLines.length);
 			for (let i = 0; i < staleLines; i++) {
 				buffer += "\r\n\x1b[2K";
 			}
 			buffer += "\x1b[?2026l"; // End synchronized output
 			this.terminal.write(buffer);
-			this.cursorRow = Math.max(0, newLines.length + staleLines - 1);
+			this.cursorRow = Math.max(0, newLines.length - 1);
 			this.hardwareCursorRow = this.cursorRow;
 			this.maxLinesRendered = newLines.length;
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
+			this.previousViewportTop = viewportTopForRender;
 			this.rollingShrinkPeak = newLines.length;
 			this.positionHardwareCursor(cursorPos, newLines.length);
 			this.previousLines = newLines;

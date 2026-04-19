@@ -499,6 +499,23 @@ describe("TUI differential rendering shrink regression", () => {
 		expect(terminal.writes.some((w) => w.includes("\x1b[3J"))).toBe(true);
 	});
 
+	test("full redraw renders only the visible tail of oversized content", () => {
+		const width = 40;
+		const height = 5;
+		const terminal = new MockTerminal(width, height);
+		const tui = new TUI(terminal);
+		const lines = Array.from({ length: 12 }, (_, i) => `line ${i}`);
+		const component = new MutableLinesComponent(lines);
+		tui.addChild(component);
+		renderNow(tui);
+
+		const output = terminal.writes.join("");
+		expect(output).not.toContain("line 0");
+		expect(output).not.toContain("line 5");
+		expect(output).toContain("line 7");
+		expect(output).toContain("line 11");
+	});
+
 	test("gradual shrink across multiple frames triggers full redraw", () => {
 		const width = 40;
 		const height = 10;
