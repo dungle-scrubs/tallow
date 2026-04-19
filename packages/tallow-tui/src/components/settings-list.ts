@@ -1,5 +1,5 @@
 import { fuzzyFilter } from "../fuzzy.js";
-import { getEditorKeybindings } from "../keybindings.js";
+import { getKeybindings } from "../keybindings.js";
 import type { Component } from "../tui.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 import { Input } from "./input.js";
@@ -69,13 +69,7 @@ export class SettingsList implements Component {
 		}
 	}
 
-	/**
-	 * Update an item's current value.
-	 *
-	 * @param id - Setting identifier
-	 * @param newValue - New value to display
-	 * @returns Nothing
-	 */
+	/** Update an item's currentValue */
 	updateValue(id: string, newValue: string): void {
 		const item = this.items.find((i) => i.id === id);
 		if (item) {
@@ -85,9 +79,6 @@ export class SettingsList implements Component {
 
 	/**
 	 * Set a callback fired before submenu-driven layout transitions.
-	 *
-	 * Callers can use this to reset TUI render-grace state before the settings
-	 * list expands into, or collapses out of, a submenu.
 	 *
 	 * @param callback - Transition callback, or undefined to clear it
 	 * @returns Nothing
@@ -211,19 +202,19 @@ export class SettingsList implements Component {
 		}
 
 		// Main list input handling
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 		const displayItems = this.searchEnabled ? this.filteredItems : this.items;
-		if (kb.matches(data, "selectUp")) {
+		if (kb.matches(data, "tui.select.up")) {
 			if (displayItems.length === 0) return;
 			this.selectedIndex =
 				this.selectedIndex === 0 ? displayItems.length - 1 : this.selectedIndex - 1;
-		} else if (kb.matches(data, "selectDown")) {
+		} else if (kb.matches(data, "tui.select.down")) {
 			if (displayItems.length === 0) return;
 			this.selectedIndex =
 				this.selectedIndex === displayItems.length - 1 ? 0 : this.selectedIndex + 1;
-		} else if (kb.matches(data, "selectConfirm") || data === " ") {
+		} else if (kb.matches(data, "tui.select.confirm") || data === " ") {
 			this.activateItem();
-		} else if (kb.matches(data, "selectCancel")) {
+		} else if (kb.matches(data, "tui.select.cancel")) {
 			this.onCancel();
 		} else if (this.searchEnabled && this.searchInput) {
 			const sanitized = data.replace(/ /g, "");
@@ -242,10 +233,8 @@ export class SettingsList implements Component {
 		if (!item) return;
 
 		if (item.submenu) {
-			// Preserve height for the first submenu frame so the TUI doesn't treat
-			// the editor→submenu swap as a destructive shrink/expand transition.
-			this.nextMinLineCount = this.lastRenderLineCount;
 			this.layoutTransitionCallback?.();
+			// Open submenu, passing current value so it can pre-select correctly
 			this.submenuItemIndex = this.selectedIndex;
 			this.submenuComponent = item.submenu(item.currentValue, (selectedValue?: string) => {
 				if (selectedValue !== undefined) {
@@ -264,16 +253,9 @@ export class SettingsList implements Component {
 		}
 	}
 
-	/**
-	 * Close the active submenu and restore the main settings list.
-	 *
-	 * @returns Nothing
-	 */
 	private closeSubmenu(): void {
-		// Preserve one frame of the submenu height so the transition back to the
-		// main settings list doesn't trigger a screen-clearing shrink redraw.
-		this.nextMinLineCount = this.lastRenderLineCount;
 		this.layoutTransitionCallback?.();
+		this.nextMinLineCount = this.lastRenderLineCount;
 		this.submenuComponent = null;
 		// Restore selection to the item that opened the submenu
 		if (this.submenuItemIndex !== null) {
