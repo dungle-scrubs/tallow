@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   terminal before using split layout, removing large blank gaps above
   background task content
 
+## [0.9.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.4...tallow-v0.9.5) (2026-04-16)
+
+### Fixed
+
+* **deps:** restore upstream runtime compatibility ([e0ff49c](https://github.com/dungle-scrubs/tallow/commit/e0ff49ce8f9d4e0197af76c620d6fbc973baf580))
+* **subagent-tool:** stabilize fuzzy model resolution ([227818f](https://github.com/dungle-scrubs/tallow/commit/227818f9289ae600f46a5cd909ca31c3f65bb24f))
+* **subagent-tool:** wrap synapse model resolvers ([078df48](https://github.com/dungle-scrubs/tallow/commit/078df48a76065f2ee8db23bc9b37ff9059d76db3))
+
+### Documentation
+
+* **changelog:** keep unreleased at the top ([27fa886](https://github.com/dungle-scrubs/tallow/commit/27fa886977202a1a7294e896d8c63183fc3e2011))
+
 ## [0.9.4](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.3...tallow-v0.9.4) (2026-04-03)
 
 
