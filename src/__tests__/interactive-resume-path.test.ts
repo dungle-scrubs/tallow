@@ -152,7 +152,7 @@ afterEach(() => {
 
 describe("interactive resume rendering", () => {
 	it("anchors startup continue to the visible transcript tail", async () => {
-		const scenarioSource = `
+		const scenarioSource = String.raw`
 			import { mkdtempSync, rmSync } from "node:fs";
 			import { tmpdir } from "node:os";
 			import { join } from "node:path";
@@ -195,11 +195,11 @@ describe("interactive resume rendering", () => {
 			};
 			setTimeout(() => {
 				const joined = writes.join("");
-				process.stdout.write("HAS_PROMPT_00 " + joined.includes("prompt-00") + "\\n");
-				process.stdout.write("HAS_PROMPT_05 " + joined.includes("prompt-05") + "\\n");
-				process.stdout.write("HAS_PROMPT_16 " + joined.includes("prompt-16") + "\\n");
-				process.stdout.write("HAS_PROMPT_17 " + joined.includes("prompt-17") + "\\n");
-				process.stdout.write("HAS_CLEAR_SCREEN " + joined.includes("\\x1b[2J\\x1b[H") + "\\n");
+				process.stdout.write("HAS_PROMPT_00 " + joined.includes("prompt-00") + "\n");
+				process.stdout.write("HAS_PROMPT_05 " + joined.includes("prompt-05") + "\n");
+				process.stdout.write("HAS_PROMPT_16 " + joined.includes("prompt-16") + "\n");
+				process.stdout.write("HAS_PROMPT_17 " + joined.includes("prompt-17") + "\n");
+				process.stdout.write("HAS_CLEAR_SCREEN " + joined.includes("\x1b[2J\x1b[H") + "\n");
 				mode.stop();
 				continued.session.dispose();
 				rmSync(cwd, { recursive: true, force: true });
@@ -219,7 +219,7 @@ describe("interactive resume rendering", () => {
 	}, 20_000);
 
 	it("renders the current transcript tail during startup continue in node runtime", async () => {
-		const scenarioSource = `
+		const scenarioSource = String.raw`
 			import { mkdtempSync, rmSync } from "node:fs";
 			import { tmpdir } from "node:os";
 			import { join } from "node:path";
@@ -294,10 +294,10 @@ describe("interactive resume rendering", () => {
 			setTimeout(() => {
 				const joined = writes.join("");
 				process.stdout.write(
-					"PATCHED " + (InteractiveMode.prototype.__tallow_stale_ui_patch_applied__ === true) + "\\n"
+					"PATCHED " + (InteractiveMode.prototype.__tallow_stale_ui_patch_applied__ === true) + "\n"
 				);
 				process.stdout.write(
-					"HAS_CLIPBOARD " + joined.includes("pi-clipboard-test.png") + "\\n"
+					"HAS_CLIPBOARD " + joined.includes("pi-clipboard-test.png") + "\n"
 				);
 				mode.stop();
 				continued.session.dispose();
@@ -320,7 +320,7 @@ describe("interactive resume rendering", () => {
 	}, 20_000);
 
 	it("does not replay transcript lines during resume redraw", async () => {
-		const scenarioSource = `
+		const scenarioSource = String.raw`
 				import { mkdtempSync, rmSync } from "node:fs";
 				import { tmpdir } from "node:os";
 				import { join } from "node:path";
@@ -365,18 +365,18 @@ describe("interactive resume rendering", () => {
 				};
 
 				setTimeout(async () => {
-					process.stdout.write("MARKER: startup_ready\\n");
+					process.stdout.write("MARKER: startup_ready\n");
 					writes.length = 0;
 					await mode.handleResumeSession(sessionPath);
 					setTimeout(() => {
 						const joined = writes.join("");
-						process.stdout.write("WRITE_COUNT " + writes.length + "\\n");
-						process.stdout.write("HAS_PROMPT_00 " + joined.includes("prompt-00") + "\\n");
-						process.stdout.write("HAS_PROMPT_05 " + joined.includes("prompt-05") + "\\n");
-						process.stdout.write("HAS_PROMPT_16 " + joined.includes("prompt-16") + "\\n");
-						process.stdout.write("HAS_PROMPT_17 " + joined.includes("prompt-17") + "\\n");
+						process.stdout.write("WRITE_COUNT " + writes.length + "\n");
+						process.stdout.write("HAS_PROMPT_00 " + joined.includes("prompt-00") + "\n");
+						process.stdout.write("HAS_PROMPT_05 " + joined.includes("prompt-05") + "\n");
+						process.stdout.write("HAS_PROMPT_16 " + joined.includes("prompt-16") + "\n");
+						process.stdout.write("HAS_PROMPT_17 " + joined.includes("prompt-17") + "\n");
 						process.stdout.write(
-							"CRLF_COUNT " + (joined.match(/\\r\\n/g) || []).length + "\\n"
+							"CRLF_COUNT " + (joined.match(/\\r\n/g) || []).length + "\n"
 						);
 						mode.stop();
 						first.session.dispose();
@@ -398,7 +398,7 @@ describe("interactive resume rendering", () => {
 	}, 20_000);
 
 	it("does not replay transcript lines when typing after resume", async () => {
-		const scenarioSource = `
+		const scenarioSource = String.raw`
 			import { mkdtempSync, rmSync } from "node:fs";
 			import { tmpdir } from "node:os";
 			import { join } from "node:path";
@@ -442,17 +442,17 @@ describe("interactive resume rendering", () => {
 				return originalWrite(data);
 			};
 			setTimeout(async () => {
-				process.stdout.write("MARKER: startup_ready\\n");
+				process.stdout.write("MARKER: startup_ready\n");
 				await mode.handleResumeSession(sessionPath);
 				setTimeout(() => {
 					writes.length = 0;
-					process.stdout.write("MARKER: type_now\\n");
+					process.stdout.write("MARKER: type_now\n");
 				}, 700);
 				setTimeout(() => {
 					const joined = writes.join("");
-					process.stdout.write("HAS_PROMPT_16 " + joined.includes("prompt-16") + "\\n");
-					process.stdout.write("HAS_PROMPT_17 " + joined.includes("prompt-17") + "\\n");
-					process.stdout.write("OUTPUT_LEN " + joined.length + "\\n");
+					process.stdout.write("HAS_PROMPT_16 " + joined.includes("prompt-16") + "\n");
+					process.stdout.write("HAS_PROMPT_17 " + joined.includes("prompt-17") + "\n");
+					process.stdout.write("OUTPUT_LEN " + joined.length + "\n");
 					mode.stop();
 					first.session.dispose();
 					second.session.dispose();
