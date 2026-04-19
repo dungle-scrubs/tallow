@@ -8,60 +8,56 @@ interface QueuedMessagesLike {
 
 interface CompactOptionsLike {
 	customInstructions?: string;
-	onComplete?: ((result: unknown) => void) | undefined;
-	onError?: ((error: Error) => void) | undefined;
+	onComplete?: (result: unknown) => void;
+	onError?: (error: Error) => void;
 }
 
 interface ExtensionRunnerLike {
-	compactFn?: ((options?: CompactOptionsLike) => void) | undefined;
+	compactFn?: (options?: CompactOptionsLike) => void;
 }
 
 interface SessionLike {
 	_sessionStartEvent?: { reason?: string };
 	autoCompactionEnabled?: boolean;
-	clearQueue?: (() => { followUp: string[]; steering: string[] }) | undefined;
+	clearQueue?: () => { followUp: string[]; steering: string[] };
 	extensionRunner?: ExtensionRunnerLike;
-	getFollowUpMessages?: (() => string[]) | undefined;
-	getSteeringMessages?: (() => string[]) | undefined;
+	getFollowUpMessages?: () => string[];
+	getSteeringMessages?: () => string[];
 	isStreaming?: boolean;
 }
 
 interface InteractiveModeInstanceLike {
-	chatContainer?: { clear?: (() => void) | undefined };
+	chatContainer?: { clear?: () => void };
 	compactionQueuedMessages?: Array<unknown>;
-	createExtensionUIContext?:
-		| ((...args: unknown[]) => { notify?: ((...args: unknown[]) => unknown) | undefined })
-		| undefined;
-	showSelector?: ((create: (...args: unknown[]) => unknown) => unknown) | undefined;
-	defaultEditor?: { onEscape?: (() => void) | undefined };
+	createExtensionUIContext?: (...args: unknown[]) => { notify?: (...args: unknown[]) => unknown };
+	showSelector?: (create: (...args: unknown[]) => unknown) => unknown;
+	defaultEditor?: { onEscape?: () => void };
 	editor?: {
-		getText?: (() => string) | undefined;
-		setText?: ((text: string) => void) | undefined;
+		getText?: () => string;
+		setText?: (text: string) => void;
 	};
-	renderCurrentSessionState?: (() => void) | undefined;
-	renderInitialMessages?: (() => void) | undefined;
-	rebuildChatFromMessages?: (() => void) | undefined;
-	executeCompaction?:
-		| ((customInstructions?: string, isAuto?: boolean) => Promise<unknown>)
-		| undefined;
-	handleCompactCommand?: ((customInstructions?: string) => Promise<unknown>) | undefined;
-	flushPendingBashComponents?: (() => void) | undefined;
-	getAllQueuedMessages?: (() => QueuedMessagesLike) | undefined;
-	handleReloadCommand?: (() => Promise<unknown>) | undefined;
-	initExtensions?: (() => Promise<unknown>) | undefined;
-	loadingAnimation?: { stop?: (() => void) | undefined } | null;
+	renderCurrentSessionState?: () => void;
+	renderInitialMessages?: () => void;
+	rebuildChatFromMessages?: () => void;
+	executeCompaction?: (customInstructions?: string, isAuto?: boolean) => Promise<unknown>;
+	handleCompactCommand?: (customInstructions?: string) => Promise<unknown>;
+	flushPendingBashComponents?: () => void;
+	getAllQueuedMessages?: () => QueuedMessagesLike;
+	handleReloadCommand?: () => Promise<unknown>;
+	initExtensions?: () => Promise<unknown>;
+	loadingAnimation?: { stop?: () => void } | null;
 	pendingWorkingMessage?: unknown;
-	restoreQueuedMessagesToEditor?: ((options?: { abort?: boolean }) => unknown) | undefined;
+	restoreQueuedMessagesToEditor?: (options?: { abort?: boolean }) => unknown;
 	session?: SessionLike;
-	statusContainer?: { clear?: (() => void) | undefined };
+	statusContainer?: { clear?: () => void };
 	ui?: {
-		beginRenderBatch?: (() => void) | undefined;
-		endRenderBatch?: (() => void) | undefined;
-		requestRender?: ((force?: boolean) => void) | undefined;
-		requestScrollbackClear?: (() => void) | undefined;
-		resetRenderGrace?: (() => void) | undefined;
+		beginRenderBatch?: () => void;
+		endRenderBatch?: () => void;
+		requestRender?: (force?: boolean) => void;
+		requestScrollbackClear?: () => void;
+		resetRenderGrace?: () => void;
 	};
-	updatePendingMessagesDisplay?: (() => void) | undefined;
+	updatePendingMessagesDisplay?: () => void;
 }
 
 interface AssistantMessageLike {
@@ -86,28 +82,24 @@ interface InteractiveModeInstanceLikeWithStartupNoise extends InteractiveModeIns
 
 interface InteractiveModePrototypeLike {
 	__tallow_stale_ui_patch_applied__?: boolean;
-	createExtensionUIContext?: ((...args: unknown[]) => Record<string, unknown>) | undefined;
-	getUserInput?: (() => Promise<unknown>) | undefined;
-	handleBashCommand?:
-		| ((command: string, excludeFromContext?: boolean) => Promise<unknown>)
-		| undefined;
-	handleEvent?: ((event: InteractiveModeEventLike) => Promise<unknown>) | undefined;
-	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
-	handleRuntimeSessionChange?: ((...args: unknown[]) => Promise<unknown>) | undefined;
-	init?: ((...args: unknown[]) => Promise<unknown>) | undefined;
-	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
-	renderCurrentSessionState?: ((...args: unknown[]) => unknown) | undefined;
-	renderInitialMessages?: ((...args: unknown[]) => unknown) | undefined;
-	rebuildChatFromMessages?: ((...args: unknown[]) => unknown) | undefined;
-	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
-	showLoadedResources?:
-		| ((options?: { force?: boolean; showDiagnosticsWhenQuiet?: boolean }) => void)
-		| undefined;
-	showNewVersionNotification?: ((version: string) => void) | undefined;
-	showPackageUpdateNotification?: ((updates: unknown[]) => void) | undefined;
-	showSelector?: ((create: (...args: unknown[]) => unknown) => unknown) | undefined;
-	showStartupNoticesIfNeeded?: (() => void) | undefined;
-	showWarning?: ((message: string) => void) | undefined;
+	createExtensionUIContext?: (...args: unknown[]) => Record<string, unknown>;
+	getUserInput?: () => Promise<unknown>;
+	handleBashCommand?: (command: string, excludeFromContext?: boolean) => Promise<unknown>;
+	handleEvent?: (event: InteractiveModeEventLike) => Promise<unknown>;
+	handleReloadCommand?: (...args: unknown[]) => Promise<unknown>;
+	handleRuntimeSessionChange?: (...args: unknown[]) => Promise<unknown>;
+	init?: (...args: unknown[]) => Promise<unknown>;
+	initExtensions?: (...args: unknown[]) => Promise<unknown>;
+	renderCurrentSessionState?: (...args: unknown[]) => unknown;
+	renderInitialMessages?: (...args: unknown[]) => unknown;
+	rebuildChatFromMessages?: (...args: unknown[]) => unknown;
+	setupKeyHandlers?: (...args: unknown[]) => unknown;
+	showLoadedResources?: (options?: { force?: boolean; showDiagnosticsWhenQuiet?: boolean }) => void;
+	showNewVersionNotification?: (version: string) => void;
+	showPackageUpdateNotification?: (updates: unknown[]) => void;
+	showSelector?: (create: (...args: unknown[]) => unknown) => unknown;
+	showStartupNoticesIfNeeded?: () => void;
+	showWarning?: (message: string) => void;
 }
 
 /**
@@ -121,7 +113,7 @@ function resetRenderGrace(mode: InteractiveModeInstanceLike): void {
 }
 
 interface SettingsListLike {
-	setLayoutTransitionCallback?: ((callback?: () => void) => void) | undefined;
+	setLayoutTransitionCallback?: (callback?: () => void) => void;
 }
 
 interface SelectorCreateResultLike {
@@ -155,7 +147,7 @@ function getSettingsListFromSelectorResult(
 		return focusCandidate;
 	}
 	const componentCandidate = result.component as
-		| { getSettingsList?: (() => SettingsListLike | undefined) | undefined }
+		| { getSettingsList?: () => SettingsListLike | undefined }
 		| undefined;
 	return componentCandidate?.getSettingsList?.();
 }
@@ -673,133 +665,110 @@ function suppressOverflowAssistantErrorLine(
 	};
 }
 
-/**
- * Patches InteractiveMode prototype methods to prevent stale UI carry-over.
- *
- * The patch adds:
- * - overflow error suppression before auto-compaction loader rendering
- * - visible overflow indicators (instead of silent hidden-thinking terminal state)
- * - retry liveness watchdog after auto-compaction retry handoff
- * - warning path for ambiguous auto-compaction terminal states
- * - agent_end cleanup for pending working messages + pending-message refresh
- * - post-bash flush/update so deferred bash output moves inline promptly
- * - idle Escape behavior that clears queued steering/follow-up messages
- * - extension notify normalization for icon-prefixed error messages
- * - compaction queue inspection helper for extension UI context
- *
- * @param prototype - InteractiveMode prototype object
- * @returns Nothing
- */
-export function patchInteractiveModePrototype(prototype: InteractiveModePrototypeLike): void {
-	if (prototype.__tallow_stale_ui_patch_applied__) return;
-	prototype.__tallow_stale_ui_patch_applied__ = true;
+function getStartupRestoreSessionManager(mode: InteractiveModeInstanceLike):
+	| {
+			buildSessionContext?: () => { messages?: unknown[] };
+			getEntries?: () => Array<{ type?: string }>;
+	  }
+	| undefined {
+	return (
+		mode as InteractiveModeInstanceLike & {
+			sessionManager?: {
+				buildSessionContext?: () => { messages?: unknown[] };
+				getEntries?: () => Array<{ type?: string }>;
+			};
+		}
+	).sessionManager;
+}
 
+function shouldBatchStartupRestore(mode: InteractiveModeInstanceLike): boolean {
+	const sessionManager = getStartupRestoreSessionManager(mode);
+	const existingMessageCount = sessionManager?.buildSessionContext?.().messages?.length ?? 0;
+	const persistedMessageCount =
+		sessionManager?.getEntries?.().filter((entry) => entry.type === "message").length ?? 0;
+	return existingMessageCount > 0 || persistedMessageCount > 0;
+}
+
+function startStartupRestoreBatch(
+	mode: InteractiveModeInstanceLikeWithStartupNoise,
+	enabled: boolean
+): void {
+	mode.__tallow_suppress_startup_chat_noise__ = enabled;
+	if (!enabled) return;
+	mode.ui?.beginRenderBatch?.();
+	mode.ui?.requestScrollbackClear?.();
+	resetRenderGrace(mode);
+}
+
+function finishStartupRestoreBatch(
+	mode: InteractiveModeInstanceLikeWithStartupNoise,
+	enabled: boolean
+): void {
+	if (!enabled) return;
+	mode.ui?.endRenderBatch?.();
+}
+
+function clearStartupChatNoiseSuppression(mode: InteractiveModeInstanceLike): void {
+	(mode as InteractiveModeInstanceLikeWithStartupNoise).__tallow_suppress_startup_chat_noise__ =
+		false;
+}
+
+function wrapStartupNoiseSuppressedVoidMethod<TArgs extends unknown[]>(
+	method: ((this: InteractiveModeInstanceLikeWithStartupNoise, ...args: TArgs) => void) | undefined,
+	shouldBypass: (...args: TArgs) => boolean = () => false
+): ((this: InteractiveModeInstanceLikeWithStartupNoise, ...args: TArgs) => void) | undefined {
+	if (typeof method !== "function") return undefined;
+	return function (this: InteractiveModeInstanceLikeWithStartupNoise, ...args: TArgs): void {
+		if (this.__tallow_suppress_startup_chat_noise__ && !shouldBypass(...args)) {
+			return;
+		}
+		method.call(this, ...args);
+	};
+}
+
+function patchStartupNoiseSuppression(prototype: InteractiveModePrototypeLike): void {
+	prototype.showLoadedResources = wrapStartupNoiseSuppressedVoidMethod(
+		prototype.showLoadedResources,
+		(options) => options?.force === true
+	);
+	prototype.showStartupNoticesIfNeeded = wrapStartupNoiseSuppressedVoidMethod(
+		prototype.showStartupNoticesIfNeeded
+	);
+	prototype.showWarning = wrapStartupNoiseSuppressedVoidMethod(prototype.showWarning);
+	prototype.showNewVersionNotification = wrapStartupNoiseSuppressedVoidMethod(
+		prototype.showNewVersionNotification
+	);
+	prototype.showPackageUpdateNotification = wrapStartupNoiseSuppressedVoidMethod(
+		prototype.showPackageUpdateNotification
+	);
+}
+
+function patchInitForStartupRestore(prototype: InteractiveModePrototypeLike): void {
 	const originalInit = prototype.init;
-	if (typeof originalInit === "function") {
-		prototype.init = async function (
-			this: InteractiveModeInstanceLikeWithStartupNoise,
-			...args: unknown[]
-		) {
-			const sessionManager = (
-				this as InteractiveModeInstanceLike & {
-					sessionManager?: {
-						buildSessionContext?: () => { messages?: unknown[] };
-						getEntries?: () => Array<{ type?: string }>;
-					};
-				}
-			).sessionManager;
-			const existingMessageCount = sessionManager?.buildSessionContext?.().messages?.length ?? 0;
-			const persistedMessageCount =
-				sessionManager?.getEntries?.().filter((entry) => entry.type === "message").length ?? 0;
-			const needsRestoreRender = existingMessageCount > 0 || persistedMessageCount > 0;
-			this.__tallow_suppress_startup_chat_noise__ = needsRestoreRender;
-			const originalRenderInitialMessages = this.renderInitialMessages;
+	if (typeof originalInit !== "function") return;
+	prototype.init = async function (
+		this: InteractiveModeInstanceLikeWithStartupNoise,
+		...args: unknown[]
+	) {
+		const needsRestoreRender = shouldBatchStartupRestore(this);
+		const originalRenderInitialMessages = this.renderInitialMessages;
+		startStartupRestoreBatch(this, needsRestoreRender);
+		try {
+			const result = await originalInit.call(this, ...args);
 			if (needsRestoreRender) {
-				this.ui?.beginRenderBatch?.();
-				this.ui?.requestScrollbackClear?.();
-				resetRenderGrace(this);
+				this.ui?.requestRender?.(true);
 			}
-			try {
-				const result = await originalInit.call(this, ...args);
-				if (needsRestoreRender) {
-					this.ui?.requestRender?.(true);
-				}
-				return result;
-			} finally {
-				if (originalRenderInitialMessages) {
-					this.renderInitialMessages = originalRenderInitialMessages;
-				}
-				if (needsRestoreRender) {
-					this.ui?.endRenderBatch?.();
-				}
+			return result;
+		} finally {
+			if (originalRenderInitialMessages) {
+				this.renderInitialMessages = originalRenderInitialMessages;
 			}
-		};
-	}
+			finishStartupRestoreBatch(this, needsRestoreRender);
+		}
+	};
+}
 
-	const originalShowLoadedResources = prototype.showLoadedResources;
-	if (typeof originalShowLoadedResources === "function") {
-		prototype.showLoadedResources = function (
-			this: InteractiveModeInstanceLikeWithStartupNoise,
-			options?: { force?: boolean; showDiagnosticsWhenQuiet?: boolean }
-		) {
-			if (this.__tallow_suppress_startup_chat_noise__ && options?.force !== true) {
-				return;
-			}
-			return originalShowLoadedResources.call(this, options);
-		};
-	}
-
-	const originalShowStartupNoticesIfNeeded = prototype.showStartupNoticesIfNeeded;
-	if (typeof originalShowStartupNoticesIfNeeded === "function") {
-		prototype.showStartupNoticesIfNeeded = function (
-			this: InteractiveModeInstanceLikeWithStartupNoise
-		) {
-			if (this.__tallow_suppress_startup_chat_noise__) {
-				return;
-			}
-			return originalShowStartupNoticesIfNeeded.call(this);
-		};
-	}
-
-	const originalShowWarning = prototype.showWarning;
-	if (typeof originalShowWarning === "function") {
-		prototype.showWarning = function (
-			this: InteractiveModeInstanceLikeWithStartupNoise,
-			message: string
-		) {
-			if (this.__tallow_suppress_startup_chat_noise__) {
-				return;
-			}
-			return originalShowWarning.call(this, message);
-		};
-	}
-
-	const originalShowNewVersionNotification = prototype.showNewVersionNotification;
-	if (typeof originalShowNewVersionNotification === "function") {
-		prototype.showNewVersionNotification = function (
-			this: InteractiveModeInstanceLikeWithStartupNoise,
-			version: string
-		) {
-			if (this.__tallow_suppress_startup_chat_noise__) {
-				return;
-			}
-			return originalShowNewVersionNotification.call(this, version);
-		};
-	}
-
-	const originalShowPackageUpdateNotification = prototype.showPackageUpdateNotification;
-	if (typeof originalShowPackageUpdateNotification === "function") {
-		prototype.showPackageUpdateNotification = function (
-			this: InteractiveModeInstanceLikeWithStartupNoise,
-			updates: unknown[]
-		) {
-			if (this.__tallow_suppress_startup_chat_noise__) {
-				return;
-			}
-			return originalShowPackageUpdateNotification.call(this, updates);
-		};
-	}
-
+function patchExtensionCompactRebinding(prototype: InteractiveModePrototypeLike): void {
 	const originalInitExtensions = prototype.initExtensions;
 	if (typeof originalInitExtensions === "function") {
 		prototype.initExtensions = async function (
@@ -823,7 +792,9 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			return result;
 		};
 	}
+}
 
+function patchRenderStabilityHooks(prototype: InteractiveModePrototypeLike): void {
 	const originalHandleRuntimeSessionChange = prototype.handleRuntimeSessionChange;
 	if (typeof originalHandleRuntimeSessionChange === "function") {
 		prototype.handleRuntimeSessionChange = async function (
@@ -852,8 +823,7 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 					reason: "interactive-runtime-session-change",
 				}
 			);
-			const result = await originalHandleRuntimeSessionChange.call(this, ...args);
-			return result;
+			return originalHandleRuntimeSessionChange.call(this, ...args);
 		};
 	}
 
@@ -919,144 +889,162 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			return originalRebuildChatFromMessages.call(this, ...args);
 		};
 	}
+}
 
-	const originalHandleEvent = prototype.handleEvent;
-	if (typeof originalHandleEvent === "function") {
-		prototype.handleEvent = async function (
-			this: InteractiveModeInstanceLike,
-			event: InteractiveModeEventLike
-		) {
-			if (event?.type === "auto_compaction_start") {
-				clearCompactionRetryWatchdog(this);
-				markAutoCompactionRunning(this);
-			}
-
-			if (isCompactionContinuationSignal(event)) {
-				clearCompactionRetryWatchdog(this);
-				markCompactionContinuationStarted(this);
-			}
-
-			// ── message_update coalescing (plan 176) ─────────────────────────
-			// During rapid streaming, message_update fires per token. Coalesce
-			// into one UI update per I/O cycle (~60fps) so the event loop
-			// reaches the I/O poll phase and stdin stays responsive.
-			//
-			// Uses scheduleAfterIO instead of setImmediate because Bun's
-			// setImmediate never enters the I/O poll phase. See plan 177.
-			if (event?.type === "message_update") {
-				const coalesce = getCoalesceState(this);
-				// Keep AgentSession event references immutable.
-				const uiEvent = suppressOverflowAssistantErrorLine(event, this.session);
-				coalesce.pendingEvent = uiEvent;
-
-				if (!coalesce.flushScheduled) {
-					coalesce.flushScheduled = true;
-					scheduleAfterIO(async () => {
-						const state = getCoalesceState(this);
-						state.flushScheduled = false;
-						const pending = state.pendingEvent;
-						state.pendingEvent = null;
-						if (pending) {
-							await originalHandleEvent.call(this, pending);
-						}
-					});
-				}
-				return;
-			}
-
-			// For events that depend on streaming state being current, flush
-			// any pending message_update first so the component is up-to-date.
-			//
-			// agent_end is excluded: its loader cleanup must run synchronously
-			// within _emit() to avoid a stale "Working..." indicator. The flush
-			// await yields to the microtask queue, letting _processAgentEvent
-			// (and ultimately prompt() / getUserInput()) resolve before the
-			// loader is cleared — the user sees the editor cursor while the
-			// spinner persists. message_end already flushes the same pending
-			// state, and in abort paths the streaming component is removed
-			// regardless, so skipping the flush for agent_end is safe.
-			// Instead, discard any orphaned pending update synchronously.
-			if (event?.type === "agent_end") {
-				const coalesce = getCoalesceState(this);
-				coalesce.pendingEvent = null;
-			} else if (
-				event?.type === "message_end" ||
-				event?.type === "tool_execution_start" ||
-				event?.type === "tool_execution_end"
-			) {
-				await flushPendingMessageUpdate(this, originalHandleEvent);
-			}
-
-			if (event?.type === "turn_start") {
-				(
-					this as InteractiveModeInstanceLikeWithStartupNoise
-				).__tallow_suppress_startup_chat_noise__ = false;
-			}
-
-			// Keep AgentSession event references immutable for persistence/compaction checks.
-			const uiEvent = suppressOverflowAssistantErrorLine(event, this.session);
-			const result = await originalHandleEvent.call(this, uiEvent);
-
-			if (event?.type === "auto_compaction_end") {
-				if (event.willRetry === true) {
-					markAutoCompactionWaitingForRetry(this);
-					armCompactionRetryWatchdog(this);
-				} else {
-					clearCompactionRetryWatchdog(this);
-					clearAutoCompactionStatus(this);
-				}
-				if (isAmbiguousCompactionEndState(event)) {
-					notifyFromInteractiveMode(this, AMBIGUOUS_COMPACTION_END_WARNING_TEXT, "warning");
-				}
-			}
-
-			if (event?.type === "agent_end") {
-				clearCompactionRetryWatchdog(this);
-				this.pendingWorkingMessage = undefined;
-
-				// Safety net: stop the loading animation if the upstream handler
-				// didn't reach its cleanup (e.g. extension agent_end handlers
-				// delayed _emit so session.prompt() resolved first). The upstream
-				// handler also clears these, but this runs in the post-await path
-				// as a second chance.
-				if (this.loadingAnimation) {
-					this.loadingAnimation.stop?.();
-					this.loadingAnimation = null;
-				}
-
-				// Preserve the compaction loader only while compaction is still
-				// running or while a promised retry has not actually started yet.
-				// Once continuation begins, later agent_end events must clear the
-				// spinner like any normal turn.
-				if (!shouldPreserveCompactionStatus(this)) {
-					this.statusContainer?.clear?.();
-				}
-				this.flushPendingBashComponents?.();
-
-				// Drain orphaned session steering/follow-up messages to the editor.
-				// Steering messages are injected mid-turn; if the turn ends without
-				// the agent consuming them, they persist as zombie "Steering: ..."
-				// lines in the UI forever. Follow-ups are similarly stale if the
-				// agent never started them. Restoring to editor makes the messages
-				// visible and re-sendable — same behavior as pressing the dequeue
-				// key, but triggered automatically at turn end.
-				drainOrphanedSessionMessages(this);
-
-				this.updatePendingMessagesDisplay?.();
-
-				// Normal turn cleanup should only request a standard render.
-				// Forced redraws replay transcript history and make the UI jump.
-				this.ui?.requestRender?.();
-
-				const deferredCompact = pendingInteractiveExtensionCompact.get(this);
-				if (deferredCompact) {
-					pendingInteractiveExtensionCompact.delete(this);
-					runInteractiveExtensionCompact(this, deferredCompact);
-				}
-			}
-			return result;
-		};
+function handleMessageUpdateEvent(
+	mode: InteractiveModeInstanceLike,
+	event: InteractiveModeEventLike,
+	originalHandleEvent: (
+		this: InteractiveModeInstanceLike,
+		event: InteractiveModeEventLike
+	) => Promise<unknown>
+): boolean {
+	if (event.type !== "message_update") {
+		return false;
 	}
+	const coalesce = getCoalesceState(mode);
+	coalesce.pendingEvent = suppressOverflowAssistantErrorLine(event, mode.session);
+	if (!coalesce.flushScheduled) {
+		coalesce.flushScheduled = true;
+		scheduleAfterIO(async () => {
+			const state = getCoalesceState(mode);
+			state.flushScheduled = false;
+			const pending = state.pendingEvent;
+			state.pendingEvent = null;
+			if (pending) {
+				await originalHandleEvent.call(mode, pending);
+			}
+		});
+	}
+	return true;
+}
+
+async function synchronizePendingMessageUpdate(
+	mode: InteractiveModeInstanceLike,
+	event: InteractiveModeEventLike,
+	originalHandleEvent: (
+		this: InteractiveModeInstanceLike,
+		event: InteractiveModeEventLike
+	) => Promise<unknown>
+): Promise<void> {
+	if (event.type === "agent_end") {
+		getCoalesceState(mode).pendingEvent = null;
+		return;
+	}
+	if (
+		event.type === "message_end" ||
+		event.type === "tool_execution_start" ||
+		event.type === "tool_execution_end"
+	) {
+		await flushPendingMessageUpdate(mode, originalHandleEvent);
+	}
+}
+
+function applyPreHandleEventState(
+	mode: InteractiveModeInstanceLike,
+	event: InteractiveModeEventLike
+): void {
+	if (event.type === "auto_compaction_start") {
+		clearCompactionRetryWatchdog(mode);
+		markAutoCompactionRunning(mode);
+	}
+	if (isCompactionContinuationSignal(event)) {
+		clearCompactionRetryWatchdog(mode);
+		markCompactionContinuationStarted(mode);
+	}
+	if (event.type === "turn_start") {
+		clearStartupChatNoiseSuppression(mode);
+	}
+}
+
+function handleAutoCompactionEnd(
+	mode: InteractiveModeInstanceLike,
+	event: InteractiveModeEventLike
+): void {
+	if (event.type !== "auto_compaction_end") {
+		return;
+	}
+	if (event.willRetry === true) {
+		markAutoCompactionWaitingForRetry(mode);
+		armCompactionRetryWatchdog(mode);
+	} else {
+		clearCompactionRetryWatchdog(mode);
+		clearAutoCompactionStatus(mode);
+	}
+	if (isAmbiguousCompactionEndState(event)) {
+		notifyFromInteractiveMode(mode, AMBIGUOUS_COMPACTION_END_WARNING_TEXT, "warning");
+	}
+}
+
+function handleAgentEndCleanup(mode: InteractiveModeInstanceLike): void {
+	clearCompactionRetryWatchdog(mode);
+	mode.pendingWorkingMessage = undefined;
+	if (mode.loadingAnimation) {
+		mode.loadingAnimation.stop?.();
+		mode.loadingAnimation = null;
+	}
+	if (!shouldPreserveCompactionStatus(mode)) {
+		mode.statusContainer?.clear?.();
+	}
+	mode.flushPendingBashComponents?.();
+	drainOrphanedSessionMessages(mode);
+	mode.updatePendingMessagesDisplay?.();
+	mode.ui?.requestRender?.();
+	const deferredCompact = pendingInteractiveExtensionCompact.get(mode);
+	if (deferredCompact) {
+		pendingInteractiveExtensionCompact.delete(mode);
+		runInteractiveExtensionCompact(mode, deferredCompact);
+	}
+}
+
+function patchHandleEventLifecycle(prototype: InteractiveModePrototypeLike): void {
+	const originalHandleEvent = prototype.handleEvent;
+	if (typeof originalHandleEvent !== "function") return;
+	prototype.handleEvent = async function (
+		this: InteractiveModeInstanceLike,
+		event: InteractiveModeEventLike
+	) {
+		applyPreHandleEventState(this, event);
+		if (handleMessageUpdateEvent(this, event, originalHandleEvent)) {
+			return;
+		}
+		await synchronizePendingMessageUpdate(this, event, originalHandleEvent);
+		const uiEvent = suppressOverflowAssistantErrorLine(event, this.session);
+		const result = await originalHandleEvent.call(this, uiEvent);
+		handleAutoCompactionEnd(this, event);
+		if (event.type === "agent_end") {
+			handleAgentEndCleanup(this);
+		}
+		return result;
+	};
+}
+
+/**
+ * Patches InteractiveMode prototype methods to prevent stale UI carry-over.
+ *
+ * The patch adds:
+ * - overflow error suppression before auto-compaction loader rendering
+ * - visible overflow indicators (instead of silent hidden-thinking terminal state)
+ * - retry liveness watchdog after auto-compaction retry handoff
+ * - warning path for ambiguous auto-compaction terminal states
+ * - agent_end cleanup for pending working messages + pending-message refresh
+ * - post-bash flush/update so deferred bash output moves inline promptly
+ * - idle Escape behavior that clears queued steering/follow-up messages
+ * - extension notify normalization for icon-prefixed error messages
+ * - compaction queue inspection helper for extension UI context
+ *
+ * @param prototype - InteractiveMode prototype object
+ * @returns Nothing
+ */
+export function patchInteractiveModePrototype(prototype: InteractiveModePrototypeLike): void {
+	if (prototype.__tallow_stale_ui_patch_applied__) return;
+	prototype.__tallow_stale_ui_patch_applied__ = true;
+
+	patchInitForStartupRestore(prototype);
+	patchStartupNoiseSuppression(prototype);
+	patchExtensionCompactRebinding(prototype);
+	patchRenderStabilityHooks(prototype);
+	patchHandleEventLifecycle(prototype);
 
 	const originalHandleBashCommand = prototype.handleBashCommand;
 	if (typeof originalHandleBashCommand === "function") {
