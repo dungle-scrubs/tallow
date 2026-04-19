@@ -32,6 +32,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Local package/release bundles
+*.tgz
+
 # Agent context (user-local)
 .tallow/
 .claude/
