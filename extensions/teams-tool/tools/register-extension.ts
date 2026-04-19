@@ -20,7 +20,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Key, Loader, Text, type TUI } from "@mariozechner/pi-tui";
+import { Key, Text, type TUI } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { INTEROP_EVENT_NAMES, onInteropEvent } from "../../_shared/interop-events.js";
 import {
@@ -248,7 +248,6 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 		dashboardEnabled = true;
 		setDashboardFlag(true);
 		startDashboardTicker();
-		ctx.ui.setWorkingMessage(Loader.HIDE);
 		ctx.ui.setStatus("team-dashboard", "Team dashboard active");
 		ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
 			enterDashboardViewport(tui);
@@ -322,7 +321,6 @@ export function registerTeamsToolExtension(pi: ExtensionAPI): void {
 
 	pi.on("turn_start", async (_event, ctx) => {
 		if (!dashboardEnabled || !ctx.hasUI) return;
-		ctx.ui.setWorkingMessage(Loader.HIDE);
 	});
 
 	// Archive all teams on session shutdown (preserves tasks for future recovery)

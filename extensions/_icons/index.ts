@@ -16,7 +16,6 @@
 
 import * as fs from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Loader } from "@mariozechner/pi-tui";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -120,13 +119,12 @@ export function getIcon(key: IconKey): string {
 }
 
 /**
- * Get spinner animation frames. Returns whatever Loader.defaultFrames is set to —
- * the random-spinner extension (or any other) can override this.
+ * Get the default spinner animation frames.
  *
  * @returns Array of spinner frame glyphs
  */
 export function getSpinner(): string[] {
-	return Loader.defaultFrames ?? ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+	return ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 }
 
 // ─── Settings Reader ─────────────────────────────────────────────────────────

@@ -1,6 +1,10 @@
 import * as fs from "node:fs";
+import { createRequire } from "node:module";
+import * as path from "node:path";
 import { setKittyProtocolActive } from "./keys.js";
 import { StdinBuffer } from "./stdin-buffer.js";
+
+const cjsRequire = createRequire(import.meta.url);
 
 /**
  * Minimal terminal interface for TUI
@@ -30,9 +34,6 @@ export interface Terminal {
 	// Whether Kitty keyboard protocol is active
 	get kittyProtocolActive(): boolean;
 
-	// Whether running inside tmux (using modifyOtherKeys instead of Kitty protocol)
-	get isTmux(): boolean;
-
 	// Cursor positioning (relative to current position)
 	moveBy(lines: number): void; // Move cursor up (negative) or down (positive) by N lines
 
@@ -45,21 +46,8 @@ export interface Terminal {
 	clearFromCursor(): void; // Clear from cursor to end of screen
 	clearScreen(): void; // Clear entire screen and move cursor to (0,0)
 
-	// Mouse reporting
-	enableMouse(): void; // Enable SGR mouse tracking (scroll, click)
-	disableMouse(): void; // Disable mouse tracking
-
-	// Screen buffer mode
-	enterAlternateScreen(): void; // Switch to alternate screen buffer (no scrollback)
-	leaveAlternateScreen(): void; // Restore normal screen buffer and scrollback
-
 	// Title operations
 	setTitle(title: string): void; // Set terminal window title
-
-	/** Set terminal progress bar via OSC 9;4. Supported by Windows Terminal, iTerm2, ConEmu. */
-	setProgress(percent: number): void;
-	/** Clear terminal progress bar via OSC 9;4. */
-	clearProgress(): void;
 }
 
 /**
@@ -70,24 +58,31 @@ export class ProcessTerminal implements Terminal {
 	private inputHandler?: (data: string) => void;
 	private resizeHandler?: () => void;
 	private _kittyProtocolActive = false;
+	private _modifyOtherKeysActive = false;
 	private stdinBuffer?: StdinBuffer;
 	private stdinDataHandler?: (data: string) => void;
-	private writeLogPath = process.env.PI_TUI_WRITE_LOG || "";
-	private alternateScreenActive = false;
-	private mouseActive = false;
+	private writeLogPath = (() => {
+		const env = process.env.PI_TUI_WRITE_LOG || "";
+		if (!env) return "";
+		try {
+			if (fs.statSync(env).isDirectory()) {
+				const now = new Date();
+				const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
+				return path.join(env, `tui-${ts}-${process.pid}.log`);
+			}
+		} catch {
+			// Not an existing directory - use as-is (file path)
+		}
+		return env;
+	})();
 
 	get kittyProtocolActive(): boolean {
 		return this._kittyProtocolActive;
 	}
 
-	get isTmux(): boolean {
-		return !!process.env.TMUX;
-	}
-
 	start(onInput: (data: string) => void, onResize: () => void): void {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
-		this.alternateScreenActive = false;
 
 		// Save previous state and enable raw mode
 		this.wasRaw = process.stdin.isRaw || false;
@@ -109,24 +104,16 @@ export class ProcessTerminal implements Terminal {
 			process.kill(process.pid, "SIGWINCH");
 		}
 
-		// Mouse tracking (enableMouse/disableMouse) is available but NOT
-		// enabled anywhere yet. The TUI has no scroll viewport — content
-		// off-screen is only reachable via terminal scrollback (or tmux
-		// copy-mode). Enabling mouse tracking steals scroll events without
-		// providing scroll handling, making things strictly worse. Enable
-		// only after implementing a scroll viewport in the TUI.
+		// On Windows, enable ENABLE_VIRTUAL_TERMINAL_INPUT so the console sends
+		// VT escape sequences (e.g. \x1b[Z for Shift+Tab) instead of raw console
+		// events that lose modifier information. Must run AFTER setRawMode(true)
+		// since that resets console mode flags.
+		this.enableWindowsVTInput();
 
-		// Enable keyboard protocol for modified key detection.
-		// tmux doesn't support the Kitty keyboard protocol but does support xterm's
-		// modifyOtherKeys. Detect tmux and use the appropriate protocol.
-		if (process.env.TMUX) {
-			this.setupTmuxInput();
-		} else {
-			// Query and enable Kitty keyboard protocol
-			// The query handler intercepts input temporarily, then installs the user's handler
-			// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
-			this.queryAndEnableKittyProtocol();
-		}
+		// Query and enable Kitty keyboard protocol
+		// The query handler intercepts input temporarily, then installs the user's handler
+		// See: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+		this.queryAndEnableKittyProtocol();
 	}
 
 	/**
@@ -176,24 +163,8 @@ export class ProcessTerminal implements Terminal {
 
 		// Handler that pipes stdin data through the buffer
 		this.stdinDataHandler = (data: string) => {
-			this.stdinBuffer?.process(data);
+			this.stdinBuffer!.process(data);
 		};
-	}
-
-	/**
-	 * Set up stdin handling for tmux without Kitty keyboard protocol.
-	 *
-	 * tmux doesn't support the Kitty keyboard protocol. Escape and Ctrl+C
-	 * arrive as raw bytes (\x1b and \x03) which the key matching handles natively.
-	 *
-	 * For Shift+Enter, tmux needs `extended-keys on` and `extended-keys-format csi-u`
-	 * in tmux.conf. With that config, we request modifyOtherKeys mode 1 so tmux
-	 * encodes modified keys (Shift+Enter → CSI 13;2 u) while leaving standard
-	 * keys (Escape, Ctrl+C, regular typing) as raw bytes.
-	 */
-	private setupTmuxInput(): void {
-		this.setupStdinBuffer();
-		process.stdin.on("data", this.stdinDataHandler!);
 	}
 
 	/**
@@ -202,6 +173,11 @@ export class ProcessTerminal implements Terminal {
 	 * Sends CSI ? u to query current flags. If terminal responds with CSI ? <flags> u,
 	 * it supports the protocol and we enable it with CSI > 1 u.
 	 *
+	 * If no Kitty response arrives shortly after startup, fall back to enabling
+	 * xterm modifyOtherKeys mode 2. This is needed for tmux, which can forward
+	 * modified enter keys as CSI-u when extended-keys is enabled, but may not
+	 * answer the Kitty protocol query.
+	 *
 	 * The response is detected in setupStdinBuffer's data handler, which properly
 	 * handles the case where the response arrives split across multiple stdin events.
 	 */
@@ -209,6 +185,41 @@ export class ProcessTerminal implements Terminal {
 		this.setupStdinBuffer();
 		process.stdin.on("data", this.stdinDataHandler!);
 		process.stdout.write("\x1b[?u");
+		setTimeout(() => {
+			if (!this._kittyProtocolActive && !this._modifyOtherKeysActive) {
+				process.stdout.write("\x1b[>4;2m");
+				this._modifyOtherKeysActive = true;
+			}
+		}, 150);
+	}
+
+	/**
+	 * On Windows, add ENABLE_VIRTUAL_TERMINAL_INPUT (0x0200) to the stdin
+	 * console handle so the terminal sends VT sequences for modified keys
+	 * (e.g. \x1b[Z for Shift+Tab). Without this, libuv's ReadConsoleInputW
+	 * discards modifier state and Shift+Tab arrives as plain \t.
+	 */
+	private enableWindowsVTInput(): void {
+		if (process.platform !== "win32") return;
+		try {
+			// Dynamic require to avoid bundling koffi's 74MB of cross-platform
+			// native binaries into every compiled binary. Koffi is only needed
+			// on Windows for VT input support.
+			const koffi = cjsRequire("koffi");
+			const k32 = koffi.load("kernel32.dll");
+			const GetStdHandle = k32.func("void* __stdcall GetStdHandle(int)");
+			const GetConsoleMode = k32.func("bool __stdcall GetConsoleMode(void*, _Out_ uint32_t*)");
+			const SetConsoleMode = k32.func("bool __stdcall SetConsoleMode(void*, uint32_t)");
+
+			const STD_INPUT_HANDLE = -10;
+			const ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200;
+			const handle = GetStdHandle(STD_INPUT_HANDLE);
+			const mode = new Uint32Array(1);
+			GetConsoleMode(handle, mode);
+			SetConsoleMode(handle, mode[0]! | ENABLE_VIRTUAL_TERMINAL_INPUT);
+		} catch {
+			// koffi not available — Shift+Tab won't be distinguishable from Tab
+		}
 	}
 
 	async drainInput(maxMs = 1000, idleMs = 50): Promise<void> {
@@ -218,6 +229,10 @@ export class ProcessTerminal implements Terminal {
 			process.stdout.write("\x1b[<u");
 			this._kittyProtocolActive = false;
 			setKittyProtocolActive(false);
+		}
+		if (this._modifyOtherKeysActive) {
+			process.stdout.write("\x1b[>4;0m");
+			this._modifyOtherKeysActive = false;
 		}
 
 		const previousHandler = this.inputHandler;
@@ -246,14 +261,6 @@ export class ProcessTerminal implements Terminal {
 	}
 
 	stop(): void {
-		// Always restore normal screen buffer before exiting.
-		if (this.alternateScreenActive) {
-			this.leaveAlternateScreen();
-		}
-
-		// Disable mouse tracking
-		this.disableMouse();
-
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
@@ -262,6 +269,10 @@ export class ProcessTerminal implements Terminal {
 			process.stdout.write("\x1b[<u");
 			this._kittyProtocolActive = false;
 			setKittyProtocolActive(false);
+		}
+		if (this._modifyOtherKeysActive) {
+			process.stdout.write("\x1b[>4;0m");
+			this._modifyOtherKeysActive = false;
 		}
 
 		// Clean up StdinBuffer
@@ -342,74 +353,8 @@ export class ProcessTerminal implements Terminal {
 		process.stdout.write("\x1b[2J\x1b[H"); // Clear screen and move to home (1,1)
 	}
 
-	/**
-	 * Enable SGR mouse tracking.
-	 * Mode 1000 = button press/release (includes scroll wheel).
-	 * Mode 1006 = SGR extended format (avoids 223-column limit).
-	 */
-	enableMouse(): void {
-		if (this.mouseActive) return;
-		process.stdout.write("\x1b[?1000h\x1b[?1006h");
-		this.mouseActive = true;
-	}
-
-	/**
-	 * Disable mouse tracking and restore default terminal mouse handling.
-	 */
-	disableMouse(): void {
-		if (!this.mouseActive) return;
-		process.stdout.write("\x1b[?1006l\x1b[?1000l");
-		this.mouseActive = false;
-	}
-
-	/**
-	 * Switch to alternate screen buffer and clear it.
-	 * @returns void
-	 */
-	enterAlternateScreen(): void {
-		if (this.alternateScreenActive) return;
-		process.stdout.write("\x1b[?1049h");
-		this.alternateScreenActive = true;
-	}
-
-	/**
-	 * Restore normal screen buffer and previous scrollback.
-	 * @returns void
-	 */
-	leaveAlternateScreen(): void {
-		if (!this.alternateScreenActive) return;
-		process.stdout.write("\x1b[?1049l");
-		this.alternateScreenActive = false;
-	}
-
 	setTitle(title: string): void {
 		// OSC 0;title BEL - set terminal window title
 		process.stdout.write(`\x1b]0;${title}\x07`);
-	}
-
-	private lastProgressWrite = 0;
-
-	/**
-	 * Set terminal progress bar via OSC 9;4.
-	 * Throttled to max 1 update per 100ms (percent=100 always passes through).
-	 * Supported by Windows Terminal (tab indicator), iTerm2 (title bar), ConEmu (taskbar).
-	 * Unsupported terminals gracefully ignore these sequences.
-	 * @param percent - Progress percentage, clamped to 0-100
-	 */
-	setProgress(percent: number): void {
-		const clamped = Math.max(0, Math.min(100, Math.round(percent)));
-		const now = Date.now();
-		if (clamped !== 100 && now - this.lastProgressWrite < 100) return;
-		this.lastProgressWrite = now;
-		process.stdout.write(`\x1b]9;4;1;${clamped}\x07`);
-	}
-
-	/**
-	 * Clear terminal progress bar via OSC 9;4.
-	 * Resets the throttle timestamp so a subsequent setProgress fires immediately.
-	 */
-	clearProgress(): void {
-		this.lastProgressWrite = 0;
-		process.stdout.write("\x1b]9;4;0;0\x07");
 	}
 }

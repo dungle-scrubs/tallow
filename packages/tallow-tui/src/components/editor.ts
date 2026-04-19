@@ -3,7 +3,7 @@ import type {
 	AutocompleteSuggestions,
 	CombinedAutocompleteProvider,
 } from "../autocomplete.js";
-import { getEditorKeybindings } from "../keybindings.js";
+import { getKeybindings } from "../keybindings.js";
 import { matchesKey } from "../keys.js";
 import { KillRing } from "../kill-ring.js";
 import { type Component, CURSOR_MARKER, type Focusable, type TUI } from "../tui.js";
@@ -217,7 +217,7 @@ export class Editor implements Component, Focusable {
 
 	// Kill ring for Emacs-style kill/yank operations
 	private killRing = new KillRing();
-	private lastAction: "kill" | "yank" | "type-word" | null = null;
+	private lastAction: "kill" | "tui.editor.yank" | "type-word" | null = null;
 
 	// Character jump mode
 	private jumpMode: "forward" | "backward" | null = null;
@@ -491,12 +491,15 @@ export class Editor implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
-		const kb = getEditorKeybindings();
+		const kb = getKeybindings();
 
 		// Handle character jump mode (awaiting next character to jump to)
 		if (this.jumpMode !== null) {
 			// Cancel if the hotkey is pressed again
-			if (kb.matches(data, "jumpForward") || kb.matches(data, "jumpBackward")) {
+			if (
+				kb.matches(data, "tui.editor.jumpForward") ||
+				kb.matches(data, "tui.editor.jumpBackward")
+			) {
 				this.jumpMode = null;
 				return;
 			}
@@ -540,29 +543,29 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Ctrl+C - let parent handle (exit/clear)
-		if (kb.matches(data, "copy")) {
+		if (kb.matches(data, "tui.input.copy")) {
 			return;
 		}
 
 		// Undo
-		if (kb.matches(data, "undo")) {
+		if (kb.matches(data, "tui.editor.undo")) {
 			this.undo();
 			return;
 		}
 
 		// Handle autocomplete mode
 		if (this.autocompleteState && this.autocompleteList) {
-			if (kb.matches(data, "selectCancel")) {
+			if (kb.matches(data, "tui.select.cancel")) {
 				this.cancelAutocomplete();
 				return;
 			}
 
-			if (kb.matches(data, "selectUp") || kb.matches(data, "selectDown")) {
+			if (kb.matches(data, "tui.select.up") || kb.matches(data, "tui.select.down")) {
 				this.autocompleteList.handleInput(data);
 				return;
 			}
 
-			if (kb.matches(data, "tab")) {
+			if (kb.matches(data, "tui.input.tab")) {
 				const selected = this.autocompleteList.getSelectedItem();
 				if (selected && this.autocompleteProvider) {
 					this.pushUndoSnapshot();
@@ -583,7 +586,7 @@ export class Editor implements Component, Focusable {
 				return;
 			}
 
-			if (kb.matches(data, "selectConfirm")) {
+			if (kb.matches(data, "tui.select.confirm")) {
 				const selected = this.autocompleteList.getSelectedItem();
 				if (selected && this.autocompleteProvider) {
 					this.pushUndoSnapshot();
@@ -612,14 +615,14 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Escape - dismiss ghost text when no autocomplete is active
-		if (kb.matches(data, "selectCancel") && !this.autocompleteState && this.ghostTextValue) {
+		if (kb.matches(data, "tui.select.cancel") && !this.autocompleteState && this.ghostTextValue) {
 			this.ghostTextValue = null;
 			this.tui.requestRender();
 			return;
 		}
 
 		// Tab - accept ghost text or trigger completion
-		if (kb.matches(data, "tab") && !this.autocompleteState) {
+		if (kb.matches(data, "tui.input.tab") && !this.autocompleteState) {
 			if (this.ghostTextValue) {
 				this.acceptGhostText();
 				return;
@@ -629,62 +632,62 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Deletion actions
-		if (kb.matches(data, "deleteToLineEnd")) {
+		if (kb.matches(data, "tui.editor.deleteToLineEnd")) {
 			this.deleteToEndOfLine();
 			return;
 		}
-		if (kb.matches(data, "deleteToLineStart")) {
+		if (kb.matches(data, "tui.editor.deleteToLineStart")) {
 			this.deleteToStartOfLine();
 			return;
 		}
-		if (kb.matches(data, "deleteWordBackward")) {
+		if (kb.matches(data, "tui.editor.deleteWordBackward")) {
 			this.deleteWordBackwards();
 			return;
 		}
-		if (kb.matches(data, "deleteWordForward")) {
+		if (kb.matches(data, "tui.editor.deleteWordForward")) {
 			this.deleteWordForward();
 			return;
 		}
-		if (kb.matches(data, "deleteCharBackward") || matchesKey(data, "shift+backspace")) {
+		if (kb.matches(data, "tui.editor.deleteCharBackward") || matchesKey(data, "shift+backspace")) {
 			this.handleBackspace();
 			return;
 		}
-		if (kb.matches(data, "deleteCharForward") || matchesKey(data, "shift+delete")) {
+		if (kb.matches(data, "tui.editor.deleteCharForward") || matchesKey(data, "shift+delete")) {
 			this.handleForwardDelete();
 			return;
 		}
 
 		// Kill ring actions
-		if (kb.matches(data, "yank")) {
+		if (kb.matches(data, "tui.editor.yank")) {
 			this.yank();
 			return;
 		}
-		if (kb.matches(data, "yankPop")) {
+		if (kb.matches(data, "tui.editor.yankPop")) {
 			this.yankPop();
 			return;
 		}
 
 		// Cursor movement actions
-		if (kb.matches(data, "cursorLineStart")) {
+		if (kb.matches(data, "tui.editor.cursorLineStart")) {
 			this.moveToLineStart();
 			return;
 		}
-		if (kb.matches(data, "cursorLineEnd")) {
+		if (kb.matches(data, "tui.editor.cursorLineEnd")) {
 			this.moveToLineEnd();
 			return;
 		}
-		if (kb.matches(data, "cursorWordLeft")) {
+		if (kb.matches(data, "tui.editor.cursorWordLeft")) {
 			this.moveWordBackwards();
 			return;
 		}
-		if (kb.matches(data, "cursorWordRight")) {
+		if (kb.matches(data, "tui.editor.cursorWordRight")) {
 			this.moveWordForwards();
 			return;
 		}
 
 		// New line
 		if (
-			kb.matches(data, "newLine") ||
+			kb.matches(data, "tui.input.newLine") ||
 			(data.charCodeAt(0) === 10 && data.length > 1) ||
 			data === "\x1b\r" ||
 			data === "\x1b[13;2~" ||
@@ -701,7 +704,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Submit (Enter)
-		if (kb.matches(data, "submit")) {
+		if (kb.matches(data, "tui.input.submit")) {
 			if (this.disableSubmit) return;
 
 			// Accept ghost text on Enter when input is empty — "just hit Enter" experience
@@ -725,7 +728,7 @@ export class Editor implements Component, Focusable {
 		}
 
 		// Arrow key navigation (with history support)
-		if (kb.matches(data, "cursorUp")) {
+		if (kb.matches(data, "tui.editor.cursorUp")) {
 			if (this.isEditorEmpty()) {
 				this.navigateHistory(-1);
 			} else if (this.historyIndex > -1 && this.isOnFirstVisualLine()) {
@@ -738,7 +741,7 @@ export class Editor implements Component, Focusable {
 			}
 			return;
 		}
-		if (kb.matches(data, "cursorDown")) {
+		if (kb.matches(data, "tui.editor.cursorDown")) {
 			if (this.historyIndex > -1 && this.isOnLastVisualLine()) {
 				this.navigateHistory(1);
 			} else if (this.isOnLastVisualLine()) {
@@ -749,31 +752,31 @@ export class Editor implements Component, Focusable {
 			}
 			return;
 		}
-		if (kb.matches(data, "cursorRight")) {
+		if (kb.matches(data, "tui.editor.cursorRight")) {
 			this.moveCursor(0, 1);
 			return;
 		}
-		if (kb.matches(data, "cursorLeft")) {
+		if (kb.matches(data, "tui.editor.cursorLeft")) {
 			this.moveCursor(0, -1);
 			return;
 		}
 
 		// Page up/down - scroll by page and move cursor
-		if (kb.matches(data, "pageUp")) {
+		if (kb.matches(data, "tui.editor.pageUp")) {
 			this.pageScroll(-1);
 			return;
 		}
-		if (kb.matches(data, "pageDown")) {
+		if (kb.matches(data, "tui.editor.pageDown")) {
 			this.pageScroll(1);
 			return;
 		}
 
 		// Character jump mode triggers
-		if (kb.matches(data, "jumpForward")) {
+		if (kb.matches(data, "tui.editor.jumpForward")) {
 			this.jumpMode = "forward";
 			return;
 		}
-		if (kb.matches(data, "jumpBackward")) {
+		if (kb.matches(data, "tui.editor.jumpBackward")) {
 			this.jumpMode = "backward";
 			return;
 		}
@@ -1188,11 +1191,11 @@ export class Editor implements Component, Focusable {
 
 	private shouldSubmitOnBackslashEnter(
 		data: string,
-		kb: ReturnType<typeof getEditorKeybindings>
+		kb: ReturnType<typeof getKeybindings>
 	): boolean {
 		if (this.disableSubmit) return false;
 		if (!matchesKey(data, "enter")) return false;
-		const submitKeys = kb.getKeys("submit");
+		const submitKeys = kb.getKeys("tui.input.submit");
 		const hasShiftEnter = submitKeys.includes("shift+enter") || submitKeys.includes("shift+return");
 		if (!hasShiftEnter) return false;
 
@@ -1786,7 +1789,7 @@ export class Editor implements Component, Focusable {
 		const text = this.killRing.peek()!;
 		this.insertYankedText(text);
 
-		this.lastAction = "yank";
+		this.lastAction = "tui.editor.yank";
 	}
 
 	/**
@@ -1795,7 +1798,7 @@ export class Editor implements Component, Focusable {
 	 */
 	private yankPop(): void {
 		// Only works if we just yanked and have more than one entry
-		if (this.lastAction !== "yank" || this.killRing.length <= 1) return;
+		if (this.lastAction !== "tui.editor.yank" || this.killRing.length <= 1) return;
 
 		this.pushUndoSnapshot();
 
@@ -1809,7 +1812,7 @@ export class Editor implements Component, Focusable {
 		const text = this.killRing.peek()!;
 		this.insertYankedText(text);
 
-		this.lastAction = "yank";
+		this.lastAction = "tui.editor.yank";
 	}
 
 	/**
