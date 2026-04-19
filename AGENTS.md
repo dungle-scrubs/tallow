@@ -144,15 +144,24 @@ If any criterion fails, do not modify `packages/tallow-tui`.
 `@mariozechner/pi-tui` to `file:packages/tallow-tui` in `devDependencies`.
 Import paths stay the same — only the resolution target changes.
 
-**You can modify TUI internals here.** After changes:
-`cd packages/tallow-tui && bun run build`, then rebuild tallow.
+**You can modify TUI internals here, but the fork is under active
+reduction.** Do not assume the current delta is intentionally permanent.
+Use the audit script for the authoritative file-level inventory. The
+canonical generated status document is `docs/research/pi-tui-fork-audit.md`.
 
-Modified upstream files (conflict surface): `tui.ts`, `keys.ts`, `utils.ts`,
-`terminal.ts`, `terminal-image.ts`, `keybindings.ts`, `editor-component.ts`,
-`index.ts`, `components/loader.ts`, `components/editor.ts`, `components/image.ts`,
-`components/select-list.ts`, `components/bordered-box.ts`.
-Added files (zero conflict): `border-styles.ts`, `autocomplete.ts`,
-`components/box.ts`, `components/cancellable-loader.ts`.
+```bash
+node scripts/audit-pi-tui-fork.mjs
+```
+
+The long-term keep surface is intentionally narrow:
+- border styles
+- loader global defaults and hide sentinel
+- editor ghost-text and change-listener APIs
+- minimal reset/render primitives still required by tallow
+
+Everything else is a revert/extract/upstream candidate until proven
+necessary. After changes:
+`cd packages/tallow-tui && bun run build`, then rebuild tallow.
 
 ### Do NOT fork `pi-coding-agent`
 

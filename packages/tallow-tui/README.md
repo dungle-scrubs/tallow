@@ -1,51 +1,73 @@
 # @mariozechner/pi-tui (Tallow fork)
 
-Tallow's fork of `@mariozechner/pi-tui` (v0.52.9). Adds customizable
-loader, border styles, and input middleware — changes that require
-modifying pi-tui internals.
+Tallow vendors a local fork of `@mariozechner/pi-tui` to keep a small set
+of UI primitives that upstream still does not expose in the form tallow
+needs.
 
-## What's different from upstream
+This is **not** a tiny historical snapshot anymore. The authoritative
+upstream reference for the current reduction effort is
+`@mariozechner/pi-tui@0.67.68`.
 
-### Configurable Loader
+## Why the fork existed
 
-`Loader` accepts optional `frames` and `intervalMs` via constructor
-options. Static `Loader.defaultFrames` / `Loader.defaultIntervalMs`
-let extensions set global defaults at session start.
+The original fork was created because tallow needed a few TUI primitives
+that extension APIs could not provide directly:
 
-### Border styles
+- configurable loader defaults
+- border styles and bordered boxes
+- earlier input interception hooks
 
-New `BorderStyle` interface with three presets: `SHARP` (┌┐└┘),
-`ROUNDED` (╭╮╰╯), `FLAT` (horizontal rules only).
-`BorderedBox` component wraps content in a full border with optional
-title, padding, and color functions.
+Since then, upstream added several features that used to be local, so the
+current fork is larger than the original rationale justifies.
 
-### Input middleware
+## Long-term keep surface
 
-`TUI.addInputMiddleware(fn)` inserts a hook before `handleInput`
-forwards to the focused component. Middleware returns `true` to
-consume input. Used by the which-key overlay extension.
+The fork reduction effort is shrinking the long-term delta to only the
+smallest set of proven tallow requirements:
 
-## Upstream sync
+- border styles
+- loader global defaults and hide sentinel
+- editor ghost-text and change-listener APIs
+- minimal reset/render primitives still required by tallow
 
-Source extracted from `@mariozechner/pi-tui@0.52.9` source maps.
+Everything else is treated as revert-or-extract unless proven necessary.
 
-### Modified files (conflict surface on sync)
+## Authoritative audit
 
-| File | Change |
-|------|--------|
-| `components/loader.ts` | Constructor options, static defaults |
-| `tui.ts` | Input middleware array + add/remove methods |
+Do not trust this README alone for the current delta. The canonical
+status document is `docs/research/pi-tui-fork-audit.md`, generated and
+validated by the audit script:
 
-### Added files (zero conflict)
+```bash
+node scripts/audit-pi-tui-fork.mjs
+```
 
-| File | Purpose |
-|------|---------|
-| `border-styles.ts` | BorderStyle interface + presets |
-| `components/bordered-box.ts` | Box component with configurable borders |
+To regenerate the human-readable audit note:
 
-### How to sync
+```bash
+node scripts/audit-pi-tui-fork.mjs \
+  --write-markdown docs/research/pi-tui-fork-audit.md
+```
 
-1. Extract new upstream source from source maps (same script)
-2. Diff against `src/` — conflicts only in modified files above
-3. Apply upstream changes, keep our additions
-4. Rebuild: `cd packages/tallow-tui && npm run build`
+The generated report classifies each changed runtime file as one of:
+
+- `keep`
+- `extract`
+- `upstream`
+- `revert`
+
+## Current ownership rules
+
+- `packages/tallow-tui` should own generic TUI primitives only
+- tallow session/reset behavior belongs in `src/interactive-*.ts`, not in
+  the fork
+- application helpers should move to tallow or upstream rather than stay
+  in the fork by accident
+
+## Sync approach
+
+1. audit local-vs-upstream runtime deltas
+2. revert low-risk files first
+3. extract tallow-owned helpers out of the fork
+4. keep only the justified primitive surface
+5. shrink high-risk render/input deltas last with PTY regression tests
