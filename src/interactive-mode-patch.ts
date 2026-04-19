@@ -700,7 +700,6 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			this: InteractiveModeInstanceLikeWithStartupNoise,
 			...args: unknown[]
 		) {
-			const isStartupResume = this.session?._sessionStartEvent?.reason === "resume";
 			const sessionManager = (
 				this as InteractiveModeInstanceLike & {
 					sessionManager?: {
@@ -719,9 +718,6 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 				this.ui?.beginRenderBatch?.();
 				this.ui?.requestScrollbackClear?.();
 				resetRenderGrace(this);
-			}
-			if (isStartupResume && originalRenderInitialMessages) {
-				this.renderInitialMessages = () => {};
 			}
 			try {
 				const result = await originalInit.call(this, ...args);

@@ -761,18 +761,6 @@ describe("patchInteractiveModePrototype", () => {
 		expect(mode.forceRenderRequests).toBe(1);
 	});
 
-	it("skips initial history render for startup continue sessions", async () => {
-		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
-		const mode = new FakeInteractiveMode();
-		mode.session._sessionStartEvent = { reason: "resume" };
-		mode.sessionManager.getEntries = () => [{ type: "message" }];
-
-		await mode.init();
-
-		expect(mode.lifecycleCalls).not.toContain("renderInitialMessages");
-		expect(mode.forceRenderRequests).toBe(1);
-	});
-
 	it("suppresses startup chat noise while restoring an existing session", async () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();

@@ -151,7 +151,7 @@ afterEach(() => {
 });
 
 describe("interactive resume rendering", () => {
-	it("does not replay transcript lines during startup continue", async () => {
+	it("anchors startup continue to the visible transcript tail", async () => {
 		const scenarioSource = `
 			import { mkdtempSync, rmSync } from "node:fs";
 			import { tmpdir } from "node:os";
@@ -213,12 +213,12 @@ describe("interactive resume rendering", () => {
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain("HAS_PROMPT_00 false");
 		expect(result.stdout).toContain("HAS_PROMPT_05 false");
-		expect(result.stdout).toContain("HAS_PROMPT_16 false");
-		expect(result.stdout).toContain("HAS_PROMPT_17 false");
+		expect(result.stdout).toContain("HAS_PROMPT_16 true");
+		expect(result.stdout).toContain("HAS_PROMPT_17 true");
 		expect(result.stdout).toContain("HAS_CLEAR_SCREEN true");
 	}, 20_000);
 
-	it("does not replay clipboard transcript lines during startup continue in node runtime", async () => {
+	it("renders the current transcript tail during startup continue in node runtime", async () => {
 		const scenarioSource = `
 			import { mkdtempSync, rmSync } from "node:fs";
 			import { tmpdir } from "node:os";
@@ -316,7 +316,7 @@ describe("interactive resume rendering", () => {
 		expect(result.stderr).toBe("");
 		expect(result.code).toBe(0);
 		expect(result.stdout).toContain("PATCHED true");
-		expect(result.stdout).toContain("HAS_CLIPBOARD false");
+		expect(result.stdout).toContain("HAS_CLIPBOARD true");
 	}, 20_000);
 
 	it("does not replay transcript lines during resume redraw", async () => {
