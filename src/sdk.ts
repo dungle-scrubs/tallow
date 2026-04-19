@@ -1965,6 +1965,15 @@ export async function createTallowSession(
 		}
 	}
 
+	const initialSessionStartEvent =
+		sessionOpt.type === "continue" || sessionOpt.type === "open" || sessionOpt.type === "resume"
+			? {
+					type: "session_start" as const,
+					reason: "resume" as const,
+					previousSessionFile: sessionManager.getSessionFile(),
+				}
+			: undefined;
+
 	const runtime = await createAgentSessionRuntime(
 		({ cwd: runtimeCwd, sessionManager: runtimeSessionManager, sessionStartEvent }) =>
 			createRuntime({
@@ -1976,6 +1985,7 @@ export async function createTallowSession(
 			cwd,
 			agentDir: tallowHome,
 			sessionManager,
+			sessionStartEvent: initialSessionStartEvent,
 		}
 	);
 

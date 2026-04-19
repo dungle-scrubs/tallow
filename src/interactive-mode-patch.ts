@@ -1,6 +1,3 @@
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { resetInteractiveSessionState } from "./interactive-reset.js";
 import { scheduleAfterIO } from "./yield-to-io.js";
 
@@ -20,6 +17,7 @@ interface ExtensionRunnerLike {
 }
 
 interface SessionLike {
+	_sessionStartEvent?: { reason?: string };
 	autoCompactionEnabled?: boolean;
 	clearQueue?: (() => { followUp: string[]; steering: string[] }) | undefined;
 	extensionRunner?: ExtensionRunnerLike;
@@ -57,6 +55,8 @@ interface InteractiveModeInstanceLike {
 	session?: SessionLike;
 	statusContainer?: { clear?: (() => void) | undefined };
 	ui?: {
+		beginRenderBatch?: (() => void) | undefined;
+		endRenderBatch?: (() => void) | undefined;
 		requestRender?: ((force?: boolean) => void) | undefined;
 		requestScrollbackClear?: (() => void) | undefined;
 		resetRenderGrace?: (() => void) | undefined;
@@ -80,6 +80,10 @@ interface InteractiveModeEventLike {
 	willRetry?: boolean;
 }
 
+interface InteractiveModeInstanceLikeWithStartupNoise extends InteractiveModeInstanceLike {
+	__tallow_suppress_startup_chat_noise__?: boolean;
+}
+
 interface InteractiveModePrototypeLike {
 	__tallow_stale_ui_patch_applied__?: boolean;
 	createExtensionUIContext?: ((...args: unknown[]) => Record<string, unknown>) | undefined;
@@ -90,12 +94,20 @@ interface InteractiveModePrototypeLike {
 	handleEvent?: ((event: InteractiveModeEventLike) => Promise<unknown>) | undefined;
 	handleReloadCommand?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	handleRuntimeSessionChange?: ((...args: unknown[]) => Promise<unknown>) | undefined;
+	init?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	initExtensions?: ((...args: unknown[]) => Promise<unknown>) | undefined;
 	renderCurrentSessionState?: ((...args: unknown[]) => unknown) | undefined;
 	renderInitialMessages?: ((...args: unknown[]) => unknown) | undefined;
 	rebuildChatFromMessages?: ((...args: unknown[]) => unknown) | undefined;
 	setupKeyHandlers?: ((...args: unknown[]) => unknown) | undefined;
+	showLoadedResources?:
+		| ((options?: { force?: boolean; showDiagnosticsWhenQuiet?: boolean }) => void)
+		| undefined;
+	showNewVersionNotification?: ((version: string) => void) | undefined;
+	showPackageUpdateNotification?: ((updates: unknown[]) => void) | undefined;
 	showSelector?: ((create: (...args: unknown[]) => unknown) => unknown) | undefined;
+	showStartupNoticesIfNeeded?: (() => void) | undefined;
+	showWarning?: ((message: string) => void) | undefined;
 }
 
 /**
@@ -682,6 +694,116 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 	if (prototype.__tallow_stale_ui_patch_applied__) return;
 	prototype.__tallow_stale_ui_patch_applied__ = true;
 
+	const originalInit = prototype.init;
+	if (typeof originalInit === "function") {
+		prototype.init = async function (
+			this: InteractiveModeInstanceLikeWithStartupNoise,
+			...args: unknown[]
+		) {
+			const isStartupResume = this.session?._sessionStartEvent?.reason === "resume";
+			const sessionManager = (
+				this as InteractiveModeInstanceLike & {
+					sessionManager?: {
+						buildSessionContext?: () => { messages?: unknown[] };
+						getEntries?: () => Array<{ type?: string }>;
+					};
+				}
+			).sessionManager;
+			const existingMessageCount = sessionManager?.buildSessionContext?.().messages?.length ?? 0;
+			const persistedMessageCount =
+				sessionManager?.getEntries?.().filter((entry) => entry.type === "message").length ?? 0;
+			const needsRestoreRender = existingMessageCount > 0 || persistedMessageCount > 0;
+			this.__tallow_suppress_startup_chat_noise__ = needsRestoreRender;
+			const originalRenderInitialMessages = this.renderInitialMessages;
+			if (needsRestoreRender) {
+				this.ui?.beginRenderBatch?.();
+				this.ui?.requestScrollbackClear?.();
+				resetRenderGrace(this);
+			}
+			if (isStartupResume && originalRenderInitialMessages) {
+				this.renderInitialMessages = () => {};
+			}
+			try {
+				const result = await originalInit.call(this, ...args);
+				if (needsRestoreRender) {
+					this.ui?.requestRender?.(true);
+				}
+				return result;
+			} finally {
+				if (originalRenderInitialMessages) {
+					this.renderInitialMessages = originalRenderInitialMessages;
+				}
+				if (needsRestoreRender) {
+					this.ui?.endRenderBatch?.();
+				}
+			}
+		};
+	}
+
+	const originalShowLoadedResources = prototype.showLoadedResources;
+	if (typeof originalShowLoadedResources === "function") {
+		prototype.showLoadedResources = function (
+			this: InteractiveModeInstanceLikeWithStartupNoise,
+			options?: { force?: boolean; showDiagnosticsWhenQuiet?: boolean }
+		) {
+			if (this.__tallow_suppress_startup_chat_noise__ && options?.force !== true) {
+				return;
+			}
+			return originalShowLoadedResources.call(this, options);
+		};
+	}
+
+	const originalShowStartupNoticesIfNeeded = prototype.showStartupNoticesIfNeeded;
+	if (typeof originalShowStartupNoticesIfNeeded === "function") {
+		prototype.showStartupNoticesIfNeeded = function (
+			this: InteractiveModeInstanceLikeWithStartupNoise
+		) {
+			if (this.__tallow_suppress_startup_chat_noise__) {
+				return;
+			}
+			return originalShowStartupNoticesIfNeeded.call(this);
+		};
+	}
+
+	const originalShowWarning = prototype.showWarning;
+	if (typeof originalShowWarning === "function") {
+		prototype.showWarning = function (
+			this: InteractiveModeInstanceLikeWithStartupNoise,
+			message: string
+		) {
+			if (this.__tallow_suppress_startup_chat_noise__) {
+				return;
+			}
+			return originalShowWarning.call(this, message);
+		};
+	}
+
+	const originalShowNewVersionNotification = prototype.showNewVersionNotification;
+	if (typeof originalShowNewVersionNotification === "function") {
+		prototype.showNewVersionNotification = function (
+			this: InteractiveModeInstanceLikeWithStartupNoise,
+			version: string
+		) {
+			if (this.__tallow_suppress_startup_chat_noise__) {
+				return;
+			}
+			return originalShowNewVersionNotification.call(this, version);
+		};
+	}
+
+	const originalShowPackageUpdateNotification = prototype.showPackageUpdateNotification;
+	if (typeof originalShowPackageUpdateNotification === "function") {
+		prototype.showPackageUpdateNotification = function (
+			this: InteractiveModeInstanceLikeWithStartupNoise,
+			updates: unknown[]
+		) {
+			if (this.__tallow_suppress_startup_chat_noise__) {
+				return;
+			}
+			return originalShowPackageUpdateNotification.call(this, updates);
+		};
+	}
+
 	const originalInitExtensions = prototype.initExtensions;
 	if (typeof originalInitExtensions === "function") {
 		prototype.initExtensions = async function (
@@ -721,6 +843,8 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 					resetExtensionUI: () => void;
 					statusContainer: { clear(): void };
 					ui: {
+						beginRenderBatch?: () => void;
+						endRenderBatch?: () => void;
 						requestRender?: (force?: boolean) => void;
 						requestScrollbackClear?: () => void;
 						resetRenderGrace?: () => void;
@@ -757,28 +881,35 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 			this: InteractiveModeInstanceLike,
 			...args: unknown[]
 		) {
-			resetInteractiveSessionState(
-				this as InteractiveModeInstanceLike & {
-					chatContainer: { clear(): void };
-					compactionQueuedMessages: unknown[];
-					pendingMessagesContainer: { clear(): void };
-					pendingTools: Map<string, unknown>;
-					statusContainer: { clear(): void };
-					ui: {
-						requestRender?: (force?: boolean) => void;
-						requestScrollbackClear?: () => void;
-						resetRenderGrace?: () => void;
-					};
-				},
-				{
-					reason: "interactive-render-current-session-state",
-					requestScrollbackClear: true,
-					resetRenderGrace: true,
-				}
-			);
-			const result = originalRenderInitialMessages.call(this, ...args);
-			this.ui?.requestRender?.(true);
-			return result;
+			this.ui?.beginRenderBatch?.();
+			try {
+				resetInteractiveSessionState(
+					this as InteractiveModeInstanceLike & {
+						chatContainer: { clear(): void };
+						compactionQueuedMessages: unknown[];
+						pendingMessagesContainer: { clear(): void };
+						pendingTools: Map<string, unknown>;
+						statusContainer: { clear(): void };
+						ui: {
+							beginRenderBatch?: () => void;
+							endRenderBatch?: () => void;
+							requestRender?: (force?: boolean) => void;
+							requestScrollbackClear?: () => void;
+							resetRenderGrace?: () => void;
+						};
+					},
+					{
+						reason: "interactive-render-current-session-state",
+						requestScrollbackClear: true,
+						resetRenderGrace: true,
+					}
+				);
+				const result = originalRenderInitialMessages.call(this, ...args);
+				this.ui?.requestRender?.(true);
+				return result;
+			} finally {
+				this.ui?.endRenderBatch?.();
+			}
 		};
 	}
 
@@ -858,6 +989,12 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 				event?.type === "tool_execution_end"
 			) {
 				await flushPendingMessageUpdate(this, originalHandleEvent);
+			}
+
+			if (event?.type === "turn_start") {
+				(
+					this as InteractiveModeInstanceLikeWithStartupNoise
+				).__tallow_suppress_startup_chat_noise__ = false;
 			}
 
 			// Keep AgentSession event references immutable for persistence/compaction checks.
@@ -1066,8 +1203,9 @@ export function patchInteractiveModePrototype(prototype: InteractiveModePrototyp
 /**
  * Applies the stale UI patch to pi-coding-agent InteractiveMode.
  *
- * Uses a direct file import via resolved package path because the InteractiveMode
- * subpath is not exported from the package.
+ * Import the package root export instead of resolving `package.json` manually.
+ * Node rejects `@mariozechner/pi-coding-agent/package.json` because that subpath
+ * is not exported, which silently disabled the patch in the real CLI runtime.
  *
  * @returns Nothing
  */
@@ -1076,18 +1214,7 @@ export async function applyInteractiveModeStaleUiPatch(): Promise<void> {
 	if (globals[APPLY_FLAG] === true) return;
 
 	try {
-		const require = createRequire(import.meta.url);
-		const packageJsonPath = require.resolve("@mariozechner/pi-coding-agent/package.json");
-		const packageRoot = dirname(packageJsonPath);
-		const interactiveModePath = join(
-			packageRoot,
-			"dist",
-			"modes",
-			"interactive",
-			"interactive-mode.js"
-		);
-		const moduleUrl = pathToFileURL(interactiveModePath).href;
-		const mod = (await import(moduleUrl)) as {
+		const mod = (await import("@mariozechner/pi-coding-agent")) as unknown as {
 			InteractiveMode?: { prototype?: InteractiveModePrototypeLike };
 		};
 		const prototype = mod.InteractiveMode?.prototype;
