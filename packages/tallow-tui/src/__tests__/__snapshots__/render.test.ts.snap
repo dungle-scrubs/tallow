@@ -23,10 +23,7 @@ Line two
 Line three                              "
 `;
 
-exports[`Markdown renders heading 1`] = `
-"Hello World                             
-                                        "
-`;
+exports[`Markdown renders heading 1`] = `"Hello World                             "`;
 
 exports[`Markdown renders paragraph text 1`] = `
 "Some paragraph text that should be      
@@ -37,8 +34,7 @@ exports[`Markdown renders code block 1`] = `
 "\`\`\`ts                                   
   const x = 1;                          
   const y = 2;                          
-\`\`\`                                     
-                                        "
+\`\`\`                                     "
 `;
 
 exports[`Markdown renders unordered list 1`] = `
@@ -53,10 +49,7 @@ exports[`Markdown renders ordered list 1`] = `
 3. Third                                "
 `;
 
-exports[`Markdown renders blockquote 1`] = `
-"│ This is a quote                       
-                                        "
-`;
+exports[`Markdown renders blockquote 1`] = `"│ This is a quote                       "`;
 
 exports[`Markdown renders at narrow width (20) 1`] = `
 "Hello World         
