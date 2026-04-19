@@ -265,12 +265,11 @@ describe("AGENTS.md accuracy", () => {
 		expect(agentsMd).not.toContain("1h TTL");
 	});
 
-	it("TUI conflict surface lists more than 3 files", () => {
+	it("TUI guidance points to the audit script and narrow keep surface", () => {
 		const agentsMd = readFileSync(resolve(__dirname, "../../AGENTS.md"), "utf-8");
-		// The old claim was only 3 files; now it should list many more
-		expect(agentsMd).toContain("editor-component.ts");
-		expect(agentsMd).toContain("terminal-image.ts");
-		expect(agentsMd).toContain("components/editor.ts");
+		expect(agentsMd).toContain("node scripts/audit-pi-tui-fork.mjs");
+		expect(agentsMd).toContain("border styles");
+		expect(agentsMd).toContain("editor ghost-text and change-listener APIs");
 	});
 
 	it("sdk.ts description acknowledges ~2900 lines and inline factory extensions", () => {
