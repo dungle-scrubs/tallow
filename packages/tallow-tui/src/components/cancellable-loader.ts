@@ -1,4 +1,4 @@
-import { getEditorKeybindings } from "../keybindings.js";
+import { getKeybindings } from "../keybindings.js";
 import { Loader } from "./loader.js";
 
 /**
@@ -27,8 +27,8 @@ export class CancellableLoader extends Loader {
 	}
 
 	handleInput(data: string): void {
-		const kb = getEditorKeybindings();
-		if (kb.matches(data, "selectCancel")) {
+		const kb = getKeybindings();
+		if (kb.matches(data, "tui.select.cancel")) {
 			this.abortController.abort();
 			this.onAbort?.();
 		}

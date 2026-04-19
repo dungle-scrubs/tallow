@@ -7,6 +7,7 @@ const CAPABILITY_ENV_KEYS = [
 	"KITTY_WINDOW_ID",
 	"TERM",
 	"TERM_PROGRAM",
+	"TMUX",
 	"WEZTERM_PANE",
 ] as const;
 

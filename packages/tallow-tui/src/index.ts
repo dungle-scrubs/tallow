@@ -4,28 +4,25 @@
 export {
 	type AutocompleteItem,
 	type AutocompleteProvider,
+	type AutocompleteSuggestions,
 	CombinedAutocompleteProvider,
 	type SlashCommand,
 } from "./autocomplete.js";
-// Border styles
-export {
-	type BorderStyle,
-	defaultBorderStyle,
-	FLAT,
-	ROUNDED,
-	SHARP,
-	setDefaultBorderStyle,
-} from "./border-styles.js";
 // Components
-export { BorderedBox, type BorderedBoxOptions } from "./components/bordered-box.js";
 export { Box } from "./components/box.js";
 export { CancellableLoader } from "./components/cancellable-loader.js";
 export { Editor, type EditorOptions, type EditorTheme } from "./components/editor.js";
 export { Image, type ImageOptions, type ImageTheme } from "./components/image.js";
 export { Input } from "./components/input.js";
-export { Loader, type LoaderOptions, type MessageTransformContext } from "./components/loader.js";
+export { Loader } from "./components/loader.js";
 export { type DefaultTextStyle, Markdown, type MarkdownTheme } from "./components/markdown.js";
-export { type SelectItem, SelectList, type SelectListTheme } from "./components/select-list.js";
+export {
+	type SelectItem,
+	SelectList,
+	type SelectListLayoutOptions,
+	type SelectListTheme,
+	type SelectListTruncatePrimaryContext,
+} from "./components/select-list.js";
 export {
 	type SettingItem,
 	SettingsList,
@@ -40,34 +37,28 @@ export type { EditorComponent } from "./editor-component.js";
 export { type FuzzyMatch, fuzzyFilter, fuzzyMatch } from "./fuzzy.js";
 // Keybindings
 export {
-	DEFAULT_EDITOR_KEYBINDINGS,
-	type EditorAction,
-	type EditorKeybindingsConfig,
-	EditorKeybindingsManager,
-	getEditorKeybindings,
 	getKeybindings,
 	type Keybinding,
+	type KeybindingConflict,
 	type KeybindingDefinition,
+	type KeybindingDefinitions,
 	type Keybindings,
 	type KeybindingsConfig,
 	KeybindingsManager,
-	setEditorKeybindings,
 	setKeybindings,
 	TUI_KEYBINDINGS,
 } from "./keybindings.js";
 // Keyboard input handling
 export {
+	decodeKittyPrintable,
 	isKeyRelease,
 	isKeyRepeat,
 	isKittyProtocolActive,
-	isMouseEvent,
 	Key,
 	type KeyEventType,
 	type KeyId,
-	type MouseEvent,
 	matchesKey,
 	parseKey,
-	parseMouseEvent,
 	setKittyProtocolActive,
 } from "./keys.js";
 // Input buffering for batch splitting
@@ -78,15 +69,12 @@ export { ProcessTerminal, type Terminal } from "./terminal.js";
 export {
 	allocateImageId,
 	type CellDimensions,
-	calculateImageLayout,
-	createImageMetadata,
+	calculateImageRows,
 	deleteAllKittyImages,
 	deleteKittyImage,
 	detectCapabilities,
-	detectImageFormat,
 	encodeITerm2,
 	encodeKitty,
-	formatImageDimensions,
 	getCapabilities,
 	getCellDimensions,
 	getGifDimensions,
@@ -94,16 +82,14 @@ export {
 	getJpegDimensions,
 	getPngDimensions,
 	getWebpDimensions,
+	hyperlink,
 	type ImageDimensions,
-	type ImageFormat,
-	type ImageLayout,
-	type ImageMetadata,
 	type ImageProtocol,
 	type ImageRenderOptions,
 	imageFallback,
-	imageFormatToMime,
 	renderImage,
 	resetCapabilitiesCache,
+	setCapabilities,
 	setCellDimensions,
 	type TerminalCapabilities,
 } from "./terminal-image.js";
@@ -121,4 +107,4 @@ export {
 	TUI,
 } from "./tui.js";
 // Utilities
-export { fileLink, hyperlink, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "./utils.js";
+export { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "./utils.js";

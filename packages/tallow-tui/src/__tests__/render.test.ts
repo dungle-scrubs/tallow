@@ -6,7 +6,6 @@
  */
 import { describe, expect, it } from "bun:test";
 import { renderSnapshot } from "../../../../test-utils/virtual-terminal.js";
-import { BorderedBox } from "../components/bordered-box.js";
 import { Markdown, type MarkdownTheme } from "../components/markdown.js";
 import { Text } from "../components/text.js";
 import { TruncatedText } from "../components/truncated-text.js";
@@ -117,38 +116,6 @@ describe("Markdown", () => {
 
 	it("handles empty content", () => {
 		expect(renderSnapshot(md(""), 40)).toMatchSnapshot();
-	});
-});
-
-// ════════════════════════════════════════════════════════════════
-// BorderedBox
-// ════════════════════════════════════════════════════════════════
-
-describe("BorderedBox", () => {
-	it("renders content with default border", () => {
-		const box = new BorderedBox(["Hello", "World"]);
-		expect(renderSnapshot(box, 30)).toMatchSnapshot();
-	});
-
-	it("renders with title", () => {
-		const box = new BorderedBox(["Content line"], { title: "My Box" });
-		expect(renderSnapshot(box, 30)).toMatchSnapshot();
-	});
-
-	it("renders with custom padding", () => {
-		const box = new BorderedBox(["Padded"], { paddingX: 3 });
-		expect(renderSnapshot(box, 30)).toMatchSnapshot();
-	});
-
-	it("handles empty content", () => {
-		const box = new BorderedBox([]);
-		expect(renderSnapshot(box, 30)).toMatchSnapshot();
-	});
-
-	it("handles very narrow width", () => {
-		const box = new BorderedBox(["Some content"]);
-		// At width 5, inner width = 5 - 2 - 2 = 1
-		expect(renderSnapshot(box, 5)).toMatchSnapshot();
 	});
 });
 

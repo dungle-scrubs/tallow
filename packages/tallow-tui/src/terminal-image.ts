@@ -34,15 +34,23 @@ export function getCellDimensions(): CellDimensions {
 }
 
 export function setCellDimensions(dims: CellDimensions): void {
-	if (dims.widthPx > 0 && dims.heightPx > 0) {
-		cellDimensions = dims;
-	}
+	cellDimensions = dims;
 }
 
 export function detectCapabilities(): TerminalCapabilities {
 	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
 	const term = process.env.TERM?.toLowerCase() || "";
 	const colorTerm = process.env.COLORTERM?.toLowerCase() || "";
+
+	// tmux and screen swallow OSC 8 by default (passthrough is opt-in and wraps
+	// sequences differently). Force hyperlinks off whenever we detect them, even
+	// when the outer terminal would otherwise support OSC 8. Image protocols are
+	// also unreliable under tmux/screen, so leave `images: null` for safety.
+	const inTmuxOrScreen = !!process.env.TMUX || term.startsWith("tmux") || term.startsWith("screen");
+	if (inTmuxOrScreen) {
+		const trueColor = colorTerm === "truecolor" || colorTerm === "24bit";
+		return { images: null, trueColor, hyperlinks: false };
+	}
 
 	if (process.env.KITTY_WINDOW_ID || termProgram === "kitty") {
 		return { images: "kitty", trueColor: true, hyperlinks: true };
@@ -68,8 +76,12 @@ export function detectCapabilities(): TerminalCapabilities {
 		return { images: null, trueColor: true, hyperlinks: true };
 	}
 
+	// Unknown terminal: be conservative. OSC 8 is rendered invisibly as "just
+	// text" on terminals that swallow it, which means the URL disappears from
+	// the rendered output. Default to the legacy `text (url)` behavior unless we
+	// have positively identified a hyperlink-capable terminal above.
 	const trueColor = colorTerm === "truecolor" || colorTerm === "24bit";
-	return { images: null, trueColor, hyperlinks: true };
+	return { images: null, trueColor, hyperlinks: false };
 }
 
 export function getCapabilities(): TerminalCapabilities {
@@ -81,6 +93,11 @@ export function getCapabilities(): TerminalCapabilities {
 
 export function resetCapabilitiesCache(): void {
 	cachedCapabilities = null;
+}
+
+/** Override the cached capabilities. Useful in tests to exercise both code paths. */
+export function setCapabilities(caps: TerminalCapabilities): void {
+	cachedCapabilities = caps;
 }
 
 const KITTY_PREFIX = "\x1b_G";
@@ -189,79 +206,16 @@ export function encodeITerm2(
 	return `\x1b]1337;File=${params.join(";")}:${base64Data}\x07`;
 }
 
-/** Layout dimensions for a rendered image in terminal cells. */
-export interface ImageLayout {
-	/** Number of terminal rows the image occupies. */
-	rows: number;
-	/** Number of terminal columns the image occupies. */
-	columns: number;
-}
-
-/**
- * Pick the closest valid integer terminal cell count for a fractional target.
- *
- * @param target - Ideal (fractional) cell count
- * @param min - Minimum allowed cell count (inclusive)
- * @param max - Maximum allowed cell count (inclusive)
- * @returns Closest in-range integer cell count
- */
-function closestCellCount(target: number, min: number, max: number): number {
-	const lower = Math.max(min, Math.min(max, Math.floor(target)));
-	const upper = Math.max(min, Math.min(max, Math.ceil(target)));
-	if (lower === upper) {
-		return lower;
-	}
-	return Math.abs(target - upper) < Math.abs(target - lower) ? upper : lower;
-}
-
-/**
- * Calculate the cell layout for an image at a given max width.
- * Clamps to the image's natural pixel width (prevents upscaling),
- * then optionally clamps height and back-calculates width to preserve aspect ratio.
- *
- * Uses nearest-integer quantization instead of always rounding up to reduce
- * narrow-width aspect distortion.
- *
- * @param imageDimensions - Native pixel dimensions of the image
- * @param maxWidthCells - Maximum column count for the image
- * @param cellDims - Terminal cell pixel dimensions
- * @param maxHeightCells - Optional row cap (portrait images)
- * @returns Layout with rows and columns the image will occupy
- */
-export function calculateImageLayout(
+export function calculateImageRows(
 	imageDimensions: ImageDimensions,
-	maxWidthCells: number,
-	cellDims: CellDimensions = { widthPx: 9, heightPx: 18 },
-	maxHeightCells?: number
-): ImageLayout {
-	const safeImageWidthPx = Math.max(1, imageDimensions.widthPx);
-	const safeImageHeightPx = Math.max(1, imageDimensions.heightPx);
-	const safeCellWidthPx = Math.max(1, cellDims.widthPx);
-	const safeCellHeightPx = Math.max(1, cellDims.heightPx);
-	const safeMaxWidthCells = Math.max(1, Math.floor(maxWidthCells));
-	const safeMaxHeightCells =
-		maxHeightCells === undefined ? undefined : Math.max(1, Math.floor(maxHeightCells));
-
-	// Clamp to natural width — prevents upscaling small images.
-	const naturalCols = Math.max(1, Math.ceil(safeImageWidthPx / safeCellWidthPx));
-	const maxColumns = Math.min(safeMaxWidthCells, naturalCols);
-	let columns = maxColumns;
-
-	const idealRows =
-		(columns * safeCellWidthPx * safeImageHeightPx) / (safeImageWidthPx * safeCellHeightPx);
-	let rows = closestCellCount(idealRows, 1, Number.MAX_SAFE_INTEGER);
-
-	// When height-clamped, reduce columns proportionally to preserve aspect ratio.
-	// Without this, the terminal receives a wide column count but the text layer
-	// only reserves maxHeightCells rows, causing the image to overflow or squish.
-	if (safeMaxHeightCells !== undefined && rows > safeMaxHeightCells) {
-		rows = safeMaxHeightCells;
-		const idealColumns =
-			(rows * safeCellHeightPx * safeImageWidthPx) / (safeImageHeightPx * safeCellWidthPx);
-		columns = closestCellCount(idealColumns, 1, maxColumns);
-	}
-
-	return { columns: Math.max(1, columns), rows: Math.max(1, rows) };
+	targetWidthCells: number,
+	cellDimensions: CellDimensions = { widthPx: 9, heightPx: 18 }
+): number {
+	const targetWidthPx = targetWidthCells * cellDimensions.widthPx;
+	const scale = targetWidthPx / imageDimensions.widthPx;
+	const scaledHeightPx = imageDimensions.heightPx * scale;
+	const rows = Math.ceil(scaledHeightPx / cellDimensions.heightPx);
+	return Math.max(1, rows);
 }
 
 export function getPngDimensions(base64Data: string): ImageDimensions | null {
@@ -389,156 +343,6 @@ export function getWebpDimensions(base64Data: string): ImageDimensions | null {
 	}
 }
 
-/** Supported image format identifiers returned by `detectImageFormat`. */
-export type ImageFormat = "png" | "jpeg" | "gif" | "webp";
-
-/**
- * Detect image format from file header bytes (magic numbers).
- *
- * Checks the first few bytes of a buffer for known image signatures:
- * - PNG: `89 50 4E 47 0D 0A 1A 0A` (8 bytes)
- * - JPEG: `FF D8 FF` (3 bytes)
- * - GIF: `47 49 46 38` + `37`/`39` + `61` (GIF87a / GIF89a)
- * - WebP: `52 49 46 46 ... 57 45 42 50` (RIFF at 0-3, WEBP at 8-11)
- *
- * @param buffer - Raw file bytes (only first 12 bytes are inspected)
- * @returns Detected format string, or null if not a recognized image
- */
-export function detectImageFormat(buffer: Buffer): ImageFormat | null {
-	if (buffer.length < 3) return null;
-
-	// PNG: 89 50 4E 47 0D 0A 1A 0A
-	if (
-		buffer.length >= 8 &&
-		buffer[0] === 0x89 &&
-		buffer[1] === 0x50 &&
-		buffer[2] === 0x4e &&
-		buffer[3] === 0x47 &&
-		buffer[4] === 0x0d &&
-		buffer[5] === 0x0a &&
-		buffer[6] === 0x1a &&
-		buffer[7] === 0x0a
-	) {
-		return "png";
-	}
-
-	// JPEG: FF D8 FF
-	if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
-		return "jpeg";
-	}
-
-	// GIF: 47 49 46 38 (37|39) 61
-	if (
-		buffer.length >= 6 &&
-		buffer[0] === 0x47 &&
-		buffer[1] === 0x49 &&
-		buffer[2] === 0x46 &&
-		buffer[3] === 0x38 &&
-		(buffer[4] === 0x37 || buffer[4] === 0x39) &&
-		buffer[5] === 0x61
-	) {
-		return "gif";
-	}
-
-	// WebP: RIFF....WEBP (bytes 0-3 = "RIFF", bytes 8-11 = "WEBP")
-	if (
-		buffer.length >= 12 &&
-		buffer[0] === 0x52 &&
-		buffer[1] === 0x49 &&
-		buffer[2] === 0x46 &&
-		buffer[3] === 0x46 &&
-		buffer[8] === 0x57 &&
-		buffer[9] === 0x45 &&
-		buffer[10] === 0x42 &&
-		buffer[11] === 0x50
-	) {
-		return "webp";
-	}
-
-	return null;
-}
-
-/**
- * Map an `ImageFormat` to its standard MIME type string.
- *
- * @param format - Detected image format
- * @returns MIME type (e.g., `"image/png"`)
- */
-export function imageFormatToMime(format: ImageFormat): string {
-	switch (format) {
-		case "png":
-			return "image/png";
-		case "jpeg":
-			return "image/jpeg";
-		case "gif":
-			return "image/gif";
-		case "webp":
-			return "image/webp";
-	}
-}
-
-/** Metadata about an image's original and display dimensions after processing. */
-export interface ImageMetadata {
-	/** Original pixel width before any resizing. */
-	readonly originalWidth: number;
-	/** Original pixel height before any resizing. */
-	readonly originalHeight: number;
-	/** Display pixel width after resizing (equals original if not resized). */
-	readonly displayWidth: number;
-	/** Display pixel height after resizing (equals original if not resized). */
-	readonly displayHeight: number;
-	/** Whether the image was resized from its original dimensions. */
-	readonly resized: boolean;
-	/** Detected image format (e.g., "png", "jpeg"). */
-	readonly format: ImageFormat | null;
-	/** File size in bytes, if known. */
-	readonly sizeBytes?: number;
-}
-
-/**
- * Create an `ImageMetadata` object from original and display dimensions.
- *
- * Sets `resized` automatically by comparing original and display dimensions.
- *
- * @param original - Original pixel dimensions before resizing
- * @param display - Display pixel dimensions after resizing
- * @param format - Detected image format, or null if unknown
- * @param sizeBytes - File size in bytes (optional)
- * @returns Populated ImageMetadata
- */
-export function createImageMetadata(
-	original: ImageDimensions,
-	display: ImageDimensions,
-	format: ImageFormat | null,
-	sizeBytes?: number
-): ImageMetadata {
-	return {
-		originalWidth: original.widthPx,
-		originalHeight: original.heightPx,
-		displayWidth: display.widthPx,
-		displayHeight: display.heightPx,
-		resized: original.widthPx !== display.widthPx || original.heightPx !== display.heightPx,
-		format,
-		sizeBytes,
-	};
-}
-
-/**
- * Format a compact dimension string for display.
- *
- * - Not resized: `"1920×1080"`
- * - Resized: `"3840×2160 → 1920×1080"`
- *
- * @param meta - Image metadata with dimension info
- * @returns Formatted dimension string
- */
-export function formatImageDimensions(meta: ImageMetadata): string {
-	if (meta.resized) {
-		return `${meta.originalWidth}×${meta.originalHeight} → ${meta.displayWidth}×${meta.displayHeight}`;
-	}
-	return `${meta.originalWidth}×${meta.originalHeight}`;
-}
-
 export function getImageDimensions(base64Data: string, mimeType: string): ImageDimensions | null {
 	if (mimeType === "image/png") {
 		return getPngDimensions(base64Data);
@@ -555,21 +359,11 @@ export function getImageDimensions(base64Data: string, mimeType: string): ImageD
 	return null;
 }
 
-/**
- * Render an image as a terminal escape sequence (Kitty or iTerm2 protocol).
- * Returns the escape sequence, the number of rows/columns it occupies, and
- * an optional Kitty image ID for later cleanup.
- *
- * @param base64Data - Base64-encoded image data
- * @param imageDimensions - Native pixel dimensions
- * @param options - Width/height caps, aspect ratio, image ID
- * @returns Rendered sequence with layout info, or null if unsupported
- */
 export function renderImage(
 	base64Data: string,
 	imageDimensions: ImageDimensions,
 	options: ImageRenderOptions = {}
-): { sequence: string; rows: number; columns: number; imageId?: number } | null {
+): { sequence: string; rows: number; imageId?: number } | null {
 	const caps = getCapabilities();
 
 	if (!caps.images) {
@@ -577,33 +371,38 @@ export function renderImage(
 	}
 
 	const maxWidth = options.maxWidthCells ?? 80;
-	const layout = calculateImageLayout(
-		imageDimensions,
-		maxWidth,
-		getCellDimensions(),
-		options.maxHeightCells
-	);
+	const rows = calculateImageRows(imageDimensions, maxWidth, getCellDimensions());
 
 	if (caps.images === "kitty") {
-		// Omit rows — let Kitty auto-calculate from the image's native aspect ratio.
-		// This avoids rounding errors in our row calculation that cause subtle stretching.
-		const sequence = encodeKitty(base64Data, {
-			columns: layout.columns,
-			imageId: options.imageId,
-		});
-		return { sequence, rows: layout.rows, columns: layout.columns, imageId: options.imageId };
+		// Only use imageId if explicitly provided - static images don't need IDs
+		const sequence = encodeKitty(base64Data, { columns: maxWidth, rows, imageId: options.imageId });
+		return { sequence, rows, imageId: options.imageId };
 	}
 
 	if (caps.images === "iterm2") {
 		const sequence = encodeITerm2(base64Data, {
-			width: layout.columns,
+			width: maxWidth,
 			height: "auto",
 			preserveAspectRatio: options.preserveAspectRatio ?? true,
 		});
-		return { sequence, rows: layout.rows, columns: layout.columns };
+		return { sequence, rows };
 	}
 
 	return null;
+}
+
+/**
+ * Wrap text in an OSC 8 hyperlink sequence.
+ * The text is rendered as a clickable hyperlink in terminals that support OSC 8
+ * (Ghostty, Kitty, WezTerm, iTerm2, VSCode, and others).
+ * In terminals that do not support OSC 8, the escape sequences are ignored
+ * and only the plain text is displayed.
+ *
+ * @param text - The visible text to display
+ * @param url - The URL to link to
+ */
+export function hyperlink(text: string, url: string): string {
+	return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
 
 export function imageFallback(

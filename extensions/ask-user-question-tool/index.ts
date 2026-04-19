@@ -9,7 +9,6 @@ import {
 	Editor,
 	type EditorTheme,
 	Key,
-	Loader,
 	matchesKey,
 	Text,
 	truncateToWidth,
@@ -152,8 +151,6 @@ WHEN NOT TO USE:
 				...params.options,
 				{ label: "Type something.", isOther: true },
 			];
-
-			ctx.ui.setWorkingMessage(Loader.HIDE);
 
 			const result = await ctx.ui.custom<{
 				answer: string;

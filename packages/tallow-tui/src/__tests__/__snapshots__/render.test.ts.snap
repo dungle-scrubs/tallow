@@ -71,36 +71,6 @@ Below                                   "
 
 exports[`Markdown handles empty content 1`] = `""`;
 
-exports[`BorderedBox renders content with default border 1`] = `
-"┌────────────────────────────┐
-│ Hello                      │
-│ World                      │
-└────────────────────────────┘"
-`;
-
-exports[`BorderedBox renders with title 1`] = `
-"┌─ My Box ───────────────────┐
-│ Content line               │
-└────────────────────────────┘"
-`;
-
-exports[`BorderedBox renders with custom padding 1`] = `
-"┌────────────────────────────┐
-│   Padded                   │
-└────────────────────────────┘"
-`;
-
-exports[`BorderedBox handles empty content 1`] = `
-"┌────────────────────────────┐
-└────────────────────────────┘"
-`;
-
-exports[`BorderedBox handles very narrow width 1`] = `
-"┌───┐
-│ . │
-└───┘"
-`;
-
 exports[`TruncatedText renders short text without truncation 1`] = `"Short                                   "`;
 
 exports[`TruncatedText truncates long text 1`] = `"This text is much..."`;

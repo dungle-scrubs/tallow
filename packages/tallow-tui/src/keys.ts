@@ -1347,63 +1347,6 @@ export function parseKey(data: string): string | undefined {
 }
 
 // =============================================================================
-// Mouse Event Parsing
-// =============================================================================
-
-/**
- * Parsed mouse event from SGR extended format.
- * SGR format: \x1b[<button;column;row[Mm]
- * M = press, m = release
- */
-export interface MouseEvent {
-	/** Event type */
-	type: "scroll-up" | "scroll-down" | "press" | "release" | "drag";
-	/** 0=left, 1=middle, 2=right */
-	button: number;
-	/** 1-indexed column */
-	x: number;
-	/** 1-indexed row */
-	y: number;
-}
-
-/** SGR extended mouse format: \x1b[<button;x;y[Mm] */
-const SGR_MOUSE_RE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/;
-
-/**
- * Parse an SGR mouse event from raw terminal input.
- *
- * @param data - Raw terminal input
- * @returns Parsed mouse event, or null if not a mouse sequence
- */
-export function parseMouseEvent(data: string): MouseEvent | null {
-	const match = data.match(SGR_MOUSE_RE);
-	if (!match) return null;
-
-	const code = parseInt(match[1]!, 10);
-	const x = parseInt(match[2]!, 10);
-	const y = parseInt(match[3]!, 10);
-	const isRelease = match[4] === "m";
-
-	if (code === 64) return { type: "scroll-up", button: 0, x, y };
-	if (code === 65) return { type: "scroll-down", button: 0, x, y };
-
-	const button = code & 0x03;
-	if (code & 32) return { type: "drag", button, x, y };
-
-	return { type: isRelease ? "release" : "press", button, x, y };
-}
-
-/**
- * Fast check: is this data an SGR mouse event?
- *
- * @param data - Raw terminal input
- * @returns true if the input is an SGR mouse sequence
- */
-export function isMouseEvent(data: string): boolean {
-	return data.length >= 9 && data.startsWith("\x1b[<");
-}
-
-// =============================================================================
 // Kitty CSI-u Printable Decoding
 // =============================================================================
 

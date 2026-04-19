@@ -1,7 +1,7 @@
 import { Marked, type Token, Tokenizer, type Tokens } from "marked";
-import { getCapabilities, isImageLine } from "../terminal-image.js";
+import { getCapabilities, hyperlink, isImageLine } from "../terminal-image.js";
 import type { Component } from "../tui.js";
-import { applyBackgroundToLine, hyperlink, visibleWidth, wrapTextWithAnsi } from "../utils.js";
+import { applyBackgroundToLine, visibleWidth, wrapTextWithAnsi } from "../utils.js";
 
 const STRICT_STRIKETHROUGH_REGEX = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
