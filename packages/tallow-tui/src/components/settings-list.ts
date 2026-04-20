@@ -45,9 +45,6 @@ export class SettingsList implements Component {
 	// Submenu state
 	private submenuComponent: Component | null = null;
 	private submenuItemIndex: number | null = null;
-	private lastRenderLineCount = 0;
-	private nextMinLineCount = 0;
-	private layoutTransitionCallback?: () => void;
 
 	constructor(
 		items: SettingItem[],
@@ -77,32 +74,17 @@ export class SettingsList implements Component {
 		}
 	}
 
-	/**
-	 * Set a callback fired before submenu-driven layout transitions.
-	 *
-	 * @param callback - Transition callback, or undefined to clear it
-	 * @returns Nothing
-	 */
-	setLayoutTransitionCallback(callback?: () => void): void {
-		this.layoutTransitionCallback = callback;
-	}
-
 	invalidate(): void {
 		this.submenuComponent?.invalidate?.();
 	}
 
 	render(width: number): string[] {
-		const lines = this.submenuComponent
-			? this.submenuComponent.render(width)
-			: this.renderMainList(width);
-
-		if (this.nextMinLineCount > lines.length) {
-			lines.push(...Array.from({ length: this.nextMinLineCount - lines.length }, () => ""));
+		// If submenu is active, render it instead
+		if (this.submenuComponent) {
+			return this.submenuComponent.render(width);
 		}
 
-		this.nextMinLineCount = 0;
-		this.lastRenderLineCount = lines.length;
-		return lines;
+		return this.renderMainList(width);
 	}
 
 	private renderMainList(width: number): string[] {
@@ -233,7 +215,6 @@ export class SettingsList implements Component {
 		if (!item) return;
 
 		if (item.submenu) {
-			this.layoutTransitionCallback?.();
 			// Open submenu, passing current value so it can pre-select correctly
 			this.submenuItemIndex = this.selectedIndex;
 			this.submenuComponent = item.submenu(item.currentValue, (selectedValue?: string) => {
@@ -254,8 +235,6 @@ export class SettingsList implements Component {
 	}
 
 	private closeSubmenu(): void {
-		this.layoutTransitionCallback?.();
-		this.nextMinLineCount = this.lastRenderLineCount;
 		this.submenuComponent = null;
 		// Restore selection to the item that opened the submenu
 		if (this.submenuItemIndex !== null) {

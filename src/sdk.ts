@@ -48,6 +48,7 @@ import {
 	TELEMETRY_API_CHANNELS,
 	type TelemetryHandle,
 } from "./otel.js";
+import { applyPiTuiPatches } from "./pi-tui-patch.js";
 import { cleanupOrphanPids } from "./pid-manager.js";
 import {
 	extractClaudePluginResources,
@@ -1555,6 +1556,7 @@ export async function createTallowSession(
 	bootstrap();
 	ensureTallowHome(startupProfile);
 	if (startupProfile === "interactive") {
+		await applyPiTuiPatches();
 		await applyInteractiveModeStaleUiPatch();
 	}
 	await applyAgentSessionCompactionCancelPatch();

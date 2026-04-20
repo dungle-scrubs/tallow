@@ -10,8 +10,8 @@ import {
 	getWebpDimensions,
 	type ImageDimensions,
 	renderImage,
+	resetCapabilitiesCache,
 } from "../terminal-image.js";
-import { withCapabilityEnv } from "../test-utils/capability-env.js";
 
 const DEFAULT_CELL = { heightPx: 18, widthPx: 9 };
 
@@ -21,8 +21,51 @@ const GIF_BASE64 = "R0lGODdhAQABAIAAAP///////ywAAAAAAQABAAACAkQBADs=";
 const WEBP_BASE64 =
 	"UklGRiYAAABXRUJQVlA4IBoAAAAQAgCdASoBAAEAAUAmJaACdLoB+AADsAD+8ut//NgVzXPv9//S4P0uD9LgAAA=";
 
+type CapabilityEnvOverrides = Readonly<Record<string, string | undefined>>;
+
+function withCapabilityEnv<T>(overrides: CapabilityEnvOverrides, run: () => T): T {
+	const keys = [
+		"COLORTERM",
+		"GHOSTTY_RESOURCES_DIR",
+		"ITERM_SESSION_ID",
+		"KITTY_WINDOW_ID",
+		"TERM",
+		"TERM_PROGRAM",
+		"TMUX",
+		"WEZTERM_PANE",
+	] as const;
+	const previous: Partial<Record<(typeof keys)[number], string | undefined>> = {};
+	for (const key of keys) {
+		previous[key] = process.env[key];
+		if (Object.hasOwn(overrides, key)) {
+			const value = overrides[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		} else {
+			delete process.env[key];
+		}
+	}
+	resetCapabilitiesCache();
+	try {
+		return run();
+	} finally {
+		for (const key of keys) {
+			const value = previous[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+		resetCapabilitiesCache();
+	}
+}
+
 function kittyResult(maxWidthCells: number, imageDimensions: ImageDimensions) {
-	return withCapabilityEnv({ TERM_PROGRAM: "kitty" }, () =>
+	return withCapabilityEnv({ TERM_PROGRAM: "kitty", TMUX: undefined }, () =>
 		renderImage("AA==", imageDimensions, { maxWidthCells })
 	);
 }
@@ -61,7 +104,7 @@ describe("terminal-image", () => {
 	});
 
 	it("renders iTerm images with auto height", () => {
-		const result = withCapabilityEnv({ TERM_PROGRAM: "iTerm.app" }, () =>
+		const result = withCapabilityEnv({ TERM_PROGRAM: "iTerm.app", TMUX: undefined }, () =>
 			renderImage("AA==", { heightPx: 1080, widthPx: 1920 }, { maxWidthCells: 30 })
 		);
 		expect(result).not.toBeNull();
@@ -70,8 +113,9 @@ describe("terminal-image", () => {
 	});
 
 	it("returns null when image protocols are unavailable", () => {
-		const result = withCapabilityEnv({ TERM_PROGRAM: "unknown", TMUX: "1" }, () =>
-			renderImage("AA==", { heightPx: 1080, widthPx: 1920 }, { maxWidthCells: 30 })
+		const result = withCapabilityEnv(
+			{ TERM: "tmux-256color", TERM_PROGRAM: "unknown", TMUX: "1" },
+			() => renderImage("AA==", { heightPx: 1080, widthPx: 1920 }, { maxWidthCells: 30 })
 		);
 		expect(result).toBeNull();
 	});
