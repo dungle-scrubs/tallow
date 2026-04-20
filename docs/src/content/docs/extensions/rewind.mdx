@@ -49,6 +49,11 @@ collision with user refs, stashes, or other tools. Snapshot metadata is
 persisted in the session via custom entries, surviving session reloads and
 compaction.
 
+Rewind refs are intentionally **not** deleted on normal shutdown because a
+resumed session still needs them. Instead, rewind prunes refs for sessions
+whose backing session files no longer exist the next time a session starts in
+that repository.
+
 ## Why git refs?
 
 - **Random access** — Unlike stashes (LIFO), refs give O(1) access to any

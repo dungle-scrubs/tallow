@@ -277,13 +277,112 @@ export class SnapshotManager {
 	}
 
 	/**
-	 * Removes all refs for the current session.
+	 * Remove all refs for the current session.
+	 *
+	 * @returns Number of refs deleted for this session
 	 */
-	cleanup(): void {
-		const snapshots = this.listSnapshots();
-		for (const snap of snapshots) {
-			this.git(["update-ref", "-d", snap.ref]);
+	cleanup(): number {
+		return this.cleanupSession(this.getSessionIdFromPrefix(this.refPrefix));
+	}
+
+	/**
+	 * Remove rewind refs whose session ids no longer exist on disk.
+	 *
+	 * @param liveSessionIds - Session ids that still have backing session files
+	 * @returns Count of deleted refs across all stale sessions
+	 */
+	cleanupStaleSessions(liveSessionIds: ReadonlySet<string>): number {
+		let deletedRefs = 0;
+
+		for (const sessionId of this.listSessionIds()) {
+			if (liveSessionIds.has(sessionId)) continue;
+			deletedRefs += this.cleanupSession(sessionId);
 		}
+
+		return deletedRefs;
+	}
+
+	/**
+	 * List every session id that currently has rewind refs in this repository.
+	 *
+	 * @returns Ordered unique session ids extracted from `refs/tallow/rewind/*`
+	 */
+	private listSessionIds(): string[] {
+		const raw = this.git(["for-each-ref", "--format=%(refname)", "refs/tallow/rewind/"]);
+		if (!raw) return [];
+
+		const ids = new Set<string>();
+		for (const line of raw.split("\n")) {
+			const ref = this.normalizeRefName(line);
+			if (!ref) continue;
+			const sessionId = this.parseSessionIdFromRef(ref);
+			if (sessionId) {
+				ids.add(sessionId);
+			}
+		}
+
+		return [...ids].sort((a, b) => a.localeCompare(b));
+	}
+
+	/**
+	 * Remove every rewind ref for a single session id.
+	 *
+	 * @param sessionId - Session id whose namespaced rewind refs should be deleted
+	 * @returns Count of deleted refs
+	 */
+	private cleanupSession(sessionId: string): number {
+		const raw = this.git([
+			"for-each-ref",
+			"--format=%(refname)",
+			`refs/tallow/rewind/${sessionId}/`,
+		]);
+		if (!raw) return 0;
+
+		let deletedRefs = 0;
+		for (const line of raw.split("\n")) {
+			const ref = this.normalizeRefName(line);
+			if (!ref) continue;
+			if (this.git(["update-ref", "-d", ref]) !== null) {
+				deletedRefs++;
+			}
+		}
+
+		return deletedRefs;
+	}
+
+	/**
+	 * Parse a session id from a full rewind ref name.
+	 *
+	 * @param ref - Full rewind ref name
+	 * @returns Session id when the ref matches the rewind namespace, otherwise null
+	 */
+	private parseSessionIdFromRef(ref: string): string | null {
+		const match = /^refs\/tallow\/rewind\/([^/]+)\/turn-\d+$/.exec(ref);
+		return match?.[1] ?? null;
+	}
+
+	/**
+	 * Normalize a raw ref name line from git output.
+	 *
+	 * @param line - Raw line returned by `git for-each-ref`
+	 * @returns Trimmed ref name without surrounding quotes
+	 */
+	private normalizeRefName(line: string): string {
+		const trimmed = line.trim();
+		if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+			return trimmed.slice(1, -1);
+		}
+		return trimmed;
+	}
+
+	/**
+	 * Extract the current manager's session id from its ref prefix.
+	 *
+	 * @param refPrefix - Session-scoped rewind ref prefix
+	 * @returns Session id portion of the prefix
+	 */
+	private getSessionIdFromPrefix(refPrefix: string): string {
+		return refPrefix.replace(/^refs\/tallow\/rewind\//, "");
 	}
 
 	/**

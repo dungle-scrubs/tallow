@@ -247,6 +247,29 @@ describe("SnapshotManager", () => {
 		otherMgr.cleanup();
 	});
 
+	it("should prune stale session refs while preserving live sessions", () => {
+		const otherMgr = new SnapshotManager(tmpDir, "other-session");
+		const staleMgr = new SnapshotManager(tmpDir, "stale-session");
+
+		writeFileSync(join(tmpDir, "a.txt"), "live-1");
+		mgr.createSnapshot(1);
+		writeFileSync(join(tmpDir, "a.txt"), "live-2");
+		otherMgr.createSnapshot(1);
+		writeFileSync(join(tmpDir, "a.txt"), "stale");
+		staleMgr.createSnapshot(1);
+
+		const deletedRefs = mgr.cleanupStaleSessions(new Set(["other-session", "test-session"]));
+		expect(deletedRefs).toBe(1);
+
+		const staleRefs = git(["for-each-ref", "refs/tallow/rewind/stale-session/"], tmpDir);
+		expect(staleRefs.trim()).toBe("");
+
+		const liveRefs = git(["for-each-ref", "refs/tallow/rewind/test-session/"], tmpDir);
+		expect(liveRefs.trim()).not.toBe("");
+		const otherRefs = git(["for-each-ref", "refs/tallow/rewind/other-session/"], tmpDir);
+		expect(otherRefs.trim()).not.toBe("");
+	});
+
 	it("should return empty list when no snapshots exist", () => {
 		expect(mgr.listSnapshots()).toHaveLength(0);
 	});

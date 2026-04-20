@@ -14,6 +14,7 @@
  */
 
 import type { CustomEntry, ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { listLiveSessionIdsForCwd } from "./session-files.js";
 import { SnapshotManager } from "./snapshots.js";
 import type { RewindSnapshotEntry } from "./tracker.js";
 import { FileTracker } from "./tracker.js";
@@ -49,6 +50,10 @@ export default function rewind(pi: ExtensionAPI): void {
 		enabled = true;
 		snapshots = mgr;
 		tracker.reset();
+
+		const liveSessionIds = listLiveSessionIdsForCwd(context.cwd);
+		liveSessionIds.add(sessionId);
+		mgr.cleanupStaleSessions(liveSessionIds);
 
 		// Restore tracker state from persisted session entries
 		const entries = context.sessionManager.getEntries();

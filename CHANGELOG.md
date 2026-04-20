@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
+  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
+  transition compatibility hooks during the upgrade
+- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
+  config so dependency bumps continue to build and validate cleanly
+- **interactive:** stabilize settings submenu transitions so changing thinking
+  level no longer triggers chat re-append jitter or viewport jumps
+- **interactive:** reset render grace before chat rebuild paths
+  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
+  churn across reload, fork, navigation, and settings-driven rebuilds
+- **rewind:** prune stale snapshot refs for deleted sessions on startup so
+  internal git checkpoints stop accumulating forever
+- **runtime:** remove published runtime wrapper references to `src/`, making
+  global installs resilient when only `runtime/` and `dist/` are shipped
+- **tasks:** top-align the side-by-side background column and require a wider
+  terminal before using split layout, removing large blank gaps above
+  background task content
+
 ## [0.9.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.5...tallow-v0.9.6) (2026-04-20)
 
 
@@ -46,26 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * **git:** ignore local package bundles ([0015ead](https://github.com/dungle-scrubs/tallow/commit/0015ead124ab164c0ea11b4ffd79a4c1c895dd97))
 * **sonar:** refresh baseline on main pushes ([57281db](https://github.com/dungle-scrubs/tallow/commit/57281dbef977e5032c59351b21459ec653a4ac3e))
 * **tui:** move settings-list transition coverage to core patches ([d0f1f9d](https://github.com/dungle-scrubs/tallow/commit/d0f1f9d90c259d86cc17f0825a6597c296c399b1))
-
-## [Unreleased]
-
-### Fixed
-
-- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
-  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
-  transition compatibility hooks during the upgrade
-- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
-  config so dependency bumps continue to build and validate cleanly
-- **interactive:** stabilize settings submenu transitions so changing thinking
-  level no longer triggers chat re-append jitter or viewport jumps
 - **interactive:** reset render grace before chat rebuild paths
-  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
-  churn across reload, fork, navigation, and settings-driven rebuilds
-- **runtime:** remove published runtime wrapper references to `src/`, making
-  global installs resilient when only `runtime/` and `dist/` are shipped
-- **tasks:** top-align the side-by-side background column and require a wider
-  terminal before using split layout, removing large blank gaps above
-  background task content
 
 ## [0.9.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.4...tallow-v0.9.5) (2026-04-16)
 
