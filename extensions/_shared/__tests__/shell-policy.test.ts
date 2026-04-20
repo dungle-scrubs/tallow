@@ -20,7 +20,9 @@ import {
 	isYoloMode,
 	reloadPermissions,
 	resetPermissionCache,
+	runCommand,
 	runCommandSync,
+	runGitCommand,
 	runGitCommandSync,
 	runShellCommandSync,
 } from "../shell-policy.js";
@@ -416,6 +418,23 @@ describe("process wrappers", () => {
 
 	test("runGitCommandSync executes allowlisted internal commands", () => {
 		const version = runGitCommandSync(["--version"], process.cwd(), 3000);
+		expect(version).toContain("git version");
+	});
+
+	test("runCommand executes allowlisted internal commands asynchronously", async () => {
+		const result = await runCommand({
+			command: "git",
+			args: ["--version"],
+			cwd: process.cwd(),
+			source: "git-helper",
+			timeoutMs: 3000,
+		});
+		expect(result.ok).toBe(true);
+		expect(result.stdout).toContain("git version");
+	});
+
+	test("runGitCommand executes allowlisted internal commands asynchronously", async () => {
+		const version = await runGitCommand(["--version"], process.cwd(), 3000);
 		expect(version).toContain("git version");
 	});
 
