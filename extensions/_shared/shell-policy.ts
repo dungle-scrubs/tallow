@@ -14,7 +14,7 @@
  * - audit trail recording
  */
 
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -1107,6 +1107,102 @@ export function runCommandSync(options: RunCommandOptions): ProcessRunResult {
 }
 
 /**
+ * Run a non-shell process asynchronously with centralized policy and audit logging.
+ *
+ * @param options - Process invocation options
+ * @returns Structured process result including policy-blocked state
+ */
+export async function runCommand(options: RunCommandOptions): Promise<ProcessRunResult> {
+	const commandLine = [options.command, ...options.args].join(" ").trim();
+	const verdict = evaluateCommand(commandLine, options.source, options.cwd);
+	if (!verdict.allowed) {
+		recordAudit({
+			timestamp: Date.now(),
+			command: verdict.normalizedCommand,
+			source: options.source,
+			trustLevel: verdict.trustLevel,
+			cwd: options.cwd,
+			outcome: "blocked",
+			reason: verdict.reason,
+		});
+		return {
+			ok: false,
+			blocked: true,
+			stdout: "",
+			stderr: "",
+			exitCode: null,
+			reason: verdict.reason,
+		};
+	}
+
+	const timeoutMs = clampTimeout(options.timeoutMs);
+	const startedAt = Date.now();
+
+	return await new Promise((resolve) => {
+		execFile(
+			options.command,
+			[...options.args],
+			{
+				cwd: options.cwd,
+				encoding: "utf-8",
+				timeout: timeoutMs,
+				maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER,
+			},
+			(error, stdout = "", stderr = "") => {
+				const exitCode = typeof error?.code === "number" ? error.code : 0;
+				const durationMs = Date.now() - startedAt;
+				const normalizedStdout = stdout.toString();
+				const normalizedStderr = stderr.toString();
+				if (error) {
+					const reason =
+						error.killed && error.signal === "SIGTERM"
+							? `Command timed out after ${timeoutMs}ms`
+							: error.message;
+					recordAudit({
+						timestamp: Date.now(),
+						command: verdict.normalizedCommand,
+						source: options.source,
+						trustLevel: verdict.trustLevel,
+						cwd: options.cwd,
+						outcome: "failed",
+						reason,
+						exitCode: typeof error?.code === "number" ? error.code : null,
+						durationMs,
+					});
+					resolve({
+						ok: false,
+						blocked: false,
+						stdout: normalizedStdout,
+						stderr: normalizedStderr,
+						exitCode: typeof error?.code === "number" ? error.code : null,
+						reason,
+					});
+					return;
+				}
+
+				recordAudit({
+					timestamp: Date.now(),
+					command: verdict.normalizedCommand,
+					source: options.source,
+					trustLevel: verdict.trustLevel,
+					cwd: options.cwd,
+					outcome: "executed",
+					exitCode,
+					durationMs,
+				});
+				resolve({
+					ok: true,
+					blocked: false,
+					stdout: normalizedStdout,
+					stderr: normalizedStderr,
+					exitCode,
+				});
+			}
+		);
+	});
+}
+
+/**
  * Run a git command through centralized policy and process wrapper.
  *
  * @param args - Git arguments
@@ -1120,6 +1216,30 @@ export function runGitCommandSync(
 	timeoutMs?: number
 ): string | null {
 	const result = runCommandSync({
+		command: "git",
+		args,
+		cwd,
+		source: "git-helper",
+		timeoutMs,
+	});
+	if (!result.ok) return null;
+	return result.stdout.trim();
+}
+
+/**
+ * Run a git command asynchronously through centralized policy and process wrapper.
+ *
+ * @param args - Git arguments
+ * @param cwd - Working directory
+ * @param timeoutMs - Optional timeout override
+ * @returns Trimmed stdout on success, null otherwise
+ */
+export async function runGitCommand(
+	args: readonly string[],
+	cwd: string,
+	timeoutMs?: number
+): Promise<string | null> {
+	const result = await runCommand({
 		command: "git",
 		args,
 		cwd,

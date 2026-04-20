@@ -5,12 +5,12 @@
  * - Current branch name
  * - Dirty state (* if uncommitted changes)
  * - Ahead/behind remote
- * - PR status (if GitHub CLI available)
+ * - PR status (if GitHub CLI is available and responsive)
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { getIcon } from "../_icons/index.js";
-import { runCommandSync, runGitCommandSync } from "../_shared/shell-policy.js";
+import { runCommand, runGitCommand } from "../_shared/shell-policy.js";
 
 // Catppuccin Macchiato colors
 const C_TEAL = "\x1b[38;2;139;213;202m"; // teal #8bd5ca
@@ -21,47 +21,53 @@ const C_MAUVE = "\x1b[38;2;198;160;246m"; // mauve #c6a0f6
 const C_GRAY = "\x1b[38;2;128;135;162m"; // overlay1 #8087a2
 const C_RESET = "\x1b[0m";
 
-/** Represents the current state of a git repository */
-interface GitState {
+const STATUS_REFRESH_INTERVAL_MS = 10_000;
+const PR_REFRESH_INTERVAL_MS = 60_000;
+const PR_TIMEOUT_MS = 1_500;
+const PR_ERROR_COOLDOWN_MS = 5 * 60_000;
+
+type PullRequestState = "open" | "merged" | "closed" | "draft" | null;
+
+/** Represents the current state of a git repository. */
+export interface GitState {
 	branch: string | null;
 	dirty: boolean;
 	ahead: number;
 	behind: number;
-	prState: "open" | "merged" | "closed" | "draft" | null;
+	prState: PullRequestState;
 	prNumber: number | null;
 }
 
-// Store interval on globalThis to clear across reloads
-const G = globalThis;
+interface PullRequestInfo {
+	prState: PullRequestState;
+	prNumber: number | null;
+}
+
+interface GitStatusGlobals {
+	__piGitStatusInterval?: ReturnType<typeof setInterval> | null;
+}
+
+const G = globalThis as typeof globalThis & GitStatusGlobals;
 if (G.__piGitStatusInterval) {
 	clearInterval(G.__piGitStatusInterval);
 	G.__piGitStatusInterval = null;
 }
+
 let lastCwd = "";
 let cachedState: GitState | null = null;
+let activeRefresh: Promise<void> | null = null;
+let queuedRefresh: { ctx: ExtensionContext; revision: number } | null = null;
+let sessionRevision = 0;
+let lastPrRefreshAt = 0;
+let prCooldownUntil = 0;
 
 /**
- * Executes a git command in the specified directory via arg-array spawn.
+ * Parse `git status --porcelain=v2 --branch` output into a base git state.
  *
- * @param args - Git subcommand and arguments as an array
- * @param cwd - The working directory to run the command in
- * @returns The trimmed stdout output, or null if the command failed
+ * @param raw - Raw porcelain-v2 status output
+ * @returns Parsed git state without PR metadata, or null when no branch is found
  */
-function runGit(args: string[], cwd: string): string | null {
-	return runGitCommandSync(args, cwd, 5000);
-}
-
-/**
- * Retrieves the current git state for a directory.
- * Includes branch name, dirty status, ahead/behind counts, and PR info.
- * @param cwd - The working directory to check
- * @returns The git state object, or null if not a git repository
- */
-function getGitState(cwd: string): GitState | null {
-	// Single command: branch, ahead/behind, and porcelain status
-	const raw = runGit(["status", "--porcelain=v2", "--branch"], cwd);
-	if (raw === null) return null;
-
+export function parseGitStatus(raw: string): GitState | null {
 	let branch: string | null = null;
 	let ahead = 0;
 	let behind = 0;
@@ -70,10 +76,6 @@ function getGitState(cwd: string): GitState | null {
 	for (const line of raw.split("\n")) {
 		if (line.startsWith("# branch.head ")) {
 			branch = line.slice("# branch.head ".length);
-			if (branch === "(detached)") {
-				const sha = runGit(["rev-parse", "--short", "HEAD"], cwd);
-				branch = sha ? `(${sha})` : branch;
-			}
 		} else if (line.startsWith("# branch.ab ")) {
 			const match = line.match(/\+(\d+) -(\d+)/);
 			if (match) {
@@ -86,58 +88,161 @@ function getGitState(cwd: string): GitState | null {
 	}
 
 	if (!branch) return null;
+	return { branch, dirty, ahead, behind, prState: null, prNumber: null };
+}
 
-	// Try to get PR status using GitHub CLI
-	let prState: GitState["prState"] = null;
-	let prNumber: number | null = null;
+/**
+ * Parse `gh pr view --json state,number,isDraft` output.
+ *
+ * @param raw - Raw gh JSON output
+ * @returns Parsed pull-request metadata, or null when unavailable
+ */
+export function parsePullRequestInfo(raw: string): PullRequestInfo | null {
+	const parsed = JSON.parse(raw) as {
+		number?: number;
+		isDraft?: boolean;
+		state?: string;
+	};
+	if (!parsed.number) return null;
+	if (parsed.isDraft) {
+		return { prState: "draft", prNumber: parsed.number };
+	}
+	if (!parsed.state) return null;
+	return {
+		prState: parsed.state.toLowerCase() as Exclude<PullRequestState, null>,
+		prNumber: parsed.number,
+	};
+}
 
-	try {
-		const prResult = runCommandSync({
-			command: "gh",
-			args: ["pr", "view", "--json", "state,number,isDraft"],
-			cwd,
-			source: "git-helper",
-			timeoutMs: 5000,
-		});
+/**
+ * Returns whether a gh stderr payload means “no PR” rather than a broken CLI.
+ *
+ * @param stderr - gh stderr text
+ * @returns True when the branch simply has no associated pull request
+ */
+function isNoPullRequestError(stderr: string): boolean {
+	return /no pull requests? found/i.test(stderr);
+}
 
-		if (prResult.ok && prResult.stdout) {
-			const pr = JSON.parse(prResult.stdout) as {
-				number?: number;
-				isDraft?: boolean;
-				state?: string;
-			};
-			if (pr.number) {
-				prNumber = pr.number;
-				if (pr.isDraft) {
-					prState = "draft";
-				} else if (pr.state) {
-					prState = pr.state.toLowerCase() as GitState["prState"];
-				}
-			}
+/**
+ * Returns whether a gh failure should trigger a long retry cooldown.
+ *
+ * @param result - Process result from the gh invocation
+ * @returns True when failures are likely environmental or timeout-related
+ */
+function shouldCooldownPullRequestChecks(result: {
+	reason?: string;
+	stderr: string;
+	exitCode: number | null;
+}): boolean {
+	if (result.reason?.includes("timed out")) return true;
+	if (result.reason?.includes("ENOENT")) return true;
+	if (result.exitCode === null && result.reason) return true;
+	return /could not resolve to a repository|no git remotes found|not a git repository/i.test(
+		result.stderr
+	);
+}
+
+/**
+ * Execute a git command asynchronously.
+ *
+ * @param args - Git subcommand and arguments
+ * @param cwd - Working directory
+ * @param timeoutMs - Optional timeout override
+ * @returns Trimmed stdout output, or null on failure
+ */
+async function runGit(
+	args: readonly string[],
+	cwd: string,
+	timeoutMs = 3_000
+): Promise<string | null> {
+	return await runGitCommand(args, cwd, timeoutMs);
+}
+
+/**
+ * Read branch, ahead/behind, and dirty state without blocking the UI thread.
+ *
+ * @param cwd - Working directory to inspect
+ * @returns Base git state, or null when not inside a git repository
+ */
+async function getBaseGitState(cwd: string): Promise<GitState | null> {
+	const raw = await runGit(["status", "--porcelain=v2", "--branch"], cwd);
+	if (raw === null) return null;
+
+	const state = parseGitStatus(raw);
+	if (!state) return null;
+	if (state.branch !== "(detached)") return state;
+
+	const sha = await runGit(["rev-parse", "--short", "HEAD"], cwd);
+	if (sha) {
+		state.branch = `(${sha})`;
+	}
+	return state;
+}
+
+/**
+ * Resolve pull-request metadata for the current branch.
+ *
+ * @param cwd - Working directory to inspect
+ * @returns PR metadata, null for no PR / unavailable data, and cooldown on repeated failures
+ */
+async function getPullRequestInfoForBranch(cwd: string): Promise<PullRequestInfo | null> {
+	const result = await runCommand({
+		command: "gh",
+		args: ["pr", "view", "--json", "state,number,isDraft"],
+		cwd,
+		source: "git-helper",
+		timeoutMs: PR_TIMEOUT_MS,
+	});
+	if (result.ok && result.stdout) {
+		try {
+			return parsePullRequestInfo(result.stdout);
+		} catch {
+			prCooldownUntil = Date.now() + PR_ERROR_COOLDOWN_MS;
+			return null;
 		}
-	} catch {
-		// gh CLI not available, parse failure, or not in a GitHub repo
 	}
 
-	return { branch, dirty, ahead, behind, prState, prNumber };
+	if (isNoPullRequestError(result.stderr)) {
+		return null;
+	}
+
+	if (shouldCooldownPullRequestChecks(result)) {
+		prCooldownUntil = Date.now() + PR_ERROR_COOLDOWN_MS;
+	}
+	return null;
+}
+
+/**
+ * Returns whether PR metadata should be refreshed for the current branch.
+ *
+ * @param baseState - Freshly computed base git state
+ * @param previousState - Previously cached state before the current refresh
+ * @returns True when a PR refresh is worth attempting
+ */
+function shouldRefreshPullRequest(baseState: GitState, previousState: GitState | null): boolean {
+	if (baseState.branch === null) return false;
+	if (Date.now() < prCooldownUntil) return false;
+	if (!previousState) return true;
+	if (previousState.branch !== baseState.branch) return true;
+	return Date.now() - lastPrRefreshAt >= PR_REFRESH_INTERVAL_MS;
 }
 
 /**
  * Formats the git state into a colored status string for display.
+ *
  * @param state - The git state to format
  * @returns A formatted string with ANSI color codes
  */
-function formatStatus(state: GitState): string {
+export function formatStatus(state: GitState): string {
 	const parts: string[] = [];
 
-	// Branch name with dirty indicator
 	let branchDisplay = `${C_TEAL}${state.branch}${C_RESET}`;
 	if (state.dirty) {
 		branchDisplay += `${C_YELLOW}*${C_RESET}`;
 	}
 	parts.push(branchDisplay);
 
-	// Ahead/behind
 	if (state.ahead > 0 || state.behind > 0) {
 		const arrows: string[] = [];
 		if (state.ahead > 0) arrows.push(`${C_GREEN}↑${state.ahead}${C_RESET}`);
@@ -145,7 +250,6 @@ function formatStatus(state: GitState): string {
 		parts.push(arrows.join(""));
 	}
 
-	// PR status
 	if (state.prState && state.prNumber) {
 		let prDisplay: string;
 		switch (state.prState) {
@@ -171,63 +275,129 @@ function formatStatus(state: GitState): string {
 }
 
 /**
- * Updates the git status in the UI status bar.
- * Caches the state to avoid redundant git calls.
- * @param ctx - The extension context providing UI access
+ * Push the current cached status into the UI.
+ *
+ * @param ctx - Extension context providing the UI surface
+ * @param revision - Session revision that must still be current
+ * @returns Nothing
  */
-async function updateStatus(ctx: ExtensionContext): Promise<void> {
-	const cwd = ctx.cwd;
-
-	// Only update if cwd changed or no cache
-	if (cwd !== lastCwd || !cachedState) {
-		lastCwd = cwd;
-		cachedState = getGitState(cwd);
-	} else {
-		// Refresh state periodically
-		cachedState = getGitState(cwd);
-	}
-
-	if (cachedState) {
-		ctx.ui.setStatus("git", formatStatus(cachedState));
-	} else {
+function renderCachedStatus(ctx: ExtensionContext, revision: number): void {
+	if (revision !== sessionRevision) return;
+	if (ctx.cwd !== lastCwd || !cachedState) {
 		ctx.ui.setStatus("git", undefined);
+		return;
 	}
+	ctx.ui.setStatus("git", formatStatus(cachedState));
+}
+
+/**
+ * Refresh the git status cache without blocking terminal input.
+ *
+ * Concurrent refreshes are coalesced so timer ticks, agent-end hooks, and bash
+ * results cannot stack multiple in-flight `git`/`gh` subprocesses.
+ *
+ * @param ctx - Extension context providing cwd + ui access
+ * @param revision - Session revision that must remain current while refreshing
+ * @returns Promise resolving after the latest queued refresh finishes
+ */
+async function refreshStatus(ctx: ExtensionContext, revision: number): Promise<void> {
+	if (activeRefresh) {
+		queuedRefresh = { ctx, revision };
+		return;
+	}
+
+	const cwd = ctx.cwd;
+	activeRefresh = (async () => {
+		const baseState = await getBaseGitState(cwd);
+		if (revision !== sessionRevision || ctx.cwd !== cwd) return;
+
+		lastCwd = cwd;
+		if (!baseState) {
+			cachedState = null;
+			renderCachedStatus(ctx, revision);
+			return;
+		}
+
+		const previousState = cachedState;
+		cachedState = {
+			...baseState,
+			prState: previousState?.branch === baseState.branch ? previousState.prState : null,
+			prNumber: previousState?.branch === baseState.branch ? previousState.prNumber : null,
+		};
+		renderCachedStatus(ctx, revision);
+
+		if (!shouldRefreshPullRequest(baseState, previousState)) {
+			return;
+		}
+
+		const prInfo = await getPullRequestInfoForBranch(cwd);
+		if (revision !== sessionRevision || ctx.cwd !== cwd) return;
+		if (!cachedState || cachedState.branch !== baseState.branch) return;
+
+		cachedState = {
+			...cachedState,
+			prState: prInfo?.prState ?? null,
+			prNumber: prInfo?.prNumber ?? null,
+		};
+		lastPrRefreshAt = Date.now();
+		renderCachedStatus(ctx, revision);
+	})().finally(() => {
+		activeRefresh = null;
+		const nextRefresh = queuedRefresh;
+		queuedRefresh = null;
+		if (nextRefresh) {
+			void refreshStatus(nextRefresh.ctx, nextRefresh.revision);
+		}
+	});
+
+	await activeRefresh;
+}
+
+/**
+ * Invalidate caches that should be recomputed on the next refresh.
+ *
+ * @returns Nothing
+ */
+function invalidateStatusCache(): void {
+	cachedState = null;
+	lastPrRefreshAt = 0;
 }
 
 /**
  * Registers the git status extension with Pi.
- * Sets up event handlers for session lifecycle and git state updates.
+ *
  * @param pi - The Pi extension API
+ * @returns Nothing
  */
 export default function gitStatus(pi: ExtensionAPI): void {
-	pi.on("session_start", async (_event, ctx) => {
-		await updateStatus(ctx);
+	pi.on("session_start", (_event, ctx) => {
+		const revision = ++sessionRevision;
+		renderCachedStatus(ctx, revision);
+		void refreshStatus(ctx, revision);
 
-		// Update every 10 seconds
 		if (G.__piGitStatusInterval) clearInterval(G.__piGitStatusInterval);
-		G.__piGitStatusInterval = setInterval(() => updateStatus(ctx), 10_000);
+		G.__piGitStatusInterval = setInterval(() => {
+			void refreshStatus(ctx, revision);
+		}, STATUS_REFRESH_INTERVAL_MS);
 	});
 
-	pi.on("session_shutdown", async () => {
+	pi.on("session_shutdown", () => {
+		sessionRevision += 1;
+		queuedRefresh = null;
 		if (G.__piGitStatusInterval) {
 			clearInterval(G.__piGitStatusInterval);
 			G.__piGitStatusInterval = null;
 		}
 	});
 
-	// Update after each agent turn (files may have changed)
-	pi.on("agent_end", async (_event, ctx) => {
-		// Clear cache to force refresh
-		cachedState = null;
-		await updateStatus(ctx);
+	pi.on("agent_end", (_event, ctx) => {
+		invalidateStatusCache();
+		void refreshStatus(ctx, sessionRevision);
 	});
 
-	// Update when directory changes
-	pi.on("tool_result", async (event, ctx) => {
-		if (event.toolName === "bash") {
-			// Might have changed directory or git state
-			cachedState = null;
-			await updateStatus(ctx);
-		}
+	pi.on("tool_result", (event, ctx) => {
+		if (event.toolName !== "bash") return;
+		invalidateStatusCache();
+		void refreshStatus(ctx, sessionRevision);
 	});
 }

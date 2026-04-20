@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transition compatibility hooks during the upgrade
 - **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
   config so dependency bumps continue to build and validate cleanly
+- **git-status:** move git / GitHub status refreshes off the main thread and
+  add PR lookup backoff so slow `gh pr view` checks no longer freeze prompt
+  input while you type
 - **interactive:** stabilize settings submenu transitions so changing thinking
   level no longer triggers chat re-append jitter or viewport jumps
 - **interactive:** reset render grace before chat rebuild paths
