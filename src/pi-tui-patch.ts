@@ -90,6 +90,506 @@ function setTuiRollingShrinkPeak(tui: object, value: number): void {
 	tuiRollingShrinkPeak.set(tui, value);
 }
 
+type CursorPosition = { row: number; col: number } | null;
+
+type RenderSnapshot = {
+	readonly cursorPos: CursorPosition;
+	readonly height: number;
+	readonly inStartupGrace: boolean;
+	readonly newLines: string[];
+	readonly width: number;
+	readonly widthChanged: boolean;
+};
+
+type ViewportState = {
+	hardwareCursorRow: number;
+	prevViewportTop: number;
+	viewportTop: number;
+};
+
+type ChangedWindow = {
+	readonly appendStart: boolean;
+	readonly firstChanged: number;
+	readonly lastChanged: number;
+};
+
+/**
+ * Build the current render snapshot from the patched TUI.
+ *
+ * @param tui - Patched TUI instance
+ * @returns Snapshot used by render helpers
+ */
+function createRenderSnapshot(tui: TuiPatchedLike & object): RenderSnapshot {
+	const width = tui.terminal.columns;
+	const height = tui.terminal.rows;
+	let newLines = tui.render(width);
+	if (tui.overlayStack.length > 0) {
+		newLines = tui.compositeOverlays(newLines, width, height);
+	}
+	const cursorPos = tui.extractCursorPosition(newLines, height);
+	newLines = tui.applyLineResets(newLines);
+	const startedAt = tuiStartedAtMs.get(tui) ?? 0;
+	return {
+		cursorPos,
+		height,
+		inStartupGrace: startedAt > 0 && Date.now() - startedAt < STARTUP_GRACE_MS,
+		newLines,
+		width,
+		widthChanged: tui.previousWidth !== 0 && tui.previousWidth !== width,
+	};
+}
+
+/**
+ * Create a redraw logger when debug logging is enabled.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @returns Logger callback
+ */
+function createRedrawLogger(
+	tui: TuiPatchedLike,
+	snapshot: RenderSnapshot
+): (reason: string) => void {
+	const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
+	return (reason: string): void => {
+		if (!debugRedraw) return;
+		const logPath = path.join(os.homedir(), ".pi", "agent", "pi-debug.log");
+		const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${tui.previousLines.length}, new=${snapshot.newLines.length}, height=${snapshot.height})\n`;
+		fs.appendFileSync(logPath, msg);
+	};
+}
+
+/**
+ * Persist render bookkeeping shared by all render strategies.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param viewportTopForRender - Top line rendered into the viewport
+ * @param preserveMaxLines - Whether maxLinesRendered should grow instead of reset
+ * @returns Nothing
+ */
+function finalizeRenderedState(
+	tui: TuiPatchedLike,
+	snapshot: RenderSnapshot,
+	viewportTopForRender: number,
+	preserveMaxLines: boolean
+): void {
+	tui.cursorRow = Math.max(0, snapshot.newLines.length - 1);
+	tui.hardwareCursorRow = tui.cursorRow;
+	tui.maxLinesRendered = preserveMaxLines
+		? Math.max(tui.maxLinesRendered, snapshot.newLines.length)
+		: snapshot.newLines.length;
+	tui.previousViewportTop = viewportTopForRender;
+	setTuiRollingShrinkPeak(tui, snapshot.newLines.length);
+	tui.positionHardwareCursor(snapshot.cursorPos, snapshot.newLines.length);
+	tui.previousLines = snapshot.newLines;
+	tui.previousWidth = snapshot.width;
+}
+
+/**
+ * Write a full redraw of the visible tail.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param clear - Whether to clear the screen before rendering
+ * @returns Nothing
+ */
+function writeFullRender(
+	tui: TuiPatchedLike & object,
+	snapshot: RenderSnapshot,
+	clear: boolean
+): void {
+	tui.fullRedrawCount += 1;
+	const viewportTopForRender = Math.max(0, snapshot.newLines.length - snapshot.height);
+	const visibleLines = snapshot.newLines.slice(viewportTopForRender);
+	let buffer = "\x1b[?2026h";
+	if (clear && getTuiPendingScrollbackClear(tui)) {
+		buffer += "\x1b[3J\x1b[2J\x1b[H";
+		setTuiPendingScrollbackClear(tui, false);
+	} else if (clear) {
+		buffer += "\x1b[2J\x1b[H";
+	}
+	for (let index = 0; index < visibleLines.length; index += 1) {
+		if (index > 0) buffer += "\r\n";
+		buffer += visibleLines[index];
+	}
+	buffer += "\x1b[?2026l";
+	tui.terminal.write(buffer);
+	finalizeRenderedState(tui, snapshot, viewportTopForRender, !clear);
+}
+
+/**
+ * Write a startup-safe redraw that clears only stale visible rows.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @returns Nothing
+ */
+function writeGentleFullRender(tui: TuiPatchedLike, snapshot: RenderSnapshot): void {
+	tui.fullRedrawCount += 1;
+	const viewportTopForRender = Math.max(0, snapshot.newLines.length - snapshot.height);
+	const visibleLines = snapshot.newLines.slice(viewportTopForRender);
+	let buffer = "\x1b[?2026h\x1b[H";
+	for (let index = 0; index < visibleLines.length; index += 1) {
+		buffer += "\x1b[2K";
+		buffer += visibleLines[index];
+		if (index < visibleLines.length - 1) buffer += "\r\n";
+	}
+	const staleLines = Math.max(
+		0,
+		Math.min(tui.maxLinesRendered, snapshot.height) - visibleLines.length
+	);
+	for (let index = 0; index < staleLines; index += 1) {
+		buffer += "\r\n\x1b[2K";
+	}
+	buffer += "\x1b[?2026l";
+	tui.terminal.write(buffer);
+	finalizeRenderedState(tui, snapshot, viewportTopForRender, false);
+}
+
+/**
+ * Apply render rules that require a full redraw and report whether rendering is done.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param logRedraw - Debug logger
+ * @returns True when rendering was handled
+ */
+function handleEarlyFullRender(
+	tui: TuiPatchedLike & object,
+	snapshot: RenderSnapshot,
+	logRedraw: (reason: string) => void
+): boolean {
+	if (tui.previousLines.length === 0 && !snapshot.widthChanged) {
+		logRedraw("first render");
+		writeFullRender(tui, snapshot, false);
+		return true;
+	}
+	if (snapshot.widthChanged) {
+		logRedraw(`width changed (${tui.previousWidth} -> ${snapshot.width})`);
+		writeFullRender(tui, snapshot, true);
+		return true;
+	}
+	if (
+		tui.clearOnShrink &&
+		snapshot.newLines.length < tui.maxLinesRendered &&
+		tui.overlayStack.length === 0
+	) {
+		logRedraw(`clearOnShrink (maxLinesRendered=${tui.maxLinesRendered})`);
+		if (snapshot.inStartupGrace) {
+			writeGentleFullRender(tui, snapshot);
+		} else {
+			writeFullRender(tui, snapshot, true);
+		}
+		return true;
+	}
+	const shrinkDelta = tui.previousLines.length - snapshot.newLines.length;
+	if (shrinkDelta > 5 && tui.overlayStack.length === 0) {
+		logRedraw(`large shrink (${shrinkDelta} lines)`);
+		if (snapshot.inStartupGrace) {
+			writeGentleFullRender(tui, snapshot);
+		} else {
+			writeFullRender(tui, snapshot, true);
+		}
+		return true;
+	}
+	const rollingPeak = getTuiRollingShrinkPeak(tui);
+	if (snapshot.newLines.length >= rollingPeak) {
+		setTuiRollingShrinkPeak(tui, snapshot.newLines.length);
+		return false;
+	}
+	if (tui.overlayStack.length > 0 || rollingPeak - snapshot.newLines.length <= 5) {
+		return false;
+	}
+	logRedraw(
+		`rolling shrink (peak=${rollingPeak}, now=${snapshot.newLines.length}, delta=${rollingPeak - snapshot.newLines.length})`
+	);
+	if (snapshot.inStartupGrace) {
+		writeGentleFullRender(tui, snapshot);
+	} else {
+		writeFullRender(tui, snapshot, true);
+	}
+	return true;
+}
+
+/**
+ * Normalize viewport state when previous viewport math drifted after a shrink.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param viewportState - Mutable viewport state
+ * @returns Nothing
+ */
+function normalizeViewportBasisDrift(
+	tui: TuiPatchedLike,
+	snapshot: RenderSnapshot,
+	viewportState: ViewportState
+): void {
+	const previousContentViewportTop = Math.max(0, tui.previousLines.length - snapshot.height);
+	const hasViewportBasisDrift =
+		tui.overlayStack.length === 0 &&
+		tui.previousLines.length > 0 &&
+		tui.maxLinesRendered > snapshot.newLines.length &&
+		viewportState.prevViewportTop !== previousContentViewportTop;
+	if (!hasViewportBasisDrift) return;
+	tui.maxLinesRendered = snapshot.newLines.length;
+	viewportState.viewportTop = Math.max(0, tui.maxLinesRendered - snapshot.height);
+	viewportState.prevViewportTop = viewportState.viewportTop;
+	tui.previousViewportTop = viewportState.viewportTop;
+}
+
+/**
+ * Find the changed window between the previous and current frames.
+ *
+ * @param previousLines - Previously rendered lines
+ * @param newLines - Newly rendered lines
+ * @returns Changed window metadata
+ */
+function findChangedWindow(previousLines: string[], newLines: string[]): ChangedWindow {
+	let firstChanged = -1;
+	let lastChanged = -1;
+	const maxLines = Math.max(newLines.length, previousLines.length);
+	for (let index = 0; index < maxLines; index += 1) {
+		const oldLine = index < previousLines.length ? previousLines[index] : "";
+		const newLine = index < newLines.length ? newLines[index] : "";
+		if (oldLine !== newLine) {
+			if (firstChanged === -1) firstChanged = index;
+			lastChanged = index;
+		}
+	}
+	const appendedLines = newLines.length > previousLines.length;
+	if (appendedLines) {
+		if (firstChanged === -1) firstChanged = previousLines.length;
+		lastChanged = newLines.length - 1;
+	}
+	return {
+		appendStart: appendedLines && firstChanged === previousLines.length && firstChanged > 0,
+		firstChanged,
+		lastChanged,
+	};
+}
+
+/**
+ * Move the diff renderer to the target row, scrolling if needed.
+ *
+ * @param buffer - Escape-sequence buffer
+ * @param viewportState - Mutable viewport state
+ * @param moveTargetRow - Target row in the content
+ * @param height - Terminal height
+ * @returns Updated buffer
+ */
+function moveBufferToTargetRow(
+	buffer: string,
+	viewportState: ViewportState,
+	moveTargetRow: number,
+	height: number
+): string {
+	const prevViewportBottom = viewportState.prevViewportTop + height - 1;
+	if (moveTargetRow <= prevViewportBottom) return buffer;
+	const currentScreenRow = Math.max(
+		0,
+		Math.min(height - 1, viewportState.hardwareCursorRow - viewportState.prevViewportTop)
+	);
+	const moveToBottom = height - 1 - currentScreenRow;
+	if (moveToBottom > 0) buffer += `\x1b[${moveToBottom}B`;
+	const scroll = moveTargetRow - prevViewportBottom;
+	buffer += "\r\n".repeat(scroll);
+	viewportState.prevViewportTop += scroll;
+	viewportState.viewportTop += scroll;
+	viewportState.hardwareCursorRow = moveTargetRow;
+	return buffer;
+}
+
+/**
+ * Compute the relative line movement needed for cursor positioning.
+ *
+ * @param viewportState - Mutable viewport state
+ * @param targetRow - Target content row
+ * @returns Relative line movement
+ */
+function computeLineDiff(viewportState: ViewportState, targetRow: number): number {
+	const currentScreenRow = viewportState.hardwareCursorRow - viewportState.prevViewportTop;
+	const targetScreenRow = targetRow - viewportState.viewportTop;
+	return targetScreenRow - currentScreenRow;
+}
+
+/**
+ * Ensure a rendered line never exceeds terminal width.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param line - Rendered line
+ * @param lineIndex - Line index in the frame
+ * @returns Safe line content
+ */
+function normalizeRenderedLine(
+	tui: TuiPatchedLike,
+	snapshot: RenderSnapshot,
+	line: string,
+	lineIndex: number
+): string {
+	if (isImageLineLocal(line) || piVisibleWidth(line) <= snapshot.width) {
+		return line;
+	}
+	const crashLogPath = path.join(os.homedir(), ".pi", "agent", "pi-crash.log");
+	const crashData = [
+		`Crash at ${new Date().toISOString()}`,
+		`Terminal width: ${snapshot.width}`,
+		`Line ${lineIndex} visible width: ${piVisibleWidth(line)}`,
+		"",
+		"=== All rendered lines ===",
+		...snapshot.newLines.map(
+			(renderedLine, index) => `[${index}] (w=${piVisibleWidth(renderedLine)}) ${renderedLine}`
+		),
+		"",
+	].join("\n");
+	fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
+	fs.writeFileSync(crashLogPath, crashData);
+	if (process.env.TALLOW_DEBUG || process.env.PI_DEBUG) {
+		tui.stop?.();
+		throw new Error(
+			`Rendered line ${lineIndex} exceeds terminal width (${piVisibleWidth(line)} > ${snapshot.width}).`
+		);
+	}
+	return piTruncateToWidth(line, snapshot.width, "");
+}
+
+/**
+ * Handle frames where only trailing lines were removed.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param viewportState - Mutable viewport state
+ * @param changedWindow - Changed window metadata
+ * @param logRedraw - Debug logger
+ * @returns True when rendering was handled
+ */
+function handleTailRemovalOnly(
+	tui: TuiPatchedLike,
+	snapshot: RenderSnapshot,
+	viewportState: ViewportState,
+	changedWindow: ChangedWindow,
+	logRedraw: (reason: string) => void
+): boolean {
+	if (changedWindow.firstChanged < snapshot.newLines.length) return false;
+	if (tui.previousLines.length <= snapshot.newLines.length) {
+		tui.positionHardwareCursor(snapshot.cursorPos, snapshot.newLines.length);
+		tui.previousLines = snapshot.newLines;
+		tui.previousWidth = snapshot.width;
+		tui.previousViewportTop = Math.max(0, tui.maxLinesRendered - snapshot.height);
+		return true;
+	}
+	let buffer = "\x1b[?2026h";
+	const targetRow = Math.max(0, snapshot.newLines.length - 1);
+	const lineDiff = computeLineDiff(viewportState, targetRow);
+	if (lineDiff > 0) buffer += `\x1b[${lineDiff}B`;
+	else if (lineDiff < 0) buffer += `\x1b[${-lineDiff}A`;
+	buffer += "\r";
+	const extraLines = tui.previousLines.length - snapshot.newLines.length;
+	if (extraLines > snapshot.height) {
+		logRedraw(`extraLines > height (${extraLines} > ${snapshot.height})`);
+		if (snapshot.inStartupGrace) {
+			writeGentleFullRender(tui, snapshot);
+		} else {
+			writeFullRender(tui, snapshot, true);
+		}
+		return true;
+	}
+	if (extraLines > 0) buffer += "\x1b[1B";
+	for (let index = 0; index < extraLines; index += 1) {
+		buffer += "\r\x1b[2K";
+		if (index < extraLines - 1) buffer += "\x1b[1B";
+	}
+	if (extraLines > 0) buffer += `\x1b[${extraLines}A`;
+	buffer += "\x1b[?2026l";
+	tui.terminal.write(buffer);
+	tui.cursorRow = targetRow;
+	tui.hardwareCursorRow = targetRow;
+	tui.positionHardwareCursor(snapshot.cursorPos, snapshot.newLines.length);
+	tui.previousLines = snapshot.newLines;
+	tui.previousWidth = snapshot.width;
+	tui.previousViewportTop = Math.max(0, tui.maxLinesRendered - snapshot.height);
+	return true;
+}
+
+/**
+ * Render the changed diff window into the current viewport.
+ *
+ * @param tui - Patched TUI instance
+ * @param snapshot - Current render snapshot
+ * @param viewportState - Mutable viewport state
+ * @param changedWindow - Changed window metadata
+ * @param logRedraw - Debug logger
+ * @returns Nothing
+ */
+function renderDiffWindow(
+	tui: TuiPatchedLike & object,
+	snapshot: RenderSnapshot,
+	viewportState: ViewportState,
+	changedWindow: ChangedWindow,
+	logRedraw: (reason: string) => void
+): void {
+	if (changedWindow.firstChanged < viewportState.prevViewportTop) {
+		logRedraw(
+			`firstChanged < viewportTop (${changedWindow.firstChanged} < ${viewportState.prevViewportTop})`
+		);
+		if (snapshot.inStartupGrace) {
+			writeGentleFullRender(tui, snapshot);
+		} else {
+			writeFullRender(tui, snapshot, true);
+		}
+		return;
+	}
+	let buffer = "\x1b[?2026h";
+	const moveTargetRow = changedWindow.appendStart
+		? changedWindow.firstChanged - 1
+		: changedWindow.firstChanged;
+	buffer = moveBufferToTargetRow(buffer, viewportState, moveTargetRow, snapshot.height);
+	const lineDiff = computeLineDiff(viewportState, moveTargetRow);
+	if (lineDiff > 0) buffer += `\x1b[${lineDiff}B`;
+	else if (lineDiff < 0) buffer += `\x1b[${-lineDiff}A`;
+	buffer += changedWindow.appendStart ? "\r\n" : "\r";
+	const renderEnd = Math.min(changedWindow.lastChanged, snapshot.newLines.length - 1);
+	for (let index = changedWindow.firstChanged; index <= renderEnd; index += 1) {
+		if (index > changedWindow.firstChanged) buffer += "\r\n";
+		buffer += "\x1b[2K";
+		const normalizedLine = normalizeRenderedLine(tui, snapshot, snapshot.newLines[index], index);
+		snapshot.newLines[index] = normalizedLine;
+		buffer += normalizedLine;
+	}
+	let finalCursorRow = renderEnd;
+	if (tui.previousLines.length > snapshot.newLines.length) {
+		const extraLines = tui.previousLines.length - snapshot.newLines.length;
+		if (extraLines > snapshot.height) {
+			logRedraw(`extraLines > height in diff path (${extraLines} > ${snapshot.height})`);
+			writeFullRender(tui, snapshot, true);
+			return;
+		}
+		if (renderEnd < snapshot.newLines.length - 1) {
+			const moveDown = snapshot.newLines.length - 1 - renderEnd;
+			buffer += `\x1b[${moveDown}B`;
+			finalCursorRow = snapshot.newLines.length - 1;
+		}
+		for (let index = snapshot.newLines.length; index < tui.previousLines.length; index += 1) {
+			buffer += "\r\n\x1b[2K";
+		}
+		buffer += `\x1b[${extraLines}A`;
+	}
+	buffer += "\x1b[?2026l";
+	tui.terminal.write(buffer);
+	tui.cursorRow = Math.max(0, snapshot.newLines.length - 1);
+	tui.hardwareCursorRow = finalCursorRow;
+	tui.maxLinesRendered =
+		tui.overlayStack.length === 0
+			? snapshot.newLines.length
+			: Math.max(tui.maxLinesRendered, snapshot.newLines.length);
+	tui.previousViewportTop = Math.max(0, tui.maxLinesRendered - snapshot.height);
+	setTuiRollingShrinkPeak(tui, Math.max(getTuiRollingShrinkPeak(tui), snapshot.newLines.length));
+	tui.positionHardwareCursor(snapshot.cursorPos, snapshot.newLines.length);
+	tui.previousLines = snapshot.newLines;
+	tui.previousWidth = snapshot.width;
+}
+
 function patchTuiPrototype(prototype: TuiPrototypeLike): void {
 	if (prototype[APPLY_FLAG]) return;
 	prototype[APPLY_FLAG] = true;
@@ -153,301 +653,27 @@ function patchTuiPrototype(prototype: TuiPrototypeLike): void {
 
 	prototype.doRender = function (this: TuiPatchedLike & object): void {
 		if (this.stopped) return;
-		const width = this.terminal.columns;
-		const height = this.terminal.rows;
-		let viewportTop = Math.max(0, this.maxLinesRendered - height);
-		let prevViewportTop = this.previousViewportTop;
-		let hardwareCursorRow = this.hardwareCursorRow;
-		const computeLineDiff = (targetRow: number): number => {
-			const currentScreenRow = hardwareCursorRow - prevViewportTop;
-			const targetScreenRow = targetRow - viewportTop;
-			return targetScreenRow - currentScreenRow;
+		const snapshot = createRenderSnapshot(this);
+		const logRedraw = createRedrawLogger(this, snapshot);
+		if (handleEarlyFullRender(this, snapshot, logRedraw)) {
+			return;
+		}
+		const viewportState: ViewportState = {
+			hardwareCursorRow: this.hardwareCursorRow,
+			prevViewportTop: this.previousViewportTop,
+			viewportTop: Math.max(0, this.maxLinesRendered - snapshot.height),
 		};
-
-		let newLines = this.render(width);
-		if (this.overlayStack.length > 0) {
-			newLines = this.compositeOverlays(newLines, width, height);
-		}
-		const cursorPos = this.extractCursorPosition(newLines, height);
-		newLines = this.applyLineResets(newLines);
-		const widthChanged = this.previousWidth !== 0 && this.previousWidth !== width;
-		const inStartupGrace =
-			(tuiStartedAtMs.get(this) ?? 0) > 0 &&
-			Date.now() - (tuiStartedAtMs.get(this) ?? 0) < STARTUP_GRACE_MS;
-
-		const fullRender = (clear: boolean): void => {
-			this.fullRedrawCount += 1;
-			const viewportTopForRender = Math.max(0, newLines.length - height);
-			const visibleLines = newLines.slice(viewportTopForRender);
-			let buffer = "\x1b[?2026h";
-			if (clear && getTuiPendingScrollbackClear(this)) {
-				buffer += "\x1b[3J\x1b[2J\x1b[H";
-				setTuiPendingScrollbackClear(this, false);
-			} else if (clear) {
-				buffer += "\x1b[2J\x1b[H";
-			}
-			for (let i = 0; i < visibleLines.length; i++) {
-				if (i > 0) buffer += "\r\n";
-				buffer += visibleLines[i];
-			}
-			buffer += "\x1b[?2026l";
-			this.terminal.write(buffer);
-			this.cursorRow = Math.max(0, newLines.length - 1);
-			this.hardwareCursorRow = this.cursorRow;
-			if (clear) {
-				this.maxLinesRendered = newLines.length;
-			} else {
-				this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
-			}
-			this.previousViewportTop = viewportTopForRender;
-			setTuiRollingShrinkPeak(this, newLines.length);
-			this.positionHardwareCursor(cursorPos, newLines.length);
-			this.previousLines = newLines;
-			this.previousWidth = width;
-		};
-
-		const gentleFullRender = (): void => {
-			this.fullRedrawCount += 1;
-			const viewportTopForRender = Math.max(0, newLines.length - height);
-			const visibleLines = newLines.slice(viewportTopForRender);
-			let buffer = "\x1b[?2026h\x1b[H";
-			for (let i = 0; i < visibleLines.length; i++) {
-				buffer += "\x1b[2K";
-				buffer += visibleLines[i];
-				if (i < visibleLines.length - 1) buffer += "\r\n";
-			}
-			const staleLines = Math.max(0, Math.min(this.maxLinesRendered, height) - visibleLines.length);
-			for (let i = 0; i < staleLines; i++) {
-				buffer += "\r\n\x1b[2K";
-			}
-			buffer += "\x1b[?2026l";
-			this.terminal.write(buffer);
-			this.cursorRow = Math.max(0, newLines.length - 1);
-			this.hardwareCursorRow = this.cursorRow;
-			this.maxLinesRendered = newLines.length;
-			this.previousViewportTop = viewportTopForRender;
-			setTuiRollingShrinkPeak(this, newLines.length);
-			this.positionHardwareCursor(cursorPos, newLines.length);
-			this.previousLines = newLines;
-			this.previousWidth = width;
-		};
-
-		const debugRedraw = process.env.PI_DEBUG_REDRAW === "1";
-		const logRedraw = (reason: string): void => {
-			if (!debugRedraw) return;
-			const logPath = path.join(os.homedir(), ".pi", "agent", "pi-debug.log");
-			const msg = `[${new Date().toISOString()}] fullRender: ${reason} (prev=${this.previousLines.length}, new=${newLines.length}, height=${height})\n`;
-			fs.appendFileSync(logPath, msg);
-		};
-
-		if (this.previousLines.length === 0 && !widthChanged) {
-			logRedraw("first render");
-			fullRender(false);
+		normalizeViewportBasisDrift(this, snapshot, viewportState);
+		const changedWindow = findChangedWindow(this.previousLines, snapshot.newLines);
+		if (changedWindow.firstChanged === -1) {
+			this.positionHardwareCursor(snapshot.cursorPos, snapshot.newLines.length);
+			this.previousViewportTop = Math.max(0, this.maxLinesRendered - snapshot.height);
 			return;
 		}
-		if (widthChanged) {
-			logRedraw(`width changed (${this.previousWidth} -> ${width})`);
-			fullRender(true);
+		if (handleTailRemovalOnly(this, snapshot, viewportState, changedWindow, logRedraw)) {
 			return;
 		}
-		if (
-			this.clearOnShrink &&
-			newLines.length < this.maxLinesRendered &&
-			this.overlayStack.length === 0
-		) {
-			logRedraw(`clearOnShrink (maxLinesRendered=${this.maxLinesRendered})`);
-			if (inStartupGrace) {
-				gentleFullRender();
-			} else {
-				fullRender(true);
-			}
-			return;
-		}
-		const shrinkDelta = this.previousLines.length - newLines.length;
-		if (shrinkDelta > 5 && this.overlayStack.length === 0) {
-			logRedraw(`large shrink (${shrinkDelta} lines)`);
-			if (inStartupGrace) {
-				gentleFullRender();
-			} else {
-				fullRender(true);
-			}
-			return;
-		}
-		if (newLines.length >= getTuiRollingShrinkPeak(this)) {
-			setTuiRollingShrinkPeak(this, newLines.length);
-		} else if (
-			this.overlayStack.length === 0 &&
-			getTuiRollingShrinkPeak(this) - newLines.length > 5
-		) {
-			logRedraw(
-				`rolling shrink (peak=${getTuiRollingShrinkPeak(this)}, now=${newLines.length}, delta=${getTuiRollingShrinkPeak(this) - newLines.length})`
-			);
-			if (inStartupGrace) {
-				gentleFullRender();
-			} else {
-				fullRender(true);
-			}
-			return;
-		}
-
-		const previousContentViewportTop = Math.max(0, this.previousLines.length - height);
-		const hasViewportBasisDrift =
-			this.overlayStack.length === 0 &&
-			this.previousLines.length > 0 &&
-			this.maxLinesRendered > newLines.length &&
-			prevViewportTop !== previousContentViewportTop;
-		if (hasViewportBasisDrift) {
-			this.maxLinesRendered = newLines.length;
-			viewportTop = Math.max(0, this.maxLinesRendered - height);
-			prevViewportTop = viewportTop;
-			this.previousViewportTop = viewportTop;
-		}
-
-		let firstChanged = -1;
-		let lastChanged = -1;
-		const maxLines = Math.max(newLines.length, this.previousLines.length);
-		for (let i = 0; i < maxLines; i++) {
-			const oldLine = i < this.previousLines.length ? this.previousLines[i] : "";
-			const newLine = i < newLines.length ? newLines[i] : "";
-			if (oldLine !== newLine) {
-				if (firstChanged === -1) firstChanged = i;
-				lastChanged = i;
-			}
-		}
-		const appendedLines = newLines.length > this.previousLines.length;
-		if (appendedLines) {
-			if (firstChanged === -1) firstChanged = this.previousLines.length;
-			lastChanged = newLines.length - 1;
-		}
-		const appendStart =
-			appendedLines && firstChanged === this.previousLines.length && firstChanged > 0;
-		if (firstChanged === -1) {
-			this.positionHardwareCursor(cursorPos, newLines.length);
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
-			return;
-		}
-		if (firstChanged >= newLines.length) {
-			if (this.previousLines.length > newLines.length) {
-				let buffer = "\x1b[?2026h";
-				const targetRow = Math.max(0, newLines.length - 1);
-				const lineDiff = computeLineDiff(targetRow);
-				if (lineDiff > 0) buffer += `\x1b[${lineDiff}B`;
-				else if (lineDiff < 0) buffer += `\x1b[${-lineDiff}A`;
-				buffer += "\r";
-				const extraLines = this.previousLines.length - newLines.length;
-				if (extraLines > height) {
-					logRedraw(`extraLines > height (${extraLines} > ${height})`);
-					if (inStartupGrace) gentleFullRender();
-					else fullRender(true);
-					return;
-				}
-				if (extraLines > 0) buffer += "\x1b[1B";
-				for (let i = 0; i < extraLines; i++) {
-					buffer += "\r\x1b[2K";
-					if (i < extraLines - 1) buffer += "\x1b[1B";
-				}
-				if (extraLines > 0) buffer += `\x1b[${extraLines}A`;
-				buffer += "\x1b[?2026l";
-				this.terminal.write(buffer);
-				this.cursorRow = targetRow;
-				this.hardwareCursorRow = targetRow;
-			}
-			this.positionHardwareCursor(cursorPos, newLines.length);
-			this.previousLines = newLines;
-			this.previousWidth = width;
-			this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
-			return;
-		}
-		if (firstChanged < prevViewportTop) {
-			logRedraw(`firstChanged < viewportTop (${firstChanged} < ${prevViewportTop})`);
-			if (inStartupGrace) gentleFullRender();
-			else fullRender(true);
-			return;
-		}
-
-		let buffer = "\x1b[?2026h";
-		const prevViewportBottom = prevViewportTop + height - 1;
-		const moveTargetRow = appendStart ? firstChanged - 1 : firstChanged;
-		if (moveTargetRow > prevViewportBottom) {
-			const currentScreenRow = Math.max(
-				0,
-				Math.min(height - 1, hardwareCursorRow - prevViewportTop)
-			);
-			const moveToBottom = height - 1 - currentScreenRow;
-			if (moveToBottom > 0) buffer += `\x1b[${moveToBottom}B`;
-			const scroll = moveTargetRow - prevViewportBottom;
-			buffer += "\r\n".repeat(scroll);
-			prevViewportTop += scroll;
-			viewportTop += scroll;
-			hardwareCursorRow = moveTargetRow;
-		}
-		const lineDiff = computeLineDiff(moveTargetRow);
-		if (lineDiff > 0) buffer += `\x1b[${lineDiff}B`;
-		else if (lineDiff < 0) buffer += `\x1b[${-lineDiff}A`;
-		buffer += appendStart ? "\r\n" : "\r";
-		const renderEnd = Math.min(lastChanged, newLines.length - 1);
-		for (let i = firstChanged; i <= renderEnd; i++) {
-			if (i > firstChanged) buffer += "\r\n";
-			buffer += "\x1b[2K";
-			let line = newLines[i];
-			const isImage = isImageLineLocal(line);
-			if (!isImage && piVisibleWidth(line) > width) {
-				const crashLogPath = path.join(os.homedir(), ".pi", "agent", "pi-crash.log");
-				const crashData = [
-					`Crash at ${new Date().toISOString()}`,
-					`Terminal width: ${width}`,
-					`Line ${i} visible width: ${piVisibleWidth(line)}`,
-					"",
-					"=== All rendered lines ===",
-					...newLines.map((l, idx) => `[${idx}] (w=${piVisibleWidth(l)}) ${l}`),
-					"",
-				].join("\n");
-				fs.mkdirSync(path.dirname(crashLogPath), { recursive: true });
-				fs.writeFileSync(crashLogPath, crashData);
-				if (process.env.TALLOW_DEBUG || process.env.PI_DEBUG) {
-					this.stop?.();
-					throw new Error(
-						`Rendered line ${i} exceeds terminal width (${piVisibleWidth(line)} > ${width}).`
-					);
-				}
-				line = piTruncateToWidth(line, width, "");
-				newLines[i] = line;
-			}
-			buffer += line;
-		}
-		let finalCursorRow = renderEnd;
-		if (this.previousLines.length > newLines.length) {
-			const extraLines = this.previousLines.length - newLines.length;
-			if (extraLines > height) {
-				logRedraw(`extraLines > height in diff path (${extraLines} > ${height})`);
-				fullRender(true);
-				return;
-			}
-			if (renderEnd < newLines.length - 1) {
-				const moveDown = newLines.length - 1 - renderEnd;
-				buffer += `\x1b[${moveDown}B`;
-				finalCursorRow = newLines.length - 1;
-			}
-			for (let i = newLines.length; i < this.previousLines.length; i++) {
-				buffer += "\r\n\x1b[2K";
-			}
-			buffer += `\x1b[${extraLines}A`;
-		}
-		buffer += "\x1b[?2026l";
-		this.terminal.write(buffer);
-		this.cursorRow = Math.max(0, newLines.length - 1);
-		this.hardwareCursorRow = finalCursorRow;
-		if (this.overlayStack.length === 0) {
-			this.maxLinesRendered = newLines.length;
-		} else {
-			this.maxLinesRendered = Math.max(this.maxLinesRendered, newLines.length);
-		}
-		this.previousViewportTop = Math.max(0, this.maxLinesRendered - height);
-		setTuiRollingShrinkPeak(this, Math.max(getTuiRollingShrinkPeak(this), newLines.length));
-		this.positionHardwareCursor(cursorPos, newLines.length);
-		this.previousLines = newLines;
-		this.previousWidth = width;
-		return;
+		renderDiffWindow(this, snapshot, viewportState, changedWindow, logRedraw);
 	};
 }
 
