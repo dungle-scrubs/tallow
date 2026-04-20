@@ -250,7 +250,7 @@ describe("TUI render scheduling", () => {
 		for (let index = 0; index < 25; index += 1) {
 			tui.requestRender();
 		}
-		await flushIO();
+		await waitFor(() => component.renderCount === 1 && terminal.writes.length === 1);
 
 		expect(component.renderCount).toBe(1);
 		expect(terminal.writes).toHaveLength(1);
