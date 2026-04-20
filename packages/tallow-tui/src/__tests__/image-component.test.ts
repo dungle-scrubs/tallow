@@ -1,10 +1,53 @@
 import { describe, expect, it } from "bun:test";
 import { Image, type ImageTheme } from "../components/image.js";
-import { withCapabilityEnv } from "../test-utils/capability-env.js";
+import { resetCapabilitiesCache } from "../terminal-image.js";
 
 const IDENTITY_THEME: ImageTheme = {
 	fallbackColor: (text) => text,
 };
+
+type CapabilityEnvOverrides = Readonly<Record<string, string | undefined>>;
+
+function withCapabilityEnv<T>(overrides: CapabilityEnvOverrides, run: () => T): T {
+	const keys = [
+		"COLORTERM",
+		"GHOSTTY_RESOURCES_DIR",
+		"ITERM_SESSION_ID",
+		"KITTY_WINDOW_ID",
+		"TERM",
+		"TERM_PROGRAM",
+		"TMUX",
+		"WEZTERM_PANE",
+	] as const;
+	const previous: Partial<Record<(typeof keys)[number], string | undefined>> = {};
+	for (const key of keys) {
+		previous[key] = process.env[key];
+		if (Object.hasOwn(overrides, key)) {
+			const value = overrides[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		} else {
+			delete process.env[key];
+		}
+	}
+	resetCapabilitiesCache();
+	try {
+		return run();
+	} finally {
+		for (const key of keys) {
+			const value = previous[key];
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+		resetCapabilitiesCache();
+	}
+}
 
 function containsKittySequence(lines: readonly string[]): boolean {
 	return lines.some((line) => line.includes("\x1b_G"));
@@ -45,7 +88,7 @@ describe("Image component", () => {
 	});
 
 	it("falls back to text when image protocols are unavailable", () => {
-		withCapabilityEnv({ TERM_PROGRAM: "unknown", TMUX: "1" }, () => {
+		withCapabilityEnv({ TERM: "tmux-256color", TERM_PROGRAM: "unknown", TMUX: "1" }, () => {
 			const image = new Image(
 				"AA==",
 				"image/png",
