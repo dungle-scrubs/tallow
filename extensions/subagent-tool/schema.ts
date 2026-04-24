@@ -2,8 +2,7 @@
  * TypeBox parameter schemas and event type definitions for the subagent tool.
  */
 
-import { StringEnum } from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
+import { StringEnum, Type } from "@mariozechner/pi-ai";
 
 // ── Parameter Schemas ────────────────────────────────────────────────────────
 

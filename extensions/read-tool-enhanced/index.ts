@@ -38,7 +38,7 @@ import {
 	formatImageDimensions,
 	imageFormatToMime,
 } from "../_shared/image-metadata.js";
-import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
+import { getTallowHomeDir, getTallowSettingsPath } from "../_shared/tallow-paths.js";
 import { fileLink } from "../_shared/terminal-links.js";
 import {
 	appendSection,
@@ -151,7 +151,12 @@ function getSkillPathMap(): Map<string, SkillCacheEntry> {
 	if (!skillPathMap) {
 		skillPathMap = new Map();
 		try {
-			const { skills } = loadSkills({ skillPaths: getPackageSkillPaths() });
+			const { skills } = loadSkills({
+				cwd: process.cwd(),
+				agentDir: getTallowHomeDir(),
+				skillPaths: getPackageSkillPaths(),
+				includeDefaults: false,
+			});
 			for (const s of skills) {
 				skillPathMap.set(s.name, {
 					path: s.filePath,

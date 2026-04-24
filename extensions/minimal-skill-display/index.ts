@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadSkills, stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+import { getTallowHomeDir } from "../_shared/tallow-paths.js";
 import {
 	DEFAULT_SKILL_ICON,
 	getPackageSkillPaths,
@@ -38,7 +39,12 @@ export default function (pi: ExtensionAPI) {
 
 	function reloadSkills() {
 		try {
-			const loaded = loadSkills({ skillPaths: getPackageSkillPaths() });
+			const loaded = loadSkills({
+				cwd: process.cwd(),
+				agentDir: getTallowHomeDir(),
+				skillPaths: getPackageSkillPaths(),
+				includeDefaults: false,
+			});
 			skills = loaded.skills.map((s) => ({
 				name: s.name,
 				filePath: s.filePath,

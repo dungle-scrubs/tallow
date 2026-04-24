@@ -4,15 +4,12 @@ import { parseToolFlag } from "../sdk.js";
 describe("parseToolFlag", () => {
 	test("parses single tool name", () => {
 		const tools = parseToolFlag("read");
-		expect(tools).toHaveLength(1);
-		expect((tools[0] as { name: string }).name).toBe("read");
+		expect(tools).toEqual(["read"]);
 	});
 
 	test("parses comma-separated tool names", () => {
 		const tools = parseToolFlag("read,grep,find");
-		expect(tools).toHaveLength(3);
-		const names = tools.map((t) => (t as { name: string }).name);
-		expect(names).toEqual(["read", "grep", "find"]);
+		expect(tools).toEqual(["find", "grep", "read"]);
 	});
 
 	test("handles spaces around commas", () => {
@@ -27,22 +24,12 @@ describe("parseToolFlag", () => {
 
 	test("resolves readonly preset", () => {
 		const tools = parseToolFlag("readonly");
-		expect(tools).toHaveLength(4);
-		const names = tools.map((t) => (t as { name: string }).name);
-		expect(names).toContain("read");
-		expect(names).toContain("grep");
-		expect(names).toContain("find");
-		expect(names).toContain("ls");
+		expect(tools).toEqual(["read", "grep", "find", "ls"]);
 	});
 
 	test("resolves coding preset", () => {
 		const tools = parseToolFlag("coding");
-		expect(tools).toHaveLength(4);
-		const names = tools.map((t) => (t as { name: string }).name);
-		expect(names).toContain("read");
-		expect(names).toContain("bash");
-		expect(names).toContain("edit");
-		expect(names).toContain("write");
+		expect(tools).toEqual(["read", "bash", "edit", "write"]);
 	});
 
 	test("resolves none preset to empty array", () => {

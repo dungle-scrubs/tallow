@@ -2,10 +2,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import {
-	bashTool,
 	type CreateAgentSessionOptions,
 	type CreateAgentSessionResult,
-	codingTools,
 	createAgentSession,
 	createAgentSessionRuntime,
 	createEventBus,
@@ -13,20 +11,13 @@ import {
 	DefaultResourceLoader,
 	type ExtensionAPI,
 	type ExtensionFactory,
-	editTool,
-	findTool,
-	grepTool,
 	type LoadExtensionsResult,
-	lsTool,
 	ModelRegistry,
 	type PromptTemplate,
-	readOnlyTools,
-	readTool,
 	SessionManager,
 	type SessionStartEvent,
 	SettingsManager,
 	type Skill,
-	writeTool,
 } from "@mariozechner/pi-coding-agent";
 import { atomicWriteFileSync } from "./atomic-write.js";
 import { createSecureAuthStorage, resolveRuntimeApiKeyFromEnv } from "./auth-hardening.js";
@@ -312,40 +303,31 @@ export interface ToolResultRetentionRunStats {
 
 // ─── Tool Flag ───────────────────────────────────────────────────────────────
 
-// AgentTool has contravariant params, so typed tools don't assign to AgentTool<TSchema>.
-// We use the opaque array type from CreateAgentSessionOptions["tools"] instead.
 type ToolArray = NonNullable<CreateAgentSessionOptions["tools"]>;
-type ToolItem = ToolArray[number];
+type ToolName = ToolArray[number];
 
-/** Map of tool name → tool object for --tools flag resolution. */
-const TOOL_MAP: Record<string, ToolItem> = {
-	read: readTool as ToolItem,
-	bash: bashTool as ToolItem,
-	edit: editTool as ToolItem,
-	write: writeTool as ToolItem,
-	grep: grepTool as ToolItem,
-	find: findTool as ToolItem,
-	ls: lsTool as ToolItem,
-};
+const INDIVIDUAL_TOOL_NAMES = ["read", "bash", "edit", "write", "grep", "find", "ls"] as const;
+const CODING_TOOL_NAMES = ["read", "bash", "edit", "write"] as const;
+const READONLY_TOOL_NAMES = ["read", "grep", "find", "ls"] as const;
 
-/** Preset aliases for --tools flag. */
-const TOOL_PRESETS: Record<string, readonly ToolItem[]> = {
-	readonly: readOnlyTools as unknown as ToolItem[],
-	coding: codingTools as unknown as ToolItem[],
+/** Map of tool preset alias → tool names for --tools flag resolution. */
+const TOOL_PRESETS: Record<string, readonly ToolName[]> = {
+	readonly: READONLY_TOOL_NAMES,
+	coding: CODING_TOOL_NAMES,
 	none: [],
 };
 
 /** All valid tool names and aliases for error messages. */
-const VALID_TOOL_NAMES = [...Object.keys(TOOL_MAP), ...Object.keys(TOOL_PRESETS)];
+const VALID_TOOL_NAMES = [...INDIVIDUAL_TOOL_NAMES, ...Object.keys(TOOL_PRESETS)];
 
 /**
- * Parse a comma-separated tool names string into an array of tool objects.
+ * Parse a comma-separated tool names string into an array of tool names.
  *
  * Accepts individual tool names (read, bash, edit, write, grep, find, ls)
  * and preset aliases (readonly, coding, none).
  *
  * @param toolString - Comma-separated tool names (e.g. "read,grep,find")
- * @returns Array of resolved tool objects
+ * @returns Array of resolved tool names
  * @throws Error with list of valid names when an unknown tool is specified
  */
 export function parseToolFlag(toolString: string): ToolArray {
@@ -363,14 +345,16 @@ export function parseToolFlag(toolString: string): ToolArray {
 		return [...TOOL_PRESETS[names[0]]];
 	}
 
-	const tools: ToolItem[] = [];
+	const tools = new Set<ToolName>();
 	const unknown: string[] = [];
 
 	for (const name of names) {
-		if (name in TOOL_MAP) {
-			tools.push(TOOL_MAP[name]);
+		if ((INDIVIDUAL_TOOL_NAMES as readonly string[]).includes(name)) {
+			tools.add(name as ToolName);
 		} else if (name in TOOL_PRESETS) {
-			tools.push(...TOOL_PRESETS[name]);
+			for (const toolName of TOOL_PRESETS[name]) {
+				tools.add(toolName);
+			}
 		} else {
 			unknown.push(name);
 		}
@@ -382,16 +366,27 @@ export function parseToolFlag(toolString: string): ToolArray {
 		);
 	}
 
-	return tools;
+	return [...tools].sort((a, b) => a.localeCompare(b));
 }
 
 /**
- * Extract tool names from a tool-definition array.
+ * Extract tool names from the session tool allowlist.
+ *
+ * @param tools - Tool names from session options
+ * @returns Sorted unique tool names
+ */
+function extractConfiguredToolNames(tools: readonly string[] | undefined): string[] {
+	if (!tools) return [];
+	return [...new Set(tools)].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Extract tool names from custom tool definitions.
  *
  * @param tools - Tool definitions from session options
  * @returns Sorted unique tool names
  */
-function extractToolNames(tools: readonly unknown[] | undefined): string[] {
+function extractCustomToolNames(tools: readonly unknown[] | undefined): string[] {
 	if (!tools) return [];
 	const names = new Set<string>();
 	for (const tool of tools) {
@@ -415,8 +410,8 @@ function extractToolNames(tools: readonly unknown[] | undefined): string[] {
  */
 function resolveExplicitToolRestrictionNames(options: TallowSessionOptions): string[] | null {
 	if (options.tools === undefined) return null;
-	const names = new Set<string>(extractToolNames(options.tools));
-	for (const name of extractToolNames(options.customTools)) {
+	const names = new Set<string>(extractConfiguredToolNames(options.tools));
+	for (const name of extractCustomToolNames(options.customTools)) {
 		names.add(name);
 	}
 	return [...names].sort((a, b) => a.localeCompare(b));

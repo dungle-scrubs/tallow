@@ -163,9 +163,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 ### ExtensionCommandContext (`ctx` in command handlers, extends ExtensionContext)
 
 - `waitForIdle()` — Wait for the agent to finish streaming
-- `fork(entryId: string)` — Fork from a specific entry, creating a new session file.
 - `navigateTree(targetId: string, options?: object)` — Navigate to a different point in the session tree.
-- `switchSession(sessionPath: string)` — Switch to a different session file.
 - `reload()` — Reload extensions, skills, prompts, and themes.
 
 ### ExtensionUIContext (`ctx.ui`)
@@ -177,6 +175,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `onTerminalInput(handler: TerminalInputHandler)` — Listen to raw terminal input (interactive mode only).
 - `setStatus(key: string, text: string)` — Set status text in the footer/status bar.
 - `setWorkingMessage(message?: string)` — Set the working/loading message shown during streaming.
+- `setWorkingIndicator(options?: WorkingIndicatorOptions)` — Configure the interactive working indicator shown during streaming.
 - `setHiddenThinkingLabel(label?: string)` — Set the label shown for hidden thinking blocks.
 - `setWidget(key: string, content: string[], options?: ExtensionWidgetOptions)` — Set a widget to display above or below the editor.
 - `setTitle(title: string)` — Set the terminal window/tab title.
@@ -184,6 +183,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `setEditorText(text: string)` — Set the text in the core input editor.
 - `getEditorText()` — Get the current text from the core input editor.
 - `editor(title: string, prefill?: string)` — Show a multi-line editor for text editing.
+- `addAutocompleteProvider(factory: AutocompleteProviderFactory)` — Stack additional autocomplete behavior on top of the built-in provider.
 - `readonly theme` — Get the current theme for styling.
 - `getAllThemes()` — Get all available themes with their names and file paths.
 - `getTheme(name: string)` — Load a theme by name without switching to it.

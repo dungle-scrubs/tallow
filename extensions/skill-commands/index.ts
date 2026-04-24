@@ -199,7 +199,12 @@ export default function (pi: ExtensionAPI) {
 	// Load skills synchronously during extension init for autocomplete to work.
 	// includeDefaults: true picks up ~/.tallow/skills/ and ./skills/ (project).
 	// extraSkillPaths adds shared dirs + Claude bridge paths.
-	const { skills } = loadSkills({ agentDir, skillPaths: extraSkillPaths });
+	const { skills } = loadSkills({
+		cwd: process.cwd(),
+		agentDir,
+		skillPaths: extraSkillPaths,
+		includeDefaults: true,
+	});
 
 	for (const skill of skills) {
 		// Validate name before registration — invalid names produce broken commands

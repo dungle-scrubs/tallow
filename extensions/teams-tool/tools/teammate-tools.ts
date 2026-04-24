@@ -2,9 +2,8 @@
  * Teammate tool definitions — coordination tools injected into each teammate session.
  */
 
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum, Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
 import { getIcon } from "../../_icons/index.js";
 import { appendDashboardFeedEvent, refreshTeamView } from "../dashboard/state.js";
 import { autoDispatch, wakeTeammate } from "../dispatch/auto-dispatch.js";

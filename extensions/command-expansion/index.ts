@@ -19,7 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { loadSkills, stripFrontmatter } from "@mariozechner/pi-coding-agent";
+import { getAgentDir, loadSkills, stripFrontmatter } from "@mariozechner/pi-coding-agent";
 import { createLazyInitializer } from "../_shared/lazy-init.js";
 import { isProjectTrusted } from "../_shared/project-trust.js";
 
@@ -52,7 +52,13 @@ interface CommandExpansionDependencies {
 
 /** Default dependency implementation for production runtime. */
 const DEFAULT_COMMAND_EXPANSION_DEPENDENCIES: CommandExpansionDependencies = {
-	loadSkills,
+	loadSkills: () =>
+		loadSkills({
+			cwd: process.cwd(),
+			agentDir: getAgentDir(),
+			skillPaths: [],
+			includeDefaults: true,
+		}),
 	loadPromptTemplates,
 };
 

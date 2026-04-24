@@ -9,9 +9,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { StringEnum } from "@mariozechner/pi-ai";
+import { StringEnum, Type } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
 
 export type WeztermAction =
 	| "list"
