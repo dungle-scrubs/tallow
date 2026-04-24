@@ -611,7 +611,7 @@ async function run(opts: {
 			try {
 				const runner = tallow.session.extensionRunner;
 				if (runner?.hasHandlers("session_shutdown")) {
-					await runner.emit({ type: "session_shutdown" });
+					await runner.emit({ type: "session_shutdown", reason: "quit" });
 				}
 			} catch {
 				// Worktree teardown remains best-effort.

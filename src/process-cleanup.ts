@@ -42,7 +42,7 @@ async function cleanup(session: AgentSession | undefined, exitCode: number): Pro
 	try {
 		const runner = session?.extensionRunner;
 		if (runner?.hasHandlers("session_shutdown")) {
-			await runner.emit({ type: "session_shutdown" });
+			await runner.emit({ type: "session_shutdown", reason: "quit" });
 		}
 	} catch {
 		// Best-effort — don't let extension errors prevent exit

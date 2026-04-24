@@ -297,7 +297,12 @@ export function buildFrontmatterIndex(debugLog?: (msg: string) => void): Frontma
 
 	// Skills: skill name as-is
 	try {
-		const { skills } = loadSkills();
+		const { skills } = loadSkills({
+			cwd: process.cwd(),
+			agentDir: getAgentDir(),
+			skillPaths: [],
+			includeDefaults: true,
+		});
 		for (const skill of skills) {
 			maybeAdd(skill.name, skill.filePath);
 		}

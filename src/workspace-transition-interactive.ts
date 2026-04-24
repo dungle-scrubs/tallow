@@ -209,7 +209,7 @@ async function shutdownPreviousSession(session: AgentSessionLike): Promise<void>
 	if (!runner?.hasHandlers("session_shutdown")) {
 		return;
 	}
-	await runner.emit({ type: "session_shutdown" });
+	await runner.emit({ type: "session_shutdown", reason: "reload" });
 }
 
 /**
