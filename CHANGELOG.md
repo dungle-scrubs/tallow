@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.6...tallow-v0.9.7) (2026-04-24)
+
+
+### Fixed
+
+* **git-status:** stop blocking prompt input ([542ca47](https://github.com/dungle-scrubs/tallow/commit/542ca47af84305d82258b4fa8cd6f4211c442cd8))
+* **rewind:** prune stale snapshot refs ([6e2d816](https://github.com/dungle-scrubs/tallow/commit/6e2d81696f1625542222ef2536f2c2631f3fb48f))
+
+
+### Maintenance
+
+* **deps:** adapt tallow to pi 0.70.0 ([ed91a84](https://github.com/dungle-scrubs/tallow/commit/ed91a843d545c94c5277e6911f4089fc0bb40584))
+* **deps:** bump pi-* dependencies ([7a813a9](https://github.com/dungle-scrubs/tallow/commit/7a813a9be6a83732263ce28139243c63aba9105b))
+
 ## [Unreleased]
 
 ### Fixed
