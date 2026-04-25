@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.7...tallow-v0.9.8) (2026-04-25)
+
+
+### Fixed
+
+* **interactive:** listen for the compaction events pi actually emits ([5b833da](https://github.com/dungle-scrubs/tallow/commit/5b833dabb0dbb3a0b65787f077138f189fbb6ec6))
+
 ## [0.9.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.6...tallow-v0.9.7) (2026-04-24)
 
 
