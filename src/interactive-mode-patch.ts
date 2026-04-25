@@ -236,7 +236,7 @@ const COMPACTION_RETRY_STALLED_WARNING_TEXT =
 const AMBIGUOUS_COMPACTION_END_WARNING_TEXT =
 	"Auto-compaction ended without a clear result. Retry your last request, run /compact, or resend your message after reducing context.";
 
-/** Retry liveness timeout after auto_compaction_end before warning the user. */
+/** Retry liveness timeout after compaction_end before warning the user. */
 const COMPACTION_RETRY_WATCHDOG_TIMEOUT_MS = 2_500;
 
 const CONTINUATION_SIGNAL_EVENT_TYPES = new Set([
@@ -493,7 +493,7 @@ function clearCompactionRetryWatchdog(mode: InteractiveModeInstanceLike): void {
 }
 
 /**
- * Arms a retry-liveness watchdog after auto_compaction_end with willRetry=true.
+ * Arms a retry-liveness watchdog after compaction_end with willRetry=true.
  *
  * @param mode - Interactive mode instance
  * @returns Nothing
@@ -605,13 +605,13 @@ function drainOrphanedSessionMessages(mode: InteractiveModeInstanceLike): void {
 }
 
 /**
- * Returns whether auto_compaction_end finished without result, abort, or error.
+ * Returns whether compaction_end finished without result, abort, or error.
  *
  * @param event - Interactive mode event
  * @returns True when the compaction end state is ambiguous to users
  */
 function isAmbiguousCompactionEndState(event: InteractiveModeEventLike): boolean {
-	if (event.type !== "auto_compaction_end") return false;
+	if (event.type !== "compaction_end") return false;
 	if (event.willRetry === true) return false;
 	if (event.aborted === true) return false;
 	if (event.result !== null && event.result !== undefined) return false;
@@ -944,7 +944,7 @@ function applyPreHandleEventState(
 	mode: InteractiveModeInstanceLike,
 	event: InteractiveModeEventLike
 ): void {
-	if (event.type === "auto_compaction_start") {
+	if (event.type === "compaction_start") {
 		clearCompactionRetryWatchdog(mode);
 		markAutoCompactionRunning(mode);
 	}
@@ -961,7 +961,7 @@ function handleAutoCompactionEnd(
 	mode: InteractiveModeInstanceLike,
 	event: InteractiveModeEventLike
 ): void {
-	if (event.type !== "auto_compaction_end") {
+	if (event.type !== "compaction_end") {
 		return;
 	}
 	if (event.willRetry === true) {

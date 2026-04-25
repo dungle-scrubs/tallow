@@ -585,7 +585,7 @@ describe("patchInteractiveModePrototype", () => {
 
 		await withImmediateTimers(async () => {
 			const mode = new FakeInteractiveMode();
-			await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+			await mode.handleEvent({ type: "compaction_end", willRetry: true });
 			await new Promise((resolve) => setTimeout(resolve, 10));
 
 			const warning = mode.notifyCalls.find(
@@ -600,7 +600,7 @@ describe("patchInteractiveModePrototype", () => {
 
 		await withImmediateTimers(async () => {
 			const mode = new FakeInteractiveMode();
-			await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+			await mode.handleEvent({ type: "compaction_end", willRetry: true });
 			await mode.handleEvent({ type: "message_start" });
 			await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -615,7 +615,7 @@ describe("patchInteractiveModePrototype", () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();
 
-		await mode.handleEvent({ type: "auto_compaction_end" });
+		await mode.handleEvent({ type: "compaction_end" });
 
 		const warning = mode.notifyCalls.find(
 			(call) => call.type === "warning" && call.message.includes("without a clear result")
@@ -627,9 +627,9 @@ describe("patchInteractiveModePrototype", () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();
 
-		await mode.handleEvent({ result: { summary: "ok" }, type: "auto_compaction_end" });
-		await mode.handleEvent({ aborted: true, type: "auto_compaction_end" });
-		await mode.handleEvent({ errorMessage: "quota exceeded", type: "auto_compaction_end" });
+		await mode.handleEvent({ result: { summary: "ok" }, type: "compaction_end" });
+		await mode.handleEvent({ aborted: true, type: "compaction_end" });
+		await mode.handleEvent({ errorMessage: "quota exceeded", type: "compaction_end" });
 
 		const warning = mode.notifyCalls.find((call) =>
 			call.message.includes("without a clear result")
@@ -1214,7 +1214,7 @@ describe("patchInteractiveModePrototype", () => {
 		const mode = new FakeInteractiveMode();
 
 		// Start auto-compaction flow
-		await mode.handleEvent({ type: "auto_compaction_start" });
+		await mode.handleEvent({ type: "compaction_start" });
 		// agent_end arrives while compaction is still running
 		await mode.handleEvent({ type: "agent_end" });
 
@@ -1227,9 +1227,9 @@ describe("patchInteractiveModePrototype", () => {
 		const mode = new FakeInteractiveMode();
 
 		// Full compaction cycle completes (willRetry=false)
-		await mode.handleEvent({ type: "auto_compaction_start" });
+		await mode.handleEvent({ type: "compaction_start" });
 		await mode.handleEvent({
-			type: "auto_compaction_end",
+			type: "compaction_end",
 			willRetry: false,
 			result: { summary: "ok" },
 		});
@@ -1243,9 +1243,9 @@ describe("patchInteractiveModePrototype", () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();
 
-		await mode.handleEvent({ type: "auto_compaction_start" });
+		await mode.handleEvent({ type: "compaction_start" });
 		// willRetry=true means the loader must survive until continuation actually starts
-		await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+		await mode.handleEvent({ type: "compaction_end", willRetry: true });
 		await mode.handleEvent({ type: "agent_end" });
 
 		expect(mode.statusClears).toBe(0);
@@ -1255,8 +1255,8 @@ describe("patchInteractiveModePrototype", () => {
 		patchInteractiveModePrototype(FakeInteractiveMode.prototype as never);
 		const mode = new FakeInteractiveMode();
 
-		await mode.handleEvent({ type: "auto_compaction_start" });
-		await mode.handleEvent({ type: "auto_compaction_end", willRetry: true });
+		await mode.handleEvent({ type: "compaction_start" });
+		await mode.handleEvent({ type: "compaction_end", willRetry: true });
 		await mode.handleEvent({ type: "message_start" });
 		await mode.handleEvent({ type: "agent_end" });
 
