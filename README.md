@@ -68,8 +68,9 @@ changes. Roll back to any earlier turn when something goes wrong.
 **Background tasks** — Kick off long-running work without blocking the session.
 Track task lifecycle explicitly and check back when ready.
 
-**LSP** — Jump to definitions, find references, inspect types, and search
-workspace symbols — no editor required.
+**LSP + refactors** — Jump to definitions, find references, inspect types,
+search workspace symbols, rename TypeScript symbols, move files with import
+updates, and organize imports — no editor required.
 
 **Claude Code compatible** — Projects with `.claude/` directories (skills, agents,
 commands) work without changes. Both `.tallow/` and `.claude/` are scanned;

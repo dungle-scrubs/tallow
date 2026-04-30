@@ -6,13 +6,111 @@ description: Code intelligence via Language Server Protocol.
 Full LSP integration giving the agent precise code intelligence:
 go-to-definition, find all references, hover for type information,
 document symbols, and workspace-wide symbol search. Supports
-TypeScript, Python (ty/pyright), Rust, and Swift.
+TypeScript, Python (ty/pyright), Rust, Swift, and PHP.
+
+The extension also provides editor-style TypeScript refactor tools that
+request deterministic workspace edits from the TypeScript language
+service instead of relying on brittle search/replace workflows. Refactor
+tools default to dry-run previews and only write files when explicitly
+called with `dryRun: false`.
 
 After edits, diagnostics are automatically reported so the agent
 can catch type errors and lint issues without you asking.
 
 Startup and request operations are time-bounded with automatic cleanup,
 so stalled language servers fail fast instead of hanging a tool call.
+
+## Refactor tools
+
+### Rename a symbol everywhere
+
+Use `refactor_rename_symbol` to rename a function, class, variable, type,
+or export at a specific source position. It updates declarations,
+references, and import specifiers using TypeScript rename locations.
+
+```json
+{
+  "file": "src/hooks/use-bff-chat.ts",
+  "line": 12,
+  "character": 17,
+  "newName": "useChat"
+}
+```
+
+The default `dryRun: true` returns touched files, edit counts, and a
+unified diff-style preview. Apply the edit after reviewing the preview:
+
+```json
+{
+  "file": "src/hooks/use-bff-chat.ts",
+  "line": 12,
+  "character": 17,
+  "newName": "useChat",
+  "dryRun": false
+}
+```
+
+### Move a file and update imports
+
+Use `refactor_move_file` to move or rename a TypeScript/JavaScript file
+and update relative imports across the project using TypeScript's
+file-rename edits.
+
+```json
+{
+  "from": "src/bff/logger.ts",
+  "to": "src/orchestration/logger.ts"
+}
+```
+
+Apply after review:
+
+```json
+{
+  "from": "src/bff/logger.ts",
+  "to": "src/orchestration/logger.ts",
+  "dryRun": false
+}
+```
+
+The tool creates destination directories when applying and removes the
+old file. It does not leave compatibility copies.
+
+### Organize imports
+
+Use `refactor_organize_imports` after a large refactor to remove unused
+imports and normalize import ordering through TypeScript's source action.
+
+```json
+{
+  "dirs": ["src"],
+  "dryRun": true
+}
+```
+
+Then apply to selected files or directories:
+
+```json
+{
+  "dirs": ["src"],
+  "dryRun": false
+}
+```
+
+### Safety model
+
+Refactor tools:
+
+- default to `dryRun: true`
+- reject edits outside the current working directory
+- reject edits under `.git`, `node_modules`, `dist`, `build`, `out`,
+  `coverage`, and `vendor`
+- validate and reverse-apply text edits to avoid offset drift
+- reject overlapping edit spans
+- stage file contents in memory before writing
+- require `force: true` for large non-dry-run edits
+- return clear errors when TypeScript is unavailable or the position is
+  not renameable
 
 ## Configuration
 
