@@ -41,6 +41,7 @@ import {
 } from "vscode-languageserver-protocol";
 import { getIcon } from "../_icons/index.js";
 import { getTallowSettingsPath } from "../_shared/tallow-paths.js";
+import { registerRefactorTools } from "./refactor.js";
 
 /** Language server binary configuration and project detection markers. */
 interface ServerConfig {
@@ -1097,6 +1098,8 @@ export default function lspExtension(pi: ExtensionAPI) {
 	const registerTool = (tool: unknown): void => {
 		pi.registerTool(tool as Parameters<ExtensionAPI["registerTool"]>[0]);
 	};
+
+	registerRefactorTools(registerTool);
 
 	// Tool: Go to Definition
 	registerTool({

@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **lsp:** add editor-style TypeScript refactor tools for symbol rename,
+  file moves with import updates, and organize-imports dry-run previews
+
 ### Fixed
 
 - **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
@@ -17,16 +22,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transition compatibility hooks during the upgrade
 - **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
   config so dependency bumps continue to build and validate cleanly
+- **git-status:** move git / GitHub status refreshes off the main thread and
+  add PR lookup backoff so slow `gh pr view` checks no longer freeze prompt
+  input while you type
 - **interactive:** stabilize settings submenu transitions so changing thinking
   level no longer triggers chat re-append jitter or viewport jumps
 - **interactive:** reset render grace before chat rebuild paths
   (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
   churn across reload, fork, navigation, and settings-driven rebuilds
+- **rewind:** prune stale snapshot refs for deleted sessions on startup so
+  internal git checkpoints stop accumulating forever
 - **runtime:** remove published runtime wrapper references to `src/`, making
   global installs resilient when only `runtime/` and `dist/` are shipped
 - **tasks:** top-align the side-by-side background column and require a wider
   terminal before using split layout, removing large blank gaps above
   background task content
+
+## [0.9.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.7...tallow-v0.9.8) (2026-04-25)
+
+
+### Fixed
+
+* **interactive:** listen for the compaction events pi actually emits ([5b833da](https://github.com/dungle-scrubs/tallow/commit/5b833dabb0dbb3a0b65787f077138f189fbb6ec6))
+
+## [0.9.7](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.6...tallow-v0.9.7) (2026-04-24)
+
+
+### Fixed
+
+* **git-status:** stop blocking prompt input ([542ca47](https://github.com/dungle-scrubs/tallow/commit/542ca47af84305d82258b4fa8cd6f4211c442cd8))
+* **rewind:** prune stale snapshot refs ([6e2d816](https://github.com/dungle-scrubs/tallow/commit/6e2d81696f1625542222ef2536f2c2631f3fb48f))
+
+
+### Maintenance
+
+* **deps:** adapt tallow to pi 0.70.0 ([ed91a84](https://github.com/dungle-scrubs/tallow/commit/ed91a843d545c94c5277e6911f4089fc0bb40584))
+* **deps:** bump pi-* dependencies ([7a813a9](https://github.com/dungle-scrubs/tallow/commit/7a813a9be6a83732263ce28139243c63aba9105b))
+
+## [0.9.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.5...tallow-v0.9.6) (2026-04-20)
+
+
+### Fixed
+
+* **ci:** stop self-updating npm in release publish ([b698f20](https://github.com/dungle-scrubs/tallow/commit/b698f20193311d13bc396ec08f284a1700c2796a))
+* **context-fork:** ignore late fork completions after reset ([62483e4](https://github.com/dungle-scrubs/tallow/commit/62483e43d4f3f42b4779ce973cbff9b48e638f0d))
+* **deps:** override vulnerable transitive packages ([9486ee2](https://github.com/dungle-scrubs/tallow/commit/9486ee24d2f0c1153378ba567b25449de25b00da))
+* **interactive:** anchor continue startup to transcript tail ([96c73c8](https://github.com/dungle-scrubs/tallow/commit/96c73c85ba6f54c6cafe98539aff58613d21d0d8))
+* **interactive:** avoid forced redraws after normal turns ([94b5a28](https://github.com/dungle-scrubs/tallow/commit/94b5a283ed10de377806003bb17a7f9c16b461dd))
+* **interactive:** clear scrollback on session resets ([9675927](https://github.com/dungle-scrubs/tallow/commit/96759274ae70b2a3e6c920dadb4e03840609561c))
+* **interactive:** stop resume transcript replay on startup ([16c9fd0](https://github.com/dungle-scrubs/tallow/commit/16c9fd05c819b08e582018c93bf11727783d2769))
+* **reset:** complete clear and render regression hardening ([c506950](https://github.com/dungle-scrubs/tallow/commit/c506950e78d205991720881ae882afc827b84aa7))
+* **tui:** redraw only the visible viewport tail ([9bd4193](https://github.com/dungle-scrubs/tallow/commit/9bd4193f2503c10a5b851085cfa1abe86a0cc4fa))
+
+
+### Changed
+
+* **interactive:** reduce Sonar noise in startup patches ([5616a36](https://github.com/dungle-scrubs/tallow/commit/5616a36dc03f33596a35545669dc2b259c46e1b8))
+* **tui:** break TUI diff rendering into helpers ([9fbe459](https://github.com/dungle-scrubs/tallow/commit/9fbe459692cdf9c0f8656e13a46255322c624361))
+* **tui:** extract app-owned image and link helpers ([cc8baf7](https://github.com/dungle-scrubs/tallow/commit/cc8baf7bafac5a588c6c39b4068cc88442ebc92f))
+* **tui:** move editor and settings hooks out of the fork ([22feb7f](https://github.com/dungle-scrubs/tallow/commit/22feb7f813acf93a6ea9ed0f22a7b58dda36033d))
+* **tui:** move reset and render hooks out of the fork ([b6459c8](https://github.com/dungle-scrubs/tallow/commit/b6459c8cfd4825773c5469cb09af09a1b27b73e6))
+* **tui:** revert dead fork surfaces to upstream ([7c1176a](https://github.com/dungle-scrubs/tallow/commit/7c1176ae7929424284d65c6d19d9261ef89a9fdf))
+* **tui:** shrink input and selection drift ([5c6abfe](https://github.com/dungle-scrubs/tallow/commit/5c6abfe508468b92af8c2b421b925c9ed097d6cf))
+* **tui:** split editor and settings patches from pi-tui shim ([078cbc6](https://github.com/dungle-scrubs/tallow/commit/078cbc6d9bf11f5b5a46515459e57ebf241509ff))
+
+
+### Documentation
+
+* **changelog:** keep unreleased at the top ([d77caac](https://github.com/dungle-scrubs/tallow/commit/d77caac1ee42818b4f5a98a9f871f6bccdc595aa))
+* **plan:** add clear reset regression plan ([72dc402](https://github.com/dungle-scrubs/tallow/commit/72dc402078701571cc265bedd0a977636a556ee6))
+* **tui:** audit and document pi-tui fork drift ([5fc8515](https://github.com/dungle-scrubs/tallow/commit/5fc8515e0f6248ab89dbd3aee8cd37666e0b194e))
+
+
+### Maintenance
+
+* **clear:** prove reset cancels compact continuation ([ec4bb3e](https://github.com/dungle-scrubs/tallow/commit/ec4bb3ef6bece5f87942d1aff237057561f140d3))
+* **git:** ignore local package bundles ([0015ead](https://github.com/dungle-scrubs/tallow/commit/0015ead124ab164c0ea11b4ffd79a4c1c895dd97))
+* **sonar:** refresh baseline on main pushes ([57281db](https://github.com/dungle-scrubs/tallow/commit/57281dbef977e5032c59351b21459ec653a4ac3e))
+* **tui:** move settings-list transition coverage to core patches ([d0f1f9d](https://github.com/dungle-scrubs/tallow/commit/d0f1f9d90c259d86cc17f0825a6597c296c399b1))
+- **interactive:** reset render grace before chat rebuild paths
 
 ## [0.9.5](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.4...tallow-v0.9.5) (2026-04-16)
 

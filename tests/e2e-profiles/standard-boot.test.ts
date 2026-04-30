@@ -55,6 +55,9 @@ describe("Standard Profile", () => {
 			"lsp_symbols",
 			"lsp_workspace_symbols",
 			"lsp_status",
+			"refactor_rename_symbol",
+			"refactor_move_file",
+			"refactor_organize_imports",
 		];
 
 		for (const name of expected) {
