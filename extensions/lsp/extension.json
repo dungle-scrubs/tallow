@@ -1,8 +1,8 @@
 {
 	"name": "lsp",
 	"version": "0.1.0",
-	"description": "Language Server Protocol support — jump to definition, references, hover, symbols",
-	"whenToUse": "Use when you want language-intelligence tools like hover, definition, references, and symbols.",
+	"description": "Language Server Protocol support plus editor-style TypeScript refactor tools",
+	"whenToUse": "Use when you want language-intelligence tools or safe TypeScript refactors like rename symbol, move file, and organize imports.",
 	"capabilities": {
 		"tools": [
 			"lsp_definition",
@@ -10,21 +10,25 @@
 			"lsp_references",
 			"lsp_status",
 			"lsp_symbols",
-			"lsp_workspace_symbols"
+			"lsp_workspace_symbols",
+			"refactor_move_file",
+			"refactor_organize_imports",
+			"refactor_rename_symbol"
 		],
 		"events": ["session_shutdown"]
 	},
 	"permissionSurface": {
-		"filesystem": "read",
+		"filesystem": "write",
 		"shell": false,
 		"network": false,
 		"subprocess": true
 	},
 	"category": "language-support",
-	"tags": ["lsp", "code-intelligence"],
-	"files": ["index.ts", "types.d.ts"],
+	"tags": ["lsp", "code-intelligence", "refactor", "typescript"],
+	"files": ["index.ts", "refactor.ts", "types.d.ts"],
 	"relationships": [],
 	"npmDependencies": {
+		"typescript": "^6.0.2",
 		"vscode-languageserver-protocol": "^3.17.5",
 		"vscode-jsonrpc": "^8.2.0"
 	}

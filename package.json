@@ -81,6 +81,7 @@
 		"@sinclair/typebox": "0.34.49",
 		"ai": "^6.0.162",
 		"commander": "^14.0.3",
+		"typescript": "^6.0.2",
 		"unpdf": "^1.6.0",
 		"vscode-jsonrpc": "8.2.1",
 		"vscode-languageserver-protocol": "3.17.5"
@@ -91,8 +92,7 @@
 		"@mariozechner/pi-ai": "^0.70.0",
 		"@types/node": "25.6.0",
 		"husky": "^9.1.7",
-		"lint-staged": "^16.4.0",
-		"typescript": "^6.0.2"
+		"lint-staged": "^16.4.0"
 	},
 	"engines": {
 		"node": ">=22"
