@@ -141,7 +141,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 |-------|---------|------------|
 | `message_start` | `MessageStartEvent` | — |
 | `message_update` | `MessageUpdateEvent` | — |
-| `message_end` | `MessageEndEvent` | — |
+| `message_end` | `MessageEndEvent` | `MessageEndEventResult` |
 
 ### ExtensionContext (`ctx` in event handlers)
 
@@ -175,6 +175,7 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `onTerminalInput(handler: TerminalInputHandler)` — Listen to raw terminal input (interactive mode only).
 - `setStatus(key: string, text: string)` — Set status text in the footer/status bar.
 - `setWorkingMessage(message?: string)` — Set the working/loading message shown during streaming.
+- `setWorkingVisible(visible: boolean)` — Show or hide the built-in interactive working loader row during streaming.
 - `setWorkingIndicator(options?: WorkingIndicatorOptions)` — Configure the interactive working indicator shown during streaming.
 - `setHiddenThinkingLabel(label?: string)` — Set the label shown for hidden thinking blocks.
 - `setWidget(key: string, content: string[], options?: ExtensionWidgetOptions)` — Set a widget to display above or below the editor.
@@ -184,6 +185,8 @@ Extensions export a default function receiving `ExtensionAPI` (conventionally na
 - `getEditorText()` — Get the current text from the core input editor.
 - `editor(title: string, prefill?: string)` — Show a multi-line editor for text editing.
 - `addAutocompleteProvider(factory: AutocompleteProviderFactory)` — Stack additional autocomplete behavior on top of the built-in provider.
+- `setEditorComponent(factory: EditorFactory)` — Set a custom editor component via factory function.
+- `getEditorComponent()` — Get the currently configured custom editor factory, or undefined when using the default editor.
 - `readonly theme` — Get the current theme for styling.
 - `getAllThemes()` — Get all available themes with their names and file paths.
 - `getTheme(name: string)` — Load a theme by name without switching to it.
