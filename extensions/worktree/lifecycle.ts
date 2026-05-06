@@ -1,8 +1,16 @@
 import { type ExecFileSyncOptions, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 
 /** Managed worktree directory-name prefix in the system temp dir. */
 export const TALLOW_WORKTREE_PREFIX = "tallow-worktree-";
@@ -24,12 +32,28 @@ export interface CreateWorktreeOptions {
 	readonly timestampMs?: number;
 }
 
+/** Options for creating a project branch worktree. */
+export interface CreateProjectWorktreeOptions {
+	readonly baseRef?: string;
+	readonly branch: string;
+	readonly path?: string;
+}
+
 /** Result from createWorktree. */
 export interface CreatedWorktree {
 	readonly id: string;
 	readonly repoRoot: string;
 	readonly scope: WorktreeScope;
 	readonly timestampMs: number;
+	readonly worktreePath: string;
+}
+
+/** Result from creating a persistent project branch worktree. */
+export interface CreatedProjectWorktree {
+	readonly baseRef: string;
+	readonly branch: string;
+	readonly branchExisted: boolean;
+	readonly repoRoot: string;
 	readonly worktreePath: string;
 }
 
@@ -110,6 +134,62 @@ export function createWorktree(
 		timestampMs,
 		worktreePath,
 	};
+}
+
+/**
+ * Create a persistent project worktree for a branch.
+ *
+ * Existing branches are checked out directly. Missing branches are created from
+ * the supplied base ref. The worktree is intentionally not marked for automatic
+ * cleanup because it represents user-owned project state.
+ *
+ * @param cwd - Current working directory inside the repository
+ * @param options - Branch, base ref, and optional target path
+ * @returns Created project worktree metadata
+ * @throws {Error} When git rejects the branch, path, or worktree creation
+ */
+export function createProjectWorktree(
+	cwd: string,
+	options: CreateProjectWorktreeOptions
+): CreatedProjectWorktree {
+	const repoRoot = validateGitRepo(cwd).repoRoot;
+	const branch = validateBranchName(options.branch, repoRoot);
+	const baseRef = options.baseRef?.trim() || "HEAD";
+	const branchExisted = branchExists(repoRoot, branch);
+	const worktreePath = options.path
+		? resolve(cwd, options.path)
+		: resolveProjectWorktreeDefaultPath(repoRoot, branch);
+
+	if (existsSync(worktreePath)) {
+		throw new Error(`Worktree path already exists: ${worktreePath}`);
+	}
+
+	mkdirSync(dirname(worktreePath), { recursive: true });
+	const args = branchExisted
+		? ["-C", repoRoot, "worktree", "add", worktreePath, branch]
+		: ["-C", repoRoot, "worktree", "add", "-b", branch, worktreePath, baseRef];
+	runGit(args, repoRoot);
+
+	return {
+		baseRef,
+		branch,
+		branchExisted,
+		repoRoot,
+		worktreePath,
+	};
+}
+
+/**
+ * Resolve the default persistent worktree path for a repository branch.
+ *
+ * @param repoRoot - Git repository root
+ * @param branch - Branch name
+ * @returns Default worktree path under ~/dev/<project>_worktrees/<branch-slug>
+ */
+export function resolveProjectWorktreeDefaultPath(repoRoot: string, branch: string): string {
+	const primaryRoot = resolvePrimaryWorktreeRoot(repoRoot);
+	const projectName = basename(primaryRoot);
+	return join(homedir(), "dev", `${projectName}_worktrees`, sanitizeSegment(branch));
 }
 
 /**
@@ -348,6 +428,59 @@ function sanitizeSegment(value: string): string {
 		.replace(/^-+|-+$/g, "");
 	if (!normalized) return "task";
 	return normalized.slice(0, 48);
+}
+
+/**
+ * Validate a git branch name using git's own ref parser.
+ *
+ * @param branch - Candidate branch name
+ * @param repoRoot - Repository root used for the validation command
+ * @returns Trimmed branch name
+ * @throws {Error} When the branch name is invalid
+ */
+function validateBranchName(branch: string, repoRoot: string): string {
+	const trimmed = branch.trim();
+	if (!trimmed) {
+		throw new Error("Branch name is required.");
+	}
+	runGit(["-C", repoRoot, "check-ref-format", "--branch", trimmed], repoRoot);
+	return trimmed;
+}
+
+/**
+ * Return whether a local branch already exists.
+ *
+ * @param repoRoot - Git repository root
+ * @param branch - Local branch name
+ * @returns True when refs/heads/<branch> exists
+ */
+function branchExists(repoRoot: string, branch: string): boolean {
+	try {
+		runGit(["-C", repoRoot, "show-ref", "--verify", `refs/heads/${branch}`], repoRoot);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Resolve the primary worktree root for naming persistent worktree groups.
+ *
+ * @param repoRoot - Current repository root, possibly itself a linked worktree
+ * @returns First path from `git worktree list`, falling back to repoRoot
+ */
+function resolvePrimaryWorktreeRoot(repoRoot: string): string {
+	try {
+		const output = runGit(["-C", repoRoot, "worktree", "list", "--porcelain"], repoRoot);
+		const firstWorktree = output
+			.split("\n")
+			.find((line) => line.startsWith("worktree "))
+			?.slice("worktree ".length)
+			.trim();
+		return firstWorktree ? resolve(firstWorktree) : repoRoot;
+	} catch {
+		return repoRoot;
+	}
 }
 
 /**
