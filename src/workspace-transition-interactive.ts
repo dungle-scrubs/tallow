@@ -21,8 +21,17 @@ interface InteractiveModeLike {
 	loadingAnimation?: { stop(): void };
 	pendingMessagesContainer: { clear(): void };
 	pendingTools: Map<string, unknown>;
+	rebindCurrentSession?(): Promise<void>;
 	renderInitialMessages(): void;
 	resetExtensionUI(): void;
+	runtimeHost?: {
+		apply(result: {
+			diagnostics: unknown;
+			modelFallbackMessage: unknown;
+			services: unknown;
+			session: unknown;
+		}): void;
+	};
 	session: AgentSessionLike;
 	showStatus(message: string): void;
 	statusContainer: { clear(): void };
@@ -36,7 +45,7 @@ interface InteractiveModeLike {
 	};
 	unsubscribe?: (() => void) | undefined;
 	updateTerminalTitle(): void;
-	initExtensions(): Promise<void>;
+	initExtensions?(): Promise<void>;
 }
 
 /** Runtime shape needed from AgentSession for transition orchestration. */
@@ -226,12 +235,25 @@ async function swapInteractiveModeSession(
 	setCleanupSession: (session: TallowSession["session"]) => void
 ): Promise<void> {
 	resetInteractiveModeState(mode);
-	mode.session = next.session as AgentSessionLike;
+	if (mode.runtimeHost) {
+		mode.runtimeHost.apply({
+			diagnostics: next.runtime.diagnostics,
+			modelFallbackMessage: next.runtime.modelFallbackMessage,
+			services: next.runtime.services,
+			session: next.session,
+		});
+	} else {
+		(mode as { session: AgentSessionLike }).session = next.session as AgentSessionLike;
+	}
 	setCleanupSession(next.session);
-	await mode.initExtensions();
+	if (mode.rebindCurrentSession) {
+		await mode.rebindCurrentSession();
+	} else {
+		await mode.initExtensions?.();
+		mode.subscribeToAgent();
+		mode.updateTerminalTitle();
+	}
 	mode.renderInitialMessages();
-	mode.subscribeToAgent();
-	mode.updateTerminalTitle();
 	mode.ui.requestRender(true);
 }
 

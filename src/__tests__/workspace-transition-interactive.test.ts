@@ -52,8 +52,10 @@ interface FakeMode {
 	loadingAnimation?: { stop: () => void };
 	pendingMessagesContainer: { clear: () => void };
 	pendingTools: Map<string, unknown>;
+	rebindCurrentSession: () => Promise<void>;
 	renderInitialMessages: () => void;
 	resetExtensionUI: () => void;
+	runtimeHost: { apply: (result: { session: unknown }) => void };
 	session: FakeSession;
 	showStatus: (message: string) => void;
 	statusContainer: { clear: () => void };
@@ -145,7 +147,7 @@ function fakeAssistantEntry(text: string, id = "a1"): FakeSessionEntry {
  * @returns Fake mode object compatible with the transition host
  */
 function createFakeMode(session: FakeSession, events: string[]): FakeMode {
-	return {
+	const mode = {
 		chatContainer: {
 			clear: (): void => {
 				events.push("chat.clear");
@@ -166,11 +168,20 @@ function createFakeMode(session: FakeSession, events: string[]): FakeMode {
 			},
 		},
 		pendingTools: new Map([["tool", {}]]),
+		rebindCurrentSession: async (): Promise<void> => {
+			events.push("mode.rebindCurrentSession");
+		},
 		renderInitialMessages: (): void => {
 			events.push("mode.renderInitialMessages");
 		},
 		resetExtensionUI: (): void => {
 			events.push("mode.resetExtensionUI");
+		},
+		runtimeHost: {
+			apply: (result: { session: unknown }): void => {
+				mode.session = result.session as FakeSession;
+				events.push("runtime.apply");
+			},
 		},
 		session,
 		showStatus: (message: string): void => {
@@ -198,6 +209,7 @@ function createFakeMode(session: FakeSession, events: string[]): FakeMode {
 			events.push("mode.updateTerminalTitle");
 		},
 	};
+	return mode;
 }
 
 /**
@@ -265,6 +277,11 @@ function createDeps(
 					extensions: {} as never,
 					modelFallbackMessage: undefined,
 					resolvedPlugins: [],
+					runtime: {
+						diagnostics: [],
+						modelFallbackMessage: undefined,
+						services: { cwd: String(options.cwd) },
+					},
 					session: nextSession as never,
 					sessionId: "next-session",
 					version: "test",
@@ -375,10 +392,9 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 			"chat.clear",
 			"mode.resetExtensionUI",
 			"mode.unsubscribe",
-			"mode.initExtensions",
+			"runtime.apply",
+			"mode.rebindCurrentSession",
 			"mode.renderInitialMessages",
-			"mode.subscribeToAgent",
-			"mode.updateTerminalTitle",
 			"ui.requestRender:force",
 			"ui.working:clear",
 		]);
@@ -529,6 +545,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 					extensionOverrides: [];
 					extensions: never;
 					resolvedPlugins: [];
+					runtime: never;
 					session: never;
 					sessionId: string;
 					version: string;
@@ -538,6 +555,7 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 			extensionOverrides: [];
 			extensions: never;
 			resolvedPlugins: [];
+			runtime: never;
 			session: never;
 			sessionId: string;
 			version: string;
@@ -570,6 +588,11 @@ describe("createInteractiveWorkspaceTransitionHost", () => {
 			extensionOverrides: [],
 			extensions: {} as never,
 			resolvedPlugins: [],
+			runtime: {
+				diagnostics: [],
+				modelFallbackMessage: undefined,
+				services: { cwd: "/repo/b" },
+			} as never,
 			session: nextSession as never,
 			sessionId: "late",
 			version: "test",
