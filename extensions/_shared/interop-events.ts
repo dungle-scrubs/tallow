@@ -50,13 +50,13 @@ export type WorktreeLifecycleEventName =
 	(typeof WORKTREE_LIFECYCLE_EVENT_NAMES)[keyof typeof WORKTREE_LIFECYCLE_EVENT_NAMES];
 
 /** Valid worktree scopes in lifecycle payloads. */
-export type WorktreeLifecycleScope = "session" | "subagent";
+export type WorktreeLifecycleScope = "project" | "session" | "subagent";
 
 /** TypeBox schema for worktree lifecycle payloads shared across extensions. */
 export const WorktreeLifecyclePayloadSchema = Type.Object({
 	agentId: Type.Optional(Type.String()),
 	repoRoot: Type.String(),
-	scope: Type.Union([Type.Literal("session"), Type.Literal("subagent")]),
+	scope: Type.Union([Type.Literal("project"), Type.Literal("session"), Type.Literal("subagent")]),
 	timestamp: Type.Number(),
 	worktreePath: Type.String(),
 });
