@@ -6,6 +6,9 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@mariozechner/pi-ai";
 import type {
 	ContextUsage,
@@ -33,10 +36,17 @@ const ZERO_USAGE: Usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+const PROJECT_TRUST_STATUS_ENV = "TALLOW_PROJECT_TRUST_STATUS";
+const PROJECT_TRUST_CWD_ENV = "TALLOW_PROJECT_TRUST_CWD";
+
 let harness: ExtensionHarness;
+let previousTrustCwd: string | undefined;
+let previousTrustStatus: string | undefined;
 let scheduler: ManualTimerScheduler;
 
 beforeEach(async () => {
+	previousTrustCwd = process.env[PROJECT_TRUST_CWD_ENV];
+	previousTrustStatus = process.env[PROJECT_TRUST_STATUS_ENV];
 	scheduler = new ManualTimerScheduler();
 	setSlashCommandBridgeSchedulerForTests(scheduler.runtime);
 	harness = ExtensionHarness.create();
@@ -44,6 +54,16 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+	if (previousTrustCwd === undefined) {
+		delete process.env[PROJECT_TRUST_CWD_ENV];
+	} else {
+		process.env[PROJECT_TRUST_CWD_ENV] = previousTrustCwd;
+	}
+	if (previousTrustStatus === undefined) {
+		delete process.env[PROJECT_TRUST_STATUS_ENV];
+	} else {
+		process.env[PROJECT_TRUST_STATUS_ENV] = previousTrustStatus;
+	}
 	resetResetDiagnosticsForTests();
 	resetSlashCommandBridgeStateForTests();
 });
@@ -123,7 +143,10 @@ function buildCompactToolResult(): ToolResultMessage<{ command: string }> {
  * @param ctx - Extension context for the execution
  * @returns Tool execution result
  */
-async function executeTool(params: { command: string }, ctx?: ExtensionContext) {
+async function executeTool(
+	params: { command: string; arguments?: string },
+	ctx?: ExtensionContext
+) {
 	const tool = harness.tools.get("run_slash_command");
 	if (!tool) {
 		throw new Error("run_slash_command tool not registered");
@@ -210,6 +233,80 @@ describe("context injection", () => {
 		expect(result?.message.content).toContain("/show-system-prompt");
 		expect(result?.message.content).toContain("/context");
 		expect(result?.message.content).toContain("/compact");
+	});
+});
+
+/**
+ * Creates a trusted temporary project command file for model-callable prompt tests.
+ *
+ * @returns Temporary project directory path
+ */
+function createTrustedModelCallableCommandFixture(): string {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "slash-command-bridge-"));
+	const commandsDir = path.join(cwd, ".claude", "commands");
+	fs.mkdirSync(commandsDir, { recursive: true });
+	fs.writeFileSync(
+		path.join(commandsDir, "auto-fix.md"),
+		[
+			"---",
+			"name: auto-fix",
+			"description: Auto fix test command",
+			"model-callable: true",
+			"---",
+			"# Auto Fix",
+			"Task: $ARGUMENTS",
+		].join("\n")
+	);
+	process.env[PROJECT_TRUST_CWD_ENV] = cwd;
+	process.env[PROJECT_TRUST_STATUS_ENV] = "trusted";
+	return cwd;
+}
+
+/**
+ * Returns message details as a loose object for assertions.
+ *
+ * @param details - Unknown message details payload
+ * @returns Details as a record
+ */
+function asDetailsRecord(details: unknown): Record<string, unknown> {
+	return details && typeof details === "object" ? (details as Record<string, unknown>) : {};
+}
+
+describe("model-callable prompt commands", () => {
+	test("injects opted-in prompt commands from trusted project command directories", async () => {
+		const cwd = createTrustedModelCallableCommandFixture();
+		const ctx = buildContext({ cwd });
+
+		const results = await harness.fireEvent(
+			"before_agent_start",
+			{ type: "before_agent_start", prompt: "hello", systemPrompt: "" },
+			ctx
+		);
+		const result = results.find((entry) => entry != null) as
+			| {
+					message: { content: string; customType: string; display: boolean };
+			  }
+			| undefined;
+
+		expect(result?.message.content).toContain("/auto-fix");
+	});
+
+	test("queues opted-in prompt command content with substituted arguments", async () => {
+		const cwd = createTrustedModelCallableCommandFixture();
+		const ctx = buildContext({ cwd });
+
+		const result = await executeTool({ command: "auto-fix", arguments: "repair tests" }, ctx);
+
+		expect(result.details).toEqual({
+			command: "auto-fix",
+			arguments: "repair tests",
+			promptCommand: true,
+		});
+		expect(harness.sentMessages).toHaveLength(2);
+		expect(harness.sentMessages[0]?.content).toBe("🪆 /auto-fix repair tests");
+		expect(harness.sentMessages[1]?.content).toContain("Task: repair tests");
+		expect(harness.sentMessages[1]?.options).toEqual({ triggerTurn: true });
+		expect(asDetailsRecord(harness.sentMessages[1]?.details).commandName).toBe("auto-fix");
 	});
 });
 
