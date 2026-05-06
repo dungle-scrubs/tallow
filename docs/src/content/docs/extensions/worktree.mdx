@@ -1,14 +1,17 @@
 ---
 title: worktree
-description: Detached git worktree isolation for sessions and subagents.
+description: Git worktree isolation and branch worktree transitions.
 ---
 
 The `worktree` extension manages temporary detached git worktrees for
-isolated execution. It is the lifecycle owner for create/remove/prune behavior.
+isolated execution and persistent branch worktrees for feature work. It is the
+lifecycle owner for create/remove/prune behavior.
 
 ## What it does
 
 - creates detached worktrees with `git worktree add --detach`
+- creates persistent branch worktrees with `/worktree-create` or the
+  `worktree_create` tool
 - removes worktrees with a git-first strategy, then filesystem fallback
 - prunes stale managed worktrees on startup
 - emits lifecycle events for hook automation
@@ -24,6 +27,23 @@ session inside a temporary detached worktree and sets:
 
 The extension reads those values, emits lifecycle events, and performs
 best-effort cleanup on `session_shutdown`.
+
+## Branch worktrees (`/worktree-create` / `worktree_create`)
+
+Use `/worktree-create <branch> [path]` to create a persistent worktree for a
+local branch and move the interactive session into it. If the branch does not
+exist, tallow creates it from `HEAD`. If the branch already exists, tallow
+checks it out in the new worktree.
+
+When no path is provided, tallow uses:
+
+```text
+~/dev/<project>_worktrees/<branch-slug>
+```
+
+The `worktree_create` tool exposes the same flow to the model with required
+`branch` and optional `baseRef` / `path` parameters. The tool should be called
+alone because the session transitions into the new worktree after creation.
 
 ## Subagent isolation (`isolation: "worktree"`)
 
@@ -62,4 +82,5 @@ Payload shape:
 }
 ```
 
-`scope` is `session` or `subagent`. `agentId` is present for subagent-scoped events.
+`scope` is `project`, `session`, or `subagent`. `agentId` is present for
+subagent-scoped events.
