@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.8...tallow-v0.9.9) (2026-05-06)
+
+
+### Added
+
+* **slash-command-bridge:** support callable prompt commands ([820520d](https://github.com/dungle-scrubs/tallow/commit/820520d0a7fa07f080b1e17a6e2cce8ef2c61fb1))
+* **worktree:** add persistent branch worktrees ([33507bb](https://github.com/dungle-scrubs/tallow/commit/33507bb086de64b6464f322b6d9011269bf61d9f))
+
+
+### Fixed
+
+* **interactive:** rebind runtime after workspace transitions ([6101aa0](https://github.com/dungle-scrubs/tallow/commit/6101aa0ac7a7e214f1ab5be5bc6ce99d3f872907))
+
+
+### Documentation
+
+* **worktree:** document branch worktree transitions ([16c6d87](https://github.com/dungle-scrubs/tallow/commit/16c6d876d436d038d09d44cf77228a86ed264f61))
+
+## [Unreleased]
+
+### Added
+
+- **worktree:** add `/worktree-create` and `worktree_create` for creating a
+  persistent branch worktree and transitioning the session into it
+
+### Fixed
+
+- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
+  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
+  transition compatibility hooks during the upgrade
+- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
+  config so dependency bumps continue to build and validate cleanly
+- **git-status:** move git / GitHub status refreshes off the main thread and
+  add PR lookup backoff so slow `gh pr view` checks no longer freeze prompt
+  input while you type
+- **interactive:** stabilize settings submenu transitions so changing thinking
+  level no longer triggers chat re-append jitter or viewport jumps
+- **interactive:** reset render grace before chat rebuild paths
+  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
+  churn across reload, fork, navigation, and settings-driven rebuilds
+- **interactive:** rebind workspace transitions through the live runtime host
+  so cwd and footer git metadata update after moving sessions
+- **rewind:** prune stale snapshot refs for deleted sessions on startup so
+  internal git checkpoints stop accumulating forever
+- **runtime:** remove published runtime wrapper references to `src/`, making
+  global installs resilient when only `runtime/` and `dist/` are shipped
+- **tasks:** top-align the side-by-side background column and require a wider
+  terminal before using split layout, removing large blank gaps above
+  background task content
+
+
 ## [0.9.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.7...tallow-v0.9.8) (2026-04-25)
 
 
@@ -25,31 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * **deps:** adapt tallow to pi 0.70.0 ([ed91a84](https://github.com/dungle-scrubs/tallow/commit/ed91a843d545c94c5277e6911f4089fc0bb40584))
 * **deps:** bump pi-* dependencies ([7a813a9](https://github.com/dungle-scrubs/tallow/commit/7a813a9be6a83732263ce28139243c63aba9105b))
-
-## [Unreleased]
-
-### Fixed
-
-- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
-  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
-  transition compatibility hooks during the upgrade
-- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
-  config so dependency bumps continue to build and validate cleanly
-- **git-status:** move git / GitHub status refreshes off the main thread and
-  add PR lookup backoff so slow `gh pr view` checks no longer freeze prompt
-  input while you type
-- **interactive:** stabilize settings submenu transitions so changing thinking
-  level no longer triggers chat re-append jitter or viewport jumps
-- **interactive:** reset render grace before chat rebuild paths
-  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
-  churn across reload, fork, navigation, and settings-driven rebuilds
-- **rewind:** prune stale snapshot refs for deleted sessions on startup so
-  internal git checkpoints stop accumulating forever
-- **runtime:** remove published runtime wrapper references to `src/`, making
-  global installs resilient when only `runtime/` and `dist/` are shipped
-- **tasks:** top-align the side-by-side background column and require a wider
-  terminal before using split layout, removing large blank gaps above
-  background task content
 
 ## [0.9.6](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.5...tallow-v0.9.6) (2026-04-20)
 

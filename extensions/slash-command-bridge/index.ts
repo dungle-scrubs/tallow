@@ -9,15 +9,20 @@
  * registration, with auto-generated tool schemas and full command handler access.
  */
 
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type {
 	ContextUsage,
 	ExtensionAPI,
 	ExtensionContext,
 	TurnEndEvent,
 } from "@mariozechner/pi-coding-agent";
+import { getAgentDir } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { recordResetDiagnostic } from "../../src/reset-diagnostics.js";
+import { isProjectTrusted } from "../_shared/project-trust.js";
 
 /**
  * Deferred compact request — set by the tool handler, consumed on the first
@@ -224,6 +229,22 @@ const COMMAND_DESCRIPTIONS: ReadonlyMap<string, string> = new Map([
 	["compact", "Triggers session compaction to free up context window space"],
 ]);
 
+/** Frontmatter parsed from a prompt or command markdown file. */
+interface PromptFrontmatter {
+	readonly description?: string;
+	readonly modelCallable?: unknown;
+	readonly "model-callable"?: unknown;
+	readonly model_callable?: unknown;
+	readonly [key: string]: unknown;
+}
+
+/** Model-callable prompt command discovered from local command directories. */
+interface ModelCallablePromptCommand {
+	readonly command: string;
+	readonly description: string;
+	readonly filePath: string;
+}
+
 /** Context usage with a known finite token count. */
 interface KnownContextUsage extends ContextUsage {
 	readonly tokens: number;
@@ -232,6 +253,208 @@ interface KnownContextUsage extends ContextUsage {
 /** Shared no-data message for /context parity. */
 const NO_CONTEXT_USAGE_DATA_TEXT =
 	"No context usage data available yet. A message must be processed first.";
+
+/**
+ * Parses simple YAML frontmatter from a prompt markdown file.
+ *
+ * @param content - Raw markdown file content
+ * @returns Frontmatter key-value pairs
+ */
+function parsePromptFrontmatter(content: string): PromptFrontmatter {
+	const match = content.match(/^---\s*\n([\s\S]*?)\n---/);
+	if (!match) return {};
+
+	const frontmatter: Record<string, unknown> = {};
+	for (const line of match[1].split("\n")) {
+		const colonIndex = line.indexOf(":");
+		if (colonIndex === -1) continue;
+
+		const key = line.slice(0, colonIndex).trim();
+		const rawValue = line.slice(colonIndex + 1).trim();
+		frontmatter[key] = rawValue.replace(/^(["'])(.*)\1$/, "$2");
+	}
+
+	return frontmatter;
+}
+
+/**
+ * Returns whether a frontmatter value opts a prompt into model invocation.
+ *
+ * @param value - Raw frontmatter value
+ * @returns True when the value is the boolean/string true
+ */
+function isModelCallableValue(value: unknown): boolean {
+	return value === true || (typeof value === "string" && value.toLowerCase() === "true");
+}
+
+/**
+ * Returns whether prompt frontmatter opts into model invocation.
+ *
+ * @param frontmatter - Parsed prompt frontmatter
+ * @returns True when any supported model-callable key is true
+ */
+function isModelCallablePrompt(frontmatter: PromptFrontmatter): boolean {
+	return (
+		isModelCallableValue(frontmatter.modelCallable) ||
+		isModelCallableValue(frontmatter["model-callable"]) ||
+		isModelCallableValue(frontmatter.model_callable)
+	);
+}
+
+/**
+ * Removes YAML frontmatter from markdown content.
+ *
+ * @param content - Raw markdown content
+ * @returns Markdown content without leading frontmatter
+ */
+function stripPromptFrontmatter(content: string): string {
+	return content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
+}
+
+/**
+ * Substitutes prompt argument placeholders with provided slash command arguments.
+ *
+ * @param content - Prompt content with placeholders
+ * @param args - Space-separated argument string
+ * @returns Content with argument placeholders expanded
+ */
+function substitutePromptArguments(content: string, args: string): string {
+	const argList = args.split(/\s+/).filter(Boolean);
+	let result = content.replace(/\$(\d+)/g, (_, num: string) => {
+		const index = Number.parseInt(num, 10) - 1;
+		return argList[index] ?? "";
+	});
+
+	result = result.replace(
+		/\$\{@:(\d+)(?::(\d+))?\}/g,
+		(_, startStr: string, lengthStr?: string) => {
+			const start = Math.max(Number.parseInt(startStr, 10) - 1, 0);
+			if (lengthStr) {
+				const length = Number.parseInt(lengthStr, 10);
+				return argList.slice(start, start + length).join(" ");
+			}
+			return argList.slice(start).join(" ");
+		}
+	);
+
+	result = result.replace(/\$ARGUMENTS/g, args);
+	return result.replace(/\$@/g, args);
+}
+
+/**
+ * Builds the local prompt/command directories that may contain model-callable commands.
+ *
+ * @param cwd - Current session working directory
+ * @returns Ordered directories, highest-precedence first
+ */
+function getModelCallablePromptDirs(cwd: string): readonly string[] {
+	const agentDir = getAgentDir();
+	const globalDirs = [
+		path.join(agentDir, "prompts"),
+		path.join(agentDir, "commands"),
+		path.join(os.homedir(), ".claude", "commands"),
+	];
+
+	if (!isProjectTrusted(cwd)) {
+		return globalDirs;
+	}
+
+	return [
+		path.join(cwd, ".tallow", "prompts"),
+		path.join(cwd, ".tallow", "commands"),
+		path.join(cwd, ".claude", "commands"),
+		...globalDirs,
+	];
+}
+
+/**
+ * Converts a markdown path below a prompt directory into its slash command name.
+ *
+ * @param rootDir - Prompt root directory
+ * @param filePath - Markdown file path inside the root directory
+ * @returns Slash command name without leading slash, or undefined for ignored files
+ */
+function getPromptCommandName(rootDir: string, filePath: string): string | undefined {
+	const relativePath = path.relative(rootDir, filePath);
+	if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) return undefined;
+	if (!relativePath.endsWith(".md")) return undefined;
+
+	const parts = relativePath.slice(0, -".md".length).split(path.sep);
+	if (parts.some((part) => part === "" || part.startsWith("_"))) return undefined;
+	return parts.join(":");
+}
+
+/**
+ * Recursively discovers markdown files in a prompt directory.
+ *
+ * @param rootDir - Prompt root directory to scan
+ * @returns Absolute markdown file paths
+ */
+function discoverPromptMarkdownFiles(rootDir: string): readonly string[] {
+	const files: string[] = [];
+	const pending = [rootDir];
+
+	while (pending.length > 0) {
+		const dir = pending.pop();
+		if (!dir) continue;
+
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+
+		for (const entry of entries) {
+			if (entry.name.startsWith("_")) continue;
+			const entryPath = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				pending.push(entryPath);
+			} else if (entry.isFile() || entry.isSymbolicLink()) {
+				files.push(entryPath);
+			}
+		}
+	}
+
+	return files;
+}
+
+/**
+ * Discovers prompt commands that explicitly opt into model invocation.
+ *
+ * @param cwd - Current session working directory
+ * @returns Model-callable prompt commands keyed by slash command name
+ */
+function discoverModelCallablePromptCommands(
+	cwd: string
+): ReadonlyMap<string, ModelCallablePromptCommand> {
+	const commands = new Map<string, ModelCallablePromptCommand>();
+
+	for (const dir of getModelCallablePromptDirs(cwd)) {
+		for (const filePath of discoverPromptMarkdownFiles(dir)) {
+			const command = getPromptCommandName(dir, filePath);
+			if (!command || commands.has(command)) continue;
+
+			let content: string;
+			try {
+				content = fs.readFileSync(filePath, "utf-8");
+			} catch {
+				continue;
+			}
+
+			const frontmatter = parsePromptFrontmatter(content);
+			if (!isModelCallablePrompt(frontmatter)) continue;
+
+			commands.set(command, {
+				command,
+				description: frontmatter.description ?? `Run ${command}`,
+				filePath,
+			});
+		}
+	}
+
+	return commands;
+}
 
 /**
  * Returns true when context usage exists and tokens are known.
@@ -387,7 +610,8 @@ function startDeferredCompact(
  * @param pi - Extension API for registering tools and event handlers
  */
 export default function slashCommandBridge(pi: ExtensionAPI): void {
-	// Build the list of available command names for the tool description
+	// Build the static command list for the tool description. Prompt commands that
+	// opt into model invocation are discovered per cwd and injected at turn time.
 	const commandList = Array.from(ALLOWED_COMMANDS.keys())
 		.map((name) => `- ${name}: ${COMMAND_DESCRIPTIONS.get(name) ?? "No description"}`)
 		.join("\n");
@@ -412,9 +636,15 @@ WHEN NOT TO USE:
 		parameters: Type.Object({
 			command: Type.String({
 				description:
-					"Slash command name (without the / prefix). " +
-					`One of: ${Array.from(ALLOWED_COMMANDS.keys()).join(", ")}`,
+					"Slash command name without the / prefix. Built-ins: " +
+					Array.from(ALLOWED_COMMANDS.keys()).join(", ") +
+					". Model-callable prompt commands are listed in session context.",
 			}),
+			arguments: Type.Optional(
+				Type.String({
+					description: "Optional slash command arguments used for model-callable prompt commands.",
+				})
+			),
 		}),
 
 		/**
@@ -445,10 +675,58 @@ WHEN NOT TO USE:
 		 */
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { command } = params;
+			const args = params.arguments ?? "";
+			const modelCallableCommands = discoverModelCallablePromptCommands(ctx.cwd);
+			const modelCallableCommand = modelCallableCommands.get(command);
+
+			if (!ALLOWED_COMMANDS.has(command) && modelCallableCommand) {
+				let content: string;
+				try {
+					content = fs.readFileSync(modelCallableCommand.filePath, "utf-8");
+				} catch {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Failed to read model-callable command: /${command}`,
+							},
+						],
+						details: { command, error: "prompt_read_failed" },
+						isError: true,
+					};
+				}
+
+				const promptContent = substitutePromptArguments(stripPromptFrontmatter(content), args);
+				const inputText = args ? `/${command} ${args}` : `/${command}`;
+
+				pi.sendMessage({
+					content: `🪆 ${inputText}`,
+					customType: "nested-prompt-summary",
+					details: { commandName: command, mode: "compact", source: "slash-command-bridge" },
+					display: true,
+				});
+				pi.sendMessage(
+					{
+						content: promptContent,
+						customType: "nested-prompt-expanded",
+						details: { commandName: command, mode: "compact", source: "slash-command-bridge" },
+						display: false,
+					},
+					{ triggerTurn: true }
+				);
+
+				return {
+					content: [{ type: "text", text: `Queued model-callable command: ${inputText}` }],
+					details: { command, arguments: args, promptCommand: true },
+				};
+			}
 
 			// Reject unknown commands
 			if (!ALLOWED_COMMANDS.has(command)) {
-				const available = Array.from(ALLOWED_COMMANDS.keys()).join(", ");
+				const available = [
+					...Array.from(ALLOWED_COMMANDS.keys()),
+					...Array.from(modelCallableCommands.keys()),
+				].join(", ");
 				return {
 					content: [
 						{
@@ -564,8 +842,11 @@ WHEN NOT TO USE:
 
 	// ── Context injection ────────────────────────────────────────
 
-	pi.on("before_agent_start", async () => {
-		const bridgedCommands = Array.from(ALLOWED_COMMANDS.keys())
+	pi.on("before_agent_start", async (_event, ctx) => {
+		const bridgedCommands = [
+			...Array.from(ALLOWED_COMMANDS.keys()),
+			...Array.from(discoverModelCallablePromptCommands(ctx.cwd).keys()),
+		]
 			.map((name) => `/${name}`)
 			.join(", ");
 

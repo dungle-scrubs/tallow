@@ -366,7 +366,10 @@ export default function customFooterExtension(pi: ExtensionAPI): void {
 				},
 
 				dispose: (() => {
-					disposeHandler = footerData.onBranchChange(() => tui.requestRender());
+					disposeHandler = footerData.onBranchChange(() => {
+						invalidateGitCache();
+						tui.requestRender();
+					});
 					return disposeHandler;
 				})(),
 			};

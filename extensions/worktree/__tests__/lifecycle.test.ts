@@ -13,8 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
 	cleanupStaleWorktrees,
+	createProjectWorktree,
 	createWorktree,
 	removeWorktree,
+	resolveProjectWorktreeDefaultPath,
 	TALLOW_WORKTREE_MARKER_FILE,
 	validateGitRepo,
 } from "../lifecycle.js";
@@ -69,6 +71,42 @@ describe("worktree lifecycle", () => {
 		const markerPath = join(created.worktreePath, TALLOW_WORKTREE_MARKER_FILE);
 		expect(existsSync(markerPath)).toBe(true);
 		removeWorktree(created.worktreePath);
+	});
+
+	it("creates a persistent project worktree on a new branch", () => {
+		const worktreePath = join(tmpdir(), `tallow-project-worktree-${Date.now()}`);
+		const created = createProjectWorktree(repoRoot, {
+			branch: "feature/test-worktree",
+			path: worktreePath,
+		});
+
+		try {
+			expect(existsSync(created.worktreePath)).toBe(true);
+			expect(created.branch).toBe("feature/test-worktree");
+			expect(created.branchExisted).toBe(false);
+			expect(git(created.worktreePath, "branch", "--show-current")).toBe("feature/test-worktree");
+			expect(resolveProjectWorktreeDefaultPath(repoRoot, created.branch)).toContain(
+				"tallow-worktree-test-"
+			);
+		} finally {
+			removeWorktree(created.worktreePath);
+		}
+	});
+
+	it("checks out an existing branch in a persistent project worktree", () => {
+		git(repoRoot, "branch", "feature/existing");
+		const worktreePath = join(tmpdir(), `tallow-project-existing-${Date.now()}`);
+		const created = createProjectWorktree(repoRoot, {
+			branch: "feature/existing",
+			path: worktreePath,
+		});
+
+		try {
+			expect(created.branchExisted).toBe(true);
+			expect(git(created.worktreePath, "branch", "--show-current")).toBe("feature/existing");
+		} finally {
+			removeWorktree(created.worktreePath);
+		}
 	});
 
 	it("fails validation outside git repositories", () => {

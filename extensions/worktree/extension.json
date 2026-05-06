@@ -1,8 +1,8 @@
 {
 	"name": "worktree",
 	"version": "0.1.0",
-	"description": "Managed git worktree isolation lifecycle for sessions and subagents.",
-	"whenToUse": "Use when tallow should run in temporary detached git worktrees with reliable cleanup and lifecycle hooks.",
+	"description": "Managed git worktree lifecycle for session isolation, subagents, and branch worktree transitions.",
+	"whenToUse": "Use when tallow should run in git worktrees, create persistent branch worktrees, or emit worktree lifecycle hooks.",
 	"capabilities": {
 		"events": ["before_agent_start", "session_shutdown", "session_start"]
 	},
