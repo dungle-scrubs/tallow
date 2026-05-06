@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.8...tallow-v0.9.9) (2026-05-06)
+
+
+### Added
+
+* **slash-command-bridge:** support callable prompt commands ([820520d](https://github.com/dungle-scrubs/tallow/commit/820520d0a7fa07f080b1e17a6e2cce8ef2c61fb1))
+* **worktree:** add persistent branch worktrees ([33507bb](https://github.com/dungle-scrubs/tallow/commit/33507bb086de64b6464f322b6d9011269bf61d9f))
+
+
+### Fixed
+
+* **interactive:** rebind runtime after workspace transitions ([6101aa0](https://github.com/dungle-scrubs/tallow/commit/6101aa0ac7a7e214f1ab5be5bc6ce99d3f872907))
+
+
+### Documentation
+
+* **worktree:** document branch worktree transitions ([16c6d87](https://github.com/dungle-scrubs/tallow/commit/16c6d876d436d038d09d44cf77228a86ed264f61))
+
 ## [Unreleased]
 
 ### Added
