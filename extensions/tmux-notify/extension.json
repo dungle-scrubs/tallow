@@ -1,0 +1,27 @@
+{
+	"name": "tmux-notify",
+	"version": "0.1.0",
+	"description": "Signal agent lifecycle status to tmux via per-pane @pi_status user options — drives window/tab indicators in the tmux status bar.",
+	"whenToUse": "Use when tmux should receive agent-state signals for tab indicators.",
+	"capabilities": {
+		"events": [
+			"agent_end",
+			"agent_start",
+			"before_agent_start",
+			"input",
+			"session_shutdown",
+			"session_start"
+		]
+	},
+	"permissionSurface": {
+		"filesystem": "none",
+		"shell": false,
+		"network": false,
+		"subprocess": true
+	},
+	"category": "integration",
+	"tags": ["terminal", "tmux", "notifications"],
+	"files": ["index.ts"],
+	"relationships": [],
+	"npmDependencies": {}
+}
