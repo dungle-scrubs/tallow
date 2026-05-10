@@ -1,0 +1,48 @@
+---
+title: tmux-notify
+description: Signals agent lifecycle status to tmux via per-pane @pi_status user options, driving status-bar tab indicators.
+---
+
+Surfaces agent activity in the tmux status bar — a working glyph while a
+turn is in progress, a done glyph after it completes — so multi-pane,
+multi-window tmux sessions show which tabs have agents that need
+attention.
+
+Gated on `$TMUX`. Outside tmux, the extension is a silent no-op.
+
+## How it works
+
+On lifecycle events, the extension shells out to
+`tmux set-option -p -t "$TMUX_PANE" @pi_status <state>` against the pane
+the agent is running in. Status transitions are coalesced so duplicate
+events don't trigger redundant writes.
+
+| Lifecycle edge | `@pi_status` value | Meaning |
+|---|---|---|
+| Session start / shutdown | unset | Pane has no active agent. |
+| Before / on agent start  | `working` | A turn is running. |
+| Input prompt appears     | `done` | Turn finished; result is waiting. |
+
+`agent_end` is intentionally a no-op — tools (subagents, background
+work) may still be executing after the model finishes generating, so the
+extension stays in `working` until the input prompt actually returns.
+
+The per-pane option is what tallow writes. Aggregating across all panes
+in a window into a single tab indicator is the responsibility of your
+tmux config — typically a small shell helper that walks the panes of a
+window and picks `working > done > none`, then surfaces a glyph in
+`window-status-format`.
+
+## User-facing behavior
+
+No commands, tools, or settings. If a tab indicator does not appear,
+verify:
+
+- `$TMUX` is set in the shell that launched tallow.
+- Your tmux `window-status-format` reads `@pi_status` (per-pane) or an
+  aggregated window-level option you derive from it.
+
+## Relationships with other extensions
+
+None — this extension only writes a single tmux user option per pane on
+lifecycle events.
