@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **worktree:** add `/worktree-create` and `worktree_create` for creating a
+  persistent branch worktree and transitioning the session into it
+
+### Fixed
+
+- **codex:** add WebSocket payload diagnostics and preflight SSE fallback for
+  oversized requests that would otherwise fail with close code 1009
+- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
+  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
+  transition compatibility hooks during the upgrade
+- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
+  config so dependency bumps continue to build and validate cleanly
+- **git-status:** move git / GitHub status refreshes off the main thread and
+  add PR lookup backoff so slow `gh pr view` checks no longer freeze prompt
+  input while you type
+- **interactive:** stabilize settings submenu transitions so changing thinking
+  level no longer triggers chat re-append jitter or viewport jumps
+- **interactive:** reset render grace before chat rebuild paths
+  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
+  churn across reload, fork, navigation, and settings-driven rebuilds
+- **interactive:** rebind workspace transitions through the live runtime host
+  so cwd and footer git metadata update after moving sessions
+- **rewind:** prune stale snapshot refs for deleted sessions on startup so
+  internal git checkpoints stop accumulating forever
+- **runtime:** remove published runtime wrapper references to `src/`, making
+  global installs resilient when only `runtime/` and `dist/` are shipped
+- **tasks:** top-align the side-by-side background column and require a wider
+  terminal before using split layout, removing large blank gaps above
+  background task content
+
 ## [0.9.10](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.9...tallow-v0.9.10) (2026-05-06)
 
 
@@ -29,39 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 
 * **worktree:** document branch worktree transitions ([16c6d87](https://github.com/dungle-scrubs/tallow/commit/16c6d876d436d038d09d44cf77228a86ed264f61))
-
-## [Unreleased]
-
-### Added
-
-- **worktree:** add `/worktree-create` and `worktree_create` for creating a
-  persistent branch worktree and transitioning the session into it
-
-### Fixed
-
-- **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
-  tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
-  transition compatibility hooks during the upgrade
-- **docs:** migrate the docs site to Astro 6 / Starlight loader-based content
-  config so dependency bumps continue to build and validate cleanly
-- **git-status:** move git / GitHub status refreshes off the main thread and
-  add PR lookup backoff so slow `gh pr view` checks no longer freeze prompt
-  input while you type
-- **interactive:** stabilize settings submenu transitions so changing thinking
-  level no longer triggers chat re-append jitter or viewport jumps
-- **interactive:** reset render grace before chat rebuild paths
-  (`renderInitialMessages()` / `rebuildChatFromMessages()`), reducing redraw
-  churn across reload, fork, navigation, and settings-driven rebuilds
-- **interactive:** rebind workspace transitions through the live runtime host
-  so cwd and footer git metadata update after moving sessions
-- **rewind:** prune stale snapshot refs for deleted sessions on startup so
-  internal git checkpoints stop accumulating forever
-- **runtime:** remove published runtime wrapper references to `src/`, making
-  global installs resilient when only `runtime/` and `dist/` are shipped
-- **tasks:** top-align the side-by-side background column and require a wider
-  terminal before using split layout, removing large blank gaps above
-  background task content
-
 
 ## [0.9.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.7...tallow-v0.9.8) (2026-04-25)
 

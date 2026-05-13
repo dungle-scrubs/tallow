@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **codex:** add WebSocket payload diagnostics and preflight SSE fallback for
+  oversized requests that would otherwise fail with close code 1009
 - **deps:** restore compatibility with `@mariozechner/pi-*` 0.67 by moving
   tallow startup/CLI flows onto `AgentSessionRuntime` and preserving session
   transition compatibility hooks during the upgrade
@@ -40,6 +42,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   terminal before using split layout, removing large blank gaps above
   background task content
 
+## [0.9.10](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.9...tallow-v0.9.10) (2026-05-06)
+
+
+### Maintenance
+
+* **deps:** bump pi-* dependencies ([c2085ea](https://github.com/dungle-scrubs/tallow/commit/c2085ea35a9177726a9f47475db5b2aea061fb49))
+
+## [0.9.9](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.8...tallow-v0.9.9) (2026-05-06)
+
+
+### Added
+
+* **slash-command-bridge:** support callable prompt commands ([820520d](https://github.com/dungle-scrubs/tallow/commit/820520d0a7fa07f080b1e17a6e2cce8ef2c61fb1))
+* **worktree:** add persistent branch worktrees ([33507bb](https://github.com/dungle-scrubs/tallow/commit/33507bb086de64b6464f322b6d9011269bf61d9f))
+
+
+### Fixed
+
+* **interactive:** rebind runtime after workspace transitions ([6101aa0](https://github.com/dungle-scrubs/tallow/commit/6101aa0ac7a7e214f1ab5be5bc6ce99d3f872907))
+
+
+### Documentation
+
+* **worktree:** document branch worktree transitions ([16c6d87](https://github.com/dungle-scrubs/tallow/commit/16c6d876d436d038d09d44cf77228a86ed264f61))
 
 ## [0.9.8](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.7...tallow-v0.9.8) (2026-04-25)
 
