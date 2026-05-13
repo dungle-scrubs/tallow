@@ -64,8 +64,10 @@ describe("applyKnownModelMetadataOverrides", () => {
 	it("corrects claude-sonnet-4-6 from 1M to 200k for anthropic and opencode providers", () => {
 		const anthropic = cloneBuiltInModel("anthropic", "claude-sonnet-4-6");
 		const opencode = cloneBuiltInModel("opencode", "claude-sonnet-4-6");
-		const antigravity = cloneBuiltInModel("google-antigravity", "claude-sonnet-4-6");
-		const registry = createRegistry([anthropic, opencode, antigravity]);
+		const unrelatedProvider = structuredClone(anthropic);
+		unrelatedProvider.provider = "google-antigravity";
+		unrelatedProvider.contextWindow = 200_000;
+		const registry = createRegistry([anthropic, opencode, unrelatedProvider]);
 
 		// Only patch entries that still carry the stale 1M value
 		const staleCount = [anthropic, opencode].filter((m) => m.contextWindow === 1_000_000).length;
@@ -75,7 +77,7 @@ describe("applyKnownModelMetadataOverrides", () => {
 		expect(applied).toBe(staleCount);
 		expect(anthropic.contextWindow).toBe(200_000);
 		expect(opencode.contextWindow).toBe(200_000);
-		// google-antigravity already has 200k — never touched
-		expect(antigravity.contextWindow).toBe(200_000);
+		// unrelated providers are never touched
+		expect(unrelatedProvider.contextWindow).toBe(200_000);
 	});
 });
