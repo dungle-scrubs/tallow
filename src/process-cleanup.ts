@@ -71,6 +71,9 @@ function handleStreamError(
 	sessionRef: { current?: AgentSession }
 ): void {
 	stream.on("error", (err: NodeJS.ErrnoException) => {
+		if (err.code === "EPIPE" && stream.isTTY) {
+			return;
+		}
 		if (err.code === "EIO" || err.code === "EPIPE") {
 			void cleanup(sessionRef.current, 1);
 		}

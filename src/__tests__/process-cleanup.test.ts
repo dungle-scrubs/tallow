@@ -100,6 +100,21 @@ describe("registerProcessCleanup", () => {
 		expect(exitCode).toBe(130);
 	});
 
+	test("ignores EPIPE from interactive stdout", async () => {
+		const { exitCode, stdout } = await runCleanupScenario(`
+			registerProcessCleanup();
+			Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+			process.stdout.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+			setTimeout(() => {
+				process.stdout.write("still-alive");
+				process.exit(0);
+			}, 50);
+		`);
+
+		expect(exitCode).toBe(0);
+		expect(stdout).toContain("still-alive");
+	});
+
 	test("second signal during cleanup forces immediate exit", async () => {
 		// Send two SIGTERMs in rapid succession — the second should force-exit
 		const { exitCode } = await runCleanupScenario(`
