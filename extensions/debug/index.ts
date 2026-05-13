@@ -621,11 +621,54 @@ export default function (pi: ExtensionAPI) {
 		});
 	}
 
+	/**
+	 * Whether the session can launch a separate WezTerm pane for live logs.
+	 *
+	 * @returns True when the wezterm_pane capability is registered
+	 */
+	function hasWeztermPaneCapability(): boolean {
+		return pi.getAllTools().some((tool) => tool.name === "wezterm_pane");
+	}
+
+	/**
+	 * Launch a live debug log tail in a new WezTerm pane.
+	 *
+	 * @param logPath - Log file to follow
+	 * @returns True when the pane launch command exits successfully
+	 */
+	async function launchLiveTailPane(logPath: string): Promise<boolean> {
+		const result = await pi.exec("wezterm", [
+			"cli",
+			"split-pane",
+			"--right",
+			"tail",
+			"-f",
+			logPath,
+		]);
+		const exitCode = "exitCode" in result ? result.exitCode : (result as { code?: number }).code;
+		return exitCode === 0;
+	}
+
 	pi.registerCommand("diagnostics", {
 		description: "Show local diagnostics tail",
-		handler: async (args: string, _ctx: ExtensionCommandContext) => {
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const lineCount = parseTailCount(args);
-			sendLocalTailOutput(lineCount);
+			if (!ctx.hasUI || !hasWeztermPaneCapability()) {
+				sendLocalTailOutput(lineCount);
+				return;
+			}
+
+			const choice = await ctx.ui.select("Diagnostics", ["Show local tail", "Live follow in pane"]);
+			if (choice !== "Live follow in pane") {
+				sendLocalTailOutput(lineCount);
+				return;
+			}
+
+			const launched = await launchLiveTailPane(getLogPath());
+			if (!launched) {
+				ctx.ui.notify("Failed to launch diagnostics pane. Showing local tail instead.", "warning");
+				sendLocalTailOutput(lineCount);
+			}
 		},
 	});
 
