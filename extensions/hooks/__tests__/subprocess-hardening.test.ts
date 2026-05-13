@@ -56,6 +56,21 @@ describe("hook subprocess hardening", () => {
 		expect(result.reason).toBeUndefined();
 	});
 
+	test("oversized hook events are sent on stdin without overflowing env", async () => {
+		const handler = createCommandHandler(
+			`node -e "let input=''; process.stdin.on('data', c => input += c); process.stdin.on('end', () => process.stdout.write(JSON.stringify({ok:true, additionalContext: String(JSON.parse(input).payload.length) + ':' + process.env.PI_HOOK_EVENT_TRUNCATED + ':' + (process.env.PI_HOOK_EVENT || '').length})))"`,
+			2
+		);
+		const result = await runCommandHook(
+			handler,
+			{ payload: "x".repeat(128 * 1024) },
+			process.cwd()
+		);
+
+		expect(result.ok).toBe(true);
+		expect(result.additionalContext).toBe("131072:true:0");
+	});
+
 	test("large stdout is truncated to bounded output", async () => {
 		process.env[HOOK_OUTPUT_MAX_BUFFER_BYTES_ENV] = "256";
 		const handler = createCommandHandler("node -e \"process.stdout.write('x'.repeat(8192))\"", 2);

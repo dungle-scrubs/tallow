@@ -105,6 +105,9 @@ const HOOK_OUTPUT_MAX_BUFFER_BYTES_ENV = "TALLOW_HOOK_MAX_BUFFER_BYTES";
 /** Optional env override for hook subprocess SIGTERM→SIGKILL grace window. */
 const HOOK_FORCE_KILL_GRACE_MS_ENV = "TALLOW_HOOK_FORCE_KILL_GRACE_MS";
 
+/** Maximum hook event size copied into the subprocess environment. */
+const MAX_HOOK_EVENT_ENV_BYTES = 64 * 1024;
+
 /** Marker appended once when subprocess output is truncated due to buffer cap. */
 export const HOOK_OUTPUT_TRUNCATION_MARKER = "\n[output truncated]\n";
 
@@ -158,6 +161,22 @@ function getHookOutputMaxBufferBytes(): number {
  */
 function getHookForceKillGraceMs(): number {
 	return getPositiveIntEnv(HOOK_FORCE_KILL_GRACE_MS_ENV, DEFAULT_HOOK_FORCE_KILL_GRACE_MS);
+}
+
+/**
+ * Add hook event compatibility env vars without exceeding platform env limits.
+ *
+ * @param env - Environment object to mutate
+ * @param hookEventJson - Serialized hook event payload
+ * @returns void
+ */
+function attachHookEventEnv(env: Record<string, string>, hookEventJson: string): void {
+	if (Buffer.byteLength(hookEventJson) <= MAX_HOOK_EVENT_ENV_BYTES) {
+		env.PI_HOOK_EVENT = hookEventJson;
+		return;
+	}
+
+	env.PI_HOOK_EVENT_TRUNCATED = "true";
 }
 
 /**
@@ -848,8 +867,8 @@ export async function runCommandHook(
 	const hookEventJson = JSON.stringify(eventData);
 	const commandEnv: Record<string, string> = {
 		...process.env,
-		PI_HOOK_EVENT: hookEventJson,
 	} as Record<string, string>;
+	attachHookEventEnv(commandEnv, hookEventJson);
 
 	if (handler._claudeSource) {
 		commandEnv.CLAUDE_CODE_REMOTE = process.env.CLAUDE_CODE_REMOTE ?? "false";
@@ -863,15 +882,26 @@ export async function runCommandHook(
 			return;
 		}
 
-		// shell: true is required for user-authored hook commands (pipes, redirects,
-		// env expansion). Commands come from settings.json, NOT from LLM input, so
-		// this is not an injection vector. Permission rules provide defense-in-depth.
-		const proc = spawn(handler.command, {
-			cwd,
-			env: commandEnv,
-			shell: true,
-			stdio: ["pipe", "pipe", "pipe"],
-		});
+		let proc: ChildProcess;
+		try {
+			// shell: true is required for user-authored hook commands (pipes, redirects,
+			// env expansion). Commands come from settings.json, NOT from LLM input, so
+			// this is not an injection vector. Permission rules provide defense-in-depth.
+			proc = spawn(handler.command, {
+				cwd,
+				env: commandEnv,
+				shell: true,
+				stdio: ["pipe", "pipe", "pipe"],
+			});
+		} catch (error) {
+			const spawnError = error as NodeJS.ErrnoException;
+			resolve({
+				ok: false,
+				reason: spawnError.message || "Hook command failed to start",
+				infrastructureError: true,
+			});
+			return;
+		}
 
 		const stdout: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
 		const stderr: HookOutputBuffer = { bytes: 0, text: "", truncated: false };
@@ -891,16 +921,16 @@ export async function runCommandHook(
 			resolve(result);
 		};
 
-		proc.stdout.on("data", (chunk: Buffer) => {
+		proc.stdout?.on("data", (chunk: Buffer) => {
 			appendToHookBuffer(stdout, chunk, maxBufferBytes);
 		});
-		proc.stderr.on("data", (chunk: Buffer) => {
+		proc.stderr?.on("data", (chunk: Buffer) => {
 			appendToHookBuffer(stderr, chunk, maxBufferBytes);
 		});
 
 		try {
-			proc.stdin.write(hookEventJson);
-			proc.stdin.end();
+			proc.stdin?.write(hookEventJson);
+			proc.stdin?.end();
 		} catch {
 			// Ignore stdin write errors (process may have already exited).
 		}
