@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.11](https://github.com/dungle-scrubs/tallow/compare/tallow-v0.9.10...tallow-v0.9.11) (2026-05-13)
+
+
+### Added
+
+* **tmux-notify:** swap wezterm extensions for tmux status indicators ([c25cf36](https://github.com/dungle-scrubs/tallow/commit/c25cf365ed44891022f970b748d01585321cdad5))
+
+
+### Fixed
+
+* **codex:** diagnose websocket 1009 payloads ([2c47cc3](https://github.com/dungle-scrubs/tallow/commit/2c47cc3f98d6d25eaeacc5245cfdedbfa5fa5e46))
+* **core:** ignore benign EPIPE disconnects ([e114853](https://github.com/dungle-scrubs/tallow/commit/e114853d073ee577ddc8fcb5199f91701d0389eb))
+* **hooks:** avoid large event env payloads ([a861ab6](https://github.com/dungle-scrubs/tallow/commit/a861ab691fd3a688d21a214c36848452ccc5e142))
+
+
+### Maintenance
+
+* **core:** restore full suite stability ([7ccf779](https://github.com/dungle-scrubs/tallow/commit/7ccf7792f984959d8fe71261d6178e87cd33295b))
+
 ## [Unreleased]
 
 ### Added
