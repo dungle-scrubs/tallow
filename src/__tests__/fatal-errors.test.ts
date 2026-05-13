@@ -139,6 +139,39 @@ describe("Fatal error handlers", () => {
 		expect(stderr).toContain("plain string rejection");
 	});
 
+	it("ignores uncaught EPIPE errors", async () => {
+		const { exitCode, stderr, crashLog } = await runCrashScenario(`
+			setTimeout(() => {
+				const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+				throw error;
+			}, 0);
+			setTimeout(() => process.exit(0), 50);
+		`);
+
+		expect(exitCode).toBe(0);
+		expect(stderr).not.toContain("FATAL");
+		expect(stderr).not.toContain("Terminal I/O disconnected");
+		expect(crashLog).toContain("Ignored EPIPE");
+		expect(crashLog).toContain("write EPIPE");
+	});
+
+	it("ignores interactive EPIPE errors from non-stdio streams", async () => {
+		const { exitCode, stderr, crashLog } = await runCrashScenario(`
+			Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true });
+			setTimeout(() => {
+				const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+				throw error;
+			}, 0);
+			setTimeout(() => process.exit(0), 50);
+		`);
+
+		expect(exitCode).toBe(0);
+		expect(stderr).not.toContain("FATAL");
+		expect(stderr).not.toContain("Terminal I/O disconnected");
+		expect(crashLog).toContain("Ignored EPIPE");
+		expect(crashLog).toContain("write EPIPE");
+	});
+
 	it("truncates very long error messages in banner", async () => {
 		const { stderr } = await runCrashScenario(`
 			throw new Error("x".repeat(1000));

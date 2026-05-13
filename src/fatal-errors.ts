@@ -19,6 +19,51 @@ const CRASH_LOG = join(TALLOW_HOME, "crash.log");
 /** Guard against recursive or duplicate fatal error handling. */
 let handled = false;
 
+/** Terminal I/O error codes emitted when a TTY or pipe disappears. */
+const TERMINAL_IO_ERROR_CODES = new Set(["EIO", "EPIPE"]);
+
+/**
+ * Get the terminal I/O code reported by an error, if any.
+ *
+ * @param error - The error to classify
+ * @returns The terminal I/O code, or undefined for unrelated errors
+ */
+function getTerminalIoErrorCode(error: Error): "EIO" | "EPIPE" | undefined {
+	const code = (error as NodeJS.ErrnoException).code;
+	if (code === "EIO" || code === "EPIPE") return code;
+
+	const match = /^(?:read|write) (EIO|EPIPE)$/.exec(error.message);
+	return match?.[1] as "EIO" | "EPIPE" | undefined;
+}
+
+/**
+ * Determine whether an error only reports a disconnected terminal or pipe.
+ *
+ * @param error - The error to classify
+ * @returns True when the error is an expected terminal I/O disconnect
+ */
+function isTerminalIoError(error: Error): boolean {
+	const code = getTerminalIoErrorCode(error);
+	return Boolean(code && TERMINAL_IO_ERROR_CODES.has(code));
+}
+
+/**
+ * Write to a process stream without recursively crashing on terminal I/O errors.
+ *
+ * @param stream - The stream to write to
+ * @param data - The bytes or text to write
+ * @returns True when the write was attempted without a synchronous throw
+ */
+function safeWrite(stream: NodeJS.WriteStream, data: string): boolean {
+	try {
+		stream.write(data);
+		return true;
+	} catch (err) {
+		if (err instanceof Error && isTerminalIoError(err)) return false;
+		throw err;
+	}
+}
+
 /**
  * Append a timestamped crash entry to the persistent crash log.
  *
@@ -52,7 +97,7 @@ function writeCrashLog(type: string, error: Error): void {
 function displayFatalBanner(type: string, error: Error): void {
 	// Restore terminal so the banner is visible after TUI alternate screen
 	if (process.stdout.isTTY) {
-		process.stdout.write("\x1b[?1049l\x1b[?25h");
+		safeWrite(process.stdout, "\x1b[?1049l\x1b[?25h");
 	}
 
 	const message = error.message.length > 500 ? `${error.message.slice(0, 500)}…` : error.message;
@@ -75,7 +120,16 @@ function displayFatalBanner(type: string, error: Error): void {
 		"",
 	];
 
-	process.stderr.write(lines.join("\n"));
+	safeWrite(process.stderr, lines.join("\n"));
+}
+
+/**
+ * Display a short disconnect notice without using alternate-screen recovery.
+ *
+ * @param error - The terminal I/O error that forced shutdown
+ */
+function displayTerminalIoNotice(error: Error): void {
+	safeWrite(process.stderr, `\nTerminal I/O disconnected (${error.message}); exiting.\n`);
 }
 
 /**
@@ -91,6 +145,19 @@ function displayFatalBanner(type: string, error: Error): void {
 function handleFatal(type: string, error: Error): void {
 	if (handled) return;
 	handled = true;
+
+	const terminalIoCode = getTerminalIoErrorCode(error);
+	if (terminalIoCode === "EPIPE") {
+		writeCrashLog("Ignored EPIPE", error);
+		handled = false;
+		return;
+	}
+	if (terminalIoCode === "EIO") {
+		writeCrashLog("Terminal I/O disconnected", error);
+		displayTerminalIoNotice(error);
+		process.nextTick(() => process.exit(1));
+		return;
+	}
 
 	writeCrashLog(type, error);
 	displayFatalBanner(type, error);
