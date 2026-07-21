@@ -75,7 +75,7 @@
 	"dependencies": {
 		"@clack/prompts": "^1.2.0",
 		"@dungle-scrubs/synapse": "0.1.8",
-		"@mariozechner/pi-coding-agent": "^0.72.1",
+		"@mariozechner/pi-coding-agent": "^0.73.1",
 		"@mariozechner/pi-tui": "workspace:*",
 		"@opentelemetry/api": "^1.9.1",
 		"@sinclair/typebox": "0.34.49",
